@@ -339,7 +339,11 @@ def testReportBeyondTheHorizon(reb):
 
     assert "Which orbit to use beyond the predictability horizon" in text
     assert "Nominal orbit at the horizon" in text
-    assert "Representative orbit at the end: clone {:s}".format(horizon["representative"]["clone"]) in text
+    assert "Representative orbit: clone {:s}, chosen at the end of the run only".format(
+        horizon["representative"]["clone"]) in text
+    assert "How: the orbits of the {:d} clones".format(len(clones)) in text
+    assert "smallest sum of distances to all the others" in text
+    assert "Chosen at the end only, it need not be central before" in text
     assert "varpi=" in text
     assert "sigma from the nominal's (6-D" in text
     assert "at the horizon" in text

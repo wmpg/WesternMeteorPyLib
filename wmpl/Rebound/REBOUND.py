@@ -1399,10 +1399,14 @@ def _beyondHorizonReportLines(horizon, n_clones, dist_unit_multiplier=1.0, lengt
         lines += _elementLines(at["nominal"], at["clones"], dist_unit_multiplier, length_units)
 
     if rep is not None:
-        lines += ["", "Representative orbit at the end: clone {:s}, the median of the {:d} clones in the "
-                      "space of the orbits".format(rep["clone"], rep["n_clones"]),
-                  "(the clone with the smallest sum of distances to the others, each direction in units of "
-                  "their spread):",
+        lines += ["", "Representative orbit: clone {:s}, chosen at the end of the run only ({:s} {:s}).".format(
+                      rep["clone"], _spanText(rep["time_days"]), "back" if rep["time_days"] < 0 else "after the start"),
+                  "How: the orbits of the {:d} clones (their size, shape and orientation, not where the body is on "
+                  "them)".format(rep["n_clones"]),
+                  "are compared two by two, each element in units of the clones' spread, and the representative is "
+                  "the",
+                  "clone with the smallest sum of distances to all the others: the median of the clones, but a real "
+                  "orbit.",
                   "{:>22s}{:>16s} {:s}".format("clone", "clones: median", "[95% CI]")]
         lines += _elementLines(rep["elements"], rep["clones"], dist_unit_multiplier, length_units, nominal=False)
         outside = rep.get("outside_ci95") or []
@@ -1424,9 +1428,9 @@ def _beyondHorizonReportLines(horizon, n_clones, dist_unit_multiplier=1.0, lengt
                                                                  100*rep["start_closer"]))
             lines.append("from the measurement are closer to the nominal).")
         if rep.get("path") is not None:
-            lines.append("Chosen at the end, it is not the most central all along: at the horizon {:.0f}% of the "
-                         "clones".format(100*rep["path"]["horizon_rank"]))
-            lines.append("were more central than it, and from there to the end {:.0f}% (median).".format(
+            lines.append("Chosen at the end only, it need not be central before: at the horizon {:.0f}% of the "
+                         "clones were".format(100*rep["path"]["horizon_rank"]))
+            lines.append("more central than it, and from there to the end {:.0f}% (median).".format(
                 100*rep["path"]["median_rank"]))
         if nominal_rank is not None:
             lines.append("At the end {:.0f}% of the clones are more central than the nominal orbit (about 50% "

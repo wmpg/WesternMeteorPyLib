@@ -565,13 +565,13 @@ measurement's uncertainty. The report gives the Mahalanobis distance of that sta
 the spread of the clones' initial states, and the share of the draws that are closer (a chi-square in
 six dimensions, in which a typical draw is 2.3 sigma away, not 1).
 
-It is chosen at the end. Once the dynamics is chaotic, no trajectory stays the most central at every
-time: in the Winchcombe run, the clone most central at the end was at the edge of the clones at the
-horizon, with 96% of them more central, and 19% over the rest of the run (median). The clone most central
-on average over the run is not a better choice: with the clones resampled (100 bootstrap draws), the
-final q of the representative varies by 0.008 AU, a sixth of the clones' spread (0.050 AU), but that of the
-clone most central on average varies by 0.050 AU, as much as the whole cloud. For a representative orbit at
-another epoch, end the run there.
+It is chosen at the end of the run only, and the report says so. Once the dynamics is chaotic, no
+trajectory stays the most central at every time: in the Winchcombe run, the clone most central at the end
+was at the edge of the clones at the horizon, with 96% of them more central, and 19% over the rest of the
+run (median). The clone most central on average over the run is not a better choice: with the clones
+resampled (100 bootstrap draws), the final q of the representative varies by 0.008 AU, a sixth of the
+clones' spread (0.050 AU), but that of the clone most central on average varies by 0.050 AU, as much as
+the whole cloud. For a representative orbit at another epoch, end the run there.
 
 Read the representative's elements together, as one orbit. Taken one at a time they can fall outside the
 clones' 95% CI, and the report says so. This happens at low inclination: i is the tilt of the orbit plane
@@ -594,8 +594,10 @@ back with 40 clones (seed 7; the pickle has no trajectory ID, hence the clone na
     varpi=    151.184568 +/- 0.005939 [151.173745, 151.192602]  deg
     f    =    112.168001 +/- 0.861532 [110.544309, 113.421983]  deg
 
-  Representative orbit at the end: clone None_MC_19, the median of the 40 clones in the space of the orbits
-  (the clone with the smallest sum of distances to the others, each direction in units of their spread):
+  Representative orbit: clone None_MC_19, chosen at the end of the run only (150 years back).
+  How: the orbits of the 40 clones (their size, shape and orientation, not where the body is on them)
+  are compared two by two, each element in units of the clones' spread, and the representative is the
+  clone with the smallest sum of distances to all the others: the median of the clones, but a real orbit.
                    clone  clones: median [95% CI]
     a    =      2.666875        2.652922 [  2.605153,   2.678882]  AU
     q    =      1.007813        0.975517 [  0.924398,   1.037934]  AU
@@ -610,8 +612,8 @@ back with 40 clones (seed 7; the pickle has no trajectory ID, hence the clone na
   median i is not the tilt of the central plane, and node and peri are not defined on their own, only varpi.
   It is a real trajectory, from an initial state 2.2 sigma from the nominal's (6-D: 45% of the draws
   from the measurement are closer to the nominal).
-  Chosen at the end, it is not the most central all along: at the horizon 56% of the clones
-  were more central than it, and from there to the end 29% (median).
+  Chosen at the end only, it need not be central before: at the horizon 56% of the clones were
+  more central than it, and from there to the end 29% (median).
   At the end 82% of the clones are more central than the nominal orbit (about 50% for a typical clone).
 ```
 
