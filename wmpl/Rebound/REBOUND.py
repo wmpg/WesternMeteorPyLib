@@ -2638,34 +2638,32 @@ def plotMegno(megno, file_path=None):
         else:
             period = np.nanmedian(np.array(megno["a_au"], dtype=float))**1.5
             shown = (elapsed[on] - onset) >= LYAPUNOV_MIN_ORBITS*period
-        ax.set_title("The fit of the panel above stopped at each time: where this levels off, the time has settled",
-                     fontsize=9)
-
         # The same growth phase and quarters as in the panel above
-        ax.axvspan(sign*onset, t[-1], color="C1", alpha=0.08, lw=0)
+        ax.axvspan(sign*onset, t[-1], color="C1", alpha=0.08, lw=0, label="growth phase (fitted)")
         for w in (v.get("lyapunov_windows") or [])[1:]:
             ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
 
-        ax.plot(t[on][shown], tau_cum[shown], color="C1", lw=1.0, label="fitted from the onset to t")
+        ax.plot(t[on][shown], tau_cum[shown], color="C1", lw=1.0, label="cumulative fit, from the onset to t")
 
         # The ends of the quarters with their times; the last one is the whole fit, the time above
         ends = [(sign*c["end_years"], c["lyapunov_time_years"]) for c in cumulative
                 if c["lyapunov_time_years"] is not None]
         if ends:
-            ax.plot(*zip(*ends), marker="o", ls="none", color="C3", markersize=5,
-                    label="from the onset to the end of each quarter")
+            ax.plot(*zip(*ends), marker="o", ls="none", color="C3", markersize=5, label="cumulative quarters")
             for k, (x, y) in enumerate(ends):
                 ax.annotate("{:.0f} yr{:s}".format(y, " (whole fit)" if k == len(ends) - 1 else ""), (x, y),
                             textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8, color="C3",
                             gid="cumulative", bbox=ground)
-        ax.axhline(tau, color="C1", ls="--", lw=1.0, label="Lyapunov time {:.0f} years (the fit above)".format(tau))
+        # The time and its 1 sigma hold over the fitted span only
+        span_x = [sign*onset, t[-1]]
+        ax.plot(span_x, [tau, tau], color="C1", ls="--", lw=1.0, label="Lyapunov time {:.0f} years (the fit above)".format(tau))
 
         values = [x for x in tau_cum[shown] if np.isfinite(x)] + [tau] + [x for x in (sigma or []) if x is not None]
         ax.set_yscale("log")
         ax.set_ylim(0.7*min(values), 1.4*max(values))
         if sigma is not None:
-            ax.axhspan(sigma[0], sigma[1] if sigma[1] is not None else ax.get_ylim()[1], color="C1", alpha=0.15,
-                       lw=0, label="1$\\sigma$")
+            ax.fill_between(span_x, sigma[0], sigma[1] if sigma[1] is not None else ax.get_ylim()[1], color="C1",
+                            alpha=0.15, lw=0, label="1$\\sigma$")
         ax.set_ylabel("Lyapunov time [years]")
         ax.legend(fontsize=8)
 

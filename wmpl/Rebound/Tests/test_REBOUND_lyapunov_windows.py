@@ -174,7 +174,7 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
 
     # The third panel: the time fitted from the onset, the quarters' ends on it, and the time with its 1 sigma
     v = result["verdict"]
-    dots = [x for x in axes[2].get_lines() if x.get_label() == "from the onset to the end of each quarter"][0]
+    dots = [x for x in axes[2].get_lines() if x.get_label() == "cumulative quarters"][0]
     assert np.allclose(dots.get_ydata(), [c["lyapunov_time_years"] for c in v["lyapunov_cumulative"]])
     notes = [x.get_text() for x in axes[2].texts if x.get_gid() == "cumulative"]
     assert notes[-1] == "{:.0f} yr (whole fit)".format(v["lyapunov_cumulative"][-1]["lyapunov_time_years"])
@@ -187,10 +187,13 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
     final = [x for x in axes[2].get_lines() if x.get_label().startswith("Lyapunov time")][0]
     assert final.get_ydata()[0] == pytest.approx(v["lyapunov_time_years"])
     band = [c for c in axes[2].patches + axes[2].collections if c.get_label() == "1$\\sigma$"][0]
-    if hasattr(band, "get_height"):
-        ys = [band.get_y(), band.get_y() + band.get_height()]
-    else:
-        ys = np.array(band.get_xy())[:, 1]
+    xy = band.get_paths()[0].vertices
+    ys = xy[:, 1]
+
+    # Over the fitted span only, not before the start of the fit
+    assert min(xy[:, 0]) == pytest.approx(-1000.0, abs=1.0) and max(xy[:, 0]) == pytest.approx(-v["lyapunov_onset_years"])
+    assert "growth phase (fitted)" in axes[2].get_legend_handles_labels()[1]
+    assert axes[2].get_title() == ""
     assert min(ys) == pytest.approx(v["lyapunov_time_1sigma_years"][0])
     assert max(ys) == pytest.approx(v["lyapunov_time_1sigma_years"][1])
 
