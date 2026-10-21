@@ -1324,6 +1324,32 @@ def _elementLines(values, spread, dist_unit_multiplier=1.0, length_units="AU", n
     return lines
 
 
+def _finalElementsWarningLines(horizon, above=False):
+    """ The warning on the final elements of the nominal orbit when the run went past the predictability
+    horizon: their central values are one realization among the clones, not a representative orbit, while
+    their intervals, the clones' spread, still hold. No lines otherwise.
+
+    Arguments:
+        horizon: [dict] Return of predictabilityHorizon, or None.
+
+    Keyword arguments:
+        above: [bool] The lines follow the elements instead of preceding them. Default False.
+
+    Return:
+        [list] Lines of text.
+    """
+
+    if (horizon is None) or (horizon.get("horizon_days") is None):
+        return []
+
+    return ["WARNING: the run went past the predictability horizon (~{:s}). The values {:s} are the nominal "
+            "orbit's".format(_spanText(horizon["horizon_days"]), "above" if above else "below"),
+            "(not a median), one realization among the clones: they do not represent the orbit at the end. "
+            "The intervals,",
+            "the clones' spread, do. For a real orbit that represents the clones, see the representative orbit "
+            "below."]
+
+
 def _beyondHorizonReportLines(horizon, n_clones, dist_unit_multiplier=1.0, length_units="AU"):
     """ Report lines on which orbit to use at the end of the run: the nominal one while the run ends
     before the predictability horizon, and beyond it the nominal at the horizon and the representative
@@ -1362,8 +1388,8 @@ def _beyondHorizonReportLines(horizon, n_clones, dist_unit_multiplier=1.0, lengt
                          "for a typical clone).".format(100*nominal_rank))
         return lines
 
-    lines = ["Beyond the predictability horizon (~{:s}) the nominal orbit is one realization among the "
-             "clones.".format(_spanText(horizon["horizon_days"]))]
+    lines = ["Which orbit to use beyond the predictability horizon (~{:s}):".format(
+        _spanText(horizon["horizon_days"]))]
 
     at = horizon.get("orbit_at_horizon")
     if at is not None:
@@ -2936,7 +2962,7 @@ PLOT_FIRST_ENCOUNTER_COLOR = "#f25f6b"
 #   (orange is the eccentricity in the predictability panel), with a white edge: protanopia and
 #   deuteranopia turn the fuchsia into a dark grey-blue that the blue bands would swallow
 PLOT_REPRESENTATIVE_COLOR = "#cf027e"
-PLOT_REPRESENTATIVE_EDGE = [patheffects.Stroke(linewidth=3.2, foreground="white"), patheffects.Normal()]
+PLOT_REPRESENTATIVE_EDGE = [patheffects.Stroke(linewidth=1.8, foreground="white"), patheffects.Normal()]
 
 
 def _unwrapDegrees(values):
@@ -3195,7 +3221,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
 
         if representative is not None:
             for m, s in enumerate(shifts(representative[key])):
-                ax.plot(t, representative[key] - s, color=PLOT_REPRESENTATIVE_COLOR, lw=1.4,
+                ax.plot(t, representative[key] - s, color=PLOT_REPRESENTATIVE_COLOR, lw=1.0,
                         path_effects=PLOT_REPRESENTATIVE_EDGE,
                         label="representative clone" if (key == "a" and m == 0) else None)
 
@@ -4142,6 +4168,8 @@ if __name__ == "__main__":
         print(header + "   (nominal  +/- 1 sigma  [95% CI]):")
     else:
         print(header + "   (nominal):")
+    for line in _finalElementsWarningLines(horizon):
+        print("  " + line)
     print("")
     print("    a    = {:>13.6f}{:s}  {:s}".format(a_val, a_ci_str, a_units))
     print("    q    = {:>13.6f}{:s}  {:s}".format(q_val, q_ci_str, q_units))
@@ -4335,6 +4363,8 @@ if __name__ == "__main__":
         f.write("node = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
         f.write("f    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
 
+        for line in _finalElementsWarningLines(horizon, above=True):
+            f.write(line + "\n")
         f.write("\n" + "\n".join(beyond_horizon_lines) + "\n")
 
         # Save the detected close encounters (Hill-sphere criterion, a fixed distance for the Sun).

@@ -337,7 +337,7 @@ def testReportBeyondTheHorizon(reb):
     lines = reb._beyondHorizonReportLines(horizon, len(clones), dist_unit_multiplier=1.0, length_units="AU")
     text = "\n".join(lines)
 
-    assert "one realization among the clones" in text
+    assert "Which orbit to use beyond the predictability horizon" in text
     assert "Nominal orbit at the horizon" in text
     assert "Representative orbit at the end: clone {:s}".format(horizon["representative"]["clone"]) in text
     assert "varpi=" in text
@@ -379,3 +379,20 @@ def testFigureDrawsTheRepresentativeBeyondTheHorizon(reb, agg):
     horizon = _beyond(reb, nominal, clones)
     _, axes = reb.plotReboundOrbits(nominal, clones, [], horizon=horizon)
     assert not [l for l in axes["a"].get_lines() if l.get_label() == "representative clone"]
+
+
+def testFinalElementsAreFlaggedBeyondTheHorizon(reb):
+    """ Past the horizon the final elements of the nominal are flagged as one realization, not a median nor
+    a representative orbit; before it, or without a horizon, they are not. """
+
+    nominal, clones = _ensemble()
+    text = " ".join(reb._finalElementsWarningLines(reb.predictabilityHorizon(nominal, clones)))
+    assert text.startswith("WARNING: the run went past the predictability horizon")
+    assert "The values below are the nominal orbit's (not a median)" in text
+    assert "do not represent the orbit at the end" in text
+    assert "above are" in " ".join(reb._finalElementsWarningLines(reb.predictabilityHorizon(nominal, clones),
+                                                                  above=True))
+
+    nominal, clones = _ensemble(k_scramble=200)
+    assert reb._finalElementsWarningLines(reb.predictabilityHorizon(nominal, clones)) == []
+    assert reb._finalElementsWarningLines(None) == []

@@ -526,8 +526,9 @@ realization among the clones, no better than any of them: in Winchcombe integrat
 with 200 clones, 86% of the clones end closer to the centre of the clones than the nominal does, about
 what any one clone would give. Nor do the medians of the elements make an orbit: each comes from a
 different clone, so that a(1 - e) is not the median q, and near i = 0 the median i is not even the
-tilt of the central orbit plane (see below). The report therefore follows the final elements with a
-block on which orbit to use, in one of three forms.
+tilt of the central orbit plane (see below). Past the horizon the report therefore flags the final
+elements, whose central values are the nominal's (not a median), and follows them with a block on which
+orbit to use, in one of three forms.
 
 **Without a horizon** (fewer than 10 clones over the whole span, or no `--mc`), it says that whether the
 measurement still sets the nominal orbit at the end is unknown.
@@ -538,7 +539,9 @@ so the measurement still sets the nominal orbit at the end, and the clones' spre
 to find the horizon. It also gives the share of the clones more central than the nominal at the end,
 which is then small: 2% for the same Winchcombe run cut 20 years back.
 
-**If the run went past the horizon**, it gives:
+**If the run went past the horizon**, a warning right at the final elements says that their values are
+the nominal orbit's, one realization among the clones, which does not represent the orbit at the end,
+while their intervals, the clones' spread, still hold. The block then gives:
 
 - The nominal orbit at the horizon, the last output at which the measurement still sets it, with the
   1 sigma and 95% CI of the clones there, as for the final elements.
@@ -578,7 +581,7 @@ their sum, the longitude of perihelion varpi, which the report adds. For example
 back with 40 clones (seed 7; the pickle has no trajectory ID, hence the clone names `None_MC_...`):
 
 ```
-  Beyond the predictability horizon (~25 years) the nominal orbit is one realization among the clones.
+  Which orbit to use beyond the predictability horizon (~25 years):
 
   Nominal orbit at the horizon, 25 years back (the last time the measurement sets it),
   +/- 1 sigma [95% CI] of the 40 clones:
