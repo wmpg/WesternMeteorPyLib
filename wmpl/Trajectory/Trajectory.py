@@ -3830,8 +3830,9 @@ class Trajectory(object):
         # Make a list of observations without any ignored stations in them
         nonignored_observations = [obs for obs in self.observations if not obs.ignore_station]
 
-        # Find the beginning height with the lowest length
-        min_svd_list = [np.min(obs.state_vect_dist) for obs in nonignored_observations]
+        # Find the beginning height with the lowest length, over the points each station reports its beginning
+        #   from, so that an ignored point does not choose the station
+        min_svd_list = [np.min(obs.state_vect_dist[obs.ignore_list == 0]) for obs in nonignored_observations]
         first_begin = min_svd_list.index(min(min_svd_list))
 
         # Set the coordinates of the height point as the first point
@@ -3844,8 +3845,8 @@ class Trajectory(object):
         self.rbeg_ele_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(self.rbeg_lat, self.rbeg_lon, self.rbeg_ele)
 
 
-        # Find the ending height with the largest length
-        max_svd_list = [np.max(obs.state_vect_dist) for obs in nonignored_observations]
+        # Find the ending height with the largest length, over the used points as above
+        max_svd_list = [np.max(obs.state_vect_dist[obs.ignore_list == 0]) for obs in nonignored_observations]
         last_end = max_svd_list.index(max(max_svd_list))
 
         # Set coordinates of the lowest point as the last point
