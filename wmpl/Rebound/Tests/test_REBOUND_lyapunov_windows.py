@@ -174,8 +174,16 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
 
     # The third panel: the time fitted from the onset, the quarters' ends on it, and the time with its 1 sigma
     v = result["verdict"]
-    dots = [x for x in axes[2].get_lines() if x.get_label() == "to the end of each quarter"][0]
+    dots = [x for x in axes[2].get_lines() if x.get_label() == "from the onset to the end of each quarter"][0]
     assert np.allclose(dots.get_ydata(), [c["lyapunov_time_years"] for c in v["lyapunov_cumulative"]])
+    notes = [x.get_text() for x in axes[2].texts if x.get_gid() == "cumulative"]
+    assert notes[-1] == "{:.0f} yr (whole fit)".format(v["lyapunov_cumulative"][-1]["lyapunov_time_years"])
+
+    # The start of the fit is drawn at the same time in all three panels
+    for ax in axes:
+        starts = [x for x in ax.get_lines() if x.get_linestyle() == "-." and len(x.get_xdata()) == 2
+                  and x.get_xdata()[0] == pytest.approx(-v["lyapunov_onset_years"])]
+        assert starts, ax.get_ylabel()
     final = [x for x in axes[2].get_lines() if x.get_label().startswith("Lyapunov time")][0]
     assert final.get_ydata()[0] == pytest.approx(v["lyapunov_time_years"])
     band = [c for c in axes[2].patches + axes[2].collections if c.get_label() == "1$\\sigma$"][0]

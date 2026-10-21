@@ -2638,14 +2638,27 @@ def plotMegno(megno, file_path=None):
         else:
             period = np.nanmedian(np.array(megno["a_au"], dtype=float))**1.5
             shown = (elapsed[on] - onset) >= LYAPUNOV_MIN_ORBITS*period
+        ax.set_title("The fit of the panel above stopped at each time: where this levels off, the time has settled",
+                     fontsize=9)
+
+        # The same growth phase and quarters as in the panel above
+        ax.axvspan(sign*onset, t[-1], color="C1", alpha=0.08, lw=0)
+        for w in (v.get("lyapunov_windows") or [])[1:]:
+            ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
+
         ax.plot(t[on][shown], tau_cum[shown], color="C1", lw=1.0, label="fitted from the onset to t")
 
+        # The ends of the quarters with their times; the last one is the whole fit, the time above
         ends = [(sign*c["end_years"], c["lyapunov_time_years"]) for c in cumulative
                 if c["lyapunov_time_years"] is not None]
         if ends:
             ax.plot(*zip(*ends), marker="o", ls="none", color="C3", markersize=5,
-                    label="to the end of each quarter")
-        ax.axhline(tau, color="C1", ls="--", lw=1.0, label="Lyapunov time {:.0f} years".format(tau))
+                    label="from the onset to the end of each quarter")
+            for k, (x, y) in enumerate(ends):
+                ax.annotate("{:.0f} yr{:s}".format(y, " (whole fit)" if k == len(ends) - 1 else ""), (x, y),
+                            textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8, color="C3",
+                            gid="cumulative", bbox=ground)
+        ax.axhline(tau, color="C1", ls="--", lw=1.0, label="Lyapunov time {:.0f} years (the fit above)".format(tau))
 
         values = [x for x in tau_cum[shown] if np.isfinite(x)] + [tau] + [x for x in (sigma or []) if x is not None]
         ax.set_yscale("log")
@@ -2655,6 +2668,14 @@ def plotMegno(megno, file_path=None):
                        lw=0, label="1$\\sigma$")
         ax.set_ylabel("Lyapunov time [years]")
         ax.legend(fontsize=8)
+
+    # The start of the fit, where <Y> last crossed MEGNO_CHAOTIC_MIN, is the same time in every panel
+    if with_fit:
+        for k, ax in enumerate(axes):
+            ax.axvline(sign*onset, color="C1", ls="-.", lw=1.0, zorder=3,
+                       label="start of the fit ({:.0f} years {:s})".format(
+                           onset, "back" if sign < 0 else "after the start") if k == 0 else None)
+        axes[0].legend(fontsize=8)
 
     axes[-1].set_xlabel("Time [years]")
     fig.tight_layout()

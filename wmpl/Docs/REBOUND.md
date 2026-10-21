@@ -383,7 +383,10 @@ In the JSON the quarters are the verdict's `lyapunov_windows` (`start_years`, `e
 `lyapunov_time_1sigma_years` (its upper end `null` when unbounded) and the cumulative fits are
 `lyapunov_cumulative`. In `rebound_megno_lyapunov.png` the middle panel draws ln|δ| with the growth
 phase, its fit and the fit of each quarter, labelled with its time, and the lower panel the time fitted
-from the onset to every later time, with the quarters' ends and the 1σ band. No time is given if the growth phase covers
+from the onset to every later time: the fit of the middle panel stopped there, so its last point is the
+time of the whole fit. The ends of the quarters are marked with their times, with the 1σ band, and the
+start of the fit, where ⟨Y⟩ last crosses 2.5 in the upper panel, is one line across all three. No time is
+given if the growth phase covers
 fewer than 10 orbital periods (or a tenth of the run), since the fit is not reliable there. The
 Lyapunov time is of the nominal orbit alone, in its Newtonian re-integration: for the clones, see
 the [Predictability horizon](#predictability-horizon).
