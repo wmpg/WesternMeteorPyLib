@@ -164,6 +164,7 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
     fig, axes = reb.plotMegno(result, file_path=str(tmp_path/"megno.png"))
     assert (tmp_path/"megno.png").exists()
     assert len(axes) == 2
+    assert axes[0].get_title() == "MEGNO and Lyapunov time of the nominal orbit (Newtonian gravity): chaotic"
 
     notes = {text.get_text() for text in axes[1].texts if text.get_gid() == "quarter"}
     assert notes == {"20 yr", "50 yr", "100 yr", "no growth"}

@@ -372,7 +372,7 @@ report lists every quarter with its time, and their spread is the range: quote t
 the central value. A quarter in which ln|δ| does not grow (it can shrink for a while between
 encounters) is listed as "no growth" and left out of the range. In the JSON the quarters are the
 verdict's `lyapunov_windows`: `start_years`, `end_years` and `lyapunov_time_years` (`null` where
-ln|δ| does not grow). The lower panel of `rebound_megno.png` draws ln|δ| with the growth phase, its
+ln|δ| does not grow). The lower panel of `rebound_megno_lyapunov.png` draws ln|δ| with the growth phase, its
 fit and the fit of each quarter, labelled with its time. No time is given if the growth phase covers
 fewer than 10 orbital periods (or a tenth of the run), since the fit is not reliable there. The
 Lyapunov time is of the nominal orbit alone, in its Newtonian re-integration: for the clones, see

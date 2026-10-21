@@ -2490,7 +2490,8 @@ def plotMegno(megno, file_path=None):
     ax.axhline(MEGNO_CHAOTIC_MIN, color="C1", ls=":", lw=1.2,
                label="chaotic above {:g}; the fit starts at the last crossing".format(MEGNO_CHAOTIC_MIN))
     ax.set_ylabel("<Y>")
-    ax.set_title("MEGNO of the nominal orbit (Newtonian gravity): {:s}".format(v["status"].replace("_", " ")))
+    ax.set_title("{:s} of the nominal orbit (Newtonian gravity): {:s}".format(
+        "MEGNO and Lyapunov time" if with_deviation else "MEGNO", v["status"].replace("_", " ")))
     ax.legend(fontsize=8)
 
     if with_deviation:
@@ -3979,7 +3980,7 @@ if __name__ == "__main__":
     # MEGNO evolution, in its own figure
     megno_png_path = None
     if (megno is not None) and megno["times_days"]:
-        megno_png_path = os.path.join(out_dir, "rebound_megno.png")
+        megno_png_path = os.path.join(out_dir, "rebound_megno_lyapunov.png")
         plotMegno(megno, file_path=megno_png_path)
 
     # Report the saved outputs
