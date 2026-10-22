@@ -1,5 +1,6 @@
-""" Tests for the Borovicka et al. (2022) pressure factor Pf (wmpl.Utils.Physics.calcPf()) and the maximum dynamic
-pressure it takes from a trajectory (maxDynamicPressure(), averageZenithDistance()).
+""" Tests for the Borovicka et al. (2022) pressure factor Pf (wmpl.Utils.Physics.calcPf()) and what it takes from a
+trajectory: the maximum dynamic pressure (maxDynamicPressure(), groundAlphaBetaFit()), the average zenith distance
+(averageZenithDistance()) and the photometric mass (photometricMassBorovicka2022(), trajectoryLightCurve()).
 
 Run with pytest:
     python -m pytest wmpl/Utils/Tests/test_PhysicsPf.py -v
@@ -8,6 +9,7 @@ or standalone (no pytest required):
     python -m wmpl.Utils.Tests.test_PhysicsPf
 """
 
+import copy
 import os
 import warnings
 from types import SimpleNamespace
@@ -16,7 +18,9 @@ import numpy as np
 
 from wmpl.Utils.AlphaBeta import alphaBetaVelocity, rescaleHeightToExponentialAtmosphere
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
-from wmpl.Utils.Physics import averageZenithDistance, calcPf, maxDynamicPressure
+from wmpl.Trajectory.AggregateAndPlot import computeMass
+from wmpl.Utils.Physics import averageZenithDistance, calcMass, calcPf, groundAlphaBetaFit, maxDynamicPressure, \
+    photometricMassBorovicka2022, trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -119,6 +123,57 @@ def test_pf_from_the_example_trajectory():
     assert abs(np.degrees(zangle - (np.pi/2 - traj.orbit.elevation_apparent_norot))) < 0.5
 
 
+def test_light_curve_is_aggregate_and_plot_s():
+    """ The light curve is the one AggregateAndPlot.computeMass() takes, which gives the same mass as before it was
+        taken out of it. """
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
+    time_arr, mag_arr, ht_arr = trajectoryLightCurve(traj)
+
+    assert np.all(np.diff(time_arr) >= 0) and np.all(mag_arr < 8)
+    assert np.all((ht_arr <= traj.rbeg_ele + 1000) & (ht_arr >= traj.rend_ele - 1000))
+
+    assert computeMass(traj, 1210) == 4.509403215639926e-06
+    assert computeMass(traj, 1210) == calcMass(time_arr, mag_arr, traj.orbit.v_avg_norot, P_0m=1210)
+
+
+def test_pf_computes_the_photometric_mass():
+    """ Without a mass, calcPf() computes Paper I's photometric mass from the trajectory's light curve, at the speeds
+        of the same robust alpha-beta fit, and says so; without magnitudes it needs the mass. """
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
+
+    time_arr, mag_arr, ht_arr = trajectoryLightCurve(traj)
+    velocity_at = groundAlphaBetaFit(traj)
+    lats = np.interp(ht_arr, [traj.rend_ele, traj.rbeg_ele], [traj.rend_lat, traj.rbeg_lat])
+    lons = np.interp(ht_arr, [traj.rend_ele, traj.rbeg_ele], [traj.rend_lon, traj.rbeg_lon])
+    mass = calcMass(time_arr, mag_arr, velocity_at(ht_arr, lats, lons), tau='rc2001', P_0m=1500.0,
+        lum_eff_mass=1.0)
+
+    assert np.isclose(photometricMassBorovicka2022(traj), mass, rtol=1e-9)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        pf = calcPf(traj=traj)
+
+    messages = [str(w.message) for w in caught if "calcPf()" in str(w.message)]
+    assert len(messages) == 1 and "initial photometric mass" in messages[0] and "brightest" in messages[0]
+    assert np.isclose(pf[0], calcPf(mass=mass, traj=traj)[0], rtol=1e-9)
+
+    # Without magnitudes
+    traj_dark = copy.deepcopy(traj)
+    for obs in traj_dark.observations:
+        obs.absolute_magnitudes = None
+    assert photometricMassBorovicka2022(traj_dark) is None
+    try:
+        calcPf(traj=traj_dark)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("No ValueError without magnitudes nor mass")
+    assert np.isclose(calcPf(mass=mass, traj=traj_dark)[0], pf[0], rtol=1e-9)
+
+
 def test_inputs_are_checked():
 
     traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
@@ -139,6 +194,8 @@ if __name__ == "__main__":
         test_explicit_values,
         test_max_dynamic_pressure_of_synthetic_fireballs,
         test_pf_from_the_example_trajectory,
+        test_light_curve_is_aggregate_and_plot_s,
+        test_pf_computes_the_photometric_mass,
         test_inputs_are_checked,
     ]
 

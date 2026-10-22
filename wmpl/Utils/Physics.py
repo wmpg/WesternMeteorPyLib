@@ -383,28 +383,75 @@ def calcKB(lat, lon, ht_beg, jd, v, zenith_angle, gmn_correction=False):
     return kb
 
 
-def maxDynamicPressure(traj, n_heights=1000):
-    """ The maximum dynamic pressure p = rho*v^2 on a meteoroid along a solved trajectory, as Borovicka et al.
-        (2022, Paper I) give it for the European Fireball Network: over the whole trajectory, from its beginning to
-        its end height, with the velocity fit extrapolated where there are no velocity measurements.
+def trajectoryLightCurve(traj, mag_limit=8.0):
+    """ The light curve of a solved trajectory, as AggregateAndPlot.computeMass() takes it for the photometric
+        mass: the absolute magnitudes of the stations that are not ignored, brighter than mag_limit, sorted by time,
+        with the points of different stations closer than a frame merged into the brightest one, which mitigates
+        saturation (it assumes the photometric calibration was done well).
 
-    The velocity comes from a robust alpha-beta fit (wmpl.Utils.AlphaBeta.fitAlphaBeta(method='robust')) of the
-    solver's point speeds, on heights rescaled to the exponential atmosphere of the alpha-beta model, as the AlphaBeta
-    command line does. The speeds are relative to the ground (the air): the solver's inertial ones minus the Earth's
-    rotation along the path, which offsets them all alike (orbit.v_init - orbit.v_init_norot, as Orbit takes it for
-    v_avg_norot), and the fit starts from orbit.v_init_norot. The air density is the NRLMSISE one along the
-    trajectory, at its reference time.
+    Arguments:
+        traj: [Trajectory] Solved trajectory.
+
+    Keyword arguments:
+        mag_limit: [float] Fainter magnitudes are left out. +8 by default.
+
+    Return:
+        (time_arr, mag_arr, ht_arr): Times (s, in the trajectory's time), absolute magnitudes and heights (m) of the
+            light curve, or None if the trajectory has no magnitudes.
+    """
+
+    from wmpl.Utils.Math import mergeClosePoints
+
+    time_mag_ht = []
+    avg_t_diff_max = 0
+    for obs in traj.observations:
+
+        # Skip ignored stations, and stations without magnitudes
+        if obs.ignore_station or (obs.absolute_magnitudes is None):
+            continue
+
+        # Compute average time difference
+        avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
+
+        # Exclude the faint magnitudes
+        mag_filter = obs.absolute_magnitudes < mag_limit
+        if not np.any(mag_filter):
+            continue
+
+        for t, mag, ht in zip(obs.time_data[mag_filter], obs.absolute_magnitudes[mag_filter], \
+            obs.model_ht[mag_filter]):
+
+            if (mag is not None) and (not np.isnan(mag)):
+                time_mag_ht.append([t, mag, ht])
+
+    if len(time_mag_ht) == 0:
+        return None
+
+    time_mag_ht = np.array(sorted(time_mag_ht, key=lambda x: x[0]))
+
+    # Take the brightest magnitudes of points closer than a frame
+    time_arr, mag_arr = mergeClosePoints(time_mag_ht[:, 0], time_mag_ht[:, 1], avg_t_diff_max, method='min')
+    time_arr, mag_arr = np.array(time_arr), np.array(mag_arr)
+
+    # The height at the merged times
+    ht_arr = np.interp(time_arr, time_mag_ht[:, 0], time_mag_ht[:, 2])
+
+    return time_arr, mag_arr, ht_arr
+
+
+def groundAlphaBetaFit(traj):
+    """ A robust alpha-beta fit (wmpl.Utils.AlphaBeta.fitAlphaBeta(method='robust')) of the speeds of a solved
+        trajectory relative to the ground (the air), on heights rescaled to the exponential atmosphere of the
+        alpha-beta model, as the AlphaBeta command line does. The speeds relative to the ground are the solver's
+        inertial ones minus the Earth's rotation along the path, which offsets them all alike (orbit.v_init -
+        orbit.v_init_norot, as Orbit takes it for v_avg_norot), and the fit starts from orbit.v_init_norot.
 
     Arguments:
         traj: [Trajectory] Solved trajectory, with its orbit and point velocities.
 
-    Keyword arguments:
-        n_heights: [int] Number of heights the pressure is evaluated at, evenly between the beginning and the end
-            height. 1000 by default.
-
     Return:
-        (p_max, ht_p_max, v_p_max): The maximum dynamic pressure (Pa), and the height (m) and the speed relative to
-            the ground (m/s) where it is reached.
+        velocityAt: [function] The speed relative to the ground (m/s) at the given heights (m), latitudes and
+            longitudes (radians): velocityAt(hts, lats, lons).
     """
 
     # AlphaBeta imports this module, so it is imported here
@@ -430,26 +477,102 @@ def maxDynamicPressure(traj, n_heights=1000):
         lon_data += obs.model_lon[filter_mask].tolist()
         vel_data += obs.velocities[filter_mask].tolist()
 
-    ht_data, vel_data = np.array(ht_data), np.array(vel_data) - v_rotation
-    ht_rescaled = rescaleHeightToExponentialAtmosphere(np.array(lat_data), np.array(lon_data), ht_data,
+    ht_rescaled = rescaleHeightToExponentialAtmosphere(np.array(lat_data), np.array(lon_data), np.array(ht_data),
         traj.jdt_ref)
 
-    # Robust alpha-beta fit of the speeds relative to the ground
-    v_init, alpha, beta = fitAlphaBeta(vel_data, ht_rescaled, v_init=v_init_norot, method='robust')
+    v_init, alpha, beta = fitAlphaBeta(np.array(vel_data) - v_rotation, ht_rescaled, v_init=v_init_norot,
+        method='robust')
 
-    # The whole trajectory, from the beginning to the end height
-    hts = np.linspace(traj.rbeg_ele, traj.rend_ele, n_heights)
-    frac = (hts - traj.rbeg_ele)/(traj.rend_ele - traj.rbeg_ele)
+    def velocityAt(hts, lats, lons):
+        return alphaBetaVelocity(rescaleHeightToExponentialAtmosphere(lats, lons, hts, traj.jdt_ref), alpha, beta,
+            v_init)
+
+    return velocityAt
+
+
+def _trajectoryLatLon(traj, hts):
+    """ Latitudes and longitudes (radians) along a trajectory at the given heights, between its beginning and end. """
+
+    frac = (np.asarray(hts) - traj.rbeg_ele)/(traj.rend_ele - traj.rbeg_ele)
     lats = traj.rbeg_lat + frac*(traj.rend_lat - traj.rbeg_lat)
     lons = traj.rbeg_lon + frac*((traj.rend_lon - traj.rbeg_lon + np.pi)%(2*np.pi) - np.pi)
 
-    vels = alphaBetaVelocity(rescaleHeightToExponentialAtmosphere(lats, lons, hts, traj.jdt_ref), alpha, beta,
-        v_init)
+    return lats, lons
+
+
+def maxDynamicPressure(traj, n_heights=1000, velocity_at=None):
+    """ The maximum dynamic pressure p = rho*v^2 on a meteoroid along a solved trajectory, as Borovicka et al.
+        (2022, Paper I) give it for the European Fireball Network: over the whole trajectory, from its beginning to
+        its end height, with the velocity fit extrapolated where there are no velocity measurements.
+
+    The velocity, relative to the ground (the air), comes from a robust alpha-beta fit of the solver's point speeds
+    (groundAlphaBetaFit()). The air density is the NRLMSISE one along the trajectory, at its reference time.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory, with its orbit and point velocities.
+
+    Keyword arguments:
+        n_heights: [int] Number of heights the pressure is evaluated at, evenly between the beginning and the end
+            height. 1000 by default.
+        velocity_at: [function] The fit from groundAlphaBetaFit(traj), to reuse one already made. None by default,
+            to make it.
+
+    Return:
+        (p_max, ht_p_max, v_p_max): The maximum dynamic pressure (Pa), and the height (m) and the speed relative to
+            the ground (m/s) where it is reached.
+    """
+
+    if velocity_at is None:
+        velocity_at = groundAlphaBetaFit(traj)
+
+    # The whole trajectory, from the beginning to the end height
+    hts = np.linspace(traj.rbeg_ele, traj.rend_ele, n_heights)
+    lats, lons = _trajectoryLatLon(traj, hts)
+
+    vels = velocity_at(hts, lats, lons)
     pressures = getAtmDensity_vect(lats, lons, hts, traj.jdt_ref)*vels**2
 
     i_max = np.argmax(pressures)
 
     return pressures[i_max], hts[i_max], vels[i_max]
+
+
+def photometricMassBorovicka2022(traj, velocity_at=None):
+    """ The initial photometric mass of Borovicka et al. (2022, Paper I, Eqs. 1 and 2), the one their Pf takes, from
+        the light curve of a solved trajectory (trajectoryLightCurve()): the luminous efficiency of ReVelle &
+        Ceplecha (2001) for type I fireballs without its mass and deceleration terms, with 1500 W for magnitude zero,
+        integrated with the speed relative to the ground at each point of the light curve, from the robust alpha-beta
+        fit (groundAlphaBetaFit()). In calcMass(): tau='rc2001', lum_eff_mass=1.0 (where the mass term vanishes),
+        v_init=None and P_0m=1500. The trajectory's absolute magnitudes are taken as Paper I's (1500 W is for the V
+        band); for cameras of another band, compute the mass with their own zero-magnitude power.
+
+    The mass is only as good as the trajectory's magnitudes: the saturated or uncalibrated video magnitudes of a
+    bright fireball give one far too small (and a Pf far too high, as m^(-1/3)). Check its light curve, or give the
+    mass then.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory, with magnitudes.
+
+    Keyword arguments:
+        velocity_at: [function] The fit from groundAlphaBetaFit(traj), to reuse one already made. None by default,
+            to make it.
+
+    Return:
+        [float] Photometric mass (kg), or None if the trajectory has no magnitudes.
+    """
+
+    light_curve = trajectoryLightCurve(traj)
+    if light_curve is None:
+        return None
+
+    time_arr, mag_arr, ht_arr = light_curve
+
+    if velocity_at is None:
+        velocity_at = groundAlphaBetaFit(traj)
+
+    vel_arr = velocity_at(ht_arr, *_trajectoryLatLon(traj, ht_arr))
+
+    return calcMass(time_arr, mag_arr, vel_arr, tau='rc2001', P_0m=1500.0, lum_eff_mass=1.0, v_init=None)
 
 
 def averageZenithDistance(traj):
@@ -492,20 +615,26 @@ def calcPf(p_max=None, zangle=None, mass=None, v_0=None, traj=None):
     lum_eff_mass=1.0, where its mass term tanh(0.38 ln m) vanishes (within 0.8% of Paper I's tau at all speeds),
     v_init=None and P_0m=1500: calcMass(time, mag_abs, velocity, tau='rc2001', lum_eff_mass=1.0, P_0m=1500).
     Paper I gives these equations as the ones for a 10 kg meteoroid; with the mass term at 10 kg, tau would be
-    2.25 times larger and the mass that much smaller.
+    2.25 times larger and the mass that much smaller. With a trajectory that has magnitudes, it is computed so
+    (photometricMassBorovicka2022()) unless it is given.
 
     Keyword arguments:
         p_max: [float] Maximum dynamic pressure p = rho*v^2 (Pa). Cannot be given together with traj.
         zangle: [float] Average zenith distance of the radiant (radians). Cannot be given together with traj.
-        mass: [float] Initial photometric mass (kg), see the note above. Always needed.
+        mass: [float] Initial photometric mass (kg), see the note above. Needed without traj, or with a traj
+            that has no magnitudes.
         v_0: [float] Initial (entry) velocity v_inf (m/s), relative to the ground as in Paper I. Cannot be given
             together with traj.
-        traj: [Trajectory] Optional solved WMPL Trajectory. If given, p_max, zangle and v_0 are derived from it
-            (a warning says so, with the values):
+        traj: [Trajectory] Optional solved WMPL Trajectory. If given, p_max, zangle and v_0 are derived from it,
+            and the mass too if it is not given (a warning says so, with the values):
                 - p_max  <- maxDynamicPressure(traj): a robust alpha-beta fit of the speeds relative to the
-                            ground, extrapolated over the whole trajectory, with the NRLMSISE density
+                            ground (groundAlphaBetaFit()), extrapolated over the whole trajectory, with the
+                            NRLMSISE density
                 - zangle <- averageZenithDistance(traj): ground-fixed radiant at the average point
                 - v_0    <- traj.orbit.v_init_norot, the initial speed relative to the ground
+                - mass   <- photometricMassBorovicka2022(traj): from the trajectory's light curve, with the speeds
+                            of the same alpha-beta fit. Only as good as the trajectory's magnitudes: the warning
+                            gives the brightest one and the radiated energy, to check them
 
     Return:
         (pf, pf_category): [tuple]
@@ -525,16 +654,32 @@ def calcPf(p_max=None, zangle=None, mass=None, v_0=None, traj=None):
             raise ValueError("The given trajectory does not have a computed orbit. Pass p_max, zangle and v_0 "
                 "explicitly instead.")
 
-        p_max, ht_p_max, v_p_max = maxDynamicPressure(traj)
+        # One robust alpha-beta fit for the pressure and the mass
+        velocity_at = groundAlphaBetaFit(traj)
+
+        p_max, ht_p_max, v_p_max = maxDynamicPressure(traj, velocity_at=velocity_at)
         zangle = averageZenithDistance(traj)
         v_0 = traj.orbit.v_init_norot if (getattr(traj.orbit, 'v_init_norot', None) is not None) \
             else traj.orbit.v_init
 
+        if mass is None:
+            mass = photometricMassBorovicka2022(traj, velocity_at=velocity_at)
+            if mass is None:
+                raise ValueError("The trajectory has no magnitudes: give the initial photometric mass.")
+            time_arr, mag_arr, _ = trajectoryLightCurve(traj)
+            mass_text = "; the initial photometric mass, {:.4g} kg, is computed from its light curve ({:d} points, " \
+                "brightest {:+.2f} mag, {:.3g} J radiated with 1500 W) with the luminous efficiency of Paper I " \
+                "(RC2001 type I without its mass term) and the speeds of the same fit. It is only as good as the " \
+                "magnitudes: saturated or uncalibrated ones give a mass far too small and a Pf too high".format(mass,
+                len(mag_arr), np.min(mag_arr), calcRadiatedEnergy(time_arr, mag_arr, P_0m=1500.0))
+        else:
+            mass_text = ""
+
         warnings.warn("calcPf() with a trajectory: the maximum dynamic pressure, {:.4f} MPa at {:.2f} km "
             "({:.3f} km/s), is estimated with a robust alpha-beta fit (fitAlphaBeta(method='robust')) of the "
             "observed speeds relative to the ground, extrapolated over the whole trajectory; the average zenith "
-            "distance of the radiant is {:.2f} deg and v_inf {:.3f} km/s, relative to the ground.".format(
-            p_max/1e6, ht_p_max/1000, v_p_max/1000, np.degrees(zangle), v_0/1000))
+            "distance of the radiant is {:.2f} deg and v_inf {:.3f} km/s, relative to the ground{:s}.".format(
+            p_max/1e6, ht_p_max/1000, v_p_max/1000, np.degrees(zangle), v_0/1000, mass_text))
 
     elif (p_max is None) or (zangle is None) or (v_0 is None):
         raise ValueError("Provide either `traj`, or all of p_max, zangle and v_0.")
