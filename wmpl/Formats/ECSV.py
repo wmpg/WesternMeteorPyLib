@@ -184,6 +184,19 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
             # Get magnitude data, if any
             if mag_indx is not None:
                 mag_data = data[:, mag_indx].astype(np.float64)
+
+                # A point picked without photometry has no magnitude: SkyFit2 sets its integrated pixel value to 1
+                #   when no photometry pixels were chosen, which leaves the magnitude at the photometric offset
+                #   (plus the vignetting and extinction corrections), a value with no relation to the meteor
+                if 'integrated_pixel_value' in header:
+                    no_photometry = data[:, header.index('integrated_pixel_value')].astype(np.float64) <= 1
+                    mag_data[no_photometry] = np.nan
+
+                    if np.any(no_photometry):
+                        print("Station {:s}: {:d} of {:d} points were picked without photometry (integrated pixel "
+                            "value 1), they have no magnitude".format(station_id, int(np.sum(no_photometry)),
+                            len(mag_data)))
+
             else:
                 mag_data = np.zeros_like(azim_data) + 10.0
 
