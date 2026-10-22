@@ -259,8 +259,8 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
             "compared to using the calibrated value.".format(lum_eff_type, P_0m, P_0m/1500.0))
 
     # Compute the luminous efficiency using an analytical velocity-dependent function.
-    import pyximport
-    pyximport.install(setup_args={'include_dirs': [np.get_include()]})
+    from wmpl.Utils.CythonBuild import installPyximport
+    installPyximport()
     from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
 
     # Radiated power at every measurement point
