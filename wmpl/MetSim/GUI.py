@@ -155,6 +155,18 @@ class SimulationResults(object):
         ###
 
 
+        # MetSim simulates the motion relative to the air, which turns with the ground. With the Earth's rotation
+        #   along the path in the constants (see constantsRelativeToGround()), give the lengths and speeds in the
+        #   trajectory solver's inertial frame, where its observations are: the speed relative to the air is then
+        #   the speed minus v_rotation
+        self.v_rotation = getattr(self.const, "v_rotation", 0.0)
+        if self.v_rotation:
+            for name in ("brightest", "leading_frag", "main"):
+                setattr(self, name + "_length_arr", getattr(self, name + "_length_arr") \
+                    + self.v_rotation*self.time_arr)
+                setattr(self, name + "_vel_arr", getattr(self, name + "_vel_arr") + self.v_rotation)
+
+
     def writeCSV(self, dir_path, file_name):
 
         # Combine data into one array
@@ -180,6 +192,10 @@ class SimulationResults(object):
                   "Abs mag total, Abs mag main, Abs mag grain, " + \
                   "log10 Lum total (W), log10 Lum main (W), log10 Lum grain (W), "+\
                   "log10 Electron line density (-/m), Mass total (kg), Mass main (kg)"
+        if self.v_rotation:
+            header += "\nLengths and speeds in the trajectory solver's inertial frame: subtract the Earth's " \
+                + "rotation along the path, v_rotation = {:.2f} m/s, for the speeds relative to the air".format(
+                self.v_rotation)
 
 
         # If the file cannot be opened, throw an error message
@@ -203,6 +219,64 @@ class SimulationResults(object):
 
             # Write the data
             np.savetxt(f, out_arr, fmt='%.5e', delimiter=',', newline='\n', header=header, comments="# ")
+
+
+def rotationSpeedAlongTrajectory(traj):
+    """ The speed of the Earth's rotation along a trajectory (m/s): the trajectory solver's inertial (ECI) initial
+        speed minus the one relative to the ground, as Orbit gives them (v_init - v_init_norot, the offset it also
+        takes for v_avg_norot). It is practically constant over the few seconds of a meteor. 0 without them, and for
+        a trajectory solved with fixed stations, whose speeds are already relative to the ground. """
+
+    orbit = getattr(traj, "orbit", None)
+    if (getattr(orbit, "v_init", None) is None) or (getattr(orbit, "v_init_norot", None) is None):
+        return 0.0
+
+    return orbit.v_init - orbit.v_init_norot
+
+
+def constantsRelativeToGround(const, v_rotation):
+    """ Turn const.v_init and const.zenith_angle, given in the trajectory solver's inertial (ECI) frame, into the
+        speed and zenith angle relative to the ground that MetSim simulates: drag, ablation and light act on the speed
+        relative to the air, which turns with the ground. v_rotation is kept in const, so that SimulationResults
+        gives the lengths and speeds back in the solver's frame, to be compared with its observations. The zenith
+        angle keeps the vertical speed, which the rotation, horizontal, does not change.
+
+    Arguments:
+        const: [Constants] Changed in place.
+        v_rotation: [float] The Earth's rotation along the path (m/s), see rotationSpeedAlongTrajectory().
+
+    Return:
+        const: [Constants]
+    """
+
+    v_ground = const.v_init - v_rotation
+    const.zenith_angle = np.arccos(np.clip(const.v_init*np.cos(const.zenith_angle)/v_ground, -1.0, 1.0))
+    const.v_init = v_ground
+    const.v_rotation = v_rotation
+
+    return const
+
+
+def loadedConstantsRelativeToGround(const, const_json, traj):
+    """ Constants loaded from a JSON file without v_rotation were saved before MetSim was run relative to the ground:
+        their v_init and zenith angle are in the trajectory solver's inertial frame, as the GUI and DynestyMetSim
+        took them from the trajectory. Turn them relative to the ground (constantsRelativeToGround()). Constants
+        with v_rotation are left as they are.
+
+    Return:
+        const: [Constants]
+    """
+
+    if ("v_rotation" in const_json) or ("v_rotation" in const_json.get("const", {})):
+        return const
+
+    v_rotation = rotationSpeedAlongTrajectory(traj)
+    if v_rotation:
+        print("NOTE: The constants file has no v_rotation: its v_init and zenith angle are taken as the trajectory "
+            "solver's inertial ones and simulated relative to the ground, without the Earth's rotation along the "
+            "path (v_rotation = {:.2f} m/s).".format(v_rotation))
+
+    return constantsRelativeToGround(const, v_rotation)
 
 
 class ECSVObservations(object):
@@ -2929,6 +3003,9 @@ class MetSimGUI(QMainWindow):
                 if const_json['erosion_sigma_change'] != const_json['sigma']:
                     self.erosion_different_sigma = True
 
+            # Simulate relative to the ground, also constants saved before that was done
+            loadedConstantsRelativeToGround(self.const, const_json, self.traj)
+
             # if 'fragmentation_string' in const_json:
             #     if const_json['fragmentation_string'] is not None:
             #         self.fragmentation = FragmentationContainer(self, os.path.join(self.dir_path, \
@@ -2971,9 +3048,13 @@ class MetSimGUI(QMainWindow):
             self.const.erosion_on = False
             self.const.disruption_on = False
 
-            # Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
+            # Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into
             # account
             self.computeSimZenithAngle()
+
+            # The speed and zenith angle above are the solver's inertial ones: simulate relative to the ground, with
+            #   the lengths and speeds given back in the solver's frame
+            constantsRelativeToGround(self.const, rotationSpeedAlongTrajectory(self.traj))
 
             # Calculate the photometric mass
             _, self.const.m_init = self.calcPhotometricMass()
@@ -3241,14 +3322,14 @@ class MetSimGUI(QMainWindow):
             return 0, self.const.m_init
 
         # The luminous efficiency chosen in the GUI: its constant value, or the code of the velocity- and
-        #   mass-dependent model, which calcMass() evaluates at the average velocity
+        #   mass-dependent model, which calcMass() evaluates at the average speed relative to the ground
         if self.const.lum_eff_type == 0:
             tau = self.const.lum_eff/100
             print("NOTE: The mass was computed using the constant luminous efficiency defined in the GUI!")
         else:
             tau = int(self.const.lum_eff_type)
             print("NOTE: The mass was computed using the luminous efficiency model chosen in the GUI "
-                "(lum_eff_type = {:d}) at the average velocity!".format(tau))
+                "(lum_eff_type = {:d}) at the average speed relative to the ground!".format(tau))
 
         # Sort array by time
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
@@ -3264,7 +3345,7 @@ class MetSimGUI(QMainWindow):
         radiated_energy = calcRadiatedEnergy(np.array(time_arr), np.array(mag_arr), P_0m=self.const.P_0m)
 
         # Compute the photometric mass
-        photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, \
+        photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg_norot, \
             tau=tau, P_0m=self.const.P_0m)
 
         
@@ -4464,10 +4545,10 @@ class MetSimGUI(QMainWindow):
         self.lagPlot.canvas.figure.clear()
 
 
-        # Update the observed initial velocity label
-        # NOTE: The ECI, not the ground-fixed velocity needs to be used, as the meteor model does not
-        #   include Earth's rotation!
-        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init/1000))
+        # Update the observed initial velocity label, relative to the ground as the simulated one, and inertial
+        v_rotation = getattr(self.const, "v_rotation", 0.0)
+        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s ({:.3f} ECI)".format(
+            (self.traj.orbit.v_init - v_rotation)/1000, self.traj.orbit.v_init/1000))
 
 
         # Compute things needed for the simulated lag
@@ -5335,9 +5416,9 @@ class MetSimGUI(QMainWindow):
 
             # Compute the dynamic pressure
             brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
-                self.traj.jdt_ref, sr.brightest_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.brightest_vel_arr - sr.v_rotation, gamma=self.const.gamma)
             leading_frag_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.leading_frag_height_arr, \
-                self.traj.jdt_ref, sr.leading_frag_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.leading_frag_vel_arr - sr.v_rotation, gamma=self.const.gamma)
 
 
             # Plot dyn pressure
@@ -5468,9 +5549,9 @@ class MetSimGUI(QMainWindow):
 
             # Compute the dynamic pressure
             brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
-                self.traj.jdt_ref, sr.brightest_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.brightest_vel_arr - sr.v_rotation, gamma=self.const.gamma)
             main_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.main_height_arr, \
-                self.traj.jdt_ref, sr.main_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.main_vel_arr - sr.v_rotation, gamma=self.const.gamma)
 
 
             # Filter out very small masses
@@ -6066,10 +6147,9 @@ class MetSimGUI(QMainWindow):
     def saveUpdatedOrbit(self):
         """ Save updated orbit and trajectory to file. """
 
-        # Compute the difference between the model and the measured initial velocity
-        # NOTE: The ECI, not the ground-fixed velocity needs to be used, as the meteor model does not
-        #   include Earth's rotation!
-        v_init_diff = self.const.v_init - self.traj.orbit.v_init
+        # Compute the difference between the model and the measured initial velocity, both in the solver's inertial
+        #   (ECI) frame: the model's is relative to the ground, plus the Earth's rotation along the path
+        v_init_diff = self.const.v_init + getattr(self.const, "v_rotation", 0.0) - self.traj.orbit.v_init
 
         # Recompute the orbit with an increased initial velocity
         # Reuse the same frame convention (moving vs fixed stations) that the original orbit solve used,

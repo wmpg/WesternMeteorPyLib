@@ -25,7 +25,7 @@ from wmpl.Utils.Math import mergeClosePoints
 from wmpl.Utils.Physics import calcMass
 
 
-# A synthetic light curve from one station, 1 s at 100 frames per second, at 18 km/s
+# A synthetic light curve from one station, 1 s at 100 frames per second, at 18 km/s (no rotation)
 TIME = np.linspace(0, 1, 101)
 MAG_ABS = -1 + 4*(TIME - 0.5)**2
 V_AVG = 18000.0
@@ -44,7 +44,7 @@ def _standIn(lum_eff_type=0, lum_eff=0.7, with_photometry=True):
 
     obs = SimpleNamespace(time_data=TIME, absolute_magnitudes=MAG_ABS if with_photometry else None,
         ignore_list=np.zeros(len(TIME), dtype=int))
-    traj = SimpleNamespace(observations=[obs], orbit=SimpleNamespace(v_avg=V_AVG))
+    traj = SimpleNamespace(observations=[obs], orbit=SimpleNamespace(v_avg=V_AVG, v_avg_norot=V_AVG))
 
     const = Constants()
     const.lum_eff_type, const.lum_eff, const.P_0m = lum_eff_type, lum_eff, 1500.0

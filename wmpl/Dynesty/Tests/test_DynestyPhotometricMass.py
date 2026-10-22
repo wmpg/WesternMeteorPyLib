@@ -25,6 +25,9 @@ MAG_ABS = -3 + 5*(TIME - 0.6)**2
 V_INIT = 20000.0
 JACCHIA_FIT = np.array([-50.0, 3.0])
 
+# The Earth's rotation along the path: the model is evaluated at the speeds relative to the ground, this much lower
+V_ROTATION = 300.0
+
 # A solved trajectory shipped with the repository, and a prior file to which the luminous efficiency lines are added
 DYNESTY_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXAMPLE_PICKLE = os.path.join(DYNESTY_DIR, "examples", "20191023_091225", "20191023_091225_trajectory.pickle")
@@ -36,14 +39,15 @@ def _traj(jacchia_fit=JACCHIA_FIT):
 
     v_avg = np.mean(jacchiaVelocityFunc(TIME, *JACCHIA_FIT, V_INIT))
 
-    return SimpleNamespace(v_init=V_INIT, jacchia_fit=jacchia_fit, orbit=SimpleNamespace(v_init=V_INIT, v_avg=v_avg))
+    return SimpleNamespace(v_init=V_INIT, jacchia_fit=jacchia_fit, orbit=SimpleNamespace(v_init=V_INIT, v_avg=v_avg,
+        v_init_norot=V_INIT - V_ROTATION, v_avg_norot=v_avg - V_ROTATION))
 
 
 def test_model_is_evaluated_at_the_jacchia_speed_of_each_point():
 
     traj = _traj()
-    vel_jacchia = jacchiaVelocityFunc(TIME, *JACCHIA_FIT, V_INIT)
-    assert 2900 < V_INIT - vel_jacchia[-1] < 3100
+    vel_jacchia = jacchiaVelocityFunc(TIME, *JACCHIA_FIT, V_INIT - V_ROTATION)
+    assert 2900 < V_INIT - V_ROTATION - vel_jacchia[-1] < 3100
 
     for lum_eff_type in (1, 4, 5, 7):
         mass, vel_used = photometricMassLumEffModel(TIME, MAG_ABS, traj, lum_eff_type, 1500.0)
@@ -56,7 +60,7 @@ def test_mass_is_self_consistent():
     """ The mass the model is evaluated at is the mass it gives (the iteration of calcMass()). """
 
     traj = _traj()
-    vel_jacchia = jacchiaVelocityFunc(TIME, *JACCHIA_FIT, V_INIT)
+    vel_jacchia = jacchiaVelocityFunc(TIME, *JACCHIA_FIT, V_INIT - V_ROTATION)
 
     for lum_eff_type in (1, 4, 7):
         mass, _ = photometricMassLumEffModel(TIME, MAG_ABS, traj, lum_eff_type, 1500.0)
@@ -73,11 +77,11 @@ def test_without_a_usable_jacchia_fit_the_average_speed_is_used():
         traj = _traj(jacchia_fit=jacchia_fit)
         mass, vel_used = photometricMassLumEffModel(TIME, MAG_ABS, traj, 1, 1500.0)
 
-        assert np.ndim(vel_used) == 0 and vel_used == traj.orbit.v_avg
-        assert np.isclose(mass, calcMass(TIME, MAG_ABS, traj.orbit.v_avg, tau=1, P_0m=1500.0), rtol=1e-12)
+        assert np.ndim(vel_used) == 0 and vel_used == traj.orbit.v_avg_norot
+        assert np.isclose(mass, calcMass(TIME, MAG_ABS, traj.orbit.v_avg_norot, tau=1, P_0m=1500.0), rtol=1e-12)
 
     _, vel_used = photometricMassLumEffModel(TIME, MAG_ABS, _traj(jacchia_fit=np.zeros(2)), 1, 1500.0)
-    assert np.allclose(vel_used, V_INIT)
+    assert np.allclose(vel_used, V_INIT - V_ROTATION)
 
 
 def test_numpy_model_codes_and_lists():
