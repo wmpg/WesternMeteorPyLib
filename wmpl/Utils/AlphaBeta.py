@@ -19,7 +19,7 @@ import scipy.interpolate
 
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Physics import dynamicPressure, dynamicMass
-from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
+from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere
 
 
 # Scale height
@@ -5081,8 +5081,14 @@ if __name__ == "__main__":
         help="Save the plots as PNGs to the trajectory pickle directory, named after the trajectory "
         "timestamp (e.g. 20191023_091225_alpha_beta_fit.png).")
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 

@@ -12,6 +12,7 @@ References:
 from __future__ import print_function, division, absolute_import
 
 
+import bisect
 import math
 
 import numpy as np
@@ -31,6 +32,9 @@ from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, lumin
 # Earth acceleration in m/s^2 on the surface
 G0 = 9.81
 
+# Rotation rate of the Earth (rad/s), over one sidereal day
+EARTH_ROTATION_RATE = 2*math.pi/86164.09053
+
 ###
 
 
@@ -40,7 +44,11 @@ class Constants(object):
 
         ### Simulation parameters ###
 
-        # Time step
+        # Time step (s). A negative step runs the simulation backwards in time, from a state observed lower down back
+        #   up the trajectory, with the mass growing as the ablation is undone. The grains and fragments released by
+        #   erosion, disruption and fragmentation cannot be undone, so a backward run needs them off; the erosion of
+        #   the body itself follows the ablation law, so it is undone by running with sigma + eta. h_kill is then
+        #   the height to stop at, above h_init
         self.dt = 0.005
 
         # Time elapsed since the beginning
@@ -55,8 +63,16 @@ class Constants(object):
         # Minimum ablation velocity (m/s)
         self.v_kill = 3000
 
-        # Minimum height (m)
+        # Minimum height (m), or the maximum height when running backwards (dt < 0)
         self.h_kill = 60000
+
+        # Maximum time (s) from the start, in either direction, after which the simulation will stop
+        # -1 means no limit
+        self.t_kill = -1
+
+        # Keep the mass constant, without ablation or erosion, so a backward run does not grow it. The light is then
+        #   only the drag term
+        self.freeze_mass = False
 
         # Maximum length along the trajectory (m) after which the simulation will stop
         # -1 means no limit
@@ -68,9 +84,17 @@ class Constants(object):
         # Power of a 0 magnitude meteor
         self.P_0m = 840
 
-        # Atmosphere density coefficients
+        # Atmosphere density coefficients (6th degree polynomial in log10 of the density, see 
+        #   wmpl.Utils.AtmosphereDensity.fitAtmPoly). Used only if no density table is given below.
         self.dens_co = np.array([6.96795507e+01, -4.14779163e+03, 9.64506379e+04, -1.16695944e+06, \
             7.62346229e+06, -2.55529460e+07, 3.45163318e+07])
+
+        # Tabulated atmosphere density profile - heights (m, ascending) and log10 of the density (kg/m^3), 
+        #   interpolated linearly in log10 between the points (see 
+        #   wmpl.Utils.AtmosphereDensity.getAtmDensityTable). If given, it is used instead of dens_co, as it
+        #   follows the MSIS model much more closely than the polynomial.
+        self.atm_table_ht = None
+        self.atm_table_log10_rho = None
         
         # Radius of the Earth (m)
         self.r_earth = 6_371_008.7714
@@ -115,6 +139,31 @@ class Constants(object):
 
         # Zenith angle (radians)
         self.zenith_angle = math.radians(45)
+
+        # Optional winds: an object whose wind(height) method gives the east and north wind velocity (m/s) at a
+        #   height (m), such as wmpl.Utils.AtmosphereProfile.AtmosphereProfile. With winds, drag, ablation and
+        #   light use the velocity relative to the air at each height, and the fragments move in 3D. The motion
+        #   is followed in the east-north-up frame of the starting point, which turns by less than 1 deg over
+        #   100 km of path, and the wind is horizontal. Gravity is handled as without winds, as a negligible drop in
+        #   height, unless gravity_3d is set. None, the default, runs without winds, with results identical to before
+        #   winds were added
+        self.wind_profile = None
+
+        # Azimuth of the radiant (radians, +E of due N), used only in 3D (with winds or gravity_3d) to know how the
+        #   wind blows relative to the motion and to orient the path
+        self.radiant_azimuth = 0.0
+
+        # Follow the fragments in 3D with gravity, towards the Earth's centre, in their velocity, instead of the
+        #   default straight path with a negligible drop in height. Gravity then turns the fragments downwards and
+        #   accelerates them along their path, together with the drag and the winds, which matters for long, slow
+        #   and shallow paths. Off by default, since the default path is the one the fits are made with. The motion
+        #   is followed in the east-north-up frame of the start, which is fixed to the ground, so with a latitude
+        #   it also includes the Coriolis acceleration of the Earth's rotation
+        self.gravity_3d = False
+
+        # Geodetic latitude of the start (radians), used only with gravity_3d to add the Coriolis acceleration,
+        #   -2*omega x v. It turns the path by up to 2*omega, 0.008 deg/s. None, the default, leaves it out
+        self.latitude = None
 
         # Drag coefficient
         self.gamma = 1.0
@@ -375,6 +424,20 @@ class Fragment(object):
         # Compute velocity components
         self.vv = -v_init*math.cos(zenith_angle)
         self.vh = v_init*math.sin(zenith_angle)
+
+        # In 3D (with winds or gravity_3d), v_init is the speed relative to the ground and the fragment's speed is
+        #   the one relative to the air. The fragment then also carries its velocity (east, north, up) relative to
+        #   the ground (m/s) and its position (east, north, up) from the start of the simulation (m), in the local
+        #   frame of the start. They are scalars, so spawn_child() copies them to the grains and fragments it
+        #   creates, and they only exist in 3D, so runs in 2D copy no more state than before
+        if (const.wind_profile is not None) or const.gravity_3d:
+            self.px = self.py = self.pz = 0.0
+            self.vx = -self.vh*math.sin(const.radiant_azimuth)
+            self.vy = -self.vh*math.cos(const.radiant_azimuth)
+            self.vz = self.vv
+            if const.wind_profile is not None:
+                wind_e, wind_n = const.wind_profile.wind(self.h)
+                self.v = math.sqrt((self.vx - wind_e)**2 + (self.vy - wind_n)**2 + self.vz**2)
 
         self.active = True
         self.n_grains = 1
@@ -691,6 +754,75 @@ def getErosionCoeff(const, h):
         return 0
 
 
+def atmDensityTable(ht, table_ht, table_log10_rho):
+    """ Atmosphere density from a tabulated profile, interpolating log10(density) linearly in height (i.e. an
+    exponential atmosphere between the table points). Outside the table, the first/last segment is
+    extrapolated.
+
+    Arguments:
+        ht: [float] Height (m).
+        table_ht: [list] Table heights (m), ascending.
+        table_log10_rho: [list] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        [float] Atmosphere density (kg/m^3).
+
+    """
+
+    # Index of the table segment, using the end segments outside the table (if-chains instead of min/max as
+    #   this is called for every fragment on every time step)
+    i = bisect.bisect_right(table_ht, ht) - 1
+    if i < 0:
+        i = 0
+    elif i > len(table_ht) - 2:
+        i = len(table_ht) - 2
+
+    ht_0 = table_ht[i]
+    log10_rho_0 = table_log10_rho[i]
+
+    return 10**(log10_rho_0 + (ht - ht_0)*(table_log10_rho[i + 1] - log10_rho_0)/(table_ht[i + 1] - ht_0))
+
+
+def atmDensity(ht, const):
+    """ Atmosphere density (kg/m^3) at the given height: from the tabulated profile if the constants have one
+    (const.atm_table_ht and const.atm_table_log10_rho), otherwise from the density polynomial const.dens_co.
+    """
+
+    # getattr keeps Constants pickled before the table was introduced working
+    table_ht = getattr(const, 'atm_table_ht', None)
+    if table_ht is None:
+        return atmDensityPoly(ht, const.dens_co)
+
+    return atmDensityTable(ht, table_ht, const.atm_table_log10_rho)
+
+
+def prepareAtmDensityTable(const):
+    """ Check the tabulated atmosphere density profile of the constants (if any) and store it as plain lists
+    of floats, which are much faster to index in the simulation loop than numpy arrays (e.g. after a JSON 
+    load that converted the lists to arrays).
+    """
+
+    if getattr(const, 'atm_table_ht', None) is None:
+        return
+
+    table_ht = [float(ht) for ht in const.atm_table_ht]
+    table_log10_rho = [float(lr) for lr in const.atm_table_log10_rho]
+
+    if len(table_ht) < 2:
+        raise ValueError("The atmosphere density table needs at least 2 points, got {:d}".format(
+            len(table_ht)))
+
+    if len(table_ht) != len(table_log10_rho):
+        raise ValueError("atm_table_ht and atm_table_log10_rho have different lengths ({:d} vs {:d})".format(
+            len(table_ht), len(table_log10_rho)))
+
+    if any(ht_next <= ht_prev for ht_prev, ht_next in zip(table_ht[:-1], table_ht[1:])):
+        raise ValueError("atm_table_ht must be strictly ascending")
+
+    const.atm_table_ht = table_ht
+    const.atm_table_log10_rho = table_log10_rho
+
+
 def killFragment(const, frag):
     """ Deactivate the given fragment and keep track of the stats. """
 
@@ -773,6 +905,25 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     #   post-loop scan of the whole fragment list
     mass_total_active = 0.0
 
+    # Checked once per call, since the per-fragment loop below is the hot path
+    winds = const.wind_profile is not None
+    gravity_3d = const.gravity_3d
+    motion_3d = winds or gravity_3d
+    wind_e = wind_n = 0.0
+    backward = const.dt < 0
+    freeze_mass = const.freeze_mass
+
+    # Twice the Earth's rotation vector (north and up components) in the frame of the start, for the Coriolis
+    #   acceleration
+    coriolis_n = coriolis_u = 0.0
+    if gravity_3d and (const.latitude is not None):
+        coriolis_n = 2*EARTH_ROTATION_RATE*math.cos(const.latitude)
+        coriolis_u = 2*EARTH_ROTATION_RATE*math.sin(const.latitude)
+
+    # Pick the atmosphere density source once, not per fragment: the table if there is one (see atmDensity)
+    atm_table_ht = getattr(const, 'atm_table_ht', None)
+    atm_table_log10_rho = getattr(const, 'atm_table_log10_rho', None)
+
     # Go through all active fragments
     for frag in fragments:
 
@@ -780,8 +931,16 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         if not frag.active:
             continue
 
+        # With winds, drag, ablation and light depend on the speed relative to the air at the current height
+        if winds:
+            wind_e, wind_n = const.wind_profile.wind(frag.h)
+            frag.v = math.sqrt((frag.vx - wind_e)**2 + (frag.vy - wind_n)**2 + frag.vz**2)
+
         # Get atmosphere density for the given height
-        rho_atm = atmDensityPoly(frag.h, const.dens_co)
+        if atm_table_ht is None:
+            rho_atm = atmDensityPoly(frag.h, const.dens_co)
+        else:
+            rho_atm = atmDensityTable(frag.h, atm_table_ht, atm_table_log10_rho)
 
         # Compute the mass loss of the fragment due to ablation
         mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
@@ -791,6 +950,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             mass_loss_erosion = massLossRK4(const.dt, frag.K, frag.erosion_coeff, frag.m, rho_atm, frag.v)
         else:
             mass_loss_erosion = 0
+
+        if freeze_mass:
+            mass_loss_ablation = mass_loss_erosion = 0
 
         # Compute the total mass loss
         mass_loss_total = mass_loss_ablation + mass_loss_erosion
@@ -809,7 +971,37 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
         if deceleration_total > 0:
             frag.vv = frag.vh = frag.v = 0
+            if motion_3d:
+                frag.vx = frag.vy = frag.vz = 0
             deceleration_total = 0
+
+        # In 3D, drag slows the velocity relative to the air along its own direction, and the fragment keeps the
+        #   velocity of the air around it
+        elif motion_3d:
+
+            # A step that would take away more than the whole speed stops the fragment relative to the air
+            #   instead of reversing it, as the vv > 0 check below does in 2D
+            scale = max(0.0, 1 + deceleration_total*const.dt/frag.v)
+            frag.vx = wind_e + (frag.vx - wind_e)*scale
+            frag.vy = wind_n + (frag.vy - wind_n)*scale
+            frag.vz *= scale
+            frag.v *= scale
+
+            # Gravity towards the Earth's centre, which is at (0, 0, -(r_earth + h_init)) in the frame of the start,
+            #   and the Coriolis acceleration -2*omega x v, with omega = (0, cos(lat), sin(lat))*rate
+            if gravity_3d:
+                r_up = const.r_earth + const.h_init + frag.pz
+                r = math.sqrt(frag.px**2 + frag.py**2 + r_up**2)
+                g_dt = G0*(const.r_earth/r)**2*const.dt/r
+                vx, vy, vz = frag.vx, frag.vy, frag.vz
+                frag.vx -= (g_dt*frag.px + (coriolis_n*vz - coriolis_u*vy)*const.dt)
+                frag.vy -= (g_dt*frag.py + coriolis_u*vx*const.dt)
+                frag.vz -= (g_dt*r_up - coriolis_n*vx*const.dt)
+                frag.v = math.sqrt((frag.vx - wind_e)**2 + (frag.vy - wind_n)**2 + frag.vz**2)
+
+            # Otherwise the same negligible gravity drop as in 2D
+            else:
+                frag.h_grav_drop_total += 0.5*G0/((1 + frag.h/const.r_earth)**2)*const.dt**2
 
         # Otherwise update the velocity
         else:
@@ -857,17 +1049,28 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                 # Setting the height to zero will stop the ablation during the if catch below
                 frag.h = 0
 
-        # Update length along the track
-        frag.length += frag.v*const.dt
-
         # Update the mass
         frag.m = m_new
 
         # Old way of computing height which did not include the curvature of the Earth
         # frag.h = frag.h + frag.vv*const.dt
 
-        # Compute the height taking the curvature of the Earth and the gravity drop into account
-        frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
+        # Update the length along the track, and compute the height taking the curvature of the Earth and the
+        #   gravity drop into account
+        if not motion_3d:
+            frag.length += frag.v*const.dt
+            frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
+
+        # In 3D, move the fragment, measure the length along its path over the ground, and take the height of its
+        #   position over a spherical Earth
+        else:
+            frag.px += frag.vx*const.dt
+            frag.py += frag.vy*const.dt
+            frag.pz += frag.vz*const.dt
+            frag.length += math.sqrt(frag.vx**2 + frag.vy**2 + frag.vz**2)*const.dt
+            frag.h = math.sqrt(frag.px**2 + frag.py**2 + (const.r_earth + const.h_init + frag.pz)**2) \
+                - const.r_earth
+
         frag.h -= frag.h_grav_drop_total
 
         # Get the luminous efficiency
@@ -936,13 +1139,15 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             brightest_length = frag.length
             brightest_vel = frag.v
 
-        # If the fragment is done, stop ablating
+        # If the fragment is done, stop ablating. total_time is only advanced after all fragments, so the state just
+        #   computed is at total_time + dt
         if  (
             (frag.m <= const.m_kill)
             or (frag.v < const.v_kill)
-            or (frag.h < const.h_kill)
+            or ((frag.h > const.h_kill) if backward else (frag.h < const.h_kill))
             or (frag.lum < 0)
             or ((const.len_kill > 0) and (frag.length > const.len_kill))
+            or ((const.t_kill > 0) and (abs(const.total_time + const.dt) >= const.t_kill))
             ):
 
             killFragment(const, frag)
@@ -1392,9 +1597,18 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 def runSimulation(const, compute_wake=False):
     """ Run the ablation simulation. """
 
+    if const.dt < 0:
+        if const.erosion_on or const.disruption_on or const.fragmentation_on or compute_wake:
+            raise ValueError("A backward run (dt < 0) needs erosion, disruption, fragmentation and the wake off.")
+        if const.h_kill <= const.h_init:
+            raise ValueError("A backward run (dt < 0) stops at h_kill, which must be above h_init.")
+
     # Ensure that the grain mass min is smaller than the grain mass max
     if const.erosion_mass_min > const.erosion_mass_max:
         const.erosion_mass_min, const.erosion_mass_max = const.erosion_mass_max, const.erosion_mass_min
+
+    # Check the atmosphere density table (if given) and convert it to lists for fast indexing
+    prepareAtmDensityTable(const)
 
     ###
 
@@ -1536,8 +1750,9 @@ def energyReceivedBeforeErosion(const, lam=1.0):
     """
 
     # Integrate atmosphere density from the beginning of simulation to beginning of erosion.
-    dens_integ = scipy.integrate.quad(atmDensityPoly, const.erosion_height_start, const.h_init, \
-        args=(const.dens_co))[0]
+    prepareAtmDensityTable(const)
+    dens_integ = scipy.integrate.quad(atmDensity, const.erosion_height_start, const.h_init, \
+        args=(const,))[0]
 
     # Compute the energy per unit cross-section
     es = 1/2*lam*(const.v_init**2)*dens_integ/np.cos(const.zenith_angle)
@@ -1553,11 +1768,31 @@ def energyReceivedBeforeErosion(const, lam=1.0):
 
 if __name__ == "__main__":
 
+    import argparse
+
     import matplotlib.pyplot as plt
 
 
-    from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+    from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, addAtmosphereArguments, \
+        setAtmosphere
     from wmpl.Utils.TrajConversions import date2JD
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Run the ablation simulation using the meteoroid parameters hardcoded in this file.")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
+
+    #########################
 
 
     # Show wake
@@ -1576,6 +1811,11 @@ if __name__ == "__main__":
         180000, # height_max in m (this needs to be the same as the beginning of simulation)
         date2JD(2020, 4, 20, 16, 15, 0) # Julian date
         )
+
+    # Tabulate the atmosphere density for the same location, time and heights - the simulation uses the table
+    #   instead of the polynomial when it is given, as it follows the MSIS model much more closely
+    const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(np.radians(45.3), np.radians(18.1), 
+        70000, 180000, date2JD(2020, 4, 20, 16, 15, 0))
 
 
     ### Set some physical parameters of the meteoroid ###
