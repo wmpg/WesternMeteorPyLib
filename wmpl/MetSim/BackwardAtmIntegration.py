@@ -99,7 +99,21 @@ def _startFrom(const, jd_ref, state_vect):
     const.v_init, const.zenith_angle, const.radiant_azimuth = v_norot, np.pi/2 - elev, azim
     const.h_init, const.latitude = ht, lat
 
+    # Where MetSim's gravity depends on the latitude (the WGS84 gravity(lat, h)), it takes it from const.lat, which
+    #   is 45 deg by default, not from const.latitude
+    const.lat = lat
+
     return lat, lon
+
+
+def groundSpeed(jd, state_vect):
+    """ The speed of a state vector (see the module docstring) relative to the ground, as MetSim follows it and the
+        trajectory solver gives it in v_init_norot. It differs from the inertial speed, the norm of the velocity, by
+        the Earth's rotation along the motion, up to 465*cos(lat) m/s. """
+
+    lat, lon, _ = cartesian2Geo(jd, *state_vect[:3])
+
+    return derotatedRadiantAltAz(state_vect[3:], state_vect[:3], jd, lat, lon)[2]
 
 
 def backwardConstants(jd_ref, state_vect, m_init, h_kill=180000.0, const=None):
@@ -519,6 +533,10 @@ if __name__ == "__main__":
         jd))
     print("Nominal: lat {:.5f} deg, lon {:.5f} deg, height {:.1f} m, speed {:.2f} m/s, mass {:.6g} kg".format(
         *rows[0, 2:7]))
+
+    # The speed above is the inertial one (ECI), which REBOUND takes. The one to compare with MetSim's v_init or the
+    #   solver's v_init_norot is the speed relative to the ground
+    print("Nominal speed relative to the ground: {:.2f} m/s".format(groundSpeed(jd, states[0])))
     if len(rows) > 1:
         print("Monte Carlo seed: {:d}".format(random_seed))
         for name, col, unit in [("mass at the reference point", 1, "kg"), ("ablation coefficient", 13, "s^2/km^2"),
