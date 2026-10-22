@@ -4,6 +4,14 @@
 import pkgutil
 import sys
 
+# Install pyximport before any submodule does, so that the Cython modules are compiled in the build directory of
+#   this copy of wmpl (see wmpl.Utils.CythonBuild), not in one shared with other copies
+try:
+    from wmpl.Utils.CythonBuild import installPyximport
+    installPyximport()
+except ImportError:
+    pass
+
 # Excluded packages
 # Note: "Tests" is excluded because importing the test modules on `import wmpl` executes their
 #   top-level code - e.g. wmpl/Utils/Tests/test_AlphaBeta.py calls matplotlib.use("Agg"), which
