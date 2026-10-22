@@ -170,7 +170,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         tau: [float or int or str] Luminous efficiency selector.
             - float: constant luminous efficiency as a ratio (not percent!). 0.007 (i.e. 0.7%) by default
               (Ceplecha & McCrosky, 1976).
-            - int: velocity-dependent lum_eff_type code passed to
+            - int (Python or numpy integer): velocity-dependent lum_eff_type code passed to
               wmpl.MetSim.MetSimErosionCyTools.luminousEfficiency() (0 - constant, 1/2/3 - ReVelle &
               Ceplecha 2001 Type I/II/III, 4 - Borovicka 2013, 5 - CAMO, 6 - Ceplecha & McCrosky 1976,
               7 - Borovicka 2020, 8 - Pecina & Ceplecha 1983). tau is then computed per velocity point.
@@ -178,14 +178,19 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         P_0m: [float] Power output of a zero absolute magnitude meteor. 840W by default, as that is the R
             bandpass for a T = 4500K black body meteor. See: Weryk & Brown, 2013 - "Simultaneous radar and
             video meteors - II. Photometry and ionisation" for more details.
-            NOTE: the panchromatic models (RC2001, Ceplecha & McCrosky 1976, Borovicka,
-            Pecina-Ceplecha) are paired with a zero-magnitude power of P_0m = 1500 W (Borovicka et
-            al. 2022; the cm1976 law has 1500 W baked into its unit conversion in
-            luminousEfficiency()); set P_0m accordingly when using those models. A warning is
-            raised if a different P_0m is used with them.
-        lum_eff_mass: [float] Meteoroid mass (kg) used to evaluate the mass-dependent luminous efficiency
-            models. Ignored for a float tau. If -1 (default), the mass is iterated to self-consistency
-            (compute mass -> recompute tau -> repeat until convergence).
+            NOTE: the RC2001, Ceplecha & McCrosky 1976, Borovicka 2013 (Kosice), Borovicka 2020 and
+            Pecina-Ceplecha models are paired with a zero-magnitude power of P_0m = 1500 W (Borovicka et
+            al. 2013, p. 1768, after Ceplecha et al. 1998, p. 365; Borovicka et al. 2022; the cm1976 law
+            has 1500 W baked into its unit conversion in luminousEfficiency()); set P_0m accordingly when
+            using those models. A warning is raised if a different P_0m is used with them.
+        lum_eff_mass: [float] Meteoroid mass (kg) at which the mass-dependent luminous efficiency models
+            are evaluated. Ignored for a float tau and for the models without a mass term (0, 6 and 8).
+            - -1 (default): the mass is iterated to self-consistency (compute mass -> recompute tau ->
+              repeat until convergence).
+            - >= 0: the models are evaluated at this fixed mass. 0 does not switch the mass term off, it
+              takes its small-mass limit (tanh -> -1): RC2001 Type I at 20 km/s gives tau = 1.39% at
+              0 kg and 4.38% at 1 kg. The mass term vanishes at 1 kg for RC2001 and Borovicka 2013 and
+              2020, and at 1 mg for CAMO.
         v_init: [float or None] Pre-atmospheric velocity (m/s) used by the ReVelle & Ceplecha (2001)
             deceleration correction in the luminous efficiency calculation. Only affects the RC2001
             models (tau = 1, 2, 3 or 'rc2001*'). Default is None.
@@ -226,8 +231,9 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
     if lum_eff_mass < 0 and lum_eff_mass != -1:
         raise ValueError("lum_eff_mass must be >= 0, or -1 for self-consistent iteration.")
 
-    # Constant luminous efficiency (tau given directly as a ratio).
-    if not isinstance(tau, str) and not isinstance(tau, (bool, int)):
+    # Constant luminous efficiency (tau given directly as a ratio). A numpy integer (e.g. a code taken
+    # from an array) is a model code like a Python int, not a constant efficiency of 100*tau %
+    if not isinstance(tau, str) and not isinstance(tau, (bool, int, np.integer)):
 
         # Constant velocity
         if np.ndim(velocity) == 0:
@@ -250,11 +256,11 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
     else:
         lum_eff_type = int(tau)
 
-    # The panchromatic models are calibrated for a zero-magnitude power of 1500 W (see the P_0m
-    # docstring note), so warn if a different value is used with them
-    if (lum_eff_type in [1, 2, 3, 6, 7, 8]) and (P_0m != 1500.0):
+    # These models are calibrated for a zero-magnitude power of 1500 W (see the P_0m docstring note),
+    # so warn if a different value is used with them
+    if (lum_eff_type in [1, 2, 3, 4, 6, 7, 8]) and (P_0m != 1500.0):
         warnings.warn("The chosen luminous efficiency model (lum_eff_type={:d}) is calibrated for "
-            "a panchromatic zero-magnitude power of P_0m = 1500 W, but P_0m = {:g} W was given. "
+            "a zero-magnitude power of P_0m = 1500 W, but P_0m = {:g} W was given. "
             "No correction is applied - the returned mass will be off by a factor of {:.2f} "
             "compared to using the calibrated value.".format(lum_eff_type, P_0m, P_0m/1500.0))
 
