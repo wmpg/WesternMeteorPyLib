@@ -174,6 +174,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
               wmpl.MetSim.MetSimErosionCyTools.luminousEfficiency() (0 - constant, 1/2/3 - ReVelle &
               Ceplecha 2001 Type I/II/III, 4 - Borovicka 2013, 5 - CAMO, 6 - Ceplecha & McCrosky 1976,
               7 - Borovicka 2020, 8 - Pecina & Ceplecha 1983). tau is then computed per velocity point.
+              Code 0 ('constant') is always 0.7%: give another constant efficiency as a float.
             - str: model name mapped to the above codes (see LUM_EFF_MODELS), e.g. 'rc2001'.
         P_0m: [float] Power output of a zero absolute magnitude meteor. 840W by default, as that is the R
             bandpass for a T = 4500K black body meteor. See: Weryk & Brown, 2013 - "Simultaneous radar and

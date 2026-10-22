@@ -105,6 +105,17 @@ def test_lum_eff_mass_zero_is_the_small_mass_limit():
     assert np.isclose(mass_0/mass_1, 4.38150/1.38734, rtol=1e-3)
 
 
+def test_constant_code_is_always_0p7_percent():
+    """ Code 0 ('constant') is the constant 0.7 %, the same as the default float tau; another constant efficiency
+        is given as a float. """
+
+    mass_default, _ = _massAndWarnings()
+    for tau in (0, 'constant', np.int64(0)):
+        assert np.isclose(_massAndWarnings(tau=tau)[0], mass_default, rtol=1e-12)
+
+    assert np.isclose(_massAndWarnings(tau=0.014)[0], mass_default/2, rtol=1e-12)
+
+
 if __name__ == "__main__":
 
     test_functions = [
@@ -114,6 +125,7 @@ if __name__ == "__main__":
         test_p0m_warning_models,
         test_warning_does_not_change_the_mass,
         test_lum_eff_mass_zero_is_the_small_mass_limit,
+        test_constant_code_is_always_0p7_percent,
     ]
 
     failed = 0
