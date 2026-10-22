@@ -14,6 +14,7 @@ import scipy.optimize
 from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations
+from wmpl.MetSim.GUI import loadedConstantsRelativeToGround
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import meanAngle
@@ -708,11 +709,12 @@ if __name__ == "__main__":
     if sim_params_path is None:
         raise Exception("Could not find the simulation params file in {}".format(dir_path))
 
-    # Load the simulation constants
-    const, _ = loadConstants(sim_params_path)
+    # Load the simulation constants, to be simulated relative to the ground (also those saved before that was done)
+    const, const_json = loadConstants(sim_params_path)
     print()
     print("Loaded simulation constants from: {}".format(sim_params_path))
     print()
+    loadedConstantsRelativeToGround(const, const_json, traj)
         
     ### ###
 
