@@ -604,6 +604,19 @@ def calcPf(p_max=None, zangle=None, mass=None, v_0=None, traj=None):
 
         Pf = 100*p_max/(cos(z)*m_phot^(1/3)*v_inf^(3/2)), p_max in MPa, m_phot in kg, v_inf in km/s
 
+    Usage, in one of three ways:
+        - All values given (p_max in Pa, zangle in radians, mass in kg, v_0 in m/s):
+              pf, pf_category = calcPf(p_max, zangle, mass, v_0)
+        - A trajectory with magnitudes: p_max, zangle, v_0 and the mass are all derived from it:
+              pf, pf_category = calcPf(traj=traj)
+        - A trajectory and a mass, e.g. when its magnitudes are saturated or not calibrated, or a better mass is
+          known: p_max, zangle and v_0 are derived from it, and the given mass is used:
+              pf, pf_category = calcPf(mass=mass, traj=traj)
+        With a trajectory, a warning gives the values derived from it. A ValueError is raised for a trajectory
+        together with p_max, zangle or v_0, for missing values without a trajectory, and for a trajectory without
+        magnitudes and no mass. The derived values can also be had separately: maxDynamicPressure(traj),
+        averageZenithDistance(traj) and photometricMassBorovicka2022(traj).
+
     References:
         Borovicka et al. (2022) - Data on 824 fireballs observed by the digital cameras of the European Fireball
             Network in 2017-2018. I. (catalogue: p_max, photometric mass, v_inf), A&A 667, A157; II. (Pf, its
@@ -639,7 +652,8 @@ def calcPf(p_max=None, zangle=None, mass=None, v_0=None, traj=None):
     Return:
         (pf, pf_category): [tuple]
             - pf: [float] Pf parameter.
-            - pf_category: [int] Pf category (1 to 5).
+            - pf_category: [int] Pf category, from 1 (strongest) to 5 (weakest): Pf-I above 0.85, Pf-II above 0.27,
+              Pf-III above 0.085, Pf-IV above 0.027, Pf-V below (Paper II).
 
     """
 
