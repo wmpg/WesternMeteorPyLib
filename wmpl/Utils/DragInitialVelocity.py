@@ -18,23 +18,34 @@ reference one are fitted again, since the solver estimates them with a lag model
 deceleration; they are only used for this fit. The offsets the solver was given as fixed are kept, as they do not
 come from its lag model.
 
+The lengths are taken where the lines of sight meet the trajectory the solver fitted them to: with the gravity drop
+when it applied one (droppedLengths), keeping the drop, since MetSim's gravity also speeds the meteoroid up along
+its path. The solver may give the lengths of the line without the drop instead, which is what its velocity and lag
+describe, and fitting MetSim to those counts the gravity twice along the path. On a synthetic meteoroid at 17.5 km/s
+first seen at 92 km at 45 deg from the zenith, without noise, that put the velocity 9.0 m/s low fitting all 3.5 s
+of points, 9 times its uncertainty, and 1.3 m/s low fitting 1 s. The lengths on the straight line itself, where the
+drop shifts the closest point of each line of sight by an amount that depends on the station's view, put it 2.6 and
+1.9 m/s low. Taken on the dropped trajectory, the velocity is within 0.3 m/s of that of the same meteoroid without
+gravity.
+
 With the option on, the solver takes the fitted velocity whenever the fit converges, fits better than the
 straight line and measures a deceleration. If the fitted points show none, B goes down until the model has no
 drag, and the fit is only a straight line over these points, which over a short part, or one seen mostly by one
 station, can differ from the solver's straight line over the first part: the solver then keeps the latter. Keeping the straight line when the fit does not measure its bias (when the two velocities are within
 sqrt(2) of the fit's uncertainty) was tried and dropped: it rests on the straight line being the more precise, but
 the solver's straight-line uncertainty is formal: through the solver, on the synthetic meteoroids below, where that
-rule kept the straight line its errors were 5-10 times that uncertainty in RMS. On 26 synthetic meteoroids (12-65
+rule kept the straight line its errors were 6-10 times that uncertainty in RMS. On 26 synthetic meteoroids (12-65
 km/s, B from 1e-6 to 1.5e-2 m^2/kg, sigma 0.005-0.03 s^2/km^2, first seen at 55-115 km, two noise realizations each,
-52 runs), the RMS velocity error was 195 and 251 m/s for the straight line, 15 and 23 m/s for the drag fit, and 20
-and 27 m/s with that rule (the first 10 meteoroids, then 16 others); no threshold for it did consistently better
-than none. Even where it kept the straight line, the drag fit's RMS error was smaller (14 against 21 and 20 against
-29 m/s), and its own uncertainty was calibrated (RMS of the error over it 0.87 and 0.99). With the option off,
-estimateLineBias() fits a parabola to the straight line's points and the solver warns when it puts the velocity at
-the first point more than 2 sigma above the straight line's. On the 16 meteoroids not used to set that threshold (32
-runs), it warned for 7 of the 10 straight lines over 100 m/s low, 1 of the 5 that were 50-100 m/s low, and 1 of the
-17 within 50 m/s (that one 5 m/s low); its precision falls with the speed: it did not warn for any of the four
-straight lines 60-172 m/s low above 35 km/s. Neither check sees a fragmentation or a wake (below).
+52 runs), the RMS velocity error was 195 and 251 m/s for the straight line, 18 and 26 m/s with the option on (21
+and 25 m/s where the drag fit was used, in all but the 5 runs of each group that measured no deceleration), and 24
+and 28 m/s with that rule (the first 10 meteoroids, then 16 others); no threshold for it did consistently better
+than none. Even where it kept the straight line, the drag fit's RMS error was smaller (20 against 25 and 25 against
+32 m/s), and its own uncertainty was calibrated or somewhat large (RMS of the error over it 0.59 and 0.85). With the
+option off, estimateLineBias() fits a parabola to the straight line's points and the solver warns when it puts the
+velocity at the first point more than 2 sigma above the straight line's. On the 16 meteoroids not used to set that
+threshold (32 runs), it warned for 7 of the 11 straight lines over 100 m/s low, 1 of the 5 that were 50-100 m/s
+low, and 1 of the 14 within 50 m/s (that one 5 m/s low); its precision falls with the speed: it did not warn for
+any of the four straight lines 59-177 m/s low above 35 km/s. Neither check sees a fragmentation or a wake (below).
 
 In the solver's Monte Carlo the fit is redone for each realization, so the spread of the initial velocity, and of
 the orbit, includes it. For the fireball at 24 km/s first seen at 60 km, with 30 realizations (geometric
@@ -82,7 +93,7 @@ the erosion of cometary shower meteoroids observed by CAMO begins (Buccongello e
 light curve: Geminids begin to crumble at 1-100 kPa (Henych et al. 2024), and the strength of a given meteoroid can
 be far from them. In the test cases, a fireball at 24 km/s first seen at 75 km crosses 0.04 MPa at 70 km, one first
 seen at 60 km is already at 0.17 MPa and reaches 1 MPa, and a meteor at 30 km/s first seen at 115 km receives
-0.2-6.7 MJ/m^2. Through NRLMSISE-00 at 45 deg from the zenith, 1-2 MJ/m^2 are received by 90-94 km at 12 km/s,
+0.2-6.8 MJ/m^2. Through NRLMSISE-00 at 45 deg from the zenith, 1-2 MJ/m^2 are received by 90-94 km at 12 km/s,
 96-100 km at 20 km/s, 100-105 km at 30 km/s and 111-117 km at 70 km/s, close to the erosion onset heights CAMO fits
 find. So for a meteoroid first seen below about 90 km, the energy criterion puts any erosion before the first point,
 active over the whole fitted part, which the fit absorbs; a fragmentation triggered by pressure is the likelier
@@ -122,7 +133,7 @@ not on its scale, which B absorbs: in those cases a density 6% higher at 40 km t
 from 60 km, moved the velocity by up to 42 m/s, beyond 3 times its uncertainty in 6 of them. MetSim takes the density
 tabulated over the observed heights, within 0.5% of the MSIS model (the 6th degree polynomial it took before was
 within 2.3% of NRLMSISE-00). The fit also inherits the errors of the solver's lengths: through the solver, the
-synthetic fireballs of the tests come out 19-56 m/s high fitting all their points, within 2.3 times their uncertainty.
+synthetic fireballs of the tests come out 7-60 m/s high fitting all their points, within 2.5 times their uncertainty.
 """
 
 import math
@@ -133,6 +144,7 @@ import scipy.optimize
 from wmpl.MetSim.BackwardAtmIntegration import backwardConstants
 from wmpl.MetSim.MetSimErosion import atmDensity, runSimulation
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, getAtmDensityTable
+from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.TrajConversions import jd2Date
 
 
@@ -243,7 +255,7 @@ def estimateLineBias(traj):
     reference time is compared with the straight line's. It is cheap and needs no model, so the solver gives it
     when the drag fit is off, and reports it when it is significant (see LINE_BIAS_SIGMA). It is a rough estimate:
     through the solver, where it warned for synthetic meteoroids whose straight line was 70-930 m/s low, it gave
-    1.0-2.0 times that.
+    1.1-2.0 times that.
 
     Arguments:
         traj: [Trajectory] Solved trajectory, with velocity_fit and velocity_fit_t_range.
@@ -402,7 +414,39 @@ def breakupNotes(fit):
     return notes
 
 
-def fitDragInitialVelocity(traj, ht_min=None, t_max=None, fine_dt=0.001, return_reason=False):
+def droppedLengths(traj, obs):
+    """ Lengths of the points of an observation from the solver's state vector along the radiant line, measured on
+        the trajectory with the gravity drop the line of sight fit applied, where angleSumMeasurements2Line finds
+        them, and keeping the drop: the motion MetSim follows, with gravity along the path too. The solver's own
+        lengths may be those of the line without the drop.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory whose lines of sight were fitted with the gravity drop.
+        obs: [ObservedPoints] One of its observations.
+
+    Return:
+        [ndarray] Lengths (m), one per point.
+    """
+
+    # Imported here, as the trajectory solver imports this module
+    from wmpl.Trajectory.Trajectory import applyGravityDrop
+
+    # Same reference time and vertical velocity as the line of sight fit
+    t0 = min([o.time_data[0] for o in traj.observations])
+    v0z = traj.v0z if traj.v0z is not None else 0.0
+
+    state_vect, radiant_eci = traj.state_vect_mini, traj.radiant_eci_mini
+    lengths = []
+    for t, stat, meas in zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los):
+        _, rad_cpa, _ = findClosestPoints(stat, meas, state_vect, radiant_eci)
+        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa), traj.gravity_factor, v0z)
+        _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
+        lengths.append(abs(np.dot(state_vect - rad_cpa_dropped, radiant_eci)))
+
+    return np.array(lengths)
+
+
+def fitDragInitialVelocity(traj, ht_min=None, t_max=None, fine_dt=0.001, return_reason=False, gravity=False):
     """ Fit the single-body drag and ablation model to the lengths of the non-ignored points of a solved
         trajectory above a height and before a time (see the module docstring).
 
@@ -416,6 +460,9 @@ def fitDragInitialVelocity(traj, ht_min=None, t_max=None, fine_dt=0.001, return_
         fine_dt: [float] The larger of the two MetSim time steps whose fits are extrapolated to a zero step (s).
             The starting fit uses MetSim's default step.
         return_reason: [bool] Also return why the fit is None, so it can be reported. False by default.
+        gravity: [bool] The lines of sight were fitted with the gravity drop, so the lengths are measured on the
+            dropped trajectory, keeping the drop (see droppedLengths), instead of taken from state_vect_dist. False
+            by default.
 
     Return:
         [DragVelocityFit] or None if there are not more points than parameters, or the fit did not converge,
@@ -437,7 +484,7 @@ def fitDragInitialVelocity(traj, ht_min=None, t_max=None, fine_dt=0.001, return_
         station_index.append(np.full(np.count_nonzero(good), len(observations)))
         observations.append(obs)
         times.append(obs.time_data[good])
-        lengths.append(obs.state_vect_dist[good])
+        lengths.append((droppedLengths(traj, obs) if gravity else obs.state_vect_dist)[good])
         heights.append(obs.model_ht[good])
     if not observations:
         return rejected("no points in the fitted part")

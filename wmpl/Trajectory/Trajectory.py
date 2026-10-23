@@ -2579,6 +2579,9 @@ class Trajectory(object):
         #   the lengths it was fitted to (see wmpl.Utils.DragInitialVelocity.estimateLineBias)
         self.v_init_line_bias = None
 
+        # Whether the last fit of the lines of sight applied the gravity drop (set by run)
+        self.los_gravity = False
+
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.fixed_time_offsets = {}
         self.fixed_time_offsets_copy = {}
@@ -6439,6 +6442,10 @@ class Trajectory(object):
         # Set the minimization status
         self.los_mini_status = minimize_solution.success
 
+        # Whether the lines of sight were fitted with the gravity drop: the drag fit of the initial velocity
+        #   measures its lengths on the trajectory they were fitted to
+        self.los_gravity = (_rerun_timing and self.gravity_correction)
+
         # If the minimization succeeded
         if minimize_solution.success:
         
@@ -6701,7 +6708,8 @@ class Trajectory(object):
         if self.v_init_drag:
             self.v_init_drag_fit, self.v_init_drag_rejection = fitDragInitialVelocity(self,
                 t_max=fittedTimeLimit(self.v_init_drag_time, self.v_init_drag_ht),
-                ht_min=(None if self.v_init_drag_ht is None else 1000*self.v_init_drag_ht), return_reason=True)
+                ht_min=(None if self.v_init_drag_ht is None else 1000*self.v_init_drag_ht), return_reason=True,
+                gravity=self.los_gravity)
 
             # Keep the straight-line velocity if the fit failed, does not fit better or measures no deceleration
             if self.v_init_drag_fit is not None:
