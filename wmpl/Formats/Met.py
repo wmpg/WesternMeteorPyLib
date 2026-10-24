@@ -11,6 +11,7 @@ import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
 
+from wmpl.Utils.AtmosphereDensity import setAtmosphere
 from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Formats.Plates import AffPlate, AstPlate, plateExactMap, plateScaleMap
 from wmpl.Trajectory.Trajectory import Trajectory
@@ -845,6 +846,9 @@ if __name__ == "__main__":
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
+    # Atmosphere model for any density the solver evaluates, also in its Monte Carlo processes
+    setAtmosphere(cml_args)
+
     #########################
 
     ### Parse command line arguments ###
@@ -893,6 +897,8 @@ if __name__ == "__main__":
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
             show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
+            v_init_drag=cml_args.vinitdrag, v_init_drag_time=cml_args.vinitdragtime, \
+            v_init_drag_ht=cml_args.vinitdraght, \
             show_jacchia=cml_args.jacchia, 
             estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
             fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd)

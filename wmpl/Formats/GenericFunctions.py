@@ -7,7 +7,9 @@ import time
 import numpy as np
 
 from wmpl.Trajectory.Trajectory import Trajectory
+from wmpl.Utils.AtmosphereDensity import addAtmosphereArguments
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
+from wmpl.Utils.DragInitialVelocity import DEFAULT_TIME_LIMIT
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, equatorialCoordPrecession_vect, raDec2AltAz_vect, \
     jd2LST
@@ -401,6 +403,18 @@ def addSolverOptions(arg_parser, skip_velpart=False):
         help='The initial veloicty will be estimated as the average velocity above this height (in km). If not given, the initial velocity will be estimated using the sliding fit which can be controlled with the --velpart option.', \
         type=float)
 
+    arg_parser.add_argument('--vinitdrag', \
+        help='Estimate the initial velocity from a single-body drag and ablation fit to the points before --vinitdragtime and above --vinitdraght instead of a straight line over the first part, which underestimates it for a meteor that already decelerates there (e.g. a fireball first seen below 60-70 km). The straight-line velocity is kept if the fit fails, does not fit better or measures no deceleration. Without this option, the solver warns when a parabola over the points of the straight line shows it underestimates the velocity. The points must follow the body: a significant wake of eroded grains can bias the velocity by hundreds of m/s.', \
+        action="store_true")
+
+    arg_parser.add_argument('--vinitdragtime', metavar='V_INIT_DRAG_TIME', \
+        help='Only points within this time from the first point (in seconds) are used in the --vinitdrag fit. The fit does not model fragmentation, so the fitted part should end before the first one. The longer the part that can be trusted to be free of fragmentation, the better constrained the velocity: without fragmentation its median uncertainty in synthetic tests was 97, 33 and 9 m/s fitting 0.5 s, 1 s and all points. Extend it as far as the light curve shows no flare, and no further. A time longer than the meteor uses all points. {:.1f} s by default, or no time limit if only --vinitdraght is given; with both, the fit ends at whichever is reached first.'.format(DEFAULT_TIME_LIMIT), \
+        type=float, default=None)
+
+    arg_parser.add_argument('--vinitdraght', metavar='V_INIT_DRAG_HT', \
+        help='Only points above this height (in km) are used in the --vinitdrag fit, e.g. above a flare in the light curve, or as the report suggests where the fitted part reaches typical fragmentation pressures. As with --vinitdragtime, the longer the part free of fragmentation, the better. Given alone, it is the only limit (the 1 s default of --vinitdragtime is then not applied); with --vinitdragtime, the fit ends at whichever is reached first. No limit by default.', \
+        type=float)
+
     if not skip_velpart:
         arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
             help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25 percent), but for noisier data this might be bumped up to 0.5.', \
@@ -458,5 +472,8 @@ def addSolverOptions(arg_parser, skip_velpart=False):
 
     arg_parser.add_argument('-o', '--enableOSM', 
         help="Enable OSM based groung plots. Internet connection required.", action="store_true")
+
+    # Atmosphere model for any density the solver evaluates; setAtmosphere() applies it after parsing
+    addAtmosphereArguments(arg_parser)
 
     return arg_parser

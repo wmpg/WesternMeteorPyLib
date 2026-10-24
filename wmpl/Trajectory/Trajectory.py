@@ -47,6 +47,8 @@ except ImportError:
 
 import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
+from wmpl.Utils.DragInitialVelocity import LINE_BIAS_SIGMA, breakupNotes, estimateLineBias, \
+    fitDragInitialVelocity, fittedTimeLimit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
     angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval
 from wmpl.Utils.Misc import valueFormat
@@ -2451,7 +2453,8 @@ class Trajectory(object):
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
-        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False):
+        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, v_init_drag=False, \
+        v_init_drag_time=None, v_init_drag_ht=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2479,6 +2482,26 @@ class Trajectory(object):
             v_init_ht: [float] If given, the initial velocity will be estimated as the average velocity
                 above the given height in kilometers using data from all stations. None by default, in which
                 case the initial velocity will be estimated using the automated siliding fit.
+            v_init_drag: [bool] Estimate the initial velocity from a single-body drag and ablation fit to the lengths
+                of the points before v_init_drag_time and above v_init_drag_ht instead (see
+                wmpl.Utils.DragInitialVelocity). The straight line fitted to the first part underestimates the
+                velocity at the first point of a meteor that already decelerates there, by hundreds of m/s for
+                fireballs first seen at 45-60 km. False by default, and then the solver warns when a parabola
+                over the straight line's points puts the initial velocity more than 2 sigma above it (see
+                wmpl.Utils.DragInitialVelocity.estimateLineBias). If the fit fails, does not fit better than the
+                straight line or measures no deceleration, the straight-line velocity is kept. The erosion of the body is absorbed by the
+                fitted ablation coefficient, but the points must follow the body: a significant wake of eroded
+                grains behind it shifts the measured centroids and can bias the velocity by hundreds of m/s.
+            v_init_drag_time: [float] Only points within this time from the first point, in seconds, are used in
+                the drag fit. None by default, for 1 s, or for no time limit if v_init_drag_ht is given; inf for no
+                limit. With both limits, the fit ends at whichever is reached first. The fit does not model
+                fragmentation, so the
+                fitted part should end before the first one, but the longer it is the better the velocity is
+                constrained (median uncertainty 97, 33 and 9 m/s fitting 0.5 s, 1 s and all points of synthetic
+                meteoroids without fragmentation): extend it as far as the light curve shows no flare.
+            v_init_drag_ht: [float] Only points above this height, in kilometers, are used in the drag fit, e.g.
+                above a flare, or where the report notes typical fragmentation pressures. None by default, for no
+                limit.
             estimate_timing_vel: [bool/str] Try to estimate the difference in timing and velocity. True by  
                 default. A string with the list of fixed time offsets can also be given, e.g. 
                 "CA001A":0.42,"CA0005":-0.3.
@@ -2541,6 +2564,23 @@ class Trajectory(object):
         # (Optional) Height in kilometers above which points will be taken for estimating the initial
         #   velocity (linear fit)
         self.v_init_ht = v_init_ht
+
+        # (Optional) Estimate the initial velocity from a drag and ablation fit to all points instead (see
+        #   wmpl.Utils.DragInitialVelocity), and keep the fit
+        self.v_init_drag = v_init_drag
+        self.v_init_drag_time = v_init_drag_time
+        self.v_init_drag_ht = v_init_drag_ht
+        self.v_init_drag_fit = None
+
+        # Why the drag fit was not used, if it was asked for and is None
+        self.v_init_drag_rejection = None
+
+        # Without the drag fit, the estimated bias of the straight-line initial velocity from the curvature of
+        #   the lengths it was fitted to (see wmpl.Utils.DragInitialVelocity.estimateLineBias)
+        self.v_init_line_bias = None
+
+        # Whether the last fit of the lines of sight applied the gravity drop (set by run)
+        self.los_gravity = False
 
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.fixed_time_offsets = {}
@@ -2716,6 +2756,9 @@ class Trajectory(object):
 
         # Fit to the best portion of time vs. length
         self.velocity_fit = None
+
+        # Time range of the points of that fit (s)
+        self.velocity_fit_t_range = None
 
         # Jacchia fit parameters for all observations combined
         self.jacchia_fit = None
@@ -3603,7 +3646,8 @@ class Trajectory(object):
                         # Calculate the standard deviation of the line fit and add it to the list of solutions
                         line_stddev = RMSD(state_vect_dist_part - lineFunc(times_part, *velocity_fit), \
                             weights=weights_list_path)
-                        stddev_list.append([line_stddev, velocity_fit, velocity_stddev])
+                        stddev_list.append([line_stddev, velocity_fit, velocity_stddev, \
+                            (times_part[0], times_part[-1])])
 
 
             # stddev_arr = np.array([std[0] for std in stddev_list])
@@ -3620,6 +3664,7 @@ class Trajectory(object):
             if not stddev_list:
 
                 v_init_mini = v_init
+                self.velocity_fit_t_range = None
 
                 # Redo the lag fit, but with fixed velocity
                 vel_intercept, vel_cov = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init_mini, \
@@ -3638,6 +3683,9 @@ class Trajectory(object):
                 stddev_min_ind = np.argmin([std[0] for std in stddev_list])
                 velocity_fit = stddev_list[stddev_min_ind][1]
                 vel_stddev = stddev_list[stddev_min_ind][2]
+
+                # Time range of the points the straight line was fitted to
+                self.velocity_fit_t_range = stddev_list[stddev_min_ind][3]
 
                 # Make sure the velocity is positive
                 v_init_mini = np.abs(velocity_fit[0])
@@ -4270,6 +4318,28 @@ class Trajectory(object):
         return out_str
 
 
+    def _dragFitRejectedText(self):
+        """ Text saying that the drag fit of the initial velocity was asked for but not used, and why. """
+
+        reason = getattr(self, "v_init_drag_rejection", None)
+
+        return ("The drag and ablation fit of the initial velocity (--vinitdrag) was not used{:s}, so the initial "
+            "velocity is the straight line's.").format("" if reason is None else ": " + reason)
+
+
+    def _lineBiasWarning(self):
+        """ Text of the warning that the straight line underestimates the initial velocity (see
+            wmpl.Utils.DragInitialVelocity.estimateLineBias). """
+
+        bias = self.v_init_line_bias
+
+        return ("A parabola fitted to the {:d} points of the straight line ({:.3f} to {:.3f} s) puts the initial "
+            "velocity {:.0f} +/- {:.0f} m/s above the straight line's (over {:.0f} sigma; a rough estimate, which "
+            "can exceed the bias). The meteor already decelerates there: consider --vinitdrag, fitted before any "
+            "fragmentation.").format(bias.n_points, bias.t_range[0], bias.t_range[1], bias.bias, bias.bias_stddev,
+            LINE_BIAS_SIGMA)
+
+
     def saveReport(self, dir_path, file_name, uncertainties=None, verbose=True, save_results=True):
         """ Save the trajectory estimation report to file. 
     
@@ -4425,6 +4495,35 @@ class Trajectory(object):
             out_str += "{:>14s}: {:.6f} s\n".format(str(stat_id), t_diff)
 
         out_str += "\n"
+
+        if self.v_init_drag_fit is not None:
+            fit = self.v_init_drag_fit
+            out_str += "Initial velocity from the drag and ablation fit to {:d} points, {:.3f} to {:.3f} s, ".format(
+                fit.n_points, fit.t_range[0], fit.t_range[1])
+            out_str += "{:.2f} to {:.2f} km:\n".format(fit.ht_range[1]/1000, fit.ht_range[0]/1000)
+            out_str += "  Vinit = {:.2f} +/- {:.2f} m/s (straight line over the first part: {:.2f} m/s)\n".format(
+                fit.v_init, fit.v_init_stddev, fit.v_init_linear)
+            sigma_str = "not constrained" if not np.isfinite(fit.sigma_stddev) else \
+                "{:.4f} +/- {:.4f} s^2/km^2".format(fit.sigma, fit.sigma_stddev)
+            out_str += "  sigma = {:s}, B = {:.4e} m^2/kg\n".format(sigma_str, fit.drag_coeff)
+            out_str += "  RMS   = {:.2f} m (straight line: {:.2f} m)\n".format(fit.rms, fit.rms_linear)
+            if getattr(fit, "fixed_stations", None):
+                out_str += "  Time offsets kept, not fitted again: {:s}\n".format(", ".join(fit.fixed_stations))
+            if getattr(fit, "atmosphere", None) is not None:
+                out_str += "  Atmosphere: {:s}\n".format(fit.atmosphere)
+            if getattr(fit, "dyn_pressure_range", None) is not None:
+                out_str += "  Dynamic pressure {:.4f} to {:.4f} MPa, energy received {:.3g} to {:.3g} MJ/m^2\n" \
+                    .format(fit.dyn_pressure_range[0]/1e6, fit.dyn_pressure_range[1]/1e6, fit.energy_range[0]/1e6,
+                    fit.energy_range[1]/1e6)
+            for note in breakupNotes(fit):
+                out_str += "  NOTE: " + note + "\n"
+            out_str += "\n"
+
+        elif getattr(self, "v_init_drag", False):
+            out_str += self._dragFitRejectedText() + "\n\n"
+
+        if (getattr(self, "v_init_line_bias", None) is not None) and self.v_init_line_bias.significant:
+            out_str += "WARNING: " + self._lineBiasWarning() + "\n\n"
 
         if self.orbit is not None:
             out_str += "Reference point on the trajectory:\n"
@@ -6343,6 +6442,10 @@ class Trajectory(object):
         # Set the minimization status
         self.los_mini_status = minimize_solution.success
 
+        # Whether the lines of sight were fitted with the gravity drop: the drag fit of the initial velocity
+        #   measures its lengths on the trajectory they were fitted to
+        self.los_gravity = (_rerun_timing and self.gravity_correction)
+
         # If the minimization succeeded
         if minimize_solution.success:
         
@@ -6597,6 +6700,43 @@ class Trajectory(object):
 
                 # Refit jacchia lag fit
                 self.jacchia_fit = self.fitJacchiaLag(self.observations)
+
+
+        # Estimate the initial velocity from a drag and ablation fit to the points before a time and above a height
+        #   (optional), as the straight line fitted to the first part underestimates it for a meteor that already
+        #   decelerates there
+        if self.v_init_drag:
+            self.v_init_drag_fit, self.v_init_drag_rejection = fitDragInitialVelocity(self,
+                t_max=fittedTimeLimit(self.v_init_drag_time, self.v_init_drag_ht),
+                ht_min=(None if self.v_init_drag_ht is None else 1000*self.v_init_drag_ht), return_reason=True,
+                gravity=self.los_gravity)
+
+            # Keep the straight-line velocity if the fit failed, does not fit better or measures no deceleration
+            if self.v_init_drag_fit is not None:
+
+                self.v_init = self.v_init_drag_fit.v_init
+                self.v_init_stddev = self.v_init_drag_fit.v_init_stddev
+                self.velocity_fit = [self.v_init, self.v_init_drag_fit.intercept]
+
+                # Recalculate the lag
+                self.calcLag(self.observations, velocity_fit=self.velocity_fit)
+
+                # Refit jacchia lag fit
+                self.jacchia_fit = self.fitJacchiaLag(self.observations)
+
+                if self.verbose:
+                    for note in breakupNotes(self.v_init_drag_fit):
+                        print("NOTE: " + note)
+
+            elif self.verbose:
+                print(self._dragFitRejectedText())
+
+        # Without the drag fit, estimate whether the straight line underestimates the initial velocity
+        elif self.v_init_ht is None:
+            self.v_init_line_bias = estimateLineBias(self)
+
+            if self.verbose and (self.v_init_line_bias is not None) and self.v_init_line_bias.significant:
+                print("WARNING: " + self._lineBiasWarning())
 
 
         # Calculate ECI positions of the CPA on the radiant line, RA and Dec of the points on the radiant
