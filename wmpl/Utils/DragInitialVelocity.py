@@ -14,9 +14,10 @@ rate set by sigma, as m/m0 = exp(sigma (v^2 - v0^2)/2) without gravity. The fitt
 t = 0, sigma and B = Gamma A rho_m^(-2/3) m0^(-1/3), so neither the mass nor the bulk density are needed: MetSim's
 drag only takes that combination, and the mass it is given follows from B. The measured deceleration constrains B
 and sigma, and with them the velocity at the first point. The time offsets of the stations other than the
-reference one are fitted again, since the solver estimates them with a lag model that absorbs part of the
-deceleration; they are only used for this fit. The offsets the solver was given as fixed are kept, as they do not
-come from its lag model.
+reference one are fitted again, as the solver's come from its lag model, not from this one; they are only used for
+this fit. On the test fireball first seen at 45 km, fitting all points, the velocity was 4-24 m/s off with its own
+offsets and 4-33 m/s with the solver's over three noise realizations: no worse, not clearly better. The offsets
+the solver was given as fixed are kept, as they do not come from its lag model.
 
 The lengths are taken where the lines of sight meet the trajectory the solver fitted them to: with the gravity drop
 when it applied one (droppedLengths), keeping the drop, since MetSim's gravity also speeds the meteoroid up along
