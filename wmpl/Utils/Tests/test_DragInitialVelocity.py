@@ -2,7 +2,8 @@
 v_init_drag option of the trajectory solver.
 
 The observations are synthetic: a meteoroid decelerated by drag, with ablation, that drops below its straight line
-and speeds up along it under gravity, observed by three stations at 25 frames per second with 20 arcsec of noise.
+and speeds up along it under gravity, observed by three stations at 25 frames per second with 20 arcsec of noise,
+and given to the solver as the azimuth and elevation of each point at its own time.
 
 Run under pytest, or directly:
 
@@ -24,7 +25,8 @@ from wmpl.Utils.AtmosphereDensity import AtmDensityTableInterp, getAtmDensityTab
 from wmpl.Utils.DragInitialVelocity import atmosphereDescription, breakupNotes, fitDragInitialVelocity, \
     fittedTimeLimit
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import altAz2RADec, cartesian2Geo, eci2RaDec, geo2Cartesian, raDec2ECI
+from wmpl.Utils.TrajConversions import altAz2RADec, cartesian2Geo, eci2RaDec, geo2Cartesian, raDec2AltAz_vect, \
+    raDec2ECI
 
 
 JD0 = 2460000.6
@@ -86,14 +88,17 @@ def _trueTrack(v0, drag_coeff, sigma, h0, zenith, duration, frag_ht=None, frag_k
 def _solve(v0, drag_coeff, sigma, h0, zenith_deg, v_init_drag, duration=2.0, seed=0, frag_ht=None, frag_kept=1.0,
         gravity=True, noise_arcsec=20.0, **solver_kwargs):
     """ Solve the synthetic observations of the meteoroid with WMPL, with the given solver options. Without
-        gravity, the meteoroid has none and the solver applies no gravity correction. """
+        gravity, the meteoroid has none and the solver applies no gravity correction. The solver is given the
+        azimuth and elevation of each point at its own time (meastype=2): with meastype=1 it takes RA/Dec at the
+        reference time, as CAMS gives them, so RA/Dec computed at each point's time come out rotated by the
+        Earth's turn since then, by up to 30" by the end of 2 s. """
 
     _, _, times, positions = _trueTrack(v0, drag_coeff, sigma*1e-6, h0, np.radians(zenith_deg), duration,
         frag_ht=frag_ht, frag_kept=frag_kept, gravity=gravity)
     rng = np.random.default_rng(seed)
     noise = np.radians(noise_arcsec/3600)
 
-    traj = Trajectory(JD0, meastype=1, monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False,
+    traj = Trajectory(JD0, meastype=2, monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False,
         verbose=False, v_init_drag=v_init_drag, gravity_correction=gravity, **solver_kwargs)
 
     for k, (lat, lon) in enumerate(STATIONS):
@@ -106,7 +111,8 @@ def _solve(v0, drag_coeff, sigma, h0, zenith_deg, v_init_drag, duration=2.0, see
             ra, dec = eci2RaDec(los/np.linalg.norm(los))
             ra_list.append(ra + rng.normal(0, noise)/np.cos(dec))
             dec_list.append(dec + rng.normal(0, noise))
-        traj.infillTrajectory(np.array(ra_list), np.array(dec_list), t_obs, lat, lon, 300.0, \
+        azim, elev = raDec2AltAz_vect(np.array(ra_list), np.array(dec_list), JD0 + t_obs/86400, lat, lon)
+        traj.infillTrajectory(np.asarray(azim), np.asarray(elev), t_obs, lat, lon, 300.0, \
             station_id="S{:d}".format(k))
 
     with contextlib.redirect_stdout(io.StringIO()):
@@ -116,9 +122,9 @@ def _solve(v0, drag_coeff, sigma, h0, zenith_deg, v_init_drag, duration=2.0, see
 def test_drag_fit_recovers_the_initial_velocity_of_a_decelerating_fireball():
     """ A fireball first seen at 60 km at 24 km/s (B = 5.3e-3 m^2/kg, about 1 kg of a 3500 kg/m^3 sphere, sigma =
         0.005 s^2/km^2) slows down to 11 km/s over the 2 s it is observed. Over three noise realizations, the
-        straight line over the first part gives a velocity 560-615 m/s too low, while the drag fit to all points
-        is 7-23 m/s above the true one, at most 2.3 times its uncertainty, and recovers the ablation coefficient
-        within 7%. """
+        straight line over the first part gives a velocity 570-605 m/s too low, while the drag fit to all points
+        is within 6-13 m/s of the true one, at most 1.4 times its uncertainty, and recovers the ablation
+        coefficient within 4%. """
 
     traj_line = _solve(24000.0, 5.3e-3, 0.005, 60e3, 45.0, v_init_drag=False)
     traj_drag = _solve(24000.0, 5.3e-3, 0.005, 60e3, 45.0, v_init_drag=True, v_init_drag_time=np.inf)
@@ -132,9 +138,10 @@ def test_drag_fit_recovers_the_initial_velocity_of_a_decelerating_fireball():
     assert fit.v_init_linear == traj_line.v_init
 
 
-def test_drag_fit_needs_its_own_time_offsets():
-    """ First seen at 45 km, the solver's time offsets absorb part of the deceleration: fitting all points with
-        them, the velocity is 121 m/s too high, 3.7 times its uncertainty, and with its own 60 m/s, 2.4 times. """
+def test_drag_fit_fits_its_own_time_offsets():
+    """ First seen at 45 km, fitting all points with its own time offsets the velocity is 24 m/s too high, 1.2
+        times its uncertainty, and with the solver's, which come from its lag model, 33 m/s, 1.6 times (over three
+        noise realizations, 4-24 m/s and 4-33 m/s off). """
 
     traj = _solve(24000.0, 5.3e-3, 0.005, 45e3, 45.0, v_init_drag=True, v_init_drag_time=np.inf)
     fit = traj.v_init_drag_fit
@@ -144,7 +151,7 @@ def test_drag_fit_needs_its_own_time_offsets():
     fit_fixed = fitDragInitialVelocity(traj_fixed, gravity=traj.los_gravity)
 
     assert abs(fit.v_init - 24000.0) < 3*fit.v_init_stddev
-    assert abs(fit_fixed.v_init - 24000.0) > 3*fit_fixed.v_init_stddev
+    assert fit.time_offsets != fit_fixed.time_offsets
 
 
 def test_drag_fit_keeps_the_time_offsets_given_to_the_solver():
@@ -172,7 +179,7 @@ def test_drag_fit_keeps_the_time_offsets_given_to_the_solver():
 
 def test_drag_fit_ends_before_a_fragmentation():
     """ The fireball first seen at 60 km keeps 20% of its mass at 45 km, 0.9 s later. The single-body fit to all
-        points puts its velocity 288 m/s too high, 11 times its uncertainty; fitting the default first second, or
+        points puts its velocity 278 m/s too high, 11 times its uncertainty; fitting the default first second, or
         the points above 46 km, gives it within its uncertainty. """
 
     def fit(**solver_kwargs):
@@ -194,7 +201,7 @@ def test_drag_fit_of_a_meteoroid_that_ablates_until_it_stops_does_not_depend_on_
         millionth of its mass. Against the fit extrapolated to a zero step, fits with MetSim steps of 5, 1 and 0.5 ms
         alone put the velocity 163, 32 and 16 m/s higher, while the extrapolations from 1 and from 0.5 ms agree
         within 0.02 m/s. The lengths are the true ones, because the solver's radiant for synthetic observations of
-        this meteoroid came out 0.18 deg off. """
+        this meteoroid came out 0.05 and 2.1 deg off in two noise realizations. """
 
     p0, motion, times, positions = _trueTrack(24000.0, 5.3e-3, 0.05e-6, 50e3, np.radians(45.0), 2.0)
     rng = np.random.default_rng(0)
@@ -242,9 +249,9 @@ def test_gravity_does_not_move_the_fitted_velocity():
     """ The solver fits the lines of sight with the gravity drop, and the drag fit takes the lengths where they meet
         the dropped trajectory, keeping the drop, which MetSim's gravity puts in along the path too. Fitting all
         points of a meteoroid at 17.5 km/s first seen at 92 km, observed for 3.5 s without noise, the velocity is
-        then 0.27 m/s from that of the same meteoroid without gravity (in it, in the solver and in MetSim), 0.3 times
-        its uncertainty. Taking the lengths on the line without the drop put it 9.0 m/s lower, and on the straight
-        line, without finding them on the dropped trajectory, 2.6 m/s lower. """
+        then 0.06 m/s from that of the same meteoroid without gravity (in it, in the solver and in MetSim). Taking
+        the lengths on the line without the drop put it 8.4 m/s lower, and on the straight line, without finding
+        them on the dropped trajectory, 4.2 m/s lower. """
 
     def solved(gravity):
         traj = _solve(17500.0, 9e-4, 0.005, 92e3, 45.0, v_init_drag=True, v_init_drag_time=np.inf, duration=3.5,
@@ -297,7 +304,7 @@ def test_fitted_points_without_deceleration_keep_the_straight_line():
 
 def test_without_the_drag_fit_the_solver_warns_when_the_straight_line_is_low():
     """ With the option off, a parabola over the straight line's points flags the fireball first seen at 60 km,
-        whose straight line is 615 m/s low, as 985 +/- 139 m/s, and suggests the drag fit; the meteor without
+        whose straight line is 606 m/s low, as 908 +/- 111 m/s, and suggests the drag fit; the meteor without
         measurable deceleration is not flagged. """
 
     traj = _solve(24000.0, 5.3e-3, 0.005, 60e3, 45.0, v_init_drag=False)
@@ -312,9 +319,9 @@ def test_without_the_drag_fit_the_solver_warns_when_the_straight_line_is_low():
 
 
 def test_drag_fit_notes_typical_fragmentation_pressures_and_erosion_energies():
-    """ Along the fitted model, the fireball at 24 km/s first seen at 75 km goes from 0.019 to 0.205 MPa and crosses
+    """ Along the fitted model, the fireball at 24 km/s first seen at 75 km goes from 0.019 to 0.19 MPa and crosses
         0.04 MPa, where ordinary chondritic fireballs start fragmenting, at 70 km, which the note gives as the
-        height to fit above; the meteor at 30 km/s first seen at 115 km receives 0.2-6.8 MJ/m^2, across the
+        height to fit above; the meteor at 30 km/s first seen at 115 km receives 0.2-5.8 MJ/m^2, across the
         energy at which shower meteoroids start eroding. A note is only given for what the fitted part crosses. """
 
     fit = _solve(24000.0, 5.3e-3, 0.005, 75e3, 45.0, v_init_drag=True).v_init_drag_fit
@@ -414,7 +421,7 @@ def test_option_is_off_by_default_and_in_old_pickles():
 
 if __name__ == "__main__":
     test_drag_fit_recovers_the_initial_velocity_of_a_decelerating_fireball()
-    test_drag_fit_needs_its_own_time_offsets()
+    test_drag_fit_fits_its_own_time_offsets()
     test_drag_fit_keeps_the_time_offsets_given_to_the_solver()
     test_drag_fit_ends_before_a_fragmentation()
     test_drag_fit_of_a_meteoroid_that_ablates_until_it_stops_does_not_depend_on_metsim_step()

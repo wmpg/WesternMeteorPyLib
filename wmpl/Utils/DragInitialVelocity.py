@@ -22,11 +22,10 @@ The lengths are taken where the lines of sight meet the trajectory the solver fi
 when it applied one (droppedLengths), keeping the drop, since MetSim's gravity also speeds the meteoroid up along
 its path. The solver may give the lengths of the line without the drop instead, which is what its velocity and lag
 describe, and fitting MetSim to those counts the gravity twice along the path. On a synthetic meteoroid at 17.5 km/s
-first seen at 92 km at 45 deg from the zenith, without noise, that put the velocity 9.0 m/s low fitting all 3.5 s
-of points, 9 times its uncertainty, and 1.3 m/s low fitting 1 s. The lengths on the straight line itself, where the
-drop shifts the closest point of each line of sight by an amount that depends on the station's view, put it 2.6 and
-1.9 m/s low. Taken on the dropped trajectory, the velocity is within 0.3 m/s of that of the same meteoroid without
-gravity.
+first seen at 92 km at 45 deg from the zenith, without noise, that put the velocity 8.4 m/s low fitting all 3.5 s
+of points and 1.1 m/s low fitting 1 s. The lengths on the straight line itself, where the drop shifts the closest
+point of each line of sight by an amount that depends on the station's view, put it 4.2 and 2.3 m/s low. Taken on
+the dropped trajectory, the velocity is within 0.2 m/s of that of the same meteoroid without gravity.
 
 With the option on, the solver takes the fitted velocity whenever the fit converges, fits better than the
 straight line and measures a deceleration. If the fitted points show none, B goes down until the model has no
@@ -34,18 +33,19 @@ drag, and the fit is only a straight line over these points, which over a short 
 station, can differ from the solver's straight line over the first part: the solver then keeps the latter. Keeping the straight line when the fit does not measure its bias (when the two velocities are within
 sqrt(2) of the fit's uncertainty) was tried and dropped: it rests on the straight line being the more precise, but
 the solver's straight-line uncertainty is formal: through the solver, on the synthetic meteoroids below, where that
-rule kept the straight line its errors were 6-10 times that uncertainty in RMS. On 26 synthetic meteoroids (12-65
+rule kept the straight line its errors were 5-6 times that uncertainty in RMS. On 26 synthetic meteoroids (12-65
 km/s, B from 1e-6 to 1.5e-2 m^2/kg, sigma 0.005-0.03 s^2/km^2, first seen at 55-115 km, two noise realizations each,
-52 runs), the RMS velocity error was 195 and 251 m/s for the straight line, 18 and 26 m/s with the option on (21
-and 25 m/s where the drag fit was used, in all but the 5 runs of each group that measured no deceleration), and 24
-and 28 m/s with that rule (the first 10 meteoroids, then 16 others); no threshold for it did consistently better
-than none. Even where it kept the straight line, the drag fit's RMS error was smaller (20 against 25 and 25 against
-32 m/s), and its own uncertainty was calibrated or somewhat large (RMS of the error over it 0.59 and 0.85). With the
+52 runs), the RMS velocity error was 195 and 257 m/s for the straight line, 15 and 28 m/s with the option on (18
+and 29 m/s where the drag fit was used, in all but the 8 and 10 runs that measured no deceleration), and 19 and 31
+m/s with that rule (the first 10 meteoroids, then 16 others); no threshold for it did consistently better than
+none. Even where it kept the straight line, the drag fit's RMS error was smaller (22 against 24 and 25 against 34
+m/s), and its own uncertainty was calibrated or somewhat large (RMS of the error over it 0.47 and 0.95). With the
 option off, estimateLineBias() fits a parabola to the straight line's points and the solver warns when it puts the
 velocity at the first point more than 2 sigma above the straight line's. On the 16 meteoroids not used to set that
-threshold (32 runs), it warned for 7 of the 11 straight lines over 100 m/s low, 1 of the 5 that were 50-100 m/s
-low, and 1 of the 14 within 50 m/s (that one 5 m/s low); its precision falls with the speed: it did not warn for
-any of the four straight lines 59-177 m/s low above 35 km/s. Neither check sees a fragmentation or a wake (below).
+threshold (32 runs), it warned for 7 of the 11 straight lines over 100 m/s low, none of the 3 that were 50-100 m/s
+low, and 1 of the 16 within 50 m/s (that one 2 m/s low); its precision falls with the speed: it did not warn for
+either of the two straight lines 62 and 187 m/s low above 35 km/s. Neither check sees a fragmentation or a wake
+(below).
 
 In the solver's Monte Carlo the fit is redone for each realization, so the spread of the initial velocity, and of
 the orbit, includes it. For the fireball at 24 km/s first seen at 60 km, with 30 realizations (geometric
@@ -92,8 +92,8 @@ chondritic fireballs (Borovicka et al. 2020), with the height where it reaches 0
 the erosion of cometary shower meteoroids observed by CAMO begins (Buccongello et al. 2024). These only point to the
 light curve: Geminids begin to crumble at 1-100 kPa (Henych et al. 2024), and the strength of a given meteoroid can
 be far from them. In the test cases, a fireball at 24 km/s first seen at 75 km crosses 0.04 MPa at 70 km, one first
-seen at 60 km is already at 0.17 MPa and reaches 1 MPa, and a meteor at 30 km/s first seen at 115 km receives
-0.2-6.8 MJ/m^2. Through NRLMSISE-00 at 45 deg from the zenith, 1-2 MJ/m^2 are received by 90-94 km at 12 km/s,
+seen at 60 km is already at 0.17 MPa and reaches 0.9 MPa, and a meteor at 30 km/s first seen at 115 km receives
+0.2-5.8 MJ/m^2. Through NRLMSISE-00 at 45 deg from the zenith, 1-2 MJ/m^2 are received by 90-94 km at 12 km/s,
 96-100 km at 20 km/s, 100-105 km at 30 km/s and 111-117 km at 70 km/s, close to the erosion onset heights CAMO fits
 find. So for a meteoroid first seen below about 90 km, the energy criterion puts any erosion before the first point,
 active over the whole fitted part, which the fit absorbs; a fragmentation triggered by pressure is the likelier
@@ -133,7 +133,8 @@ not on its scale, which B absorbs: in those cases a density 6% higher at 40 km t
 from 60 km, moved the velocity by up to 42 m/s, beyond 3 times its uncertainty in 6 of them. MetSim takes the density
 tabulated over the observed heights, within 0.5% of the MSIS model (the 6th degree polynomial it took before was
 within 2.3% of NRLMSISE-00). The fit also inherits the errors of the solver's lengths: through the solver, the
-synthetic fireballs of the tests come out 7-60 m/s high fitting all their points, within 2.5 times their uncertainty.
+synthetic fireballs of the tests come out from 6 m/s low to 43 m/s high fitting all their points, within 2.2 times
+their uncertainty.
 """
 
 import math
@@ -254,8 +255,8 @@ def estimateLineBias(traj):
     the one at its start. The parabola measures the deceleration over those points, and its velocity at the
     reference time is compared with the straight line's. It is cheap and needs no model, so the solver gives it
     when the drag fit is off, and reports it when it is significant (see LINE_BIAS_SIGMA). It is a rough estimate:
-    through the solver, where it warned for synthetic meteoroids whose straight line was 70-930 m/s low, it gave
-    1.1-2.0 times that.
+    through the solver, where it warned for synthetic meteoroids whose straight line was 110-960 m/s low, it gave
+    0.8-2.0 times that.
 
     Arguments:
         traj: [Trajectory] Solved trajectory, with velocity_fit and velocity_fit_t_range.
