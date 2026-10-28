@@ -205,7 +205,7 @@ def downloadDebiasedNEOPopulation(model=GRANVIK2018, file_path=None, url=None, v
         try:
 
             if verbose:
-                print("Downloading the debiased NEO population of {:s} ({:d} MB), once,".format(
+                print("Downloading the debiased NEO population of {:s} ({:g} MB), once,".format(
                     model['name'], model['size_mb']))
                 print("  from {:s}".format(url))
                 print("  to {:s}".format(target))
