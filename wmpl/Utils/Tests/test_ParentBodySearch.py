@@ -877,6 +877,122 @@ def test_moid_criterion_ranks_every_body_including_open_comets():
         assert abs(match['d_values'][1] - moid_of[match['name']]) < 1e-12
 
 
+def _deamModel(tmp):
+    """ A small model of Deam et al. (2026) with every source in the bin of Phaethon's orbit, a = 1.2-1.3
+        AU, e = 0.88-0.92, i = 20-24 deg, so that background meteoroids come close to it. """
+
+    import wmpl.Utils.DebiasedMeteoroidPopulation as dmp
+    from wmpl.Utils.Tests.test_DebiasedMeteoroidPopulation import writeModel
+
+    posterior_path, tar_path = writeModel(tmp, maps_3my=((12, 22, 5),), maps_1my=((12, 22, 5),))
+
+    return dmp.loadDeamModel(posterior_path=posterior_path, residence_path=tar_path)
+
+
+def test_chance_meteoroid_takes_a_trajectory_or_the_elements():
+    """ chanceMeteoroid runs the search itself and gives the same values for the orbit of a trajectory
+        as for the same elements given as numbers. Comets get a value too. Both, or an incomplete
+        orbit, are refused. """
+
+    import types
+
+    q, e, i, peri, node = PHAETHON
+    elements = (q, e, np.radians(i), np.radians(peri), np.radians(node))
+    traj = types.SimpleNamespace(orbit=types.SimpleNamespace(q=q, e=e, i=np.radians(i),
+        peri=np.radians(peri), node=np.radians(node)))
+
+    with tempfile.TemporaryDirectory() as tmp, _Catalogue():
+
+        deam = _deamModel(tmp)
+        kwargs = dict(deam=deam, n_samples=20000, n_global=200, top_n=-1)
+
+        from_traj = pbs.chanceMeteoroid(38.0, traj=traj, **kwargs)
+        from_elements = pbs.chanceMeteoroid(38.0, *elements, **kwargs)
+
+        for bad in (dict(traj=traj, q=q), dict(q=q, e=e)):
+            try:
+                pbs.chanceMeteoroid(38.0, **dict(kwargs, **bad))
+                raise AssertionError("{:s} was accepted".format(str(sorted(bad))))
+
+            except ValueError:
+                pass
+
+    assert from_traj['meteor_in_model']
+    assert from_traj['results'] == from_elements['results']
+
+    names = [m['name'] for m in from_traj['search']['matches']]
+    results = dict(zip(names, from_traj['results']['D_SH']))
+
+    assert results['Phaethon']['n_closer'] == 0 and results['Phaethon']['is_limit']
+    assert results['Near twin']['n_closer'] > 0
+    assert results['Near twin']['p_value'] < results['Apollo']['p_value']
+    assert results['Parabolic comet']['p_value'] is not None
+    assert all(r['p_value_global'] >= r['p_value'] for r in from_traj['results']['D_SH'])
+
+
+def test_chance_meteoroid_skips_the_radiant_and_the_moid_and_is_saved():
+    """ Only the criteria on the elements are tested, the MOID excepted; the tables, the summary and
+        the saved files carry the values. """
+
+    q, e, i, peri, node = PHAETHON
+
+    with tempfile.TemporaryDirectory() as tmp, _Catalogue():
+
+        deam = _deamModel(tmp)
+
+        search = pbs.searchParentBodies(q, e, np.radians(i), np.radians(peri), np.radians(node),
+            d_crit=['DSH', 'DN', 'MOID'], top_n=3)
+
+        chance = pbs.chanceMeteoroid(38.0, q, e, np.radians(i), np.radians(peri), np.radians(node),
+            search=search, deam=deam, n_samples=20000, n_global=200)
+
+        assert chance['labels'] == ['D_SH']
+        assert set(chance['skipped']) == {'D_N', 'MOID (AU)'}
+        assert len(chance['results']['D_SH']) == 3
+
+        text = "\n".join(pbs.formatChanceMeteoroid(chance))
+        assert "Skipped D_N" in text and "Summary (D_SH" in text and "Verdict:" in text
+        assert "Please cite Deam" in text
+
+        csv_path = os.path.join(tmp, "matches.csv")
+        pbs.saveMatches(csv_path, search, chance_meteoroid=chance)
+
+        with open(csv_path) as f:
+            rows = list(csv.DictReader(f))
+
+        assert rows[0]['name'] == 'Phaethon'
+        assert rows[0]['chance_meteoroid_D_SH_is_limit'] == 'True'
+        assert float(rows[1]['chance_meteoroid_D_SH_p_value']) == chance['results']['D_SH'][1]['p_value']
+        assert not any(name.startswith('chance_meteoroid_D_N') for name in rows[0])
+
+        json_path = os.path.join(tmp, "matches.json")
+        pbs.saveMatches(json_path, search, chance_meteoroid=chance)
+
+        with open(json_path) as f:
+            data = json.load(f)
+
+        assert data['chance_meteoroid']['labels'] == ['D_SH']
+        assert data['chance_meteoroid']['h_mag'] == 38.0
+        assert set(data['matches'][0]['chance_meteoroid']) == {'D_SH'}
+        assert not any(name.startswith('chance_meteoroid_') for name in data['matches'][0])
+
+
+def test_chance_meteoroid_reports_a_meteoroid_outside_the_model():
+    """ An H outside the model gives no p-value, and the output says why. """
+
+    q, e, i, peri, node = PHAETHON
+
+    with tempfile.TemporaryDirectory() as tmp, _Catalogue():
+
+        chance = pbs.chanceMeteoroid(30.0, q, e, np.radians(i), np.radians(peri), np.radians(node),
+            deam=_deamModel(tmp), top_n=3)
+
+    assert not chance['meteor_in_model']
+    assert chance['n_background'] is None
+    assert all(r['p_value'] is None for r in chance['results']['D_SH'])
+    assert 'H = 30.00 is outside the model' in "\n".join(pbs.formatChanceMeteoroid(chance))
+
+
 if __name__ == "__main__":
 
     test_functions = [obj for name, obj in sorted(globals().items()) \

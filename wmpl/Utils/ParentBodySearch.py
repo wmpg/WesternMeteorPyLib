@@ -20,6 +20,12 @@ least as close to the orbit by chance, the p-value of the match, for the body al
 having searched bodies of every size, against the debiased NEO population of Granvik et al. (2018),
 which is downloaded on first use, and ranks the whole catalogue by it (rankByChance). See
 wmpl.Utils.DebiasedNEOPopulation.
+
+--chance_meteoroid H (chanceMeteoroid) asks the converse: for each body, how often an unrelated
+meteoroid of absolute magnitude H lies at least as close to it, for the body alone and corrected for
+the search, against the meteoroids that hit the Earth in the near-Earth object model of Deam et al.
+(2026), which is downloaded on first use. Comets get a value too. chanceMeteoroid takes the meteoroid's
+trajectory or its elements. See wmpl.Utils.DebiasedMeteoroidPopulation.
 """
 
 # The MIT License
@@ -350,7 +356,8 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
             criterion with 'name', 'q', 'e', 'incl', 'peri', 'node' (degrees), 'h_mag',
             'd_values' (a value per criterion, in order), and 'epoch_jd', 'mean_anomaly' (deg) and
             'perihelion_jd' of the catalogue elements, which are None if the catalogue does not give
-            them.
+            them; and 'meteorites', whether the meteorites were searched instead of the comets and
+            asteroids.
     """
 
     criteria = _resolveCriteria(d_crit)
@@ -471,7 +478,7 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
     return {'keys': [c[0] for c in criteria], 'labels': [c[1] for c in criteria],
         'query_geocentric': query_radiants['geocentric'], 'geocentric_source': sources['geocentric'],
         'query_heliocentric': query_radiants['heliocentric'],
-        'heliocentric_source': sources['heliocentric'], 'matches': matches}
+        'heliocentric_source': sources['heliocentric'], 'matches': matches, 'meteorites': meteorites}
 
 
 def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=False,
@@ -869,6 +876,242 @@ def formatChanceNEO(chance, search, top_n=10, search_all=None, chance_all=None):
     return lines
 
 
+def meteorElements(traj=None, q=None, e=None, incl=None, peri=None, node=None):
+    """ The orbital elements of a meteoroid, from its trajectory or as given.
+
+    Keyword arguments:
+        traj: [Trajectory] A solved trajectory, whose orbit gives the elements. With it, the elements
+            are not given.
+        q: [float] Perihelion distance (AU).
+        e: [float] Eccentricity.
+        incl, peri, node: [float] Inclination, argument of perihelion and ascending node (radians).
+
+    Return:
+        (q, e, incl, peri, node): [tuple] The angles in radians.
+    """
+
+    given = (q, e, incl, peri, node)
+
+    if traj is not None:
+
+        if any(v is not None for v in given):
+            raise ValueError("Give either a trajectory or the orbital elements, not both.")
+
+        return traj.orbit.q, traj.orbit.e, traj.orbit.i, traj.orbit.peri, traj.orbit.node
+
+    if any(v is None for v in given):
+        raise ValueError("All orbital elements need to be given: q, e, incl, peri, node.")
+
+    return given
+
+
+def chanceMeteoroid(h_mag, q=None, e=None, incl=None, peri=None, node=None, traj=None, search=None,
+    d_crit='dsh', top_n=10, meteorites=False, deam=None, n_samples=None, n_global=None, seed=None,
+    download=True):
+    """ For each match of a search, the probability that an unrelated meteoroid lies at least as close
+        to the body as the given one, for every criterion of the search on the orbital elements: for
+        the body alone, and corrected for having searched the whole catalogue.
+
+        The background is the meteoroids that hit the Earth in the near-Earth object model of Deam et
+        al. (2026), at the meteoroid's absolute magnitude. See wmpl.Utils.DebiasedMeteoroidPopulation
+        for the test and what it assumes. The criteria on the radiant and the MOID are skipped.
+
+        The meteoroid is given by its trajectory or by its elements. Without a search, one is run
+        with d_crit, top_n and meteorites.
+
+    Arguments:
+        h_mag: [float] Absolute magnitude of the meteoroid, in the model's scale, 34.75 to 41.25.
+
+    Keyword arguments:
+        q, e, incl, peri, node: [float] The meteoroid's orbit, the angles in radians, if traj is not
+            given.
+        traj: [Trajectory] The meteoroid's trajectory, instead of its elements.
+        search: [dict] Return of searchParentBodies for this orbit. Run here if None.
+        d_crit, top_n, meteorites: The arguments of searchParentBodies, when the search is run here.
+        deam: [dict] Return of wmpl.Utils.DebiasedMeteoroidPopulation.loadDeamModel. It is loaded,
+            and downloaded on first use, if None.
+        n_samples: [int] Background orbits for the p of each body, 10^6 by default.
+        n_global: [int] How many of them are compared with the whole catalogue for p_global, 2000
+            by default.
+        seed: [int] Seed of the background orbits.
+        download: [bool] Download the model if it is not there. If False, raise instead.
+
+    Return:
+        [dict] 'model', 'reference', 'data_reference', 'license' and 'file_paths' of the model;
+            'h_mag'; 'n_background', 'n_eff' and 'n_global', the background orbits, their effective
+            number and how many were compared with the catalogue, None for a meteoroid outside the
+            model; 'meteor_in_model' and 'meteor_outside_reason'; 'labels', the criteria evaluated,
+            in the order of the search, and 'skipped', each criterion that was not with why; 'results',
+            for each label a list with a dictionary per match, as returned by
+            wmpl.Utils.DebiasedMeteoroidPopulation.chanceAssociation; and 'search'.
+    """
+
+    from wmpl.Utils import DebiasedMeteoroidPopulation as dmp
+
+    q, e, incl, peri, node = meteorElements(traj, q, e, incl, peri, node)
+
+    if search is None:
+        search = searchParentBodies(q, e, incl, peri, node, d_crit=d_crit, top_n=top_n,
+            meteorites=meteorites)
+
+    n_samples = dmp.N_SAMPLES if n_samples is None else n_samples
+    n_global = dmp.N_GLOBAL if n_global is None else n_global
+    seed = dmp.SEED if seed is None else seed
+
+    if deam is None:
+        deam = dmp.loadDeamModel(download=download)
+
+    model = deam['model']
+
+    meteor_orbit = (q, e, incl, node, peri)
+    inside, reason = dmp.isInModelRegion(q, e, incl, h_mag, model)
+
+    impactors = dmp.sampleImpactors(deam, h_mag, n=n_samples, seed=seed) if inside else None
+
+    # The bodies the search compared the meteoroid with, for p_global
+    bodies = meteorites_elements if search['meteorites'] else comets_elements + asteroids_elements
+    elements = np.array([body[1:6] for body in bodies], dtype=float).reshape(-1, 5)
+    catalogue_orbits = (elements[:, 0], elements[:, 1], np.radians(elements[:, 2]),
+        np.radians(elements[:, 4]), np.radians(elements[:, 3]))
+
+    results = {}
+    labels = []
+    skipped = {}
+
+    for c, (key, label) in enumerate(zip(search['keys'], search['labels'])):
+
+        if lookupCriterion(key)[3] != 'elements':
+            skipped[label] = "a criterion on the radiant"
+            continue
+
+        if key == 'MOID':
+            skipped[label] = "0.1 ms a pair, too slow against the background"
+            continue
+
+        candidates = [(m['d_values'][c], (m['q'], m['e'], np.radians(m['incl']), np.radians(m['node']),
+            np.radians(m['peri']))) for m in search['matches']]
+
+        results[label] = dmp.chanceAssociation(meteor_orbit, h_mag, candidates, key, impactors,
+            catalogue_orbits=catalogue_orbits, n_global=n_global, model=model)
+        labels.append(label)
+
+    return {'model': model['name'], 'reference': model['reference'],
+        'data_reference': model['data_reference'], 'license': model['license'],
+        'file_paths': deam['file_paths'], 'h_mag': h_mag,
+        'n_background': None if impactors is None else impactors['n'],
+        'n_eff': None if impactors is None else impactors['n_eff'],
+        'n_global': None if impactors is None else min(n_global, impactors['n']),
+        'meteor_in_model': inside, 'meteor_outside_reason': reason, 'labels': labels,
+        'skipped': skipped, 'results': results, 'search': search}
+
+
+def formatChanceMeteoroid(chance):
+    """ The lines that print the result of chanceMeteoroid: for each criterion the matches of its
+        search, and a summary for the criterion the bodies were ranked by. """
+
+    search = chance['search']
+
+    lines = ["Chance coincidence with the background meteoroids of {:s} at H = {:.2f}:".format(
+        chance['model'], chance['h_mag'])]
+
+    if not chance['meteor_in_model']:
+        lines.append("  No p-value for this meteoroid: " + chance['meteor_outside_reason'] + ".")
+        return lines
+
+    n_background = chance['n_background']
+
+    lines += [
+        "  {:d} meteoroids that hit the Earth, drawn from the model and weighted by their rate of "
+            "impact (effective number {:d}).".format(n_background, int(round(chance['n_eff']))),
+        "  closer      background meteoroids at least as close to the body as this one.",
+        "  p           (closer, by weight, + 1)/{:d}: how often an unrelated meteoroid is as close to "
+            "the body. Valid for a body named".format(n_background + 1),
+        "              before the search. Comets are tested too.",
+        "  closer_g    of {:d} background meteoroids, those with some body of the catalogue as close."
+            .format(chance['n_global']),
+        "  p_global    (closer_g, by weight, + 1)/{:d}: the one to quote for a body the search found."
+            .format(chance['n_global'] + 1),
+        "  sigma       p_global as Gaussian standard deviations: 2 is a hint (p_global 0.046), 3 is "
+            "evidence (0.0027).",
+        "              Below 1 it measures nothing and is printed <1. A <= or >= marks a limit."]
+
+    if chance['skipped']:
+        lines.append("  Skipped " + "; ".join("{:s} ({:s})".format(label, why)
+            for label, why in chance['skipped'].items()) + ".")
+
+    for label in chance['labels']:
+
+        c = search['labels'].index(label)
+
+        lines.append("")
+        lines.append("{:s}, the matches above, ranked by {:s}:".format(label, search['labels'][0]))
+        lines.append("Name                               , {:>9s},  closer,          p, closer_g,   "
+            "p_global,  sigma,".format(label[:9]))
+
+        for m, r in zip(search['matches'], chance['results'][label]):
+
+            d_value = m['d_values'][c]
+            start = "{:35s}, ".format(m['name']) + ("{:9.4f}, ".format(d_value) if np.isfinite(d_value)
+                else "{:>9s}, ".format("n/a"))
+
+            if r['reason'] is not None:
+                lines.append(start + "n/a: " + r['reason'])
+                continue
+
+            lines.append(start + "{:7d}, {:>10s}, {:8d}, {:>10s}, {:>6s}, {:s}".format(r['n_closer'],
+                formatProbability(r['p_value'], r['is_limit']), r['n_closer_global'],
+                formatProbability(r['p_value_global'], r['is_limit_global']),
+                formatSigma(r['sigma'], r['is_limit_global']), _significanceText(r['sigma'])).rstrip())
+
+    lines.append("")
+    lines.append("Please cite " + chance['reference'] + ", and " + chance['data_reference'] + ".")
+
+    # The summary, for the criterion the bodies were ranked by if it was evaluated
+    if not chance['labels']:
+        return lines
+
+    primary = search['labels'][0] if search['labels'][0] in chance['labels'] else chance['labels'][0]
+    c = search['labels'].index(primary)
+
+    tested = [(m, m['d_values'][c], r) for m, r in zip(search['matches'], chance['results'][primary])
+        if r['reason'] is None]
+
+    lines.append("")
+    lines.append("Summary ({:s}, the {:d} closest bodies):".format(primary, len(search['matches'])))
+
+    if not tested:
+        lines.append("  No body could be tested.")
+        return lines
+
+    match, d_value, r = min(tested, key=lambda entry: (entry[2]['p_value_global'], entry[1]))
+
+    odds = formatOdds(r['p_value_global'])
+    lines.append("  Most significant: {:s} at {:s} = {:.4f}, p = {:s}, p_global = {:s}{:s}, "
+        "{:s} sigma.".format(match['name'], primary, d_value,
+            formatProbability(r['p_value'], r['is_limit']),
+            formatProbability(r['p_value_global'], r['is_limit_global']),
+            " ({:s})".format(odds) if odds else "", formatSigma(r['sigma'], r['is_limit_global'])))
+
+    sigmas = [entry[2]['sigma'] for entry in tested]
+
+    if max(sigmas) >= SIGMA_EVIDENCE:
+        verdict = "evidence: a meteoroid of the background is rarely this close to a body of the " \
+            "catalogue."
+
+    elif max(sigmas) >= SIGMA_HINT:
+        verdict = "a hint, not conclusive."
+
+    else:
+        verdict = "no body is closer than the background meteoroids commonly are. None reaches " \
+            "{:.0f} sigma.".format(SIGMA_HINT)
+
+    lines.append("  Verdict: " + verdict)
+    lines.append("  A low p says that the dynamical evolution of the sporadic background rarely brings a "
+        "meteoroid this close, not that the body is the parent.")
+
+    return lines
+
+
 
 
 def propagateBodies(bodies, jd_target):
@@ -978,8 +1221,12 @@ CHANCE_NEO_FIELDS = ['n_at_least_as_large', 'n_closer', 'expected', 'p_value', '
     'p_value_global', 'sigma', 'is_limit', 'expected_upper', 'p_value_upper', 'p_value_global_upper',
     'reason']
 
+# The values of chanceMeteoroid saved per match and criterion, as chance_meteoroid_<label>_<name>
+CHANCE_METEOROID_FIELDS = ['n_closer', 'fraction', 'p_value', 'is_limit', 'n_closer_global',
+    'p_value_global', 'sigma', 'is_limit_global', 'reason']
 
-def _bodyRows(search, propagated=None, at_epoch_values=None, chance=None):
+
+def _bodyRows(search, propagated=None, at_epoch_values=None, chance=None, chance_meteoroid=None):
     """ The matches of a search as flat rows of (name, value) pairs, for the saved files. """
 
     rows = []
@@ -1027,6 +1274,15 @@ def _bodyRows(search, propagated=None, at_epoch_values=None, chance=None):
                 for field in CHANCE_NEO_FIELDS:
                     row.append(('chance_neo_' + label + '_' + field, r[field]))
 
+        if chance_meteoroid is not None:
+
+            for label in chance_meteoroid['labels']:
+
+                r = chance_meteoroid['results'][label][rank]
+
+                for field in CHANCE_METEOROID_FIELDS:
+                    row.append(('chance_meteoroid_' + label + '_' + field, r[field]))
+
         rows.append(row)
 
     return rows
@@ -1051,7 +1307,7 @@ def _rankedRows(ranked):
 
 
 def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values=None, chance=None,
-    ranked=None):
+    ranked=None, chance_meteoroid=None):
     """ Save the matches of a search, with the value of every D criterion that was used.
 
         The format follows the extension: JSON for .json, a CSV table otherwise. The CSV has a row
@@ -1073,6 +1329,7 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
         at_epoch_values: [list] Return of criteriaAtEpoch for them.
         chance: [dict] Return of chanceNEO for the search.
         ranked: [dict] For each criterion label, the return of rankByChance.
+        chance_meteoroid: [dict] Return of chanceMeteoroid for the search, saved like chance.
 
     Return:
         [list] The paths of the files written.
@@ -1082,7 +1339,7 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
         """ Infinite values are not JSON. """
         return v if (v is not None) and np.isfinite(v) else None
 
-    rows = _bodyRows(search, propagated, at_epoch_values, chance)
+    rows = _bodyRows(search, propagated, at_epoch_values, chance, chance_meteoroid)
 
     if file_path.lower().endswith('.json'):
 
@@ -1096,7 +1353,7 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
             #   the chance coincidence in 'chance_neo'
             entry = dict((name, v) for name, v in row
                 if (name not in search['labels']) and (not name.startswith('at_epoch_'))
-                and (not name.startswith('chance_neo_')))
+                and (not name.startswith('chance_neo_')) and (not name.startswith('chance_meteoroid_')))
             entry['criteria'] = dict((label, _finite(v)) for label, v in zip(search['labels'],
                 match['d_values']))
 
@@ -1112,6 +1369,11 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
             if chance is not None:
                 entry['chance_neo'] = dict((label, dict((field, chance['results'][label][k][field])
                     for field in CHANCE_NEO_FIELDS)) for label in chance['labels'])
+
+            if chance_meteoroid is not None:
+                entry['chance_meteoroid'] = dict((label, dict((field,
+                    chance_meteoroid['results'][label][k][field]) for field in CHANCE_METEOROID_FIELDS))
+                    for label in chance_meteoroid['labels'])
 
             matches.append(entry)
 
@@ -1130,6 +1392,11 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
             if ranked is not None:
                 out['chance_neo']['most_significant'] = dict((label, [dict(row[1:])
                     for row in _rankedRows({label: entries})]) for label, entries in ranked.items())
+
+        if chance_meteoroid is not None:
+            out['chance_meteoroid'] = dict((name, chance_meteoroid[name]) for name in ('model',
+                'reference', 'data_reference', 'license', 'h_mag', 'n_background', 'n_eff', 'n_global',
+                'meteor_in_model', 'meteor_outside_reason', 'labels', 'skipped'))
 
         with open(file_path, 'w') as f:
             json.dump(out, f, indent=2)
@@ -1289,7 +1556,14 @@ Is a match more than chance?
   most significant asteroids of the whole catalogue, and ends with a summary and a verdict. The
   population, 28 MB, is downloaded to wmpl/share the first time:
 
-      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH RHO2 --chance_neo""")
+      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH RHO2 --chance_neo
+
+  --chance_meteoroid H asks the converse, for a meteoroid of absolute magnitude H (34.75 to 41.25, in
+  the scale of the model): how often an unrelated meteoroid that hits the Earth lies at least as close
+  to each of the top N bodies, from the near-Earth object model of Deam et al. (2026), comets
+  included. The model, 3.5 MB, is downloaded to wmpl/share the first time:
+
+      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 38.0""")
 
     arg_parser.add_argument('traj_path', nargs="?", metavar='TRAJ_PATH', type=str, \
         help="Path to the trajectory pickle file.")
@@ -1362,6 +1636,14 @@ Is a match more than chance?
         "asteroids of the catalogue, and a summary with a verdict. The population (28 MB) is downloaded to wmpl/share on first use. "
         "Comets, meteorites and asteroids fainter than H = 25 get no p-value, and the criteria on the "
         "radiant are skipped. See wmpl.Utils.DebiasedNEOPopulation.")
+
+    arg_parser.add_argument('--chance_meteoroid', metavar='H', type=float, \
+        help="For each of the top N bodies, the probability that an unrelated meteoroid of absolute "
+        "magnitude H lies at least as close to it (the p-value of the match), alone and corrected for "
+        "the search (p_global, with its sigma), for every criterion on the orbital elements given with "
+        "-d except the MOID, against the meteoroids that hit the Earth in the near-Earth object model "
+        "of Deam et al. (2026). H is in the scale of the model, 34.75 to 41.25. The model (3.5 MB) is "
+        "downloaded to wmpl/share on first use. See wmpl.Utils.DebiasedMeteoroidPopulation.")
 
     arg_parser.add_argument('--no_plot', action="store_true", \
         help="Do not save the bar plot that is saved by default when several D criteria are given.")
@@ -1561,6 +1843,24 @@ Is a match more than chance?
                     search_all=search_all, chance_all=chance_all)))
 
 
+    # How often an unrelated meteoroid lies as close to each match
+    chance_meteoroid = None
+
+    if (cml_args.chance_meteoroid is not None) and matches:
+
+        print()
+
+        try:
+            chance_meteoroid = chanceMeteoroid(cml_args.chance_meteoroid, q, e, np.radians(incl),
+                np.radians(peri), np.radians(node), search=search)
+
+        except IOError as err:
+            print("--chance_meteoroid: {:s}".format(str(err)), file=sys.stderr)
+
+        if chance_meteoroid is not None:
+            print("\n".join(formatChanceMeteoroid(chance_meteoroid)))
+
+
     # Bring the bodies to the reference epoch of the meteor
     propagated = None
     at_epoch_values = None
@@ -1621,7 +1921,8 @@ Is a match more than chance?
                 'solar_longitude_deg': np.degrees(sol_h), 'v_h_kms': v_h})
 
         written = saveMatches(cml_args.save, search, meteor=meteor, propagated=propagated,
-            at_epoch_values=at_epoch_values, chance=chance, ranked=ranked)
+            at_epoch_values=at_epoch_values, chance=chance, ranked=ranked,
+            chance_meteoroid=chance_meteoroid)
 
         print()
         print("Saved the matches to", cml_args.save)

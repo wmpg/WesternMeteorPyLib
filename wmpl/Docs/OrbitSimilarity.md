@@ -315,6 +315,48 @@ python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
     `--save` adds `chance_neo_<criterion>_*` columns to the CSV and a `chance_neo` entry per match to
     the JSON. The ranking by p goes into the JSON as `most_significant`, or into
     `<name>_chance_neo.csv` beside the CSV.
+- **How often does an unrelated meteoroid share the orbit? (`--chance_meteoroid H`)** `--chance_neo`
+  asks whether the body is unusually close given how many NEOs there are. This asks the converse:
+  given the body, how often does a sporadic meteoroid, brought there by the dynamical evolution of
+  its source region and unrelated to the body, lie at least as close to it as this one? H is the
+  meteoroid's absolute magnitude in the scale of the model, 34.75 to 41.25.
+
+  ```
+  python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 38.0
+  ```
+
+  From Python, `chanceMeteoroid` takes the trajectory (`traj=traj`) or the elements, and runs the
+  search itself if it is not given one; `wmpl.Utils.DebiasedMeteoroidPopulation.chanceAssociation`
+  exposes the test directly.
+
+  - **The background.** The near-Earth object model of
+    [Deam et al. (2026)](https://doi.org/10.3847/1538-3881/ae2fc5), at meteoroid sizes (about 1 cm to
+    1 m), binned in (a, e, i, H) with six source regions and a collisional lifetime of 3 Myr to
+    H = 38.5 and 1 Myr past it. The first use downloads its posterior samples and residence-time maps,
+    3.5 MB, from [Zenodo](https://doi.org/10.5281/zenodo.17809512) into `wmpl/share`, or
+    `~/.cache/wmpl`, and checks their SHA-256. CC BY 4.0: cite the paper and the data.
+  - **Only impactors.** The model gives where the meteoroids are, and 34 to 41 % of them never cross
+    the Earth's orbit, but one that was observed is one that hit. Each orbit is therefore weighted by
+    its rate of impact, that of Opik (1951) with gravitational focusing, and given a node at 1 AU.
+    Measured with D_SH at H = 38, the fraction within 0.1 of a low-inclination Apollo orbit is 7.0
+    times that of the unweighted population, and of an Apollo orbit with i = 10 deg 4.0 times.
+    Within a bin the orbital pole is taken uniform, so that the density in i goes as sin i and
+    cancels Opik's 1/sin i: with i uniform, as the authors' sampler takes it, 57 to 67 % of the
+    impacts would come from the lowest bin, i < 4 deg, and depend on where 1/sin i is cut off.
+  - **The test.** The candidate is kept fixed and 10⁶ background impactors are compared with it:
+    p = (k + 1)/(N + 1), k the weight of those at least as close as the meteoroid. The body's size
+    plays no part, so comets are tested too. `p_global` is the probability that a background
+    meteoroid has some body of the catalogue as close, from 2000 of them compared with the whole
+    catalogue, 10 s with D_SH and 15 s with D_D for 46 000 bodies; it is the value to quote for a body
+    the search found, and `sigma` is its Gaussian equivalent, as above. The resolution is 1/(N + 1) for p and
+    1/2001 for p_global, at most 3.5 sigma.
+  - **Limits.** The model changes with H, by a factor of 0.66 to 2.0 in the fraction near the two
+    orbits above from H = 35 to 41, so H has to be given. The Earth's orbit is taken circular. The
+    model covers a < 4.2 AU and i < 88 deg. Only the criteria on the elements are offered, and not the
+    MOID, which would take 1.5 to 2.5 minutes a body. The global correction is on the criterion, not
+    on p. The meteoroid's orbit is taken as exact.
+  - **Saving.** `--save` adds `chance_meteoroid_<criterion>_*` columns to the CSV and a
+    `chance_meteoroid` entry per match to the JSON.
 
 ---
 

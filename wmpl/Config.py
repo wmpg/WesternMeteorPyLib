@@ -188,6 +188,12 @@ class ConfigStruct(object):
         #   wmpl.Utils.DebiasedNEOPopulation
         self.granvik2018_neo_file = os.path.join(abs_path, 'share', 'Granvik+_2018_Icarus.dat.gz')
 
+        # Posterior samples and residence-time maps of the near-Earth object model of Deam et al.
+        #   (2026), downloaded on first use by wmpl.Utils.DebiasedMeteoroidPopulation
+        self.deam2026_posterior_file = os.path.join(abs_path, 'share', 'Deam+_2026_posterior_samples.dat')
+        self.deam2026_residence_file = os.path.join(abs_path, 'share',
+            'Deam+_2026_residence_time_distributions.tar.gz')
+
 
         ### SHOWER ASSOCIATION
 

@@ -30,4 +30,6 @@ wmpl/share/Atens.txt
 wmpl/share/gmn_shower_table_20230518.npy
 wmpl/share/ELEMENTS.COMET
 wmpl/share/Granvik+_2018_Icarus.dat.gz
+wmpl/share/Deam+_2026_posterior_samples.dat
+wmpl/share/Deam+_2026_residence_time_distributions.tar.gz
 wmpl/MetSim/MetSimErosionCyTools.c
