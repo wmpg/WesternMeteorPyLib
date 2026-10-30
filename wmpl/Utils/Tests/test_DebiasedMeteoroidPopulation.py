@@ -48,12 +48,15 @@ def _mapRows(bins):
 
 
 def writeModel(tmp, maps_3my=(BIN_3MY,), maps_1my=(BIN_1MY,), strengths=(STRENGTHS_A, STRENGTHS_B),
-    crossovers=CROSSOVERS):
+    crossovers=CROSSOVERS, others=None):
     """ Write a model in the format of the published files: the nu6 source in the given bins of its 3 Myr
-        and 1 Myr maps, every other source in the bin of the 3 Myr map of nu6 for both lifetimes. Return
-        the paths of the posterior and of the archive. """
+        and 1 Myr maps, every other source in the bins of the 3 Myr map of nu6 for both lifetimes, or in
+        others if given. Return the paths of the posterior and of the archive. """
 
     tar_path = os.path.join(tmp, 'residence_time_distributions.tar.gz')
+
+    if others is None:
+        others = maps_3my
 
     with tarfile.open(tar_path, 'w:gz') as tar:
 
@@ -61,7 +64,7 @@ def writeModel(tmp, maps_3my=(BIN_3MY,), maps_1my=(BIN_1MY,), strengths=(STRENGT
 
             for maps, bins in ((dmp.MAPS_3MY, maps_3my), (dmp.MAPS_1MY, maps_1my)):
 
-                data = _mapRows(bins if source == 'nu6' else maps_3my).encode()
+                data = _mapRows(bins if source == 'nu6' else others).encode()
                 info = tarfile.TarInfo('residence_time_distributions/' + maps[source] + '.csv')
                 info.size = len(data)
                 tar.addfile(info, io.BytesIO(data))
@@ -413,6 +416,64 @@ def test_a_missing_file_is_reported_when_downloading_is_off():
 
         finally:
             dnp.CACHE_DIR = saved
+
+
+def test_each_map_keeps_its_fitted_share_of_the_fitted_region():
+    """ nu6 spends half its time in a bin at i = 64-68 deg, outside the region the model was fitted on.
+        Its map is normalised over the region, so it keeps there the share its strength gives it, and
+        its time outside comes on top: in each sample the bin outside holds alpha/(1 + alpha) of the
+        population, alpha being the strength of nu6, and the bin inside the rest. Normalised over all
+        its bins, as the authors' sampler does, nu6 would hold only alpha/2 of the region. """
+
+    bin_outside = (15, 15, 16)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deam = _model(tmp, maps_3my=(BIN_3MY, bin_outside), others=(BIN_3MY,))
+
+    population = deam['population']
+    assert np.allclose(population.sum(axis=(0, 1, 2)), 1.0, rtol=1e-12)
+
+    # H bin 15, below both crossovers; the other sources are all in BIN_3MY
+    k = 15
+    alpha = np.array([np.interp(dmp.H_CENTRES[k], dmp.H_NODES, s[0]) for s in (STRENGTHS_A, STRENGTHS_B)])
+
+    ratio = population[bin_outside + (k,)]/population[BIN_3MY + (k,)]
+    expected = np.mean(alpha/(1 + alpha))/np.mean(1/(1 + alpha))
+    authors = np.mean(alpha/2)/np.mean(1 - alpha/2)
+
+    assert math.isclose(ratio, expected, rel_tol=1e-3), (ratio, expected)
+    assert not math.isclose(ratio, authors, rel_tol=0.1)
+
+
+def test_mass_converts_to_h_as_the_authors_convert_the_fireballs():
+    """ An ordinary chondrite of 3500 kg/m^3 and albedo 0.147: 1 kg is H = 38.14, 0.6 kg H = 38.5 and
+        150 kg H = 34.5, as Deam et al. (2026) quote; the H the model takes, 34.75 to 41.25, is 108 kg
+        to 14 g. The command line takes H or a mass in kg or g. """
+
+    assert math.isclose(dmp.massToH(1.0), 38.138, abs_tol=1e-3)
+    assert math.isclose(dmp.massToH(0.6), 38.5, abs_tol=0.01)
+    assert math.isclose(dmp.massToH(152.3), 34.5, abs_tol=0.01)
+    assert dmp.massToH(107.0) > 34.75 > dmp.massToH(109.0)
+    assert dmp.massToH(0.0137) < 41.25 < dmp.massToH(0.0135)
+
+    # D = 1329 km 10^(-H/5)/sqrt(p_V) gives back the diameter of the sphere
+    h_mag = dmp.massToH(2.0)
+    diameter = 1329e3*10**(-h_mag/5)/math.sqrt(dmp.ALBEDO)
+    assert math.isclose(math.pi/6*diameter**3*dmp.DENSITY, 2.0, rel_tol=1e-12)
+
+    assert dmp.parseMeteoroidSize('38.0') == (38.0, None)
+    assert dmp.parseMeteoroidSize(' 0.6kg') == (float(dmp.massToH(0.6)), 0.6)
+
+    h_g, mass_g = dmp.parseMeteoroidSize('600 g')
+    assert math.isclose(mass_g, 0.6) and math.isclose(h_g, dmp.massToH(0.6))
+
+    for bad in ('heavy', '-1kg', '0g'):
+        try:
+            dmp.parseMeteoroidSize(bad)
+            raise AssertionError("{:s} was accepted".format(bad))
+
+        except ValueError:
+            pass
 
 
 def test_the_published_files_when_they_have_been_downloaded():

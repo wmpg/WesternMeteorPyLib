@@ -1,17 +1,29 @@
 """ The orbits of the meteoroids that hit the Earth, from the near-Earth object model of Deam et al.
 (2026), and the probability that a meteoroid lies as close to a parent body candidate by chance.
 
-The model of Deam et al. (2026) describes the near-Earth objects at meteoroid sizes, about 1 cm to
-1 m, fitted to sporadic meteoroids observed by the Global Fireball Observatory, on the bins and the
-residence-time maps of the model of Nesvorny et al. (2023). It is binned in (a, e, i, H): 42 x 25 x 22
-bins over a < 4.2 AU, e < 1, i < 88 deg, and 28 bins of 0.25 over 34.5 < H < 41.5. At each H it is a
-sum over six source regions (the nu6 and the 3:1, 5:2 and 2:1 resonances, the inner belt and the
-Jupiter-family comets) of the residence-time map of the source, the time its objects spend in each
-bin, weighted by the strength of the source. The strengths
+The model of Deam et al. (2026) describes the near-Earth objects at meteoroid sizes, H = 34.5 to 41.5,
+fitted to 1202 sporadic meteoroids observed by the Global Fireball Observatory, on the residence-time
+maps of the model of Nesvorny et al. (2023). The authors convert the masses of the fireballs to H with
+the density (3500 kg/m^3) and albedo (0.147) of an ordinary chondrite (massToH): 1 kg is H = 38.14, and
+the model spans 150 kg to 10 g, 0.44 m to 1.7 cm in diameter. It is binned in (a, e, i, H): 42 x 25 x 22
+bins over a < 4.2 AU, e < 1, i < 88 deg, and 28 bins of 0.25 over 34.5 < H < 41.5. The authors fitted it
+on bins twice as wide in a and e, over e > 0.04 and i < 60 deg (their Table 1), and their sampler draws
+it, as here, on the finer bins. At each H it is a sum over six source regions (the nu6 and the 3:1, 5:2
+and 2:1 resonances, the inner belt and the Jupiter-family comets) of the residence-time map of the
+source, the time its objects spend in each bin, weighted by the strength of the source. The strengths
 are linear in H between H = 34.5, 36.75, 39.25 and 41.5. The maps are those for a collisional
 lifetime of 3 Myr up to an H that is fitted, and of 1 Myr past it: H = 38.5 in 4122 of the 4125
 posterior samples. The model gives the relative orbital distribution at each H, not the numbers of
 objects.
+
+The strengths were fitted with each map normalised over the fitted region, so that the strength of a
+source is its share of that region. Here too each map is normalised over the region, and the
+population of each posterior sample at each H then over all the bins. The authors' sampler normalises
+each map over all its bins instead, which gives a source with more of its time outside the region less
+weight than it was fitted with: 7 to 18 % of the time of the 3:1, 5:2 and 2:1 resonances and of the
+Jupiter-family comets in their 3 Myr maps is at i > 60 deg, against 0.3 to 0.4 % for nu6 and the inner
+belt. Measured on the two orbits below, that would raise the fraction of the background near them by
+1 to 3 %.
 
 Two files are needed, 3.5 MB together, and are not distributed with wmpl. They are downloaded on
 first use from the authors' Zenodo record, checked against their SHA-256 and kept in wmpl/share (or
@@ -19,15 +31,19 @@ first use from the authors' Zenodo record, checked against their SHA-256 and kep
 samples of the source strengths, and the residence-time maps. Deam & Nesvorny publish them under CC BY
 4.0: cite the paper and the data.
 
-    Deam, S. E., et al. (2026), A Near-Earth Object Model Calibrated to Earth Impactors, AJ 171, 126,
-    doi:10.3847/1538-3881/ae2fc5
+    Deam, S. E., Devillepoix, H. A. R., Nesvorny, D., et al. (2026), A Near-Earth Object Model
+    Calibrated to Earth Impactors, AJ 171, 126, doi:10.3847/1538-3881/ae2fc5
     Deam, S. E. & Nesvorny, D. (2025), Sampling and querying code for the Near-Earth Object Model
     Calibrated to Earth Impactors, Zenodo, doi:10.5281/zenodo.17809512
 
 The background. The model gives where the objects are, not which of them hit the Earth, and a
-meteoroid that was observed is one that did: 34 to 41 % of the model's population at H = 35 to 41 does
-not even cross the Earth's orbit. Each orbit is therefore weighted by its rate of impact on the Earth,
-that of Opik (1951) for a target on a circular orbit of 1 AU, with gravitational focusing:
+meteoroid that was observed is one that did: 34.5 to 42 % of the model's population at H = 35 to 41
+does not even cross the Earth's orbit. To fit the model, Deam et al. went from the fireballs to the
+population by dividing each fireball by its probability of impact, from 100 000 years of backward
+integration of its clones with the method of Fuentes-Munoz et al. (2023, AJ 166, 10), and by the
+gravitational focusing (their Appendix B). Going back, each orbit of the model is multiplied here by its
+rate of impact on the Earth. The model has no angles to integrate, so the rate is that of Opik (1951),
+which averages over them, for a target on a circular orbit of 1 AU, with the same focusing:
 
     P ~ U (1 + v_esc^2/v_inf^2) / (a^1.5 sin i |U_x|)
         U^2 = 3 - 1/a - 2 sqrt(a (1 - e^2)) cos i       the encounter speed, in units of the Earth's
@@ -35,16 +51,17 @@ that of Opik (1951) for a target on a circular orbit of 1 AU, with gravitational
                                                        touches 1 AU
         v_inf = U v_E                                  v_E = 29.78 km/s, v_esc = 11.10 km/s at 100 km
 
-and zero for an orbit that does not cross 1 AU. This changes the background a great deal: measured
-with D_SH at H = 38, the fraction of the impactors within 0.1 of a low-inclination Apollo orbit
-(q = 0.99 AU, i = 0.5 deg) is 7.0 times that of the population, and of an Apollo orbit with q = 0.8 AU
-and i = 10 deg 4.0 times.
+and zero for an orbit that does not cross 1 AU. This changes the background a great deal. Two Apollo
+orbits are used for the figures here, both with the ascending node at 0 and a node at 1 AU: a
+low-inclination one, q = 0.99 AU, e = 0.4, i = 0.5 deg (argument of perihelion 15.2 deg), and one with
+q = 0.8 AU, e = 0.5, i = 10 deg (66.4 deg). Measured with D_SH at H = 38, the fraction of the impactors
+within 0.1 of them is 20 and 4.2 times that of the population, whose angles are uniform.
 
 Within a bin a and e are taken uniform, as the authors' sampler takes them, and the orbital pole
 uniform on the sphere, so that the density in i goes as sin i. The authors' sampler takes i uniform
 instead, which for the population is a fine difference but not for the impacts: with i uniform down to
 0, Opik's 1/sin i makes the impacts from the lowest bin depend on where 1/sin i is cut off. Cut off at
-the Earth's radius, 57 to 67 % of the impacts at H = 35 to 41 come from i < 4 deg, 6 to 8 % of the
+the Earth's radius, 60 to 68 % of the impacts at H = 35 to 41 come from i < 4 deg, 6 to 8 % of the
 population. With the pole uniform, the sin i of the density cancels the 1/sin i of the rate and there
 is nothing to cut off.
 
@@ -86,15 +103,25 @@ wmpl.Utils.DebiasedNEOPopulation.
 
 What the test assumes:
     - The meteoroid's H selects the model: the bins within H +- 0.25, as the authors' sampler takes
-      them, so H can be given between 34.75 and 41.25. The source strengths change with H, and with
-      them the fraction of the background within D_SH = 0.1 of the two Apollo orbits above, by 2.0 and
-      0.66 times from H = 35 to 41. H is that of the model, D = 1329 km 10^(-H/5)/sqrt(p_V).
-    - The posterior is averaged: the population is the mean of the 4125 posterior samples, and the
-      empty bins are filled with 1e-8 before each map is normalised, as in the authors' sampler.
+      them, so H can be given between 34.75 and 41.25, 108 kg to 14 g. The source strengths change with
+      H, and with them the fraction of the background within D_SH = 0.1 of the two Apollo orbits above:
+      over H = 35 to 41 it is 0.86 to 1.10 and 0.57 to 1.06 times its value at H = 38.
+    - H is that of the model. Convert a mass with massToH and its defaults whatever the meteoroid's
+      type: every fireball the model was fitted to was converted so.
+    - The posterior is averaged: the population is the mean of the 4125 posterior samples (3566 of them
+      distinct), and the empty bins are filled with 1e-8 before each map is normalised, as in the
+      authors' sampler. Their sampler draws from the samples of highest likelihood instead, which with
+      its recommended five are the best fit five times over. The best fit alone puts 0.75 to 1.03 times
+      the background of the posterior mean near the two orbits over H = 35 to 41, the least at H = 35.
+    - The rate of impact is Opik's, which takes the angles of the orbit as uniform over its secular
+      cycle. For the fireballs, whose positions they know, Deam et al. preferred integrations, so the
+      weighting here is not the exact inverse of their debiasing.
     - The Earth's orbit is taken circular. An orbit with q up to 1.017 AU, or Q down to 0.983 AU, can
       hit the Earth but has no counterpart in the background, so a meteoroid there gets a p-value
       biased low.
     - The model covers a < 4.2 AU and i < 88 deg, prograde. A meteoroid outside it gets no p-value.
+      Past i = 60 deg and below e = 0.04 it is the maps' own extension of the fitted region, not fitted
+      to any fireball.
     - Only the criteria on the orbital elements are offered, and not the MOID, which costs 0.09 to
       0.15 ms a pair, 1.5 to 2.5 minutes a body against 10^6 background orbits.
     - The global correction is on the criterion, not on p: a body in a sparse part of orbit space at a
@@ -121,8 +148,8 @@ from wmpl.Utils.DebiasedNEOPopulation import (CACHE_DIR, findDebiasedNEOPopulati
 
 _ZENODO = 'https://zenodo.org/records/17809512/files/'
 
-_REFERENCE = ('Deam, S. E., et al. (2026), A Near-Earth Object Model Calibrated to Earth Impactors, '
-    'AJ 171, 126, doi:10.3847/1538-3881/ae2fc5')
+_REFERENCE = ('Deam, S. E., Devillepoix, H. A. R., Nesvorny, D., et al. (2026), A Near-Earth Object '
+    'Model Calibrated to Earth Impactors, AJ 171, 126, doi:10.3847/1538-3881/ae2fc5')
 
 _DATA_REFERENCE = ('Deam, S. E. & Nesvorny, D. (2025), Sampling and querying code for the Near-Earth '
     'Object Model Calibrated to Earth Impactors, Zenodo, doi:10.5281/zenodo.17809512')
@@ -183,6 +210,14 @@ MAPS_1MY = {'nu6': 'nu6_tc1My', '31': '31_tc1My', 'inner': 'inn_tc1My', '52': '5
 # What the authors' sampler fills the empty bins of a map with before normalising it
 EMPTY_BIN = 1e-8
 
+# The bins of the region the model was fitted on, e > 0.04 and i < 60 deg (Deam et al. 2026, Table 1)
+FIT_REGION = (slice(None), slice(1, None), slice(0, 15))
+
+# The density (kg/m^3) and geometric albedo of an ordinary chondrite, with which Deam et al. (2026)
+#   convert the masses of the fireballs to H
+DENSITY = 3500.0
+ALBEDO = 0.147
+
 # The Earth's orbital speed on a circle of 1 AU, and the escape speed at 100 km, where a meteoroid
 #   becomes a meteor [km/s]
 SPEED_EARTH = GAUSS_K*149597870.7/86400.0
@@ -205,9 +240,57 @@ def findDeamModel(model=DEAM2026):
     return [findDebiasedNEOPopulation(f) for f in model['files']]
 
 
+def massToH(mass, density=DENSITY, albedo=ALBEDO):
+    """ The absolute magnitude of a meteoroid in the scale of the model, from its mass, as Deam et al.
+        (2026) convert the masses of the fireballs: a sphere of the density and albedo of an ordinary
+        chondrite, with D = 1329 km 10^(-H/5)/sqrt(p_V). 1 kg is H = 38.14.
+
+    Arguments:
+        mass: [float or ndarray] Mass (kg).
+
+    Keyword arguments:
+        density: [float] Bulk density (kg/m^3).
+        albedo: [float] Geometric albedo.
+
+    Return:
+        [float or ndarray] H.
+    """
+
+    diameter_km = (6.0*np.asarray(mass, dtype=float)/(np.pi*density))**(1.0/3)/1000.0
+
+    return 5.0*np.log10(1329.0/(diameter_km*np.sqrt(albedo)))
+
+
+def parseMeteoroidSize(value):
+    """ The meteoroid's H from a command-line value: H itself, or a mass ending in kg or g, converted
+        with massToH.
+
+    Arguments:
+        value: [str] For example '38.0', '0.6kg' or '600g'.
+
+    Return:
+        (h_mag, mass): [tuple] H, and the mass in kg if one was given, else None.
+    """
+
+    text = str(value).strip().lower()
+
+    for unit, factor in (('kg', 1.0), ('g', 1e-3)):
+
+        if text.endswith(unit):
+
+            mass = float(text[:-len(unit)])*factor
+
+            if not (mass > 0):
+                raise ValueError("The mass has to be positive, not {:s}.".format(str(value)))
+
+            return float(massToH(mass)), mass
+
+    return float(text), None
+
+
 def _readMaps(tar_path):
     """ The residence-time maps of the sources, 42 x 25 x 22 each, read from the archive without
-        unpacking it. """
+        unpacking it, and each normalised over the region the model was fitted on, FIT_REGION. """
 
     maps = {}
 
@@ -227,8 +310,11 @@ def _readMaps(tar_path):
             counts[rows[:, 0].astype(int) - 1, rows[:, 1].astype(int) - 1,
                 rows[:, 2].astype(int) - 1] = rows[:, 3]
 
+            # The strengths were fitted with each map normalised over the region, so that a source's
+            #   strength is its share of the region; normalised over all its bins, as the authors'
+            #   sampler does, a source with more time outside it would weigh less than it was fitted to
             counts[counts == 0.0] = EMPTY_BIN
-            maps[name[:-len('.csv')]] = counts/np.sum(counts)
+            maps[name[:-len('.csv')]] = counts/np.sum(counts[FIT_REGION])
 
     missing = [m for m in list(MAPS_3MY.values()) + list(MAPS_1MY.values()) if m not in maps]
 
@@ -299,14 +385,23 @@ def loadDeamModel(model=DEAM2026, posterior_path=None, residence_path=None, down
     maps = _readMaps(paths[1])
 
     # The strength of each source at each H bin, as the authors' sampler interpolates it, and split
-    #   between the two lifetimes by each sample's crossover. The model is linear in the strengths, so
-    #   averaging these averages the model
+    #   between the two lifetimes by each sample's crossover
     strength_h = np.empty(strengths.shape[:2] + (len(H_CENTRES),))
     for k in range(strengths.shape[0]):
         for s in range(len(SOURCES)):
             strength_h[k, s] = np.interp(H_CENTRES, H_NODES, strengths[k, s])
 
     long_lived = np.arange(len(H_CENTRES))[None, :] < crossover[:, None]
+
+    # Each sample's population at each H sums to 1 over all the bins, the strengths being scaled by
+    #   the sum of the maps, which are normalised over the fitted region only. The model is then linear
+    #   in the scaled strengths, so averaging them averages the model
+    total_3my = np.array([np.sum(maps[MAPS_3MY[source]]) for source in SOURCES])
+    total_1my = np.array([np.sum(maps[MAPS_1MY[source]]) for source in SOURCES])
+    total = np.sum(strength_h*np.where(long_lived[:, None, :], total_3my[None, :, None],
+        total_1my[None, :, None]), axis=1)
+    strength_h = strength_h/total[:, None, :]
+
     mean_3my = np.mean(strength_h*long_lived[:, None, :], axis=0)
     mean_1my = np.mean(strength_h*(~long_lived)[:, None, :], axis=0)
 

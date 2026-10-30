@@ -921,6 +921,7 @@ def chanceMeteoroid(h_mag, q=None, e=None, incl=None, peri=None, node=None, traj
 
     Arguments:
         h_mag: [float] Absolute magnitude of the meteoroid, in the model's scale, 34.75 to 41.25.
+            wmpl.Utils.DebiasedMeteoroidPopulation.massToH converts a mass to it.
 
     Keyword arguments:
         q, e, incl, peri, node: [float] The meteoroid's orbit, the angles in radians, if traj is not
@@ -1559,11 +1560,12 @@ Is a match more than chance?
       python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH RHO2 --chance_neo
 
   --chance_meteoroid H asks the converse, for a meteoroid of absolute magnitude H (34.75 to 41.25, in
-  the scale of the model): how often an unrelated meteoroid that hits the Earth lies at least as close
-  to each of the top N bodies, from the near-Earth object model of Deam et al. (2026), comets
-  included. The model, 3.5 MB, is downloaded to wmpl/share the first time:
+  the scale of the model) or of a given mass: how often an unrelated meteoroid that hits the Earth
+  lies at least as close to each of the top N bodies, from the near-Earth object model of Deam et al.
+  (2026), comets included. The model, 3.5 MB, is downloaded to wmpl/share the first time:
 
-      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 38.0""")
+      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 38.0
+      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 0.6kg""")
 
     arg_parser.add_argument('traj_path', nargs="?", metavar='TRAJ_PATH', type=str, \
         help="Path to the trajectory pickle file.")
@@ -1637,13 +1639,15 @@ Is a match more than chance?
         "Comets, meteorites and asteroids fainter than H = 25 get no p-value, and the criteria on the "
         "radiant are skipped. See wmpl.Utils.DebiasedNEOPopulation.")
 
-    arg_parser.add_argument('--chance_meteoroid', metavar='H', type=float, \
+    arg_parser.add_argument('--chance_meteoroid', metavar='H|MASS', type=str, \
         help="For each of the top N bodies, the probability that an unrelated meteoroid of absolute "
         "magnitude H lies at least as close to it (the p-value of the match), alone and corrected for "
         "the search (p_global, with its sigma), for every criterion on the orbital elements given with "
         "-d except the MOID, against the meteoroids that hit the Earth in the near-Earth object model "
-        "of Deam et al. (2026). H is in the scale of the model, 34.75 to 41.25. The model (3.5 MB) is "
-        "downloaded to wmpl/share on first use. See wmpl.Utils.DebiasedMeteoroidPopulation.")
+        "of Deam et al. (2026). H is in the scale of the model, 34.75 to 41.25; a mass, such as 0.6kg "
+        "or 600g, is converted to it as the authors convert the fireballs (an ordinary chondrite, "
+        "3500 kg/m^3 and albedo 0.147; 1 kg is H = 38.14), whatever the meteoroid's type. The model "
+        "(3.5 MB) is downloaded to wmpl/share on first use. See wmpl.Utils.DebiasedMeteoroidPopulation.")
 
     arg_parser.add_argument('--no_plot', action="store_true", \
         help="Do not save the bar plot that is saved by default when several D criteria are given.")
@@ -1850,8 +1854,23 @@ Is a match more than chance?
 
         print()
 
+        from wmpl.Utils.DebiasedMeteoroidPopulation import parseMeteoroidSize
+
         try:
-            chance_meteoroid = chanceMeteoroid(cml_args.chance_meteoroid, q, e, np.radians(incl),
+            h_meteoroid, mass_meteoroid = parseMeteoroidSize(cml_args.chance_meteoroid)
+
+        except ValueError:
+            print("--chance_meteoroid takes H, or a mass ending in kg or g, not {:s}.".format(
+                cml_args.chance_meteoroid), file=sys.stderr)
+            sys.exit(1)
+
+        if mass_meteoroid is not None:
+            print("--chance_meteoroid: {:g} kg is H = {:.2f}, as an ordinary chondrite of 3500 kg/m^3 "
+                "and albedo 0.147, as Deam et al. (2026) convert the fireballs.".format(mass_meteoroid,
+                    h_meteoroid))
+
+        try:
+            chance_meteoroid = chanceMeteoroid(h_meteoroid, q, e, np.radians(incl),
                 np.radians(peri), np.radians(node), search=search)
 
         except IOError as err:
