@@ -375,6 +375,35 @@ python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
     the criterion, not on p. The meteoroid's orbit is taken as exact.
   - **Saving.** `--save` adds `chance_meteoroid_<criterion>_*` columns to the CSV and a
     `chance_meteoroid` entry per match to the JSON.
+- **Within the uncertainty of the orbit.** `--clones N` repeats the comparison for N clones of the
+  meteor's orbit, drawn from the covariance of a trajectory solved with the Monte Carlo uncertainties,
+  with the draws of `wmpl.Rebound.REBOUND`: `--clones N --seed S` here are the clones that
+  `REBOUND.py --mc N --seed S` integrates, at the epoch of the meteor, each turned into an orbit as the
+  solver computed the nominal one (`wmpl.Utils.OrbitClones`). Each clone is compared with its own
+  radiant, as the nominal orbit is.
+
+  ```
+  python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DD --clones 1000 --dmax 0.10 0.09
+  ```
+
+  For each match it gives the 95% interval of every criterion over the clones, the share of them under
+  the threshold given with `--dmax` (one per criterion, in the order of `-d`), how often the body is the
+  closest of the whole catalogue by the first criterion and its rank among all the bodies (median and
+  95%), and it names the bodies that are the closest for some clone.
+  - **What to quote.** The nominal values. A criterion is a distance between orbits, so noise moves it
+    away on average: the median over the clones lies above the nominal value and is no estimate of it.
+    The p-values of `--chance_neo` and `--chance_meteoroid` stay those of the nominal orbit.
+  - **When it matters.** For a well-measured fireball hardly at all: Novo Mesto (initial speed known to
+    14 m/s), 500 clones, keeps 2005 OX as the closest body in every clone, at D_SH 0.0785 [0.0781,
+    0.0790]; only a candidate right at a threshold moves, the second, 2008 DK5 (D_SH 0.0994), being
+    under 0.10 in 77% of the clones. With the covariance scaled by 10 (140 m/s, the radiant alike) that
+    share falls to 52%, and scaled by 30 (410 m/s) 2005 OX is the closest body in 71% of the clones
+    only, at D_SH 0.0785 [0.0732, 0.1242], their median 0.0854.
+  - **Cost.** The first criterion is computed against the whole catalogue for every clone: a few ms per
+    clone for a criterion on the elements, ~0.15 s for one on the radiant (after ~4 s to derive the
+    radiants of the catalogue once) and ~3 s for the MOID. The other criteria only against the matches.
+  - **Saving.** `--save` adds `clones_*` columns to the CSV and a `clones` entry per match to the JSON,
+    with a `clones` summary (seed, thresholds, closest bodies, spread of the clones' orbits).
 
 ---
 

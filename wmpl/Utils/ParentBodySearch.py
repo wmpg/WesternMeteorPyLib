@@ -26,6 +26,12 @@ meteoroid of absolute magnitude H lies at least as close to it, for the body alo
 the search, against the meteoroids that hit the Earth in the near-Earth object model of Deam et al.
 (2026), which is downloaded on first use. Comets get a value too. chanceMeteoroid takes the meteoroid's
 trajectory or its elements. See wmpl.Utils.DebiasedMeteoroidPopulation.
+
+--clones N [--seed S] repeats the comparison for N clones of the meteor's orbit, drawn from the
+covariance of its trajectory as wmpl.Rebound.REBOUND draws its Monte Carlo realizations: for each match,
+the 95% interval of every criterion over the clones, the share of them under a threshold (--dmax), how
+often it is the closest body of the catalogue and its rank. The values to quote stay the nominal ones.
+See wmpl.Utils.OrbitClones.
 """
 
 # The MIT License
@@ -1239,7 +1245,8 @@ CHANCE_METEOROID_FIELDS = ['n_closer', 'fraction', 'p_value', 'is_limit', 'regio
     'sigma', 'is_limit_global', 'reason']
 
 
-def _bodyRows(search, propagated=None, at_epoch_values=None, chance=None, chance_meteoroid=None):
+def _bodyRows(search, propagated=None, at_epoch_values=None, chance=None, chance_meteoroid=None,
+    clones=None):
     """ The matches of a search as flat rows of (name, value) pairs, for the saved files. """
 
     rows = []
@@ -1296,6 +1303,12 @@ def _bodyRows(search, propagated=None, at_epoch_values=None, chance=None, chance
                 for field in CHANCE_METEOROID_FIELDS:
                     row.append(('chance_meteoroid_' + label + '_' + field, r[field]))
 
+        if clones is not None:
+
+            from wmpl.Utils.OrbitClones import cloneSearchColumns
+
+            row += cloneSearchColumns(clones, rank)
+
         rows.append(row)
 
     return rows
@@ -1320,7 +1333,7 @@ def _rankedRows(ranked):
 
 
 def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values=None, chance=None,
-    ranked=None, chance_meteoroid=None):
+    ranked=None, chance_meteoroid=None, clones=None):
     """ Save the matches of a search, with the value of every D criterion that was used.
 
         The format follows the extension: JSON for .json, a CSV table otherwise. The CSV has a row
@@ -1343,6 +1356,9 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
         chance: [dict] Return of chanceNEO for the search.
         ranked: [dict] For each criterion label, the return of rankByChance.
         chance_meteoroid: [dict] Return of chanceMeteoroid for the search, saved like chance.
+        clones: [dict] Return of wmpl.Utils.OrbitClones.cloneSearch for the search: for each match, the
+            95% interval of each criterion over the clones of the meteor's orbit, the share under each
+            threshold, how often it is the closest body and its rank; in the JSON also the clones as a whole.
 
     Return:
         [list] The paths of the files written.
@@ -1352,7 +1368,7 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
         """ Infinite values are not JSON. """
         return v if (v is not None) and np.isfinite(v) else None
 
-    rows = _bodyRows(search, propagated, at_epoch_values, chance, chance_meteoroid)
+    rows = _bodyRows(search, propagated, at_epoch_values, chance, chance_meteoroid, clones)
 
     if file_path.lower().endswith('.json'):
 
@@ -1366,7 +1382,8 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
             #   the chance coincidence in 'chance_neo'
             entry = dict((name, v) for name, v in row
                 if (name not in search['labels']) and (not name.startswith('at_epoch_'))
-                and (not name.startswith('chance_neo_')) and (not name.startswith('chance_meteoroid_')))
+                and (not name.startswith('chance_neo_')) and (not name.startswith('chance_meteoroid_'))
+                and (not name.startswith('clones_')))
             entry['criteria'] = dict((label, _finite(v)) for label, v in zip(search['labels'],
                 match['d_values']))
 
@@ -1387,6 +1404,12 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
                 entry['chance_meteoroid'] = dict((label, dict((field,
                     chance_meteoroid['results'][label][k][field]) for field in CHANCE_METEOROID_FIELDS))
                     for label in chance_meteoroid['labels'])
+
+            if clones is not None:
+
+                from wmpl.Utils.OrbitClones import cloneSearchMatch
+
+                entry['clones'] = cloneSearchMatch(clones, k)
 
             matches.append(entry)
 
@@ -1410,6 +1433,12 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
             out['chance_meteoroid'] = dict((name, chance_meteoroid[name]) for name in ('model',
                 'reference', 'data_reference', 'license', 'h_mag', 'n_background', 'n_eff', 'n_global',
                 'n_bodies', 'meteor_in_model', 'meteor_outside_reason', 'labels', 'skipped'))
+
+        if clones is not None:
+
+            from wmpl.Utils.OrbitClones import cloneSearchSummary
+
+            out['clones'] = cloneSearchSummary(clones)
 
         with open(file_path, 'w') as f:
             json.dump(out, f, indent=2)
@@ -1577,7 +1606,22 @@ Is a match more than chance?
   (2026), comets included. The model, 3.5 MB, is downloaded to wmpl/share the first time:
 
       python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 38.0
-      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 0.6kg""")
+      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 0.6kg
+
+Within the uncertainty of the orbit
+  --clones N compares N clones of the meteor's orbit as well, drawn from the covariance of a trajectory
+  solved with the Monte Carlo uncertainties, with the same draws as wmpl.Rebound.REBOUND: --clones N
+  --seed S here are the clones of REBOUND.py --mc N --seed S, at the epoch of the meteor. For each match
+  it gives the 95% interval of every criterion over the clones, the share of the clones under a
+  threshold given with --dmax (one per criterion, in the order of -d), how often the body is the closest
+  of the catalogue by the first criterion, and its rank among all the bodies:
+
+      python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DD --clones 1000 --dmax 0.10 0.09
+
+  The values to quote are the nominal ones: a criterion is a distance, so the clones' noise moves it
+  away on average, and their median is no estimate of it. For a well-measured fireball the clones
+  change nothing; they matter for poorly constrained orbits. Each clone costs a few ms with a criterion
+  on the elements first, ~0.15 s with one on the radiant and ~3 s with the MOID.""")
 
     arg_parser.add_argument('traj_path', nargs="?", metavar='TRAJ_PATH', type=str, \
         help="Path to the trajectory pickle file.")
@@ -1667,6 +1711,20 @@ Is a match more than chance?
     arg_parser.add_argument('--plot_path', metavar='FILE', type=str, \
         help="Where to save the bar plot, instead of beside the pickle.")
 
+    arg_parser.add_argument('--clones', metavar='N', type=int, \
+        help="Compare N clones of the meteor's orbit too, drawn from the covariance of the trajectory "
+        "(a pickle solved with the Monte Carlo uncertainties) as wmpl.Rebound.REBOUND --mc draws them: "
+        "the 95%% interval of each criterion over the clones for each match, how often it is the closest "
+        "body and its rank. See wmpl.Utils.OrbitClones.")
+
+    arg_parser.add_argument('--seed', metavar='S', type=int, \
+        help="Seed of the clones, to draw the same ones again, or those of wmpl.Rebound.REBOUND --seed S. "
+        "Drawn and printed if not given.")
+
+    arg_parser.add_argument('--dmax', metavar='D', type=float, nargs='+', \
+        help="With --clones, a threshold for each criterion, in the order of -d (fewer may be given): the "
+        "share of the clones under it is given for each match.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1677,6 +1735,7 @@ Is a match more than chance?
     geocentric = None
     heliocentric = None
     jd_ref = cml_args.jd
+    traj = None
 
     if cml_args.traj_path is not None:
 
@@ -1750,6 +1809,30 @@ Is a match more than chance?
             file=sys.stderr)
         sys.exit(1)
 
+    if (cml_args.clones is None) and ((cml_args.seed is not None) or (cml_args.dmax is not None)):
+        print("--seed and --dmax go with --clones.", file=sys.stderr)
+        sys.exit(1)
+
+    if cml_args.clones is not None:
+
+        if traj is None:
+            print("--clones needs a trajectory pickle solved with the Monte Carlo uncertainties: the "
+                "clones are drawn from its covariance.", file=sys.stderr)
+            sys.exit(1)
+
+        if (getattr(traj, 'uncertainties', None) is None) or (getattr(traj, 'state_vect_cov', None) is None):
+            print("--clones: the trajectory has no Monte Carlo uncertainties (traj.state_vect_cov), so it "
+                "has no clones. Solve it again with the Monte Carlo uncertainties.", file=sys.stderr)
+            sys.exit(1)
+
+        if cml_args.clones < 2:
+            print("--clones needs at least 2 clones.", file=sys.stderr)
+            sys.exit(1)
+
+        if (cml_args.dmax is not None) and (len(cml_args.dmax) > len(d_crit_keys)):
+            print("--dmax takes at most one threshold per criterion of -d.", file=sys.stderr)
+            sys.exit(1)
+
 
 
     # Print orbital elements
@@ -1818,6 +1901,31 @@ Is a match more than chance?
             m['e'], m['incl'], m['peri'], m['node'], m['h_mag']) \
             + ", ".join("{:{:d}.{:d}f}".format(v, w, d) if np.isfinite(v) else "{:>{:d}s}".format("n/a", w) \
             for v, w, d in zip(m['d_values'], widths, decimals)))
+
+
+    # The same comparison for clones of the orbit, within the uncertainty of the trajectory
+    clone_stats = None
+
+    if (cml_args.clones is not None) and matches:
+
+        from wmpl.Utils.OrbitClones import cloneOrbits, cloneHeaderLines, cloneSearch, formatCloneSearch
+
+        print()
+        print("Within the uncertainty of the orbit:")
+
+        clones = cloneOrbits(traj, cml_args.clones, random_seed=cml_args.seed)
+        print("\n".join(cloneHeaderLines(clones)))
+
+        def _progress(k, n):
+            """ Overwrite one line of a terminal with the number of clones done. """
+            if sys.stdout.isatty() and ((k == n) or (k % max(1, n//100) == 0)):
+                sys.stdout.write("\r  {:d}/{:d} clones compared".format(k, n) + ("\n" if k == n else ""))
+                sys.stdout.flush()
+
+        clone_stats = cloneSearch(search, meteorites_elements if cml_args.meteorites \
+            else comets_elements + asteroids_elements, clones, dmax=cml_args.dmax, progress=_progress)
+
+        print("\n".join(formatCloneSearch(clone_stats, search, decimals=[d + 1 for d in decimals])))
 
 
     # The probability that each match is a chance coincidence
@@ -1953,7 +2061,7 @@ Is a match more than chance?
 
         written = saveMatches(cml_args.save, search, meteor=meteor, propagated=propagated,
             at_epoch_values=at_epoch_values, chance=chance, ranked=ranked,
-            chance_meteoroid=chance_meteoroid)
+            chance_meteoroid=chance_meteoroid, clones=clone_stats)
 
         print()
         print("Saved the matches to", cml_args.save)

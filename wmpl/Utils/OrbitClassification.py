@@ -6,6 +6,11 @@ they are kept apart from the dissimilarity criteria in wmpl.Utils.Dcriteria.
 All functions take angles in radians. The single-parameter criteria, the two-parameter cometary
 tests and the near-Earth and meteoroid orbital classes accept scalars or numpy arrays; the Tancredi
 (2014) classifiers return a label and take scalars only.
+
+The command line classifies the orbit of a trajectory pickle or one given by hand. With --clones N
+[--seed S] it also classifies N clones of the orbit, drawn from the covariance of a trajectory solved
+with the Monte Carlo uncertainties as wmpl.Rebound.REBOUND draws them, and gives the 95% interval of
+every parameter and the share of the clones in each class (see wmpl.Utils.OrbitClones).
 """
 
 from __future__ import print_function, division, absolute_import
@@ -1112,6 +1117,16 @@ if __name__ == "__main__":
     output.add_argument('--quiet', '-Q', action='store_true', \
         help="Print one 'KEY VALUE' line per quantity and nothing else, for scripted use.")
 
+    uncertainty = arg_parser.add_argument_group('within the uncertainty of the orbit',
+        "Classify clones of the orbit too, drawn from the covariance of a trajectory pickle solved with "
+        "the Monte Carlo uncertainties, with the draws of wmpl.Rebound.REBOUND (--clones N --seed S here "
+        "are the clones of its --mc N --seed S). See wmpl.Utils.OrbitClones.")
+    uncertainty.add_argument('--clones', metavar='N', type=int, \
+        help="Classify N clones, and give the 95%% interval of every parameter and the share of the "
+             "clones in each class.")
+    uncertainty.add_argument('--seed', metavar='S', type=int, \
+        help="Seed of the clones, to draw the same ones again. Drawn and printed if not given.")
+
     cml_args = arg_parser.parse_args()
 
 
@@ -1130,9 +1145,12 @@ if __name__ == "__main__":
 
 
     # Assemble the orbit, either from a trajectory pickle or from the elements given by hand
+    traj = None
+
     if cml_args.traj_path is not None:
 
-        orbit = loadPickle(*os.path.split(cml_args.traj_path)).orbit
+        traj = loadPickle(*os.path.split(cml_args.traj_path))
+        orbit = traj.orbit
         q, e, incl, node, peri = orbit.q, orbit.e, orbit.i, orbit.node, orbit.peri
 
     else:
@@ -1168,6 +1186,22 @@ if __name__ == "__main__":
     a = q/(1.0 - e)
 
     verbose = not cml_args.quiet
+
+    if (cml_args.clones is None) and (cml_args.seed is not None):
+        reportError("--seed goes with --clones.")
+
+    if cml_args.clones is not None:
+
+        if traj is None:
+            reportError("--clones needs a trajectory pickle solved with the Monte Carlo uncertainties: "
+                "the clones are drawn from its covariance.")
+
+        if (getattr(traj, 'uncertainties', None) is None) or (getattr(traj, 'state_vect_cov', None) is None):
+            reportError("--clones: the trajectory has no Monte Carlo uncertainties (traj.state_vect_cov), "
+                "so it has no clones. Solve it again with the Monte Carlo uncertainties.")
+
+        if cml_args.clones < 2:
+            reportError("--clones needs at least 2 clones.")
 
 
     if verbose:
@@ -1286,3 +1320,25 @@ if __name__ == "__main__":
         print("The Tancredi classification of an asteroid was skipped: it needs the distances to")
         print("the giant planets, and so the node and the argument of perihelion, from a")
         print("trajectory pickle or from the --node and --peri arguments.")
+
+
+    ### WITHIN THE UNCERTAINTY OF THE ORBIT
+
+    if cml_args.clones is not None:
+
+        from wmpl.Utils.OrbitClones import (cloneOrbits, cloneHeaderLines, cloneClasses, classifyOrbit,
+            formatCloneClasses)
+
+        clones = cloneOrbits(traj, cml_args.clones, random_seed=cml_args.seed)
+        summary = cloneClasses(clones)
+        nominal = classifyOrbit(q, e, incl, node, peri)
+
+        if verbose:
+            print()
+            print("Within the uncertainty of the orbit")
+            print("-----------------------------------")
+            print("\n".join("  " + line for line in cloneHeaderLines(clones)))
+            print()
+
+        print("\n".join(("  " + line) if verbose and line else line
+            for line in formatCloneClasses(summary, nominal, quiet=not verbose)))

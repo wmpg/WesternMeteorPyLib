@@ -14,6 +14,7 @@ Atira, Aten, Apollo or Amor.
 - [One-parameter criteria](#one-parameter-criteria)
 - [Two-parameter cometary tests](#two-parameter-cometary-tests)
 - [The Tancredi scheme](#the-tancredi-scheme)
+- [Within the uncertainty of the orbit](#within-the-uncertainty-of-the-orbit)
 - [Supporting machinery](#supporting-machinery)
 - [Cost](#cost)
 - [Verification status](#verification-status)
@@ -276,6 +277,30 @@ This is what stops the scheme from calling every resonant asteroid a comet.
 The libration width is computed from the eccentricity for the five inner resonances and taken as a
 fixed value for the three outer ones, where the expansion of the disturbing function is no longer
 reliable.
+
+---
+
+## Within the uncertainty of the orbit
+
+A class near one of its limits (T_J near 3, q near 0.2 AU, a near 1 AU, Q near 4.5 AU) can depend on
+the measurement. The command line classifies clones of the orbit too:
+
+```
+python -m wmpl.Utils.OrbitClassification traj.pickle --clones 1000 --seed 1
+```
+
+The clones are drawn from the covariance of the trajectory's state vector, so the pickle has to be
+solved with the Monte Carlo uncertainties, with the draws of `wmpl.Rebound.REBOUND`: `--clones N --seed
+S` here are the clones that `REBOUND.py --mc N --seed S` integrates, at the epoch of the meteor. Each is
+turned into an orbit as the solver computed the nominal one (`wmpl.Utils.OrbitClones`). Beside the
+nominal values it prints the 95% interval of every parameter over the clones and the share of the clones
+in each class, an unbound clone being a class of its own; `--quiet` adds `KEY_CLONES_95 lo hi` and
+`KEY_CLONES class: share, ...` lines. A clone costs about 5 ms. The values to quote stay the nominal
+ones.
+
+For a well-measured fireball nothing moves: Novo Mesto (initial speed known to 14 m/s) is an Apollo on
+an asteroidal-chondritic orbit in all 500 clones, T_J 4.405 [4.389, 4.421]. `classifyOrbit` and
+`cloneClasses` in `wmpl.Utils.OrbitClones` do the same from Python.
 
 ---
 
