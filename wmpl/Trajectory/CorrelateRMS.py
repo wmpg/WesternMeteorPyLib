@@ -157,8 +157,10 @@ class TrajectoryReduced(object):
 
         # Load values from a dictionary
         else:
-            if not hasattr(json_dict, 'obs_ids'):
+            if 'obs_ids' not in json_dict.keys():
                 json_dict['obs_ids'] = None
+            if 'ign_obs_ids' not in json_dict.keys():
+                json_dict['ign_obs_ids'] = None
             self.__dict__ = json_dict
 
 
@@ -393,6 +395,10 @@ class RMSDataHandle(object):
                 which case the output files will be saved in the dir_path.
             mcmode: [int] the operation mode, candidates, phase1 simple solns, mc phase or a combination
             max_trajs: [int] maximum number of phase1 trajectories to load at a time when adding uncertainties. Improves throughput.
+            verbose: [bool] print out additional debug
+            archivemonths: [int] how much data to keep online or to purge/archive
+            auto: [bool] not used
+            max_toffset: [float] timing offset to use when considering potential matched observations. Default 10s. 
         """
 
         self.mc_mode = mcmode
@@ -719,6 +725,42 @@ class RMSDataHandle(object):
                 processing_list.append([station_name, night_path_rel, night_path, night_dt])
 
         return processing_list
+
+    def dummyProcessingList(self, obs_id_list):
+        """
+        Create a list of folders constrained by the observations that are supplied.
+        The purpose of this is to provide a list of folders to reload observations from, when we have
+        new observations for an existing trajectory. 
+        """
+        processing_list = []
+        station_list = [obs.split('_')[0] for obs in obs_id_list if len(obs.split('_')) > 1]
+        obs_dts = [obs.split('_')[1] for obs in obs_id_list if len(obs.split('_')) > 1]
+        obs_dts = [datetime.datetime.strptime(dt, '%Y%m%d-%H%M%S.%f').replace(tzinfo=datetime.timezone.utc) for dt in obs_dts]
+        dt_range = [min(obs_dts) + datetime.timedelta(minutes=-1), max(obs_dts)+ datetime.timedelta(minutes=1)]
+
+        for station_name in station_list:
+            station_path = os.path.join(self.dir_path, station_name)
+            # Go through all directories in stations
+            for night_name in os.listdir(station_path):
+                # Extract the date and time of directory, if possible
+                try:
+                    night_dt = datetime.datetime.strptime("_".join(night_name.split("_")[1:3]), 
+                        "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
+                except:
+                    log.info(f'Could not parse the date of the night dir: {night_name}')
+                    night_dt = None
+                    continue
+                # skip folders more than a day older the requested date range
+                if night_dt < (dt_range[0]+ datetime.timedelta(days=-1)).replace(tzinfo=datetime.timezone.utc):
+                    continue
+                if night_dt > (dt_range[1]+ datetime.timedelta(days=1)).replace(tzinfo=datetime.timezone.utc):
+                    continue
+
+                night_path = os.path.join(station_path, night_name)
+                night_path_rel = os.path.join(station_name, night_name)
+
+                processing_list.append([station_name, night_path_rel, night_path, night_dt])
+        return processing_list, dt_range
 
     def initMeteorObs(self, station_code, ftpdetectinfo_path, platepars_recalibrated_dict):
         """ Init meteor observations from the FTPdetectinfo file and recalibrated platepars. """
@@ -2306,6 +2348,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         verbose = True
     else:
         verbose = False
+    
+    # the amount of data we'll keep active. 
+    archivemonths = cml_args.archivemonths
 
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None
@@ -2334,6 +2379,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
             event_time_range = [dt_beg, dt_end]
 
+            # Make sure that we're not archiving data that we're still processing via the --auto flag
+            # Note that the case where a specific timerange is given is already handled in the archiveOldRecords function
+            if archivemonths:
+                archivemonths = max(archivemonths, cml_args.auto/30 + 1)
 
         # Otherwise check if the time range is given
         else:
@@ -2363,7 +2412,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         # Init the data handle
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=mcmode, max_trajs=max_trajs, verbose=verbose, archivemonths=cml_args.archivemonths, auto=cml_args.auto,
+            mcmode=mcmode, max_trajs=max_trajs, verbose=verbose, archivemonths=archivemonths, auto=cml_args.auto,
             max_toffset=cml_args.maxtoffset)
 
         # on the first pass, we clear the status flags on Cands and Trajectories. This ensures that if a process

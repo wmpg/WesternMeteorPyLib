@@ -1369,13 +1369,44 @@ class TrajectoryCorrelator(object):
                             if not traj_time_pairs:
                                 continue
 
+                            # Issue #168
+                            # There are two approaches to adding new observations to existing solutions:
+                            #
+                            # If the solution includes observation IDs, we invalidate and remove the existing solution, 
+                            # add the observations to the unpaired list, and allow the next step of the solver to 
+                            # find a new candidate group.
+                            # This is the safest approach as it ensures all observations are treated equally. 
+                            #
+                            # However, legacy trajectories don't include obs_ids; in that case we must fall back on the 
+                            # legacy approach of attempting to augment the existing solution. 
+                            # This is less reliable because sometimes the augmentation fails, leaving two or more 
+                            # 'unpaired' observations. These will then be formed into a duplicate solution in the next step.  
+                            # Analysis of historical data by @AstroEloy indicates about 
 
                             log.info("")
                             log.info("Checking trajectory at {:s} in countries: {:s}".format( 
                                 str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc)), 
                                 ", ".join(list(set([stat_id[:2] for stat_id in traj_reduced.participating_stations])))))
                             log.info("--------")
+                            
+                            if hasattr(traj_reduced, 'obs_ids') and hasattr(traj_reduced,'ign_obs_ids'):
+                                unpair_ids = traj_reduced.obs_ids + traj_reduced.obs_ids
+                                # some older trajectories may have simple numeric Obs IDs - we can't use these
+                                unusable = [x for x in unpair_ids if isinstance(x, int) or len(x) < 4]
+                                if len(unusable) == 0:
+                                    log.info(f'unpairing {unpair_ids}')
+                                    self.dh.observations_db.unpairObs(unpair_ids)
+                                    tmp_processing_list, tmp_dt_range = self.dh.dummyProcessingList(unpair_ids)
+                                    print([x[1] for x in tmp_processing_list], tmp_dt_range)
+                                    new_unpaired = self.dh.loadUnpairedObservations(tmp_processing_list, dt_range=tmp_dt_range)
+                                    print(len(new_unpaired))
+                                    for obs in new_unpaired:
+                                        unpaired_observations.append(obs)
+                                    self.dh.removeTrajectory(traj_reduced)
+                                    continue
 
+                            # okay, if we get to here, we have a legacy style trajectory without obs ids 
+                            # or with integer obs ids and so we have to check if we can augment the old solution 
 
                             # Filter out bad matches and only keep the good ones
                             candidate_observations = []
