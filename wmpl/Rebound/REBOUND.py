@@ -1524,6 +1524,12 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
 #   interaction between every pair of bodies; its cost grows as the cube of the number of bodies.
 GR_MODELS = ("gr", "gr_full")
 
+# Arrays of the lean output format (see _integrateParticles): the output times, in REBOUND time
+#   units as in the rows of the full format, and the osculating elements of the rows' orbit object.
+#   They are what an ensemble of thousands of clones needs: 60 bytes per output in memory, against
+#   1.5 kB for a full row with the state vector and the distance to each of ten bodies.
+LEAN_OUTPUT_KEYS = ("t", "a", "e", "inc", "Omega", "omega", "f")
+
 # Integrators that can be selected for the integration. IAS15 is adaptive and the default. WHFast
 # and TRACE use a fixed timestep (see FIXED_STEP_DEFAULT_DT_DAYS).
 INTEGRATORS = ("ias15", "whfast", "trace")
@@ -1601,11 +1607,16 @@ def _integrateParticles(task):
                                  leaves REBOUNDx's default, the z axis (the ecliptic pole).
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
+            lean_outputs:    [bool] Optional. Return each particle's outputs as one numpy array per
+                                 key of LEAN_OUTPUT_KEYS instead of one row per output. Default False.
 
     Return:
         [dict] {
             "outputs": {particle_name: [[time, state_vect_hel, orb_ns, planet_dists], ...]}, where
-                orb_ns is a picklable SimpleNamespace with attributes a, e, inc, Omega, omega, f,
+                orb_ns is a picklable SimpleNamespace with attributes a, e, inc, Omega, omega, f.
+                With lean_outputs, {particle_name: {key: array}} for the keys of LEAN_OUTPUT_KEYS
+                instead, with the same values. Either format stops at the last output a particle
+                reached, so a particle that hit a body or escaped has fewer outputs.
             "diagnostics": {particle_name: {
                 "min_dist_au":   {body: closest approach in AU (None if never tracked)},
                 "min_time_days": {body: time of closest approach in days},
@@ -1888,7 +1899,14 @@ def _integrateParticles(task):
     # Keep the returned reference alive until the integration ends (see _setHeartbeat)
     heartbeat_ref = _setHeartbeat(sim, heartbeat)  # noqa: F841
 
-    outputs = {name: [] for name in particle_names}
+    lean_outputs = task.get("lean_outputs", False)
+    if lean_outputs:
+        outputs = {name: {key: [] for key in LEAN_OUTPUT_KEYS} for name in particle_names}
+    else:
+        outputs = {name: [] for name in particle_names}
+
+    # The body the elements are relative to, as in extractSimParams
+    ref_object = "Earth" if reference_frame == "geocentric" else "Sun"
 
     # Integrate the simulation and save the state vectors and orbital elements. These are not time
     # steps, but the times at which the simulation state is saved.
@@ -1987,6 +2005,18 @@ def _integrateParticles(task):
             except rb.ParticleNotFound:
                 continue
 
+            if lean_outputs:
+                orb_elem = ps[name].orbit(primary=ps[ref_object])
+                columns = outputs[name]
+                columns["t"].append(t_out)
+                columns["a"].append(orb_elem.a)
+                columns["e"].append(orb_elem.e)
+                columns["inc"].append(orb_elem.inc)
+                columns["Omega"].append(orb_elem.Omega)
+                columns["omega"].append(orb_elem.omega)
+                columns["f"].append(orb_elem.f)
+                continue
+
             state_vect_hel, orb_elem, planet_dists = extractSimParams(
                 ps, name, planet_names, reference_frame=reference_frame)
 
@@ -2031,6 +2061,10 @@ def _integrateParticles(task):
             "fixed_step_from_days": (None if switch_time is None
                                      else time_sign*simTimeToDays(switch_time)),
         }
+
+    if lean_outputs:
+        outputs = {name: {key: np.array(values) for key, values in columns.items()}
+                   for name, columns in outputs.items()}
 
     return {"outputs": outputs, "diagnostics": diagnostics}
 
@@ -2807,7 +2841,8 @@ def reboundSimulate(
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, sun_j2=True, gr="gr_full", verbose=False):
+        dt_days=None, compute_megno=False, sun_j2=True, gr="gr_full", lean_outputs=False,
+        verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -2867,11 +2902,16 @@ def reboundSimulate(
             solution's diagnostics. Requires return_diagnostics=True, which is the only way the
             result is returned; it is skipped with a warning otherwise, since the extra integration
             is as expensive as the nominal run. Default False.
+        lean_outputs: [bool] If True, return each run's outputs as numpy arrays of the output times
+            and the osculating elements only (see LEAN_OUTPUT_KEYS), without the state vectors and
+            the distances to every body. With the ten bodies a full row takes 1.5 kB and a lean
+            output 60 bytes, so 1000 clones with 2000 outputs each need 3.1 GB in rows and 0.12 GB
+            in arrays. Default False.
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
         outputs: [list] List of outputs, each containing the time, state vector and orbital elements at that
-            time.
+            time. With lean_outputs, a dict {key: array} for the keys of LEAN_OUTPUT_KEYS instead.
         outputs_mc: [dict] {mc_name: outputs} for the Monte Carlo realizations.
         diagnostics: [dict] Only returned if return_diagnostics is True. Maps each particle name to
             its closest approaches ("min_dist_au", "min_time_days"), every close encounter
@@ -3044,6 +3084,7 @@ def reboundSimulate(
             "earth_spin_axis": earth_spin_axis,
             "sun_j2": sun_j2,
             "gr": gr,
+            "lean_outputs": lean_outputs,
         }
 
     if verbose:
