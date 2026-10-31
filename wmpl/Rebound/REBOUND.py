@@ -1798,24 +1798,36 @@ def _integrateParticles(task):
     # minimum by a large fraction of that. The closest approach inside each step is therefore
     # refined on a Hermite interpolant of the relative motion (see hermiteClosestApproach). "prev"
     # holds the relative state of the previous step for each body, and "encounters" collects every
-    # refined local minimum that falls inside n_hill Hill radii, as (body, time, distance).
+    # refined local minimum that falls inside n_hill Hill radii, as (body index, time, distance).
+    # Everything per body is a list indexed like planet_names, because the heartbeat runs at every
+    # step and a dictionary lookup per body per step is a measurable part of its cost.
+    n_bodies = len(planet_names)
+    every_body = list(range(n_bodies))
+    luna_only = [bi for bi, bname in enumerate(planet_names) if bname == "Luna"]
+    thresholds = [_encounterThreshold(bname, n_hill) for bname in planet_names]
+
     track = {}
     for name in particle_names:
         track[name] = {
-            "min_dist": {b: np.inf for b in planet_names},
-            "min_time": {b: np.nan for b in planet_names},
+            "min_dist": [np.inf]*n_bodies,
+            "min_time": [np.nan]*n_bodies,
             "departed": False,
             "impact": None,
             "escaped": None,
-            "prev": {},
+            "prev": [None]*n_bodies,
             "encounters": [],
         }
 
     def heartbeat(sim_pointer):
 
         s = sim_pointer.contents
-        p = s.particles
         t_now = s.t
+
+        # Every position and velocity in one copy, as plain floats. Fetching a particle through
+        #   sim.particles[i] costs ~1.7 us, and this needed 12 of them at every step.
+        states = np.empty((s.N, 6))
+        s.serialize_particle_data(xyzvxvyvz=states)
+        states = states.tolist()
 
         for pname, pidx in particle_idx.items():
 
@@ -1823,54 +1835,55 @@ def _integrateParticles(task):
             if pidx >= s.N:
                 continue
 
-            o = p[pidx]
+            o = states[pidx]
             st = track[pname]
 
             # Distance to the Earth, used to decide whether the object has left its neighbourhood
-            pe = p[earth_i]
-            d_earth = ((o.x - pe.x)**2 + (o.y - pe.y)**2 + (o.z - pe.z)**2)**0.5
+            pe = states[earth_i]
+            d_earth = ((o[0] - pe[0])**2 + (o[1] - pe[1])**2 + (o[2] - pe[2])**2)**0.5
             if (not st["departed"]) and (d_earth > departure_radius):
                 st["departed"] = True
 
-            for bi, bname in enumerate(planet_names):
+            min_dist = st["min_dist"]
+            min_time = st["min_time"]
+            prevs = st["prev"]
 
-                # The Moon is tracked over the whole integration; every other body only after the
-                # object has left the Earth's neighbourhood, so the trivial initial departure from
-                # the Earth is not reported as an encounter.
-                if (bname != "Luna") and (not st["departed"]):
-                    continue
+            # The Moon is tracked over the whole integration; every other body only after the object
+            #   has left the Earth's neighbourhood, so the trivial initial departure from the Earth is
+            #   not reported as an encounter.
+            for bi in (every_body if st["departed"] else luna_only):
 
                 # Relative state as plain floats: this runs every step for every body, and building
                 # numpy arrays here would slow the whole integration down by ~10%
-                b = p[bi]
-                rel = (o.x - b.x, o.y - b.y, o.z - b.z, o.vx - b.vx, o.vy - b.vy, o.vz - b.vz)
+                b = states[bi]
+                rel = (o[0] - b[0], o[1] - b[1], o[2] - b[2], o[3] - b[3], o[4] - b[4], o[5] - b[5])
                 d = (rel[0]**2 + rel[1]**2 + rel[2]**2)**0.5
                 rv = rel[0]*rel[3] + rel[1]*rel[4] + rel[2]*rel[5]
 
-                if d < st["min_dist"][bname]:
-                    st["min_dist"][bname] = d
-                    st["min_time"][bname] = t_now
+                if d < min_dist[bi]:
+                    min_dist[bi] = d
+                    min_time[bi] = t_now
 
                 # The distance has a minimum inside the last step if the approach rate r.v changed
                 # sign from approaching to receding (h makes this hold in both time directions).
                 # Refine it on the Hermite interpolant of the step.
-                prev = st["prev"].get(bname)
+                prev = prevs[bi]
                 if prev is not None:
                     t_prev, rel_prev, rv_prev = prev
                     h = t_now - t_prev
                     if (h*rv_prev < 0) and (h*rv > 0):
                         rp, rn = np.array(rel_prev), np.array(rel)
                         d_h, t_h = hermiteClosestApproach(t_prev, rp[:3], rp[3:], t_now, rn[:3], rn[3:])
-                        if d_h < st["min_dist"][bname]:
-                            st["min_dist"][bname] = d_h
-                            st["min_time"][bname] = t_h
+                        if d_h < min_dist[bi]:
+                            min_dist[bi] = d_h
+                            min_time[bi] = t_h
 
                         # Every such passage inside the threshold is an encounter: n_hill Hill radii,
                         # or a fixed distance for the Sun, which has no Hill sphere
-                        if d_h < _encounterThreshold(bname, n_hill):
-                            st["encounters"].append((bname, t_h, d_h))
+                        if d_h < thresholds[bi]:
+                            st["encounters"].append((bi, t_h, d_h))
 
-                st["prev"][bname] = (t_now, rel, rv)
+                prevs[bi] = (t_now, rel, rv)
 
     # Keep the returned reference alive until the integration ends (see _setHeartbeat)
     heartbeat_ref = _setHeartbeat(sim, heartbeat)  # noqa: F841
@@ -2003,13 +2016,13 @@ def _integrateParticles(task):
     for name in particle_names:
         st = track[name]
         diagnostics[name] = {
-            "min_dist_au": {b: (None if not np.isfinite(st["min_dist"][b]) else st["min_dist"][b])
-                            for b in planet_names},
-            "min_time_days": {b: (None if not np.isfinite(st["min_time"][b])
-                                  else time_sign*simTimeToDays(st["min_time"][b]))
-                              for b in planet_names},
-            "encounters": [_encounterRecord(b, d, time_sign*simTimeToDays(t))
-                           for b, t, d in st["encounters"]],
+            "min_dist_au": {b: (None if not np.isfinite(st["min_dist"][bi]) else st["min_dist"][bi])
+                            for bi, b in enumerate(planet_names)},
+            "min_time_days": {b: (None if not np.isfinite(st["min_time"][bi])
+                                  else time_sign*simTimeToDays(st["min_time"][bi]))
+                              for bi, b in enumerate(planet_names)},
+            "encounters": [_encounterRecord(planet_names[bi], d, time_sign*simTimeToDays(t))
+                           for bi, t, d in st["encounters"]],
             "departed": st["departed"],
             "impact": st["impact"],
             "escaped": st["escaped"],
