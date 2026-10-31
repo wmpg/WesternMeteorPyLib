@@ -941,8 +941,9 @@ def chanceMeteoroid(h_mag, q=None, e=None, incl=None, peri=None, node=None, traj
         [dict] 'model', 'reference', 'data_reference', 'license' and 'file_paths' of the model;
             'h_mag'; 'n_background', 'n_eff' and 'n_global', the background orbits, their effective
             number and how many were compared with the catalogue, None for a meteoroid outside the
-            model; 'meteor_in_model' and 'meteor_outside_reason'; 'labels', the criteria evaluated,
-            in the order of the search, and 'skipped', each criterion that was not with why; 'results',
+            model; 'n_bodies', the bodies of the catalogue searched; 'meteor_in_model' and
+            'meteor_outside_reason'; 'labels', the criteria evaluated, in the order of the search, and
+            'skipped', each criterion that was not with why; 'results',
             for each label a list with a dictionary per match, as returned by
             wmpl.Utils.DebiasedMeteoroidPopulation.chanceAssociation; and 'search'.
     """
@@ -993,7 +994,7 @@ def chanceMeteoroid(h_mag, q=None, e=None, incl=None, peri=None, node=None, traj
             np.radians(m['peri']))) for m in search['matches']]
 
         results[label] = dmp.chanceAssociation(meteor_orbit, h_mag, candidates, key, impactors,
-            catalogue_orbits=catalogue_orbits, n_global=n_global, model=model)
+            catalogue_orbits=catalogue_orbits, n_global=n_global, model=model, deam=deam)
         labels.append(label)
 
     return {'model': model['name'], 'reference': model['reference'],
@@ -1002,13 +1003,15 @@ def chanceMeteoroid(h_mag, q=None, e=None, incl=None, peri=None, node=None, traj
         'n_background': None if impactors is None else impactors['n'],
         'n_eff': None if impactors is None else impactors['n_eff'],
         'n_global': None if impactors is None else min(n_global, impactors['n']),
-        'meteor_in_model': inside, 'meteor_outside_reason': reason, 'labels': labels,
+        'n_bodies': len(bodies), 'meteor_in_model': inside, 'meteor_outside_reason': reason, 'labels': labels,
         'skipped': skipped, 'results': results, 'search': search}
 
 
 def formatChanceMeteoroid(chance):
     """ The lines that print the result of chanceMeteoroid: for each criterion the matches of its
         search, and a summary for the criterion the bodies were ranked by. """
+
+    from wmpl.Utils.DebiasedMeteoroidPopulation import N_REFINE
 
     search = chance['search']
 
@@ -1026,12 +1029,18 @@ def formatChanceMeteoroid(chance):
             "impact (effective number {:d}).".format(n_background, int(round(chance['n_eff']))),
         "  closer      background meteoroids at least as close to the body as this one.",
         "  p           (closer, by weight, + 1)/{:d}: how often an unrelated meteoroid is as close to "
-            "the body. Valid for a body named".format(n_background + 1),
-        "              before the search. Comets are tested too.",
+            "the body. Below {:d} closer,".format(n_background + 1, N_REFINE),
+        "              drawn again near the body, which resolves it far below 1e-6. Valid for a body "
+            "named before the search.",
+        "              Comets are tested too.",
+        "  p_bonf      {:d} p, the bodies searched: how often some body is this unusual for a "
+            "background meteoroid.".format(chance['n_bodies']),
         "  closer_g    of {:d} background meteoroids, those with some body of the catalogue as close."
             .format(chance['n_global']),
-        "  p_global    (closer_g, by weight, + 1)/{:d}: the one to quote for a body the search found."
-            .format(chance['n_global'] + 1),
+        "  p_closest   (closer_g, by weight, + 1)/{:d}: how often a background meteoroid has some "
+            "body this close.".format(chance['n_global'] + 1),
+        "  p_global    twice the smaller of p_bonf and p_closest: the one to quote for a body the "
+            "search found.",
         "  sigma       p_global as Gaussian standard deviations: 2 is a hint (p_global 0.046), 3 is "
             "evidence (0.0027).",
         "              Below 1 it measures nothing and is printed <1. A <= or >= marks a limit."]
@@ -1046,8 +1055,8 @@ def formatChanceMeteoroid(chance):
 
         lines.append("")
         lines.append("{:s}, the matches above, ranked by {:s}:".format(label, search['labels'][0]))
-        lines.append("Name                               , {:>9s},  closer,          p, closer_g,   "
-            "p_global,  sigma,".format(label[:9]))
+        lines.append("Name                               , {:>9s},  closer,          p,     p_bonf, "
+            "closer_g,  p_closest,   p_global,  sigma,".format(label[:9]))
 
         for m, r in zip(search['matches'], chance['results'][label]):
 
@@ -1059,8 +1068,10 @@ def formatChanceMeteoroid(chance):
                 lines.append(start + "n/a: " + r['reason'])
                 continue
 
-            lines.append(start + "{:7d}, {:>10s}, {:8d}, {:>10s}, {:>6s}, {:s}".format(r['n_closer'],
-                formatProbability(r['p_value'], r['is_limit']), r['n_closer_global'],
+            lines.append(start + "{:7d}, {:>10s}, {:>10s}, {:8d}, {:>10s}, {:>10s}, {:>6s}, {:s}".format(
+                r['n_closer'], formatProbability(r['p_value'], r['is_limit']),
+                formatProbability(r['p_value_bonferroni'], r['is_limit']), r['n_closer_global'],
+                formatProbability(r['p_value_closest'], r['n_closer_global'] == 0),
                 formatProbability(r['p_value_global'], r['is_limit_global']),
                 formatSigma(r['sigma'], r['is_limit_global']), _significanceText(r['sigma'])).rstrip())
 
@@ -1223,8 +1234,9 @@ CHANCE_NEO_FIELDS = ['n_at_least_as_large', 'n_closer', 'expected', 'p_value', '
     'reason']
 
 # The values of chanceMeteoroid saved per match and criterion, as chance_meteoroid_<label>_<name>
-CHANCE_METEOROID_FIELDS = ['n_closer', 'fraction', 'p_value', 'is_limit', 'n_closer_global',
-    'p_value_global', 'sigma', 'is_limit_global', 'reason']
+CHANCE_METEOROID_FIELDS = ['n_closer', 'fraction', 'p_value', 'is_limit', 'region_share', 'n_local',
+    'n_closer_local', 'p_value_bonferroni', 'n_closer_global', 'p_value_closest', 'p_value_global',
+    'sigma', 'is_limit_global', 'reason']
 
 
 def _bodyRows(search, propagated=None, at_epoch_values=None, chance=None, chance_meteoroid=None):
@@ -1397,7 +1409,7 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
         if chance_meteoroid is not None:
             out['chance_meteoroid'] = dict((name, chance_meteoroid[name]) for name in ('model',
                 'reference', 'data_reference', 'license', 'h_mag', 'n_background', 'n_eff', 'n_global',
-                'meteor_in_model', 'meteor_outside_reason', 'labels', 'skipped'))
+                'n_bodies', 'meteor_in_model', 'meteor_outside_reason', 'labels', 'skipped'))
 
         with open(file_path, 'w') as f:
             json.dump(out, f, indent=2)

@@ -314,10 +314,12 @@ def test_p_counts_the_weight_of_the_background_at_least_as_close():
     assert math.isclose(none['p_value'], 1.0/(imp['n'] + 1.0))
 
 
-def test_p_global_counts_the_background_with_some_body_as_close():
+def test_p_global_is_twice_the_smaller_correction():
     """ With a catalogue of the candidate and a far body, a background orbit has a body within
-        D_SH = 0.045 when it is one of the four near the candidate; p_global is that weight + 1 over
-        n_global + 1, and never below p. """
+        D_SH = 0.045 when it is one of the four near the candidate: p_closest is that weight + 1 over
+        n_global + 1, here p itself, and below p_bonferroni = 2 p, so p_global = 2 p_closest. With the
+        second body on the far background orbits, all but the six near ones beyond D_SH = 0.045 have a
+        body as close, so p_closest is nearly 1 and p_global = 2 p_bonferroni = 4 p. """
 
     imp = _impactors()
     weight = imp['weight']
@@ -329,18 +331,117 @@ def test_p_global_counts_the_background_with_some_body_as_close():
         catalogue_orbits=catalogue, n_global=imp['n'])[0]
 
     k = weight[0] + weight[1] + weight[2] + weight[3]
+    p_value = (k + 1.0)/(imp['n'] + 1.0)
 
-    assert result['n_closer_global'] == 4
-    assert math.isclose(result['p_value_global'], (k + 1.0)/(imp['n'] + 1.0), rel_tol=1e-12)
+    assert result['n_bodies'] == 2 and result['n_closer_global'] == 4
+    assert math.isclose(result['p_value_closest'], p_value, rel_tol=1e-12)
+    assert math.isclose(result['p_value_bonferroni'], 2*p_value, rel_tol=1e-12)
+    assert math.isclose(result['p_value_global'], 2*p_value, rel_tol=1e-12)
     assert math.isclose(result['sigma'], dnp.pValueToSigma(result['p_value_global']), rel_tol=1e-12)
-    assert result['p_value_global'] >= result['p_value']
+    assert not result['is_limit_global']
 
-    # With only 500 far orbits compared, p_global would be 1/501, below p: it is taken as p
+    # The second body where the far background orbits are
+    on_far = (imp['q'][-1], imp['e'][-1], imp['incl'][-1], imp['node'][-1], imp['peri'][-1])
+    catalogue = tuple(np.array([c, f]) for c, f in zip(CANDIDATE, on_far))
+
+    crowded = dmp.chanceAssociation(METEOR, 38.0, [(0.045, CANDIDATE)], 'DSH', imp,
+        catalogue_orbits=catalogue, n_global=imp['n'])[0]
+
+    assert crowded['n_closer_global'] == 4 + 990
+    assert math.isclose(crowded['p_value_closest'], (imp['n'] - np.sum(weight[4:10]) + 1.0)
+        /(imp['n'] + 1.0), rel_tol=1e-12)
+    assert math.isclose(crowded['p_value_global'], 4*p_value, rel_tol=1e-12)
+    assert not crowded['is_limit_global']
+
+    # With only 500 far orbits compared, p_closest would be 1/501, below p: it is taken as p, and
+    #   p_global, twice it, is a limit
     few = dmp.chanceAssociation(METEOR, 38.0, [(0.045, CANDIDATE)], 'DSH', dict(imp,
         **dict((name, imp[name][::-1]) for name in ('q', 'a', 'e', 'incl', 'node', 'peri', 'weight'))),
-        catalogue_orbits=catalogue, n_global=500)[0]
+        catalogue_orbits=tuple(np.array([c, f]) for c, f in zip(CANDIDATE, far)), n_global=500)[0]
     assert few['n_closer_global'] == 0 and few['is_limit_global']
-    assert few['p_value_global'] == few['p_value']
+    assert few['p_value_closest'] == few['p_value']
+    assert math.isclose(few['p_value_global'], 2*few['p_value'], rel_tol=1e-12)
+
+
+def test_criterion_region_holds_every_orbit_as_close():
+    """ Orbits scattered around a body at every scale: every one within D of it by D_SH, D_H or D_D
+        lies in a bin of criterionRegion, which leaves most bins out. The other criteria have no
+        region. """
+
+    from wmpl.Utils.Dcriteria import lookupCriterion
+
+    rng = np.random.default_rng(8)
+    n = 200000
+
+    for body in ((0.14, 0.89, math.radians(22.3), 4.63, 5.62), (0.98, 0.40, math.radians(1.0), 1.0, 0.3),
+            (0.55, 0.30, math.radians(40.0), 2.0, 4.0)):
+
+        # Scattered by 0.1 % to 100 % of 0.1 AU in q, 0.1 in e, 8 deg in i and 0.3 rad in the angles
+        scale = 10**rng.uniform(-3, 0, n)
+
+        q = np.abs(body[0] + scale*rng.normal(0, 0.1, n))
+        e = np.clip(body[1] + scale*rng.normal(0, 0.1, n), 0, 0.999)
+        incl = np.abs(body[2] + scale*rng.normal(0, math.radians(8), n))
+        node = (body[3] + scale*rng.normal(0, 0.3, n)) % (2*np.pi)
+        peri = (body[4] + scale*rng.normal(0, 0.3, n)) % (2*np.pi)
+
+        ia = np.clip(np.searchsorted(dmp.A_EDGES, q/(1 - e), side='right') - 1, 0, 41)
+        ie = np.clip(np.searchsorted(dmp.E_EDGES, e, side='right') - 1, 0, 24)
+        ii = np.clip(np.searchsorted(np.radians(dmp.INCL_EDGES), incl, side='right') - 1, 0, 21)
+        a_inside = q/(1 - e) < 4.2
+
+        for key in ('DSH', 'DH', 'DD'):
+
+            func = lookupCriterion(key)[2]
+            d_values = np.asarray(func((q, e, incl, node, peri), body))
+
+            for d_value in (0.02, 0.1, 0.3):
+
+                region = dmp.criterionRegion(body, key, d_value)
+                close = (d_values <= d_value) & a_inside
+
+                assert np.count_nonzero(close) > 1000, (key, d_value)
+                assert np.all(region[ia[close], ie[close], ii[close]]), (key, d_value)
+                assert np.mean(region) < 0.5
+
+    assert dmp.criterionRegion((0.5, 0.5, 0.2), 'RHO2', 0.1) is None
+
+
+def test_p_near_a_candidate_agrees_with_the_whole_background():
+    """ p computed again from orbits drawn near the candidate agrees with p from the whole background
+        within their sampling errors, with a share R of the impacts between 0 and 1, and is
+        computed only below n_refine closer orbits. """
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deam = _model(tmp, maps_3my=(BIN_3MY, BIN_LOW_I), maps_1my=(BIN_1MY,))
+
+    h_mag = 39.0
+    imp = dmp.sampleImpactors(deam, h_mag, n=400000, seed=4)
+
+    # A candidate on the orbit of a background meteoroid of the 1 Myr bin, and the meteoroid near it
+    k = int(np.argmax((imp['a'] > 0.8) & (imp['a'] < 0.9)))
+    candidate = tuple(float(imp[name][k]) for name in ('q', 'e', 'incl', 'node', 'peri'))
+    meteor = (candidate[0] + 0.01,) + candidate[1:]
+
+    for d_value in (0.05, 0.1):
+
+        whole = dmp.chanceAssociation(meteor, h_mag, [(d_value, candidate)], 'DSH', imp)[0]
+        near = dmp.chanceAssociation(meteor, h_mag, [(d_value, candidate)], 'DSH', imp, deam=deam,
+            n_refine=10**9)[0]
+
+        assert whole['region_share'] is None
+        assert 0 < near['region_share'] < 1 and near['n_local'] > 0 and near['n_closer_local'] > 30
+
+        # Their sampling errors, from the counts
+        error = whole['fraction']/math.sqrt(whole['n_closer']) + near['fraction']/math.sqrt(
+            near['n_closer_local'])
+        assert abs(near['fraction'] - whole['fraction']) < 4*error, (d_value, near, whole)
+        assert near['fraction']/whole['fraction'] > 0.8
+
+    # The default n_refine leaves a candidate with many orbits as close alone
+    assert whole['n_closer'] >= dmp.N_REFINE
+    assert dmp.chanceAssociation(meteor, h_mag, [(0.1, candidate)], 'DSH', imp,
+        deam=deam)[0]['region_share'] is None
 
 
 def test_meteoroid_outside_the_model_gets_no_value():

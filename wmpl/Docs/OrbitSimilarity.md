@@ -352,12 +352,19 @@ python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
     the authors' sampler takes it, 60 to 68 % of the impacts would come from the lowest bin, i < 4°,
     and depend on where 1/sin i is cut off.
   - **The test.** The candidate is kept fixed and 10⁶ background impactors are compared with it:
-    p = (k + 1)/(N + 1), k the weight of those at least as close as the meteoroid. The body's size
-    plays no part, so comets are tested too. `p_global` is the probability that a background
-    meteoroid has some body of the catalogue as close, from 2000 of them compared with the whole
-    catalogue, 10 s with D_SH and 15 s with D_D for 46 000 bodies; it is the value to quote for a body
-    the search found, and `sigma` is its Gaussian equivalent, as above. The resolution is 1/(N + 1) for p and
-    1/2001 for p_global, at most 3.5 sigma.
+    p = (k + 1)/(N + 1), k the weight of those at least as close as the meteoroid. When fewer than 100
+    are, p is computed again from orbits drawn only in the bins that can hold one that close (for D_SH,
+    D_H and D_D), which resolves it far below 10⁻⁶: for a Geminid of 50 g, Phaethon has p = 2.2e-8. The
+    body's size plays no part, so comets are tested too. A body the search found needs a correction for
+    the M bodies searched, and `p_global` is twice the smaller of two: `p_bonf` = M p (Bonferroni),
+    which finds a body in a part of orbit space the background rarely reaches, and `p_closest`, how
+    often a background meteoroid has some body of the catalogue as close (2000 of them compared with
+    the whole catalogue), which finds a body very close to a meteoroid among the many asteroids at low
+    inclination. Against the 46 501 comets and near-Earth asteroids of the JPL and the MPC, Phaethon
+    has p_closest = 0.32 but p_bonf = 1.0e-3, so p_global = 2.0e-3 (3.1 sigma); Winchcombe's closest
+    body, 2016 EF195 at D_SH = 0.025, has p_bonf = 0.39 but p_closest = 0.035, so p_global = 0.069.
+    `sigma` is the Gaussian equivalent of p_global, as above. The whole takes 7 to 9 s with D_SH and
+    12 to 13 s with D_D.
   - **Limits.** The model changes with H: over H = 35 to 41 the fraction near the two orbits above
     is 0.86 to 1.10 and 0.57 to 1.06 times its value at H = 38, so H has to be given. The best fit
     alone, which the authors' sampler draws from, would put 0.75 to 1.03 times as much background

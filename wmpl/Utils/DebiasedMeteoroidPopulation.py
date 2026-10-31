@@ -88,18 +88,50 @@ draws the candidate:
 The candidate's size plays no part, so comets and bodies without an absolute magnitude get a p too. p
 is the value for a body named before the search, such as one proposed in the literature.
 
-The global p-value. A body found by the search, as the closest of a catalogue of tens of thousands,
-needs a correction: some body is close to almost any orbit. With K background meteoroids, each
-compared with every body of the catalogue,
+Resolving a small p. N = 10^6 background orbits resolve p only down to 1/(N + 1), but the bodies that
+matter after the correction below have p of 1e-5 and less. When fewer than 100 of the N are at least as
+close, p is computed again from orbits drawn only in the bins that can hold an orbit that close to the
+candidate, in batches of N until 100 are as close or ten batches are drawn. The bins are those that
+overlap the box the criterion puts around the candidate: |dq| <= D, |de| <= D and a mutual inclination
+of at most 2 arcsin(D/2) for D_SH; |dq| <= D (q1 + q2) instead for D_H; and |dq| <= D (q1 + q2),
+|de| <= D (e1 + e2) and a mutual inclination of at most pi D for D_D. With R the share of the impacts
+in those bins,
 
-    p_global = (k_global + 1)/(K + 1)
-                           k_global being the weight of those whose closest body is at least as close
-                           as the candidate is to the meteoroid,
+    p = R (k_R + 1)/(N_R + 1)
 
-the probability that a background meteoroid has some body of the catalogue at least as close. The
-candidate is one of the bodies, so p_global is at least p. When the smaller K gives less, by sampling,
-it is taken as p. Significance is given as the two-sided Gaussian equivalent of p_global, as in
-wmpl.Utils.DebiasedNEOPopulation.
+the meteoroid being one more draw in the box, where it lies, and k_R the weight of the N_R orbits drawn
+there that are at least as close. For a Geminid of 50 g (q = 0.140 AU, e = 0.896, i = 23.6 deg), whose
+closest body is Phaethon at D_SH = 0.046, none of the N orbits is as close; R = 0.0025, 82 of 9.7 x 10^6
+orbits drawn there are, and p = 2.2e-8. Where the N orbits have hundreds as close, eight seeds of each
+give means 0.987 to 1.001 times apart, within the 4 to 9 % error of the N orbits. The other criteria
+keep the resolution of the N orbits.
+
+The global p-value. A body found by the search, as the closest of a catalogue of M bodies, tens of
+thousands, needs a correction: some body is close to almost any orbit. Two corrections are computed,
+each valid and each powerful where the other is not:
+
+    p_bonferroni = min(1, M p)
+                           no body of the catalogue is as unusual for a background meteoroid, at its
+                           own value of the criterion, more often than this (Bonferroni, which holds
+                           however the bodies are related and however the candidate was chosen). It
+                           finds a body in a part of orbit space the background rarely reaches.
+    p_closest = (k_global + 1)/(K + 1)
+                           K background meteoroids being compared with every body of the catalogue,
+                           and k_global the weight of those whose closest body is at least as close as
+                           the candidate is to the meteoroid: how often a background meteoroid has some
+                           body this close. It finds a body very close to a meteoroid among the many
+                           near-Earth asteroids at low inclination, where M p is large. The candidate
+                           is one of the bodies, so it is at least p; when the smaller K gives less, by
+                           sampling, it is taken as p.
+    p_global = min(1, 2 min(p_bonferroni, p_closest))
+                           the smaller, doubled because two were tried: the value to quote.
+
+Measured with the comets of the JPL and the near-Earth asteroids of the MPC, 46 501 bodies: for the
+Geminid above, Phaethon has p_closest = 0.32, as a third of the background meteoroids have some body
+that close, but p_bonferroni = 1.0e-3, so that p_global = 2.0e-3, 3.1 sigma (with D_D, 3.5e-5, 4.1
+sigma). For Winchcombe (13 kg), whose closest body, 2016 EF195, is at D_SH = 0.025, p_bonferroni = 0.39
+but p_closest = 0.035, and p_global = 0.069. Significance is given as the two-sided Gaussian equivalent
+of p_global, as in wmpl.Utils.DebiasedNEOPopulation.
 
 What the test assumes:
     - The meteoroid's H selects the model: the bins within H +- 0.25, as the authors' sampler takes
@@ -124,12 +156,13 @@ What the test assumes:
       to any fireball.
     - Only the criteria on the orbital elements are offered, and not the MOID, which costs 0.09 to
       0.15 ms a pair, 1.5 to 2.5 minutes a body against 10^6 background orbits.
-    - The global correction is on the criterion, not on p: a body in a sparse part of orbit space at a
-      larger D could be the more significant, and is not found as such.
+    - Only the bodies the search ranked first by the criterion are tested. A body further down, in a
+      sparse part of orbit space, could have a smaller p and is not found as such.
     - The meteoroid's orbit is taken as exact. Its uncertainty is not propagated.
 
-Resolution. N background orbits give p no lower than 1/(N + 1), and K give p_global no lower than
-1/(K + 1). When no background orbit is as close, the value is an upper bound.
+Resolution. N background orbits give p no lower than 1/(N + 1), or R/(10 N + 1) when it is computed
+again near the candidate, and K give p_closest no lower than 1/(K + 1). When no background orbit is as
+close, the value is an upper bound.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -224,10 +257,15 @@ SPEED_EARTH = GAUSS_K*149597870.7/86400.0
 ESCAPE_SPEED = np.sqrt(2*6.67408e-11*5.9722e24/6471.0e3)/1000.0
 
 # Background orbits for the p of each body, and the part of them compared with the whole catalogue
-#   for p_global
+#   for p_closest
 N_SAMPLES = 1000000
 N_GLOBAL = 2000
 SEED = 1
+
+# Below this many background orbits at least as close, p is computed again from orbits drawn near the
+#   candidate, in batches as large as the background until as many are as close, at most this many
+N_REFINE = 100
+N_REFINE_BATCHES = 10
 
 # The model, once loaded
 _model_cache = {}
@@ -502,9 +540,10 @@ def populationAtH(deam, h_mag):
     return np.sum(deam['population'][..., keep], axis=-1)
 
 
-def sampleImpactors(deam, h_mag, n=N_SAMPLES, seed=SEED):
+def sampleImpactors(deam, h_mag, n=N_SAMPLES, seed=SEED, region=None):
     """ Draw the orbits of meteoroids of absolute magnitude h_mag that hit the Earth, by importance
-        sampling of the model weighted by impactRate. See the module docstring.
+        sampling of the model weighted by impactRate, from all the bins or from a region of them. See
+        the module docstring.
 
         Within a bin a is drawn uniform, i uniform and e as e_c cosh(u), u uniform, e_c = |1 - 1/a|
         being the smallest e that crosses 1 AU. With the density of the population uniform in a and e
@@ -519,17 +558,22 @@ def sampleImpactors(deam, h_mag, n=N_SAMPLES, seed=SEED):
     Keyword arguments:
         n: [int] How many orbits to draw. The 2 to 3 % that fall where their bin does not cross 1 AU
             are dropped.
-        seed: [int] Seed of the random generator, so that the same call gives the same orbits.
+        seed: [int or tuple] Seed of the random generator, so that the same call gives the same
+            orbits.
+        region: [ndarray] Boolean mask over the (a, e, i) bins, to draw only in those bins. The orbits
+            drawn this way are not kept for later calls.
 
     Return:
         [dict] Arrays of 'q', 'a' (AU), 'e', 'incl', 'node', 'peri' (rad), 'weight' (mean 1), 'v_inf'
             (km/s); 'h_mag', 'n' (the orbits kept), 'n_eff' (their effective number,
-            (sum w)^2/sum w^2), 'seed' and 'model'.
+            (sum w)^2/sum w^2), 'mass' (the rate of impact of the bins drawn from, to a constant
+            factor, so that the ratio of two calls is the share of the impacts in a region), 'seed'
+            and 'model'.
     """
 
     cache_key = (float(h_mag), int(n), seed)
 
-    if cache_key in deam['impactors']:
+    if (region is None) and (cache_key in deam['impactors']):
         return deam['impactors'][cache_key]
 
     rng = np.random.default_rng(seed)
@@ -556,7 +600,20 @@ def sampleImpactors(deam, h_mag, n=N_SAMPLES, seed=SEED):
     guide = population*e_factor[:, :, None]*incl_factor[None, None, :]
     pmf = guide.ravel()/np.sum(guide)
 
-    index = rng.choice(pmf.size, size=n, p=pmf)
+    # Within a region the bins are drawn from the same guide, restricted to it; the weights are those
+    #   of the whole, and the share of the guide in the region scales their mean into its mass
+    draw_pmf = pmf
+    region_share = 1.0
+
+    if region is not None:
+        draw_pmf = pmf*np.asarray(region, dtype=bool).ravel()
+        region_share = np.sum(draw_pmf)
+
+    if region_share <= 0:
+        index = np.zeros(0, dtype=int)
+
+    else:
+        index = rng.choice(pmf.size, size=n, p=draw_pmf/region_share)
     ia, ie, ii = np.unravel_index(index, population.shape)
 
     a = rng.uniform(A_EDGES[ia], A_EDGES[ia + 1])
@@ -584,11 +641,13 @@ def sampleImpactors(deam, h_mag, n=N_SAMPLES, seed=SEED):
         weight = np.where(crossing & (u > 0), population[ia, ie, ii]*incl_factor[ii]*(u_hi - u_lo)
             /np.diff(E_EDGES)[ie]/a**2*u*(1.0 + (ESCAPE_SPEED/(u*SPEED_EARTH))**2)/pmf[index], 0.0)
 
+    mass = region_share*np.sum(weight)/n
+
     # The draws that do not cross 1 AU are dropped, so that every orbit kept can hit the Earth
     kept = weight > 0
     a, e, incl, p, u = a[kept], e[kept], incl[kept], p[kept], u[kept]
-    weight = weight[kept]/np.mean(weight[kept])
     n_kept = len(a)
+    weight = weight[kept]/np.mean(weight[kept]) if n_kept else weight[kept]
 
     # The angles: the node uniform, and one of the four arguments of perihelion that put a node at
     #   1 AU, r = p/(1 + e cos(nu)) with nu = -peri at the ascending node and pi - peri at the
@@ -600,9 +659,11 @@ def sampleImpactors(deam, h_mag, n=N_SAMPLES, seed=SEED):
 
     impactors = {'q': a*(1.0 - e), 'a': a, 'e': e, 'incl': incl, 'node': node, 'peri': peri,
         'weight': weight, 'v_inf': u*SPEED_EARTH, 'h_mag': float(h_mag), 'n': n_kept,
-        'n_eff': float(np.sum(weight)**2/np.sum(weight**2)), 'seed': seed, 'model': deam['model']}
+        'n_eff': float(np.sum(weight)**2/np.sum(weight**2)) if n_kept else 0.0, 'mass': float(mass),
+        'seed': seed, 'model': deam['model']}
 
-    deam['impactors'][cache_key] = impactors
+    if region is None:
+        deam['impactors'][cache_key] = impactors
 
     return impactors
 
@@ -647,8 +708,60 @@ def closestInCatalogue(impactors, catalogue_orbits, criterion_key, n_global=N_GL
     return closest, weight/np.mean(weight)
 
 
+def criterionRegion(orbit, criterion_key, d_value):
+    """ The bins of the model that can hold an orbit within d_value of the given one by the criterion:
+        those that overlap the box in q, e and i the criterion puts around the orbit (see the module
+        docstring). Only D_SH, D_H and D_D have one.
+
+    Arguments:
+        orbit: [tuple] (q (AU), e, incl, ...) of the orbit, the inclination in radians.
+        criterion_key: [str] Key of the criterion (wmpl.Utils.Dcriteria).
+        d_value: [float] The value of the criterion.
+
+    Return:
+        [ndarray] Boolean mask over the (a, e, i) bins, or None for another criterion.
+    """
+
+    q, e, incl = float(orbit[0]), float(orbit[1]), float(orbit[2])
+    d_value = float(d_value)
+    key = criterion_key.upper()
+
+    def relative(x):
+        """ The range of x' with |x' - x| <= d_value (x' + x). """
+        return x*(1.0 - d_value)/(1.0 + d_value), (x*(1.0 + d_value)/(1.0 - d_value) if d_value < 1
+            else np.inf)
+
+    if key in ('DSH', 'DH'):
+
+        e_lo, e_hi = e - d_value, e + d_value
+        q_lo, q_hi = (q - d_value, q + d_value) if key == 'DSH' else relative(q)
+
+        # The mutual inclination is at least the difference of the inclinations
+        d_incl = 2*np.arcsin(min(d_value/2.0, 1.0))
+
+    elif key == 'DD':
+
+        (e_lo, e_hi), (q_lo, q_hi) = relative(e), relative(q)
+        d_incl = np.pi*d_value
+
+    else:
+        return None
+
+    incl_edges = np.radians(INCL_EDGES)
+
+    # A bin of (a, e) holds q from a_lo (1 - e_hi) to a_hi (1 - e_lo)
+    q_min = A_EDGES[:-1][:, None]*(1.0 - E_EDGES[1:][None, :])
+    q_max = A_EDGES[1:][:, None]*(1.0 - E_EDGES[:-1][None, :])
+
+    in_ae = (q_max >= q_lo) & (q_min <= q_hi) & (E_EDGES[1:] >= e_lo)[None, :] \
+        & (E_EDGES[:-1] <= e_hi)[None, :]
+    in_incl = (incl_edges[1:] >= incl - d_incl) & (incl_edges[:-1] <= incl + d_incl)
+
+    return in_ae[:, :, None] & in_incl[None, None, :]
+
+
 def chanceAssociation(meteor_orbit, h_mag, candidates, criterion_key, impactors,
-    catalogue_orbits=None, n_global=N_GLOBAL, model=DEAM2026):
+    catalogue_orbits=None, n_global=N_GLOBAL, model=DEAM2026, deam=None, n_refine=N_REFINE):
     """ For each candidate, the probability that a background meteoroid lies at least as close to it
         as the meteoroid does, for the candidate alone and, given the catalogue that was searched,
         corrected for the search. See the module docstring for the test and what it assumes.
@@ -665,16 +778,22 @@ def chanceAssociation(meteor_orbit, h_mag, candidates, criterion_key, impactors,
     Keyword arguments:
         catalogue_orbits: [tuple] Arrays of (q, e, incl, node, peri) of every body searched, for
             p_global. Without them p_global is not computed.
-        n_global: [int] How many background orbits to compare with the catalogue for p_global.
+        n_global: [int] How many background orbits to compare with the catalogue for p_closest.
         model: [dict] The model, DEAM2026, for the region it covers.
+        deam: [dict] Return of loadDeamModel, to compute p again near a candidate that fewer than
+            n_refine background orbits are as close to. Without it p keeps the resolution of the
+            background orbits given.
+        n_refine: [int] See deam.
 
     Return:
         [list] For each candidate a dictionary: 'p_value' of the candidate alone, 'fraction' of the
             background at least as close (by weight), 'n_closer' (the background orbits at least as
             close), 'n_background', 'is_limit' (True when none is, so that p is at most the value
-            given); 'p_value_global' corrected for the search and its 'sigma', 'n_closer_global',
-            'n_global' and 'is_limit_global', likewise, None without the catalogue; and 'reason',
-            None if the values were computed or why not, in which case they are None.
+            given); when p was computed again near the candidate, 'region_share' (R), 'n_local'
+            (N_R) and 'n_closer_local', else None; 'p_value_bonferroni', 'p_value_closest',
+            'n_closer_global' and 'n_global', 'n_bodies' (M), and 'p_value_global' with its 'sigma'
+            and 'is_limit_global', None without the catalogue; and 'reason', None if the values were
+            computed or why not, in which case they are None.
     """
 
     key, label, func, kind = lookupCriterion(criterion_key)
@@ -687,11 +806,12 @@ def chanceAssociation(meteor_orbit, h_mag, candidates, criterion_key, impactors,
         raise ValueError("The MOID costs 0.09 to 0.15 ms a pair, 1.5 to 2.5 minutes a body against 10^6 "
             "background orbits, so it is not offered.")
 
-    fields = ['p_value', 'fraction', 'n_closer', 'is_limit', 'p_value_global', 'sigma',
-        'n_closer_global', 'is_limit_global']
+    fields = ['p_value', 'fraction', 'n_closer', 'is_limit', 'region_share', 'n_local',
+        'n_closer_local', 'p_value_bonferroni', 'p_value_closest', 'n_closer_global', 'p_value_global',
+        'sigma', 'is_limit_global']
 
     empty = dict((field, None) for field in fields)
-    empty.update({'n_background': None, 'n_global': None, 'reason': None})
+    empty.update({'n_background': None, 'n_global': None, 'n_bodies': None, 'reason': None})
 
     inside, reason = isInModelRegion(meteor_orbit[0], meteor_orbit[1], meteor_orbit[2], h_mag, model)
 
@@ -700,7 +820,8 @@ def chanceAssociation(meteor_orbit, h_mag, candidates, criterion_key, impactors,
 
     n_background = impactors['n']
     n_used = None if catalogue_orbits is None else min(int(n_global), n_background)
-    empty.update({'n_background': n_background, 'n_global': n_used})
+    n_bodies = None if catalogue_orbits is None else int(np.size(catalogue_orbits[0]))
+    empty.update({'n_background': n_background, 'n_global': n_used, 'n_bodies': n_bodies})
 
     if abs(impactors['h_mag'] - h_mag) > 1e-9:
         raise ValueError("The background orbits were drawn for H = {:.2f}, not {:.2f}.".format(
@@ -718,7 +839,7 @@ def chanceAssociation(meteor_orbit, h_mag, candidates, criterion_key, impactors,
 
     results = []
 
-    for d_value, orbit in candidates:
+    for c, (d_value, orbit) in enumerate(candidates):
 
         if (d_value is None) or (not np.isfinite(d_value)):
             results.append(dict(empty, reason="no value of {:s}".format(label)))
@@ -737,13 +858,66 @@ def chanceAssociation(meteor_orbit, h_mag, candidates, criterion_key, impactors,
         result.update({'p_value': (k + 1.0)/(n_background + 1.0), 'fraction': k/n_background,
             'n_closer': n_closer, 'is_limit': n_closer == 0})
 
+        # Few background orbits as close: p again from orbits drawn in the bins that can be as close,
+        #   R (k_R + 1)/(N_R + 1), the meteoroid being one more draw there. Batches of as many orbits as
+        #   the background are drawn until n_refine of them are as close, or N_REFINE_BATCHES were
+        region = None
+        if (deam is not None) and (n_closer < n_refine) and impactors.get('mass'):
+            region = criterionRegion(orbit, key, d_value)
+
+        if region is not None:
+
+            masses = []
+            k_local, n_local, n_closer_local = 0.0, 0, 0
+            seed = SEED if impactors['seed'] is None else impactors['seed']
+
+            for batch in range(N_REFINE_BATCHES):
+
+                local = sampleImpactors(deam, h_mag, n=n_background, seed=(seed, c + 1, batch),
+                    region=region)
+
+                if local['n'] == 0:
+                    break
+
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    d_local = np.asarray(func(tuple(local[name] for name in ('q', 'e', 'incl', 'node',
+                        'peri')), tuple(orbit)), dtype=float)
+
+                closer_local = np.isfinite(d_local) & (d_local <= d_value)
+
+                masses.append(local['mass'])
+                k_local += float(np.sum(local['weight'][closer_local]))
+                n_local += local['n']
+                n_closer_local += int(np.count_nonzero(closer_local))
+
+                if n_closer_local >= n_refine:
+                    break
+
+            if n_local > 0:
+
+                share = float(np.mean(masses))/impactors['mass']
+
+                result.update({'p_value': share*(k_local + 1.0)/(n_local + 1.0),
+                    'fraction': share*k_local/n_local, 'is_limit': n_closer_local == 0,
+                    'region_share': share, 'n_local': n_local, 'n_closer_local': n_closer_local})
+
         if closest is not None:
 
-            j = int(np.searchsorted(closest, d_value, side='right'))
-            p_global = max((cumulative_global[j] + 1.0)/(n_used + 1.0), result['p_value'])
+            p_value = result['p_value']
+            p_bonferroni = min(1.0, n_bodies*p_value)
 
-            result.update({'p_value_global': p_global, 'sigma': float(pValueToSigma(p_global)),
-                'n_closer_global': j, 'is_limit_global': j == 0})
+            j = int(np.searchsorted(closest, d_value, side='right'))
+            p_closest = max((cumulative_global[j] + 1.0)/(n_used + 1.0), p_value)
+
+            # The smaller of the two, doubled for having tried two, and a limit if that one is
+            if p_bonferroni <= p_closest:
+                p_global, is_limit_global = min(1.0, 2*p_bonferroni), result['is_limit']
+            else:
+                p_global, is_limit_global = min(1.0, 2*p_closest), j == 0
+
+            result.update({'p_value_bonferroni': p_bonferroni, 'p_value_closest': p_closest,
+                'n_closer_global': j, 'p_value_global': p_global,
+                'sigma': float(pValueToSigma(p_global)), 'is_limit_global': is_limit_global})
 
         results.append(result)
 
