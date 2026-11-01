@@ -16,9 +16,13 @@ import math
 
 import numpy as np
 
+from types import SimpleNamespace
+
+import wmpl.Rebound.REBOUND as reb
 from wmpl.Utils.OrbitClassification import (calcKozaiEnergy, calcExcursionFractions,
     countPerihelionReach, splitPerihelionReachByEncounter, calcBinomialInterval,
-    classifyPerihelionReach, JFC_DYNAMICS_Q_LIMIT, JFC_DYNAMICS_A_LIMIT)
+    classifyPerihelionReach, classifyJupiterFamilyDynamics, cloneEnsemble, formatJupiterFamilyDynamics,
+    JFC_DYNAMICS_Q_LIMIT, JFC_DYNAMICS_A_LIMIT)
 
 
 # Ten one-year intervals of a backward integration
@@ -247,6 +251,188 @@ def test_kozai_energy_analytic_values():
     assert np.allclose(h, [1.0, 0.4])
 
 
+class _FakeRebound(object):
+    """ Stand-in for wmpl.Rebound.REBOUND.reboundSimulate with known clones, numbered across calls.
+
+    clone(k) says what clone k does: 'reach' (q rises above the limit halfway, after a Jupiter
+    encounter at 0.5 Hill radii), 'kozai' (it rises with no encounter), 'stay' (it never does),
+    'escape' (after that encounter it turns hyperbolic halfway and leaves two outputs later),
+    'ejected' (the same, with no encounter with Jupiter inside 1 Hill radius), 'unbound' (hyperbolic
+    at every output but the epoch's, and leaves halfway), 'far' (bound with its aphelion beyond the
+    simulation volume, and leaves halfway) or 'impact' (it stays and ends halfway on a body).
+    """
+
+    def __init__(self, clone):
+        self.clone = clone
+        self.calls = []
+        self.n = 0
+
+    def __call__(self, julian_date, state_vect, traj=None, direction=None, sim_days=None,
+            n_outputs=None, mc_runs=None, random_seed=None, **kwargs):
+
+        self.calls.append(dict(kwargs, direction=direction, sim_days=sim_days, n_outputs=n_outputs,
+            mc_runs=mc_runs, random_seed=random_seed))
+
+        half = n_outputs//2
+        outputs_mc, diagnostics = {}, {}
+
+        for i in range(mc_runs):
+
+            kind = self.clone(self.n)
+            self.n += 1
+
+            a = np.full(n_outputs, 3.5)
+            e = np.full(n_outputs, 0.7)
+            if kind in ('reach', 'kozai'):
+                a[half:] = 8.0
+                e[half:] = 0.6
+            if kind in ('escape', 'ejected'):
+                a[half:], e[half:] = -5.0, 1.3
+                a, e = a[:half + 2], e[:half + 2]
+            if kind == 'unbound':
+                a[:], e[:] = -5.0, 1.2
+                a[0], e[0] = 40.0, 0.95
+            if kind == 'far':
+                a[:], e[:] = 600.0, 0.999
+            if kind in ('unbound', 'far', 'impact'):
+                a, e = a[:half], e[:half]
+
+            encounters = [{'body': 'Saturn', 'time_days': -365.25, 'n_hill': 0.1},
+                {'body': 'Jupiter', 'time_days': -365.25, 'n_hill': 2.0}] \
+                if kind in ('reach', 'escape', 'ejected') else []
+            if kind in ('reach', 'escape'):
+                encounters.append({'body': 'Jupiter', 'time_days': -half*365.25, 'n_hill': 0.5})
+
+            name = 'obj_MC_{:d}'.format(i)
+            outputs_mc[name] = {'t': np.zeros(len(a)), 'a': a, 'e': e}
+            diagnostics[name] = {
+                'escaped': {'time_days': -1.0} if kind in ('escape', 'ejected', 'unbound', 'far') else None,
+                'impact': {'body': 'Earth'} if kind == 'impact' else None, 'encounters': encounters}
+
+        return None, outputs_mc, diagnostics
+
+
+_TRAJ = SimpleNamespace(uncertainties=object(), state_vect_cov=np.eye(6), jdt_ref=2459000.5)
+
+
+def _runDriver(clone, traj=_TRAJ, **kwargs):
+    """ Run classifyJupiterFamilyDynamics on the stand-in, and return its result and the stand-in. """
+
+    fake = _FakeRebound(clone)
+    original = (reb.reboundSimulate, reb.REBOUND_FOUND)
+    reb.reboundSimulate, reb.REBOUND_FOUND = fake, True
+
+    try:
+        result = classifyJupiterFamilyDynamics(traj, years=1000.0, output_years=10.0, **kwargs)
+
+    finally:
+        reb.reboundSimulate, reb.REBOUND_FOUND = original
+
+    return result, fake
+
+
+def test_dynamics_stops_as_soon_as_the_class_is_settled():
+
+    for kind, verdict in (('reach', 'jupiter family'), ('stay', 'not jupiter family')):
+
+        result, fake = _runDriver(lambda k: kind, seed=7)
+
+        # 20 of 20 settles it even at the 99.5% of each of the 10 possible looks
+        assert result['n_batches'] == 1 and result['n_clones'] == 20
+        assert result['dynamics_class'] == verdict
+        assert len(fake.calls) == 1
+
+        call = fake.calls[0]
+        assert call['direction'] == 'backward' and call['lean_outputs'] and call['return_diagnostics']
+        assert call['mc_runs'] == 20 and call['n_outputs'] == 101 and call['random_seed'] == 7
+
+
+def test_dynamics_runs_every_batch_when_the_class_stays_open():
+
+    result, fake = _runDriver(lambda k: 'reach' if k%2 else 'stay', seed=100)
+
+    assert result['dynamics_class'] == 'undetermined'
+    assert result['n_batches'] == 10 and result['n_clones'] == 200
+    assert result['p'] == 0.5
+
+    # Every batch draws its own clones
+    assert [c['random_seed'] for c in fake.calls] == list(range(100, 110))
+
+    # The plain interval is narrower than the one each look used
+    assert result['look_confidence'] == 1.0 - 0.05/10
+    lo, hi = calcBinomialInterval(100, 200)
+    assert (result['p_low'], result['p_high']) == (lo, hi)
+
+
+def test_escaped_clones_are_told_apart_by_their_eccentricity_after_the_epoch():
+
+    kinds = ['escape', 'unbound', 'far']
+    _, outputs_mc, diagnostics = _FakeRebound(lambda k: kinds[k])(None, None, n_outputs=11, mc_runs=3)
+    q, a, _, left_unbound = cloneEnsemble(outputs_mc, diagnostics, 11)
+
+    # Thrown out: its states, then beyond every limit
+    assert np.all(np.isfinite(q[0, :7])) and np.all(np.isinf(q[0, 7:])) and np.all(np.isinf(a[0, 7:]))
+
+    # Hyperbolic after the epoch, though bound at it: not part of the ensemble
+    assert np.all(np.isnan(q[1])) and np.all(np.isnan(a[1]))
+
+    # Bound beyond the simulation volume: it keeps its orbit
+    assert np.allclose(q[2], 600.0*(1.0 - 0.999)) and np.all(a[2] == 600.0)
+
+    assert list(left_unbound) == [False, True, False]
+
+
+def test_dynamics_counts_escapes_impacts_and_encounters():
+
+    kinds = ['reach', 'kozai', 'escape', 'ejected', 'impact', 'stay', 'unbound', 'far']
+    result, _ = _runDriver(lambda k: kinds[k%8], max_clones=16, batch=16, seed=1)
+
+    # The two unbound clones are integrated but not classified
+    assert result['n_integrated'] == 16 and result['n_clones'] == 14
+    assert result['n_left_unbound'] == 2
+    assert result['n_escaped'] == 8 and result['n_impacted'] == 2
+
+    # Reach, Kozai and the thrown-out clones reach the limit; only the Jupiter encounter inside 1 R_H
+    #   counts, so the Kozai and the ejected clones are the ones without one, and of those the
+    #   ejected ones got there by being thrown out
+    assert result['n_reached'] == 8
+    assert (result['n_reached_after_encounter'], result['n_reached_without_encounter']) == (4, 4)
+    assert result['n_reached_without_encounter_by_escape'] == 2
+
+
+def test_dynamics_of_an_unbound_orbit_is_not_classified():
+
+    result, fake = _runDriver(lambda k: 'unbound', seed=5)
+
+    # Every clone left unbound, so one batch is enough to tell, and it gets no Jupiter-family verdict
+    assert len(fake.calls) == 1
+    assert result['dynamics_class'] == 'unbound'
+    assert result['n_clones'] == 0 and result['n_left_unbound'] == 20
+    assert math.isnan(result['p'])
+
+    # The report gives the verdict without fractions of an empty ensemble
+    report = "\n".join(formatJupiterFamilyDynamics(result))
+    assert "Verdict: unbound" in report
+    assert "nan" not in report
+
+
+def test_dynamics_refuses_what_it_cannot_run():
+
+    no_mc = SimpleNamespace(uncertainties=None, state_vect_cov=None, jdt_ref=2459000.5)
+    assert _raises(ValueError, _runDriver, lambda k: 'stay', traj=no_mc)
+    assert _raises(ValueError, _runDriver, lambda k: 'stay', batch=1)
+
+
+def test_dynamics_report_states_its_assumptions():
+
+    result, _ = _runDriver(lambda k: 'reach', seed=3, gr='none', beta=1.9e-4, integrator='trace')
+    text = "\n".join(formatJupiterFamilyDynamics(result))
+
+    for expected in ("1000 yr backward", "TRACE", "no GR", "beta = 1.900e-04", "seed 3",
+            "every 10 yr", "q > 2.5 AU", "20/20", "jupiter family"):
+        assert expected in text, expected
+
+
 if __name__ == "__main__":
 
     test_functions = [
@@ -263,6 +449,13 @@ if __name__ == "__main__":
         test_binomial_interval_is_symmetric_and_narrows_with_more_trials,
         test_classification_gives_both_verdicts,
         test_kozai_energy_analytic_values,
+        test_dynamics_stops_as_soon_as_the_class_is_settled,
+        test_dynamics_runs_every_batch_when_the_class_stays_open,
+        test_escaped_clones_are_told_apart_by_their_eccentricity_after_the_epoch,
+        test_dynamics_counts_escapes_impacts_and_encounters,
+        test_dynamics_of_an_unbound_orbit_is_not_classified,
+        test_dynamics_refuses_what_it_cannot_run,
+        test_dynamics_report_states_its_assumptions,
         ]
 
     failed = 0

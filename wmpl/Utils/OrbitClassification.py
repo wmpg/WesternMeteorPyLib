@@ -1153,13 +1153,324 @@ def classifyPerihelionReach(n_reached, n_clones, threshold=JFC_DYNAMICS_P_THRESH
         'dynamics_class': dynamics_class}
 
 
+# Defaults of classifyJupiterFamilyDynamics. The span is that of Shober et al. (2024). Outputs every
+#   50 yr take 1/50 of the memory of yearly ones and gave the same fraction reaching q > 2.5 AU on a
+#   21P-like orbit
+JFC_DYNAMICS_YEARS = 10000.0
+JFC_DYNAMICS_OUTPUT_YEARS = 50.0
+JFC_DYNAMICS_BATCH = 20
+JFC_DYNAMICS_MAX_CLONES = 200
+
+# Depth, in Hill radii of Jupiter, of the encounters that count as lifting a perihelion past the
+#   limit (see splitPerihelionReachByEncounter)
+JFC_DYNAMICS_ENCOUNTER_HILL = 1.0
+
+
+def cloneEnsemble(outputs_mc, diagnostics, n_outputs, encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL):
+    """ Turn the lean outputs of the clones of a REBOUND run into the arrays of the Jupiter-family
+        metrics.
+
+        A clone that hit a body has no state after its last output (nan). One that left the simulation
+        volume of wmpl.Rebound.REBOUND (1000 AU from the Sun) is told apart by its eccentricity:
+          - bound at its last output: its aphelion lies beyond the volume, where nothing in the force
+            model changes the orbit, so it keeps its last q and a;
+          - unbound at its last output, after being bound: it was thrown out, and is beyond every
+            limit from then on (+inf), as calcExcursionFractions expects;
+          - unbound at every output after the epoch: it was never part of the bound dynamics being
+            classified, and is left out of the metrics altogether (nan at every output).
+        The output at the epoch is not used for this, because it is taken at the Earth, whose pull
+        changes the heliocentric orbit: on a Halley-type orbit with a = 10 AU it gave a = 36-108 AU.
+
+    Arguments:
+        outputs_mc: [dict] {clone name: {key: array}} from wmpl.Rebound.REBOUND.reboundSimulate with
+            lean_outputs=True.
+        diagnostics: [dict] {clone name: diagnostics} from the same call (return_diagnostics=True).
+        n_outputs: [int] Number of output times the run asked for.
+
+    Keyword arguments:
+        encounter_hill: [float] Encounters with Jupiter closer than this many Hill radii are returned.
+            Default JFC_DYNAMICS_ENCOUNTER_HILL.
+
+    Return:
+        (q, a, encounter_times, left_unbound): q and a [ndarray] of shape (n_clones, n_outputs), in
+            AU; for each clone the times (yr, negative before the epoch) of its encounters with
+            Jupiter; and [ndarray] whether each clone was unbound at every output after the epoch.
+            All in the order of the clone names.
+    """
+
+    names = sorted(outputs_mc, key=lambda name: int(name.rsplit('_', 1)[1]))
+
+    q = np.full((len(names), n_outputs), np.nan)
+    a = np.full((len(names), n_outputs), np.nan)
+    encounter_times = []
+    left_unbound = np.zeros(len(names), dtype=bool)
+
+    for k, name in enumerate(names):
+
+        columns = outputs_mc[name]
+        n = len(columns['a'])
+
+        q[k, :n] = columns['a']*(1.0 - columns['e'])
+        a[k, :n] = columns['a']
+        if diagnostics[name]['escaped'] is not None:
+
+            e_after_epoch = columns['e'][1:] if n > 1 else columns['e']
+
+            if columns['e'][-1] < 1.0:
+                q[k, n:] = q[k, n - 1]
+                a[k, n:] = a[k, n - 1]
+
+            elif np.all(e_after_epoch >= 1.0):
+                left_unbound[k] = True
+                q[k] = np.nan
+                a[k] = np.nan
+
+            else:
+                q[k, n:] = np.inf
+                a[k, n:] = np.inf
+
+        encounter_times.append([enc['time_days']/365.25 for enc in diagnostics[name]['encounters']
+            if (enc['body'] == 'Jupiter') and (enc['n_hill'] < encounter_hill)])
+
+    return q, a, encounter_times, left_unbound
+
+
+def checkDynamicsInputs(traj, batch):
+    """ Raise a ValueError if classifyJupiterFamilyDynamics cannot run on these inputs, before any
+        integration is started.
+
+    Arguments:
+        traj: [Trajectory] The trajectory.
+        batch: [int] Clones per batch.
+    """
+
+    if (traj.uncertainties is None) or (traj.state_vect_cov is None):
+        raise ValueError("The trajectory has no Monte Carlo uncertainties, so there are no clones to "
+            "integrate. Solve it with the Monte Carlo runs on.")
+
+    # reboundSimulate draws clones only for more than one realization
+    if batch < 2:
+        raise ValueError("A batch needs at least 2 clones, got {}.".format(batch))
+
+
+def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNAMICS_BATCH,
+    max_clones=JFC_DYNAMICS_MAX_CLONES, confidence=0.95, integrator='ias15', gr='gr', beta=None,
+    seed=None, output_years=JFC_DYNAMICS_OUTPUT_YEARS, encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL,
+    n_cpu=None):
+    """ Classify whether a meteoroid moved like a Jupiter-family comet, from clones of its orbit
+        integrated backwards.
+
+        The clones are drawn from the covariance of the trajectory's state vector, as
+        wmpl.Rebound.REBOUND draws its Monte Carlo realizations, and integrated by it. They are run in
+        batches until the fraction of them reaching q > 2.5 AU settles the class or max_clones is
+        reached: an orbit that is clearly or clearly not Jupiter-family stops after a few tens of
+        clones instead of the fixed 1000 of Shober et al. (2024).
+
+        Each batch is a look at the fraction that could stop the run on a fluke, so each look uses the
+        interval at a confidence 1 - (1 - confidence)/n_looks (Bonferroni over the possible looks).
+        That keeps the chance of stopping on the wrong class at about 1 - confidence or less, about
+        because the coverage of the Wilson interval is itself approximate. The fraction is also given
+        with its plain interval at the requested confidence.
+
+        Reference: Shober et al. (2024), A&A 687, A181, doi:10.1051/0004-6361/202449635, adapted:
+        clones from the full state-vector covariance, the stopping rule above, and the split of the
+        clones that reach the limit without a close encounter (splitPerihelionReachByEncounter).
+
+    Arguments:
+        traj: [Trajectory] Trajectory solved with the Monte Carlo uncertainties (traj.state_vect_cov).
+
+    Keyword arguments:
+        years: [float] Span of the backward integration. Default JFC_DYNAMICS_YEARS.
+        batch: [int] Clones per batch, at least 2. Default JFC_DYNAMICS_BATCH.
+        max_clones: [int] Most clones integrated, one more if the last batch would otherwise hold a
+            single clone. Default JFC_DYNAMICS_MAX_CLONES.
+        confidence: [float] Confidence of the verdict. Default 0.95.
+        integrator: [str] Integrator of wmpl.Rebound.REBOUND. Default 'ias15'.
+        gr: [str] General relativity model of wmpl.Rebound.REBOUND. Default 'gr'.
+        beta: [float] Radiation pressure parameter, None (default) for none.
+        seed: [int] Seed of the clones; batch k uses seed + k. None draws one, which is returned.
+        output_years: [float] Spacing of the outputs. Default JFC_DYNAMICS_OUTPUT_YEARS.
+        encounter_hill: [float] Depth of the encounters with Jupiter, in Hill radii, that count as
+            lifting a perihelion. Default JFC_DYNAMICS_ENCOUNTER_HILL.
+        n_cpu: [int] Processes for the clones. None uses all cores but one.
+
+    Return:
+        [dict] The settings (under 'assumptions'), and: 'n_integrated', 'n_clones' (those that count:
+            all but the unbound ones), 'n_batches', 'f_q', 'f_a',
+            'n_reached', 'n_reached_after_encounter', 'n_reached_without_encounter' and how many of
+            those by being thrown out of the solar system ('n_reached_without_encounter_by_escape'),
+            'n_left_unbound' (clones unbound at every output after the epoch, see cloneEnsemble),
+            'n_escaped' (clones that left the simulation volume), 'n_impacted', 'p', 'p_low' and
+            'p_high' (plain interval), 'look_confidence', 'jupiter_family_shober' and
+            'dynamics_class' (from the last look; 'unbound' if every clone was unbound).
+    """
+
+    from wmpl.Rebound import REBOUND as reb
+
+    if not reb.REBOUND_FOUND:
+        raise ImportError(reb._REBOUND_IMPORT_ERROR)
+
+    checkDynamicsInputs(traj, batch)
+
+    if seed is None:
+        seed = int(np.random.SeedSequence().entropy%(2**32))
+
+    n_outputs = int(round(years/output_years)) + 1
+    t = np.linspace(0.0, -years, n_outputs)
+
+    n_looks = int(np.ceil(float(max_clones)/batch))
+    look_confidence = 1.0 - (1.0 - confidence)/n_looks
+
+    q_parts, a_parts, encounter_times, unbound_parts = [], [], [], []
+    n_integrated = 0
+    n_escaped = 0
+    n_impacted = 0
+
+    for look in range(n_looks):
+
+        n_batch = max(2, min(batch, max_clones - look*batch))
+
+        _, outputs_mc, diagnostics = reb.reboundSimulate(None, None, traj=traj, direction='backward',
+            sim_days=years*365.25, n_outputs=n_outputs, mc_runs=n_batch, random_seed=seed + look,
+            integrator=integrator, gr=gr, beta=beta, lean_outputs=True, return_diagnostics=True,
+            show_progress=False, n_cpu=n_cpu)
+
+        q_batch, a_batch, encounters_batch, unbound_batch = cloneEnsemble(outputs_mc, diagnostics,
+            n_outputs, encounter_hill=encounter_hill)
+
+        q_parts.append(q_batch)
+        a_parts.append(a_batch)
+        unbound_parts.append(unbound_batch)
+        encounter_times += encounters_batch
+        n_integrated += len(outputs_mc)
+        n_escaped += sum(diagnostics[name]['escaped'] is not None for name in outputs_mc)
+        n_impacted += sum(diagnostics[name]['impact'] is not None for name in outputs_mc)
+
+        q = np.vstack(q_parts)
+        n_reached, n_clones = countPerihelionReach(q)
+
+        # Every clone so far was unbound: the orbit is not bound, and more clones will not change that
+        if n_clones == 0:
+            break
+
+        verdict = classifyPerihelionReach(n_reached, n_clones, confidence=look_confidence)
+
+        if verdict['dynamics_class'] != 'undetermined':
+            break
+
+    a = np.vstack(a_parts)
+    f_q, f_a = calcExcursionFractions(t, q, a)
+    n_with, n_without = splitPerihelionReachByEncounter(t, q, encounter_times)
+
+    if n_clones:
+        plain = classifyPerihelionReach(n_reached, n_clones, confidence=confidence)
+
+    else:
+        plain = {'p': np.nan, 'p_low': np.nan, 'p_high': np.nan, 'jupiter_family_shober': False}
+        verdict = {'dynamics_class': 'unbound'}
+
+    # Of the clones that reached the limit without an encounter, those that did it by being thrown out
+    #   of the solar system, rather than by a slow rise of the perihelion as the Kozai mechanism gives
+    elapsed = np.abs(t)
+    n_without_by_escape = 0
+    for q_clone, times in zip(q, encounter_times):
+        beyond = np.flatnonzero(q_clone > JFC_DYNAMICS_Q_LIMIT)
+        if beyond.size and np.isinf(q_clone[beyond[0]]) \
+                and not np.any(np.abs(np.asarray(times, dtype=float)) <= elapsed[beyond[0]]):
+            n_without_by_escape += 1
+
+    return {
+        'assumptions': {'years': years, 'epoch_jd': traj.jdt_ref, 'integrator': integrator, 'gr': gr,
+            'beta': beta, 'seed': seed, 'batch': batch, 'max_clones': max_clones,
+            'output_years': output_years, 'q_limit': JFC_DYNAMICS_Q_LIMIT,
+            'a_limit': JFC_DYNAMICS_A_LIMIT, 'p_threshold': JFC_DYNAMICS_P_THRESHOLD,
+            'encounter_hill': encounter_hill, 'confidence': confidence},
+        'n_integrated': n_integrated, 'n_clones': n_clones, 'n_batches': look + 1, 'f_q': f_q,
+        'f_a': f_a, 'n_reached': n_reached,
+        'n_reached_after_encounter': n_with, 'n_reached_without_encounter': n_without,
+        'n_reached_without_encounter_by_escape': n_without_by_escape,
+        'n_left_unbound': int(np.count_nonzero(np.concatenate(unbound_parts))),
+        'n_escaped': n_escaped, 'n_impacted': n_impacted, 'p': plain['p'], 'p_low': plain['p_low'],
+        'p_high': plain['p_high'], 'look_confidence': look_confidence,
+        'jupiter_family_shober': plain['jupiter_family_shober'],
+        'dynamics_class': verdict['dynamics_class'],
+        }
+
+
+def formatJupiterFamilyDynamics(result):
+    """ Lines of the report of classifyJupiterFamilyDynamics: what was assumed, then what came out.
+
+    Arguments:
+        result: [dict] Return of classifyJupiterFamilyDynamics.
+
+    Return:
+        [list] Lines of text.
+    """
+
+    s = result['assumptions']
+    gr_text = {'gr': 'GR (Sun)', 'gr_full': 'GR (all bodies)', 'none': 'no GR'}[s['gr']]
+    radiation = "no radiation pressure" if s['beta'] is None \
+        else "radiation pressure and Poynting-Robertson drag (beta = {:.3e})".format(s['beta'])
+
+    lines = [
+        "Jupiter-family dynamics (adapted from Shober et al. 2024)",
+        "---------------------------------------------------------",
+        "  Assumptions",
+        "    Integration : {:.0f} yr backward from JD {:.5f}, {:s}".format(s['years'], s['epoch_jd'],
+            s['integrator'].upper()),
+        "    Forces      : Sun, planets and Moon (DE430); {:s}; Sun J2; Earth J2/J4; {:s}; no "
+            "outgassing or Yarkovsky".format(gr_text, radiation),
+        "    Clones      : {:d} from the trajectory's state-vector covariance, seed {:d}, in batches of "
+            "{:d} (at most {:d})".format(result['n_integrated'], s['seed'], s['batch'], s['max_clones']),
+        "    Outputs     : every {:g} yr".format(s['output_years']),
+        "    Limits      : q > {:g} AU, a > {:g} AU, threshold {:g}, encounters < {:g} R_H of "
+            "Jupiter".format(s['q_limit'], s['a_limit'], s['p_threshold'], s['encounter_hill']),
+        "  Result",
+        ]
+
+    # With no clone bound to the Sun there is no fraction to take and no interval to test
+    if result['n_clones'] == 0:
+        lines.append("    Verdict: {:s}".format(result['dynamics_class']))
+
+    else:
+        lines += [
+            "    f_q = {:.3f}   f_a = {:.3f}".format(result['f_q'], result['f_a']),
+            "    Clones reaching q > {:g} AU: {:d}/{:d}  ({:d} after a Jupiter encounter; {:d} without "
+                "one: {:d} thrown out of the solar system, {:d} possible Kozai)".format(s['q_limit'],
+                result['n_reached'], result['n_clones'], result['n_reached_after_encounter'],
+                result['n_reached_without_encounter'], result['n_reached_without_encounter_by_escape'],
+                result['n_reached_without_encounter'] - result['n_reached_without_encounter_by_escape']),
+            "    P = {:.2f}  [{:.2f}, {:.2f}] at {:.0%} (Wilson)".format(result['p'], result['p_low'],
+                result['p_high'], s['confidence']),
+            "    Rule of Shober et al. (P > {:g}): {:s}".format(s['p_threshold'],
+                "yes" if result['jupiter_family_shober'] else "no"),
+            "    Verdict: {:s} (interval at {:.2%} per look, {:d} look{:s})".format(
+                result['dynamics_class'], result['look_confidence'], result['n_batches'],
+                "" if result['n_batches'] == 1 else "s"),
+            ]
+
+    if result['n_escaped'] or result['n_impacted']:
+        lines.append("    {:d} clone(s) left the simulation volume (1000 AU) and {:d} hit a body".format(
+            result['n_escaped'], result['n_impacted']))
+
+    if result['n_left_unbound']:
+        lines.append("    {:d} of them were unbound at every output after the epoch and are left out of "
+            "the classification".format(result['n_left_unbound']))
+
+    return lines
+
+
 if __name__ == "__main__":
 
     import os
     import sys
+    import json
     import argparse
 
     from wmpl.Utils.Pickling import loadPickle
+
+    # The choices of the dynamics options are those of the integrator, so that they cannot drift apart
+    from wmpl.Rebound.REBOUND import GR_MODELS, INTEGRATORS, radiationPressureBeta
 
 
     ### COMMAND LINE ARGUMENTS
@@ -1193,6 +1504,40 @@ if __name__ == "__main__":
     output.add_argument('--quiet', '-Q', action='store_true', \
         help="Print one 'KEY VALUE' line per quantity and nothing else, for scripted use.")
 
+    dyn = arg_parser.add_argument_group('Jupiter-family dynamics',
+        "Integrate clones of the orbit backwards with wmpl.Rebound.REBOUND and classify whether it "
+        "moved like a Jupiter-family comet: the fraction of clones whose perihelion rises above 2.5 AU, "
+        "adapted from Shober et al. (2024), A&A 687, A181. Needs a trajectory pickle solved with the "
+        "Monte Carlo uncertainties, rebound/reboundx and the DE430 ephemeris. Clones are integrated in "
+        "batches until the class is settled or --max_clones is reached.")
+    dyn.add_argument('--dynamics', action='store_true', \
+        help="Run the classification.")
+    dyn.add_argument('--years', type=float, default=JFC_DYNAMICS_YEARS, \
+        help="Span of the backward integration in years. Default: {:g}.".format(JFC_DYNAMICS_YEARS))
+    dyn.add_argument('--batch', type=int, default=JFC_DYNAMICS_BATCH, \
+        help="Clones per batch, at least 2. Default: {:d}.".format(JFC_DYNAMICS_BATCH))
+    dyn.add_argument('--max_clones', type=int, default=JFC_DYNAMICS_MAX_CLONES, \
+        help="Most clones integrated. Default: {:d}.".format(JFC_DYNAMICS_MAX_CLONES))
+    dyn.add_argument('--integrator', type=str.lower, default='ias15', choices=INTEGRATORS, \
+        help="Integrator. Default: ias15. On a 21P-like test orbit TRACE showed no detectable "
+        "difference in the fraction of 40 clones and took only 12%% less time.")
+    dyn.add_argument('--gr', type=str.lower, default='gr', choices=GR_MODELS, \
+        help="General relativity. Default: gr, the Sun's post-Newtonian correction: on a 21P-like "
+        "test orbit it showed no detectable difference from gr_full in the fraction of 40 clones, at 1/4.6 "
+        "of the cost. none leaves it out.")
+    dyn.add_argument('--beta', type=float, default=None, \
+        help="Include radiation pressure and Poynting-Robertson drag with this beta. Off by default.")
+    dyn.add_argument('--radius', type=float, default=None, \
+        help="Meteoroid radius in metres, with --density, to compute beta instead of giving it.")
+    dyn.add_argument('--density', type=float, default=3000.0, \
+        help="Bulk density in kg/m^3 for --radius. Default: 3000.")
+    dyn.add_argument('--seed', type=int, default=None, \
+        help="Seed of the clones, to reproduce a run. Drawn and reported if not given.")
+    dyn.add_argument('--cores', type=int, default=None, \
+        help="Processes for the clones. Default: all cores but one.")
+    dyn.add_argument('--dynamics_save', metavar='FILE', type=str, default=None, \
+        help="Save the result of the classification, with its assumptions, to this JSON file.")
+
     cml_args = arg_parser.parse_args()
 
 
@@ -1213,7 +1558,8 @@ if __name__ == "__main__":
     # Assemble the orbit, either from a trajectory pickle or from the elements given by hand
     if cml_args.traj_path is not None:
 
-        orbit = loadPickle(*os.path.split(cml_args.traj_path)).orbit
+        traj = loadPickle(*os.path.split(cml_args.traj_path))
+        orbit = traj.orbit
         q, e, incl, node, peri = orbit.q, orbit.e, orbit.i, orbit.node, orbit.peri
 
     else:
@@ -1342,3 +1688,50 @@ if __name__ == "__main__":
         print("The Tancredi classification of an asteroid was skipped: it needs the distances to")
         print("the giant planets, and so the node and the argument of perihelion, from a")
         print("trajectory pickle or from the --node and --peri arguments.")
+
+
+    ### JUPITER-FAMILY DYNAMICS
+
+    if cml_args.dynamics:
+
+        if cml_args.traj_path is None:
+            reportError("--dynamics needs a trajectory pickle: the clones are drawn from its Monte "
+                "Carlo uncertainties.")
+
+        if (cml_args.beta is not None) and (cml_args.radius is not None):
+            reportError("Give either --beta or --radius (with --density), not both.")
+
+        beta = cml_args.beta
+        if cml_args.radius is not None:
+            beta = radiationPressureBeta(cml_args.radius, cml_args.density)
+
+        try:
+            checkDynamicsInputs(traj, cml_args.batch)
+        except ValueError as err:
+            reportError("--dynamics: {:s}".format(str(err)))
+
+        if verbose:
+            print()
+            print("Integrating clones for the Jupiter-family dynamics, up to {:d} of {:.0f} yr each; "
+                "this takes minutes to hours...".format(cml_args.max_clones, cml_args.years))
+
+        try:
+            result = classifyJupiterFamilyDynamics(traj, years=cml_args.years, batch=cml_args.batch,
+                max_clones=cml_args.max_clones, integrator=cml_args.integrator, gr=cml_args.gr,
+                beta=beta, seed=cml_args.seed, n_cpu=cml_args.cores)
+
+        except (ImportError, ValueError) as err:
+            reportError("--dynamics: {:s}".format(str(err)))
+
+        if verbose:
+            print()
+            print("\n".join(formatJupiterFamilyDynamics(result)))
+
+        else:
+            for key in ('n_clones', 'n_reached', 'p', 'p_low', 'p_high', 'f_q', 'f_a'):
+                print("JFC_DYNAMICS_{:s} {}".format(key.upper(), result[key]))
+            print("JFC_DYNAMICS_CLASS {:s}".format(result['dynamics_class']))
+
+        if cml_args.dynamics_save is not None:
+            with open(cml_args.dynamics_save, 'w') as f:
+                json.dump(result, f, indent=2, default=float)
