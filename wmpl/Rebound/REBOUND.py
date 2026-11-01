@@ -1522,7 +1522,8 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
 #   correction from the dominant body, the Sun, applied to every body: it gets the perihelion
 #   precession and the mean motions right. "gr_full" (Newhall et al. 1983, the EIH equations) is the
 #   interaction between every pair of bodies; its cost grows as the cube of the number of bodies.
-GR_MODELS = ("gr", "gr_full")
+#   "none" leaves general relativity out, for comparison with purely Newtonian integrations.
+GR_MODELS = ("gr", "gr_full", "none")
 
 # Arrays of the lean output format (see _integrateParticles): the output times, in REBOUND time
 #   units as in the rows of the full format, and the osculating elements of the rows' orbit object.
@@ -1597,8 +1598,9 @@ def _integrateParticles(task):
                                  Moon 1737.4 km).
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
             gr:              [str]  Optional. General relativity: "gr_full" (default), the
-                                 post-Newtonian interaction between all pairs of bodies, or "gr",
-                                 the correction of the Sun's field on every body (see GR_MODELS).
+                                 post-Newtonian interaction between all pairs of bodies, "gr",
+                                 the correction of the Sun's field on every body, or "none", no
+                                 relativistic correction (see GR_MODELS).
             sun_j2:          [bool] Optional. Include the Sun's J2 (SUN_J2), symmetric about its
                                  rotation axis (sunSpinAxisEcliptic). Default True.
             earth_spin_axis: [list] Optional. Direction of the Earth's rotation axis in the
@@ -1756,9 +1758,10 @@ def _integrateParticles(task):
     gr_model = task.get("gr", "gr_full")
     if gr_model not in GR_MODELS:
         raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr_model), ", ".join(GR_MODELS)))
-    gr = rebx.load_force(gr_model)
-    rebx.add_force(gr)
-    gr.params["c"] = rbxConstants.C
+    if gr_model != "none":
+        gr = rebx.load_force(gr_model)
+        rebx.add_force(gr)
+        gr.params["c"] = rbxConstants.C
 
     # Optional solar radiation pressure and Poynting-Robertson drag on the integrated particles.
     # Off unless a beta is supplied, because it needs the object's size and density, which are not
@@ -2891,8 +2894,9 @@ def reboundSimulate(
         dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
             FIXED_STEP_DEFAULT_DT_DAYS. Ignored by IAS15.
         gr: [str] General relativity model, "gr_full" (default; the post-Newtonian interaction between
-            all pairs of bodies) or "gr" (the Sun's post-Newtonian correction on every body, 3.3 times
-            faster, with the same results to ~1e-7 in a). See GR_MODELS.
+            all pairs of bodies), "gr" (the Sun's post-Newtonian correction on every body, 3.3 times
+            faster, with the same results to ~1e-7 in a) or "none" (Newtonian gravity only). See
+            GR_MODELS.
         sun_j2: [bool] Include the Sun's J2 (SUN_J2, about its rotation axis). Default True. It moves
             Mercury's perihelion by 0.03 arcsec per century, and a meteoroid's in proportion to
             (R_Sun/q)^2, so it matters most for small perihelia.
@@ -3264,9 +3268,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--gr", type=str.lower, default="gr_full", choices=GR_MODELS,
                         help="General relativity: gr_full (default), the post-Newtonian interaction "
-                        "between all pairs of bodies, or gr, the Sun's post-Newtonian correction on "
-                        "every body. gr is 3.3 times faster and changes the orbits by ~1e-7 in a over "
-                        "100 years; use it for large Monte Carlo runs.")
+                        "between all pairs of bodies, gr, the Sun's post-Newtonian correction on "
+                        "every body, or none, Newtonian gravity only. gr is 3.3 times faster and "
+                        "changes the orbits by ~1e-7 in a over 100 years; use it for large Monte Carlo "
+                        "runs. none is for comparison with purely Newtonian integrations.")
 
     parser.add_argument("--no_sun_j2", action="store_true",
                         help="Leave out the Sun's J2 (on by default: J2 = {:.4e}, about the Sun's rotation "
@@ -3568,8 +3573,9 @@ if __name__ == "__main__":
 
     print("  Frame        : {:s}".format(reference_frame))
     j2_axis = "" if harmonicsSpinAxisSupported() else " (about the ecliptic pole: REBOUNDx < 4.4.0)"
-    forces_str = "gravity + GR ({:s}) + {:s}Earth J2/J4{:s}".format(
-        "Sun" if args.gr == "gr" else "all bodies", "" if args.no_sun_j2 else "Sun J2 + ", j2_axis)
+    gr_str = {"gr": "GR (Sun) + ", "gr_full": "GR (all bodies) + ", "none": ""}[args.gr]
+    forces_str = "gravity + {:s}{:s}Earth J2/J4{:s}{:s}".format(
+        gr_str, "" if args.no_sun_j2 else "Sun J2 + ", j2_axis, " (no GR)" if args.gr == "none" else "")
     if beta is not None:
         forces_str += " + radiation (beta = {:.3e})".format(beta)
     print("  Forces       : {:s}".format(forces_str))
@@ -3890,6 +3896,7 @@ if __name__ == "__main__":
             f.write("Relative energy drift of the massive subsystem: {:.3e}\n".format(
                 nominal_diag["energy_rel_drift"]))
 
+        f.write("Forces: {:s}\n".format(forces_str))
         f.write("Integrator: {:s}\n".format(integrator_str))
         if whfast_warning:
             f.write("\n{:s}\n".format(whfast_warning))
