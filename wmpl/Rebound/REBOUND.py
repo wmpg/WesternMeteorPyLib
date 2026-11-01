@@ -2954,7 +2954,7 @@ def integrateHeliocentricBodies(names, states_hel, jd_tdb, times, ephem_source="
     return _integrateParticles(task)
 
 
-def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_outputs=20):
+def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_outputs=20, gr="gr_full"):
     """ Bring bodies given by osculating elements at their own epochs to a common epoch, by
     integrating them with integrateHeliocentricBodies. Bodies that share an epoch, which is every
     asteroid of the catalogues, are integrated together.
@@ -2973,6 +2973,7 @@ def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_output
         ephem_source: [str] "local" (default) or "horizons".
         n_outputs: [int] Output times along the way. Only the last one is returned, but the encounter
             and impact detection of _integrateParticles is armed at an output, so a few are taken.
+        gr: [str] General relativity model, one of GR_MODELS. Default "gr_full".
 
     Return:
         [list] For each body, None if it could not be brought to the epoch (no epoch, no place on its
@@ -2981,6 +2982,11 @@ def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_output
             'mean_anomaly' (deg, None if the orbit is not elliptic), 'position' (AU) and 'velocity'
             (AU/day), heliocentric ecliptic J2000.
     """
+
+    # Checked here because an epoch outside the ephemeris is caught below as a ValueError, which would
+    #   otherwise also swallow an unknown model and leave every body unpropagated without a word
+    if gr not in GR_MODELS:
+        raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr), ", ".join(GR_MODELS)))
 
     results = [None]*len(bodies)
 
@@ -3026,7 +3032,8 @@ def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_output
         times = np.linspace(0, (jd_tdb_target - epoch_jd)/SIM_TIME_DAYS, max(2, n_outputs))
 
         try:
-            result = integrateHeliocentricBodies(names, states, epoch_jd, times, ephem_source=ephem_source)
+            result = integrateHeliocentricBodies(names, states, epoch_jd, times, ephem_source=ephem_source,
+                                                 gr=gr)
 
         # An epoch outside of the ephemeris leaves the bodies of the group where they are
         except ValueError:
@@ -3047,7 +3054,7 @@ def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_output
     return results
 
 
-def loadParentBodies(file_path, jd_tdb, ephem_source="local", top_n=None):
+def loadParentBodies(file_path, jd_tdb, ephem_source="local", top_n=None, gr="gr_full"):
     """ Read the matches saved by the parent body search (wmpl.Utils.ParentBodySearch --save, JSON) and
     return them at an epoch, ready to be integrated with integrateHeliocentricBodies.
 
@@ -3062,6 +3069,8 @@ def loadParentBodies(file_path, jd_tdb, ephem_source="local", top_n=None):
     Keyword arguments:
         ephem_source: [str] "local" (default) or "horizons".
         top_n: [int] Use only the first N bodies of the file. All of them by default.
+        gr: [str] General relativity model of the propagation, one of GR_MODELS. Default "gr_full".
+            A body taken from the file as it is was propagated with the model ParentBodySearch used.
 
     Return:
         (bodies, criteria_keys, skipped): [tuple] The bodies as dictionaries with 'name', 'rank',
@@ -3102,7 +3111,8 @@ def loadParentBodies(file_path, jd_tdb, ephem_source="local", top_n=None):
                      "perihelion_jd": matches[k].get("catalogue_perihelion_jd"),
                      "epoch_jd": matches[k].get("catalogue_epoch_jd")} for k in to_propagate]
 
-        for k, rec in zip(to_propagate, propagateBodiesToEpoch(elements, jd_tdb, ephem_source=ephem_source)):
+        propagated = propagateBodiesToEpoch(elements, jd_tdb, ephem_source=ephem_source, gr=gr)
+        for k, rec in zip(to_propagate, propagated):
             if rec is not None:
                 bodies[k] = rec["position"] + rec["velocity"]
 
@@ -4254,7 +4264,8 @@ if __name__ == "__main__":
 
         time_tdb_ref = utcToTdb(traj.jdt_ref)
         parent_bodies, file_keys, parent_skipped = loadParentBodies(
-            args.parent_bodies, time_tdb_ref, ephem_source=ephem_source, top_n=args.parent_top)
+            args.parent_bodies, time_tdb_ref, ephem_source=ephem_source, top_n=args.parent_top,
+            gr=args.gr)
 
         try:
             parent_criteria = [lookupCriterion(k) for k in (args.parent_dcrit or file_keys)]

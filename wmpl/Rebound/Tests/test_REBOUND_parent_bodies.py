@@ -366,3 +366,30 @@ def testParentBodiesAreIntegratedWithTheMeteoroidForces(reb, monkeypatch):
     assert task["gr"] == "gr"
     if reb.harmonicsSpinAxisSupported():
         assert np.allclose(task["earth_spin_axis"], reb.earthSpinAxisEcliptic(jd))
+
+
+def testPropagationPassesTheGrModelAndRefusesAnUnknownOne(reb, monkeypatch):
+    """ The GR model reaches the integration, and an unknown one is refused before any integration,
+        instead of being caught with the epochs outside the ephemeris, which leave a body None. """
+
+    if not reb.REBOUND_FOUND:
+        pytest.skip("rebound/reboundx not importable: {}".format(reb._REBOUND_IMPORT_ERROR))
+
+    calls = []
+
+    def stopAtTheIntegration(names, states, jd_tdb, times, **kwargs):
+        calls.append(kwargs.get("gr"))
+        raise ValueError("outside the ephemeris")
+
+    monkeypatch.setattr(reb, "integrateHeliocentricBodies", stopAtTheIntegration)
+
+    body = {"q": 0.8, "e": 0.5, "incl": 10.0, "peri": 60.0, "node": 120.0, "mean_anomaly": 200.0,
+            "epoch_jd": 2459000.5}
+
+    assert reb.propagateBodiesToEpoch([body], 2459030.5, gr="none") == [None]
+    assert calls == ["none"]
+
+    with pytest.raises(ValueError):
+        reb.propagateBodiesToEpoch([body], 2459030.5, gr="newtonian")
+
+    assert calls == ["none"]

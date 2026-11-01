@@ -680,6 +680,47 @@ def test_propagation_goes_through_rebound_py_and_leaves_unusable_bodies_alone():
     assert abs(((back['mean_anomaly'] - 200.0) + 180) % 360 - 180) < 1e-2
 
 
+def test_propagation_takes_the_gr_model_and_records_it():
+    """ The GR model of --gr reaches wmpl.Rebound.REBOUND and is kept with each propagated body, so a
+        saved file says which physics brought it to the epoch. """
+
+    from wmpl.Rebound import REBOUND as reb
+
+    if not reb.REBOUND_FOUND:
+        print("  (skipped, REBOUND is not available)")
+        return
+
+    try:
+        reb.checkReboundxUsable()
+
+    except RuntimeError:
+        print("  (skipped, REBOUNDx does not attach to REBOUND in this environment)")
+        return
+
+    calls = []
+
+    def propagateWithoutIntegrating(elements, jd_tdb, gr='gr_full'):
+        calls.append(gr)
+        return [{'jd_tdb': jd_tdb} for _ in elements]
+
+    body = {'name': 'Apollo', 'q': 0.8, 'e': 0.5, 'incl': 10.0, 'peri': 60.0, 'node': 120.0,
+        'epoch_jd': 2461200.5, 'mean_anomaly': 200.0}
+
+    original = reb.propagateBodiesToEpoch
+    reb.propagateBodiesToEpoch = propagateWithoutIntegrating
+
+    try:
+        out = pbs.propagateBodies([body], 2459000.5, gr='none')
+        default = pbs.propagateBodies([body], 2459000.5)
+
+    finally:
+        reb.propagateBodiesToEpoch = original
+
+    assert calls == ['none', 'gr_full']
+    assert out[0]['gr'] == 'none'
+    assert default[0]['gr'] == 'gr_full'
+
+
 def test_loaders_read_the_epoch_and_the_mean_anomaly():
 
     with tempfile.TemporaryDirectory() as tmp:

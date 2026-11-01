@@ -1126,14 +1126,14 @@ def formatChanceMeteoroid(chance):
 
 
 
-def propagateBodies(bodies, jd_target):
+def propagateBodies(bodies, jd_target, gr='gr_full'):
     """ Bring bodies of the catalogues to the reference epoch of a meteor, so that they can be handed
         to a REBOUND integration with the meteoroid (wmpl.Rebound.REBOUND, --parent_bodies).
 
         The integration is that of wmpl.Rebound.REBOUND.propagateBodiesToEpoch: the same simulation
         the meteoroid is integrated in, with the Sun, the planets and the Moon from DE430, the Earth's
-        J2 and J4 and general relativity. Non-gravitational forces are not modelled, which matters for
-        comets. The catalogue epochs are taken as TDB (they are TT, which differs from it by less than
+        J2 and J4 and the general relativity model given. Non-gravitational forces are not modelled,
+        which matters for comets. The catalogue epochs are taken as TDB (they are TT, which differs from it by less than
         2 ms), and the reference epoch of the meteor, which is UTC, is converted to TDB, as
         wmpl.Rebound.REBOUND does with the trajectory.
 
@@ -1147,12 +1147,16 @@ def propagateBodies(bodies, jd_target):
         jd_target: [float] Julian date (UTC) to bring the bodies to, the reference time of the
             trajectory.
 
+    Keyword arguments:
+        gr: [str] General relativity model, one of wmpl.Rebound.REBOUND.GR_MODELS: 'gr_full'
+            (default), 'gr' or 'none'.
+
     Return:
         [list] For each body, None if it could not be propagated (no epoch, or neither a mean anomaly
             nor a time of perihelion in the catalogue, an epoch outside the ephemeris, an impact or an
-            escape on the way), or a dictionary: 'jd' (UTC) and 'jd_tdb', 'q', 'a' (AU), 'e',
-            'incl', 'peri', 'node', 'mean_anomaly' (degrees), 'position' (AU) and 'velocity'
-            (AU/day), heliocentric in the ecliptic J2000 frame.
+            escape on the way), or a dictionary: 'jd' (UTC) and 'jd_tdb', 'gr' (the model used),
+            'q', 'a' (AU), 'e', 'incl', 'peri', 'node', 'mean_anomaly' (degrees), 'position' (AU) and
+            'velocity' (AU/day), heliocentric in the ecliptic J2000 frame.
     """
 
     from wmpl.Rebound import REBOUND as reb
@@ -1169,11 +1173,12 @@ def propagateBodies(bodies, jd_target):
         'mean_anomaly': b['mean_anomaly'], 'perihelion_jd': b.get('perihelion_jd'),
         'epoch_jd': b['epoch_jd']} for b in bodies]
 
-    results = reb.propagateBodiesToEpoch(elements, jd_tdb)
+    results = reb.propagateBodiesToEpoch(elements, jd_tdb, gr=gr)
 
     for rec in results:
         if rec is not None:
             rec['jd'] = jd_target
+            rec['gr'] = gr
 
     return results
 
@@ -1530,6 +1535,9 @@ if __name__ == "__main__":
 
     import argparse
 
+    # The choices of --gr are those of the integrator, so that the two cannot drift apart
+    from wmpl.Rebound.REBOUND import GR_MODELS
+
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
@@ -1638,6 +1646,11 @@ Is a match more than chance?
         "change the ranking. The JSON saved with it can be given to wmpl.Rebound.REBOUND "
         "--parent_bodies, which then starts the bodies from these states instead of propagating "
         "them again.")
+
+    arg_parser.add_argument('--gr', type=str.lower, default='gr_full', choices=GR_MODELS, \
+        help="General relativity model of --propagate, as in wmpl.Rebound.REBOUND: gr_full (default), "
+        "the post-Newtonian interaction between all pairs of bodies, gr, the Sun's post-Newtonian "
+        "correction on every body, or none, Newtonian gravity only.")
 
     arg_parser.add_argument('--jd', metavar='JD', type=float, \
         help="Reference epoch of the meteor as a Julian date, if there is no pickle.")
@@ -1901,7 +1914,7 @@ Is a match more than chance?
         print()
 
         try:
-            propagated = propagateBodies(matches, jd_ref)
+            propagated = propagateBodies(matches, jd_ref, gr=cml_args.gr)
 
         except ImportError as err:
             print("REBOUND and REBOUNDx are needed to propagate the bodies: {:s}".format(str(err)),
@@ -1918,7 +1931,8 @@ Is a match more than chance?
 
         print("At the reference epoch of the meteor, JD {:.5f}: heliocentric elements (ecliptic J2000) "
             "and the".format(jd_ref))
-        print("criteria with them. The ranking above, from the catalogue elements, is kept.")
+        print("criteria with them. The ranking above, from the catalogue elements, is kept. General "
+            "relativity: {:s}.".format(cml_args.gr))
         print('Name                               ,      q,      e,   incl,    peri,    node, cat. epoch,',
             ', '.join('{:>{:d}s}'.format(l, w) for l, w in zip(labels, widths)))
 
