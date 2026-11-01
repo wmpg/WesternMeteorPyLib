@@ -498,11 +498,13 @@ class RMSDataHandle(object):
 
             if self.old_db:
                 del self.old_db
-
-            self.archiveOldRecords(older_than=archivemonths)
                 
 
             if mcmode & MCMODE_CANDS:
+                # only archive data in cand mode, otherwise we run the risk of one instance archiving  and another
+                # restoring data again. This can arise if candmode and phase1 are run with different auto lookbacks. 
+                self.archiveOldRecords(older_than=archivemonths)
+    
                 # Load the list of stations
                 station_list = self.loadStations()
 
