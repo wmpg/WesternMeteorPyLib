@@ -12,6 +12,7 @@ transneptunian.
 - [One-parameter criteria](#one-parameter-criteria)
 - [Two-parameter cometary tests](#two-parameter-cometary-tests)
 - [The Tancredi scheme](#the-tancredi-scheme)
+- [Jupiter-family dynamics](#jupiter-family-dynamics)
 - [Supporting machinery](#supporting-machinery)
 - [Cost](#cost)
 - [Verification status](#verification-status)
@@ -153,6 +154,55 @@ reliable.
 
 ---
 
+## Jupiter-family dynamics
+
+The criteria above read one orbit. Shober et al. (2024, A&A 687, A181) asked instead how the orbit
+*behaves*: integrate clones of it 10 000 years back and count how many raise their perihelion above
+2.5 AU, as Jupiter-family comets do and asteroids on comet-like orbits rarely do. `--dynamics` runs
+this through [`wmpl.Rebound.REBOUND`](REBOUND.md), on a trajectory pickle:
+
+```
+python -m wmpl.Utils.OrbitClassification traj.pickle --dynamics              # adapted mode
+python -m wmpl.Utils.OrbitClassification traj.pickle --dynamics shober2024   # the paper's setup
+```
+
+Give `--dynamics` after the pickle: it takes an optional mode, and would read the path as one.
+
+| | `adapted` (default) | `shober2024` |
+| :--- | :--- | :--- |
+| Clones | from the state-vector covariance of the Monte Carlo solution | a, e, i, node, peri drawn independently from their 1-sigma; without Monte Carlo, the values the paper assumed for MORP (0.01 AU, 0.001, 0.1°, 0.01°, 0.01°) |
+| How many | batches of 20 until the class is settled, at most 200 | 1000, all of them |
+| Start | the meteoroid's state in the atmosphere | each clone's orbit without the Earth's attraction, 3 Earth Hill radii out, at the geocentric speed it had there |
+| Forces | Sun, planets, Moon, the Sun's post-Newtonian correction (`--gr`), Sun J2, Earth J2/J4, radiation optional (`--beta`, `--radius`) | Sun, planets, Moon, Newtonian (Earth J2/J4 stay) |
+| Integrator | IAS15 (`--integrator`) | IAS15 |
+| Outputs | every 50 years | every 10 years |
+
+Both report the assumptions first, then f_q and f_a (the fractions of time beyond q = 2.5 AU and
+a = 7.37 AU, Fernández et al. 2014), the number of clones that reached q > 2.5 AU, split by whether a
+Jupiter encounter inside 1 Hill radius came first, and the fraction P with its Wilson interval.
+Two verdicts follow: the paper's rule (P > 0.5) and a class from the interval, which stays
+`undetermined` while the interval straddles 0.5. `--dynamics_save` writes all of it to JSON.
+
+Three choices are not in the paper:
+
+- **Batches** (adapted mode). Each batch is a look at P that could stop the run on a fluke, so
+  each uses the interval at 1 - 0.05/n_looks (Bonferroni over the possible looks).
+- **Clones that leave the 1000 AU volume** are told apart by their eccentricity after the epoch:
+  bound at their last output, they keep their orbit; bound and then hyperbolic, they were thrown out
+  and count as beyond every limit; hyperbolic throughout, they are left out and reported.
+- **The start of the shober2024 clones.** The elements are those of the orbit without the
+  Earth's attraction, placed where the meteoroid met the Earth. A clone started there would feel the
+  Earth a second time; one started at a distance d with the speed at infinity leaves it with v²
+  short by 2GM/d. In a Sun-and-Earth test on the Orionid example, that left a short by 0.014 AU from 3 Hill
+  radii; with the speed it had at d, by 2.7e-4 AU. The paper does not say how its clones were
+  started.
+
+**Cost.** IAS15 took 295 s per clone over 10 000 years on a 21P-like orbit with the Sun's
+post-Newtonian correction, and 211 s without it. That makes about 60 CPU-hours for the 1000 clones
+of `shober2024` on such an orbit, and minutes for an orbit whose class settles in one batch.
+
+---
+
 ## Supporting machinery
 
 These exist to serve the Tancredi scheme but are usable on their own.
@@ -203,6 +253,7 @@ resonances are ever needed.
 | The two-parameter cometary tests | **Verified** against the limits as published |
 | Tancredi class structure and the 3.05 limit | **Verified indirectly** — the primary paper (Icarus 234, 66) is paywalled and the author's own site no longer resolves, but a 2025 paper co-authored by Tancredi restates the class definitions and the 3.05 cut verbatim |
 | Tancredi Hill radii, table 1 resonances and widths, appendix A and B formulae | **Unverified** — the primary source could not be read. The implementation reproduces the tabulated resonance centres and widths to the printed precision, which is strong but indirect evidence |
+| Jupiter-family dynamics | **Not yet compared with the paper.** The metrics are tested on synthetic ensembles and both modes ran end to end with stand-in planets; the paper's Tables 1 and 2 need DE430 and its data |
 
 Related: [orbit dissimilarity criteria](OrbitSimilarity.md) and
 [choosing a threshold](DThresholds.md).

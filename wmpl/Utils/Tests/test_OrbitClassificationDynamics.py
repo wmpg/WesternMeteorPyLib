@@ -12,6 +12,7 @@ or standalone (no pytest required):
     python -m wmpl.Utils.Tests.test_OrbitClassificationDynamics
 """
 
+import os
 import math
 
 import numpy as np
@@ -22,7 +23,25 @@ import wmpl.Rebound.REBOUND as reb
 from wmpl.Utils.OrbitClassification import (calcKozaiEnergy, calcExcursionFractions,
     countPerihelionReach, splitPerihelionReachByEncounter, calcBinomialInterval,
     classifyPerihelionReach, classifyJupiterFamilyDynamics, cloneEnsemble, formatJupiterFamilyDynamics,
+    classifyJupiterFamilyDynamicsShober2024, elementUncertainties, drawElementClones,
+    elementCloneStates, addEarthAttraction, SHOBER2024_DEFAULT_SIGMA, SHOBER2024_START_HILL,
     JFC_DYNAMICS_Q_LIMIT, JFC_DYNAMICS_A_LIMIT)
+
+
+# Tests that integrate with REBOUND itself, skipped where it cannot be imported (it has no wheels for
+#   Linux on ARM64). The standalone runner skips the same ones.
+_REBOUND_TESTS = set()
+
+def _needsRebound(test_func):
+    _REBOUND_TESTS.add(test_func.__name__)
+
+    try:
+        import pytest
+
+    except ImportError:
+        return test_func
+
+    return pytest.mark.skipif(not reb.REBOUND_FOUND, reason="rebound/reboundx not importable")(test_func)
 
 
 # Ten one-year intervals of a backward integration
@@ -433,6 +452,235 @@ def test_dynamics_report_states_its_assumptions():
         assert expected in text, expected
 
 
+
+# A JFC-like orbit at its descending node, for the shober2024 mode
+_ORBIT = SimpleNamespace(a=3.5, e=0.7, i=np.radians(10.0), node=np.radians(100.0),
+    peri=np.radians(170.0), true_anomaly=np.radians(10.0), v_g=15000.0)
+_UNCERTAINTIES = SimpleNamespace(a=0.02, e=0.003, i=np.radians(0.2), node=np.radians(0.05),
+    peri=np.radians(0.04))
+
+
+class _FakeHeliocentric(object):
+    """ Stand-in for wmpl.Rebound.REBOUND.integrateHeliocentricBodies, with the clones of
+    _FakeRebound, numbered in the order of the calls.
+    """
+
+    def __init__(self, clone):
+        self.rebound = _FakeRebound(clone)
+        self.calls = []
+
+    def __call__(self, names, states_hel, jd_tdb, times, **kwargs):
+
+        self.calls.append(dict(kwargs, names=names, states_hel=states_hel, jd_tdb=jd_tdb, times=times))
+        _, outputs_mc, diagnostics = self.rebound(None, None, n_outputs=len(times), mc_runs=1)
+
+        return {'outputs': {names[0]: outputs_mc['obj_MC_0']},
+            'diagnostics': {names[0]: diagnostics['obj_MC_0']}}
+
+
+# The Sun and an Earth far from the clones, standing in for planetStatesAtEpoch
+_PLANETS = (["Sun", "Earth"], [[0.0]*6, [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0]], [1.0, 3.0035e-6])
+
+
+def _runShober2024(clone, traj, **kwargs):
+    """ Run classifyJupiterFamilyDynamicsShober2024 on the stand-in, in this process, and return its
+    result and the stand-in, which also holds the dates the planets were asked for.
+    """
+
+    fake = _FakeHeliocentric(clone)
+    fake.planet_dates = []
+    names = ('integrateHeliocentricBodies', 'planetStatesAtEpoch', 'REBOUND_FOUND')
+    original = [getattr(reb, name) for name in names]
+    reb.integrateHeliocentricBodies, reb.REBOUND_FOUND = fake, True
+    reb.planetStatesAtEpoch = lambda jd_tdb: fake.planet_dates.append(jd_tdb) or _PLANETS
+
+    try:
+        result = classifyJupiterFamilyDynamicsShober2024(traj, years=1000.0, output_years=10.0,
+            n_cpu=1, **kwargs)
+
+    finally:
+        for name, value in zip(names, original):
+            setattr(reb, name, value)
+
+    return result, fake
+
+
+def test_shober2024_draws_the_clones_from_the_diagonal_of_the_uncertainties():
+
+    traj = SimpleNamespace(orbit=_ORBIT, uncertainties=_UNCERTAINTIES)
+    sigma, source = elementUncertainties(traj)
+    assert source == "Monte Carlo of the trajectory"
+    assert np.isclose(sigma['i'], 0.2) and np.isclose(sigma['peri'], 0.04)
+
+    n = 20000
+    clones = drawElementClones(_ORBIT, sigma, n, np.random.default_rng(1))
+
+    nominal = {'a': _ORBIT.a, 'e': _ORBIT.e, 'i': 10.0, 'node': 100.0, 'peri': 170.0}
+    for key in nominal:
+        assert abs(np.mean(clones[key]) - nominal[key]) < 4*sigma[key]/np.sqrt(n), key
+        assert abs(np.std(clones[key])/sigma[key] - 1.0) < 0.03, key
+
+    # Independent draws, as from the diagonal of a covariance
+    assert abs(np.corrcoef(clones['a'], clones['e'])[0, 1]) < 4/np.sqrt(n)
+
+    # Every clone keeps the argument of latitude, so it is at the node as the meteoroid was
+    assert np.allclose(clones['peri'] + clones['f'], 180.0)
+
+
+def test_shober2024_uses_the_uncertainties_the_paper_assumed_without_monte_carlo():
+
+    sigma, source = elementUncertainties(SimpleNamespace(orbit=_ORBIT, uncertainties=None))
+    assert sigma == SHOBER2024_DEFAULT_SIGMA
+    assert "MORP" in source
+
+
+def test_shober2024_refuses_clones_that_make_no_conic():
+
+    near_parabolic = SimpleNamespace(**dict(vars(_ORBIT), a=50.0, e=0.995))
+    sigma = dict(SHOBER2024_DEFAULT_SIGMA, e=0.01)
+    assert _raises(ValueError, drawElementClones, near_parabolic, sigma, 100, np.random.default_rng(2))
+
+
+@_needsRebound
+def test_shober2024_clones_start_three_hill_radii_before_the_earth():
+
+    from wmpl.Utils.Pickling import loadPickle
+    from wmpl.Trajectory.Orbit import eclipticToRectangularVelocityVect
+
+    examples = os.path.join(os.path.dirname(__file__), "..", "..", "Dynesty", "examples",
+        "20191023_091225")
+    orbit = loadPickle(examples, "20191023_091225_trajectory.pickle").orbit
+
+    zero = dict.fromkeys(SHOBER2024_DEFAULT_SIGMA, 0.0)
+    clone = drawElementClones(orbit, zero, 1, np.random.default_rng(0))
+
+    # At the epoch the elements put the clone where the trajectory placed the meteoroid
+    au_km = reb.AU_M/1000.0
+    start = np.array(elementCloneStates(clone, 0.0)[0])
+    assert np.linalg.norm(start[:3]*au_km - np.array(orbit.meteor_pos)) < 1e-3
+
+    # The Earth at the epoch, moving at the meteoroid's heliocentric velocity less the geocentric one
+    v_g = np.array(eclipticToRectangularVelocityVect(orbit.L_g, orbit.B_g, orbit.v_g/1000.0))
+    v_earth = (start[3:] - v_g*86400.0/au_km)*reb.SIM_TIME_DAYS
+    sim = reb.rb.Simulation()
+    sim.add(m=1.0)
+    sim.add(x=start[0], y=start[1], z=start[2], vx=v_earth[0], vy=v_earth[1], vz=v_earth[2])
+
+    dt_days = SHOBER2024_START_HILL*reb.HILL_RADII_AU["Earth"]*reb.AU_M/orbit.v_g/86400.0
+    sim.integrate(-dt_days/reb.SIM_TIME_DAYS)
+    before = np.array(elementCloneStates(clone, dt_days)[0])
+
+    distance = np.linalg.norm(before[:3] - np.array(sim.particles[1].xyz))
+    assert abs(distance/reb.HILL_RADII_AU["Earth"] - SHOBER2024_START_HILL) < 1e-3
+
+
+@_needsRebound
+def test_shober2024_start_does_not_depend_on_the_distance_from_the_earth():
+
+    from wmpl.Utils.Pickling import loadPickle
+    from wmpl.Trajectory.Orbit import eclipticToRectangularVelocityVect
+
+    examples = os.path.join(os.path.dirname(__file__), "..", "..", "Dynesty", "examples",
+        "20191023_091225")
+    traj = loadPickle(examples, "20191023_091225_trajectory.pickle")
+    orbit = traj.orbit
+
+    zero = dict.fromkeys(SHOBER2024_DEFAULT_SIGMA, 0.0)
+    clone = drawElementClones(orbit, zero, 1, np.random.default_rng(0))
+    start = np.array(elementCloneStates(clone, 0.0)[0])
+
+    # The Sun and the Earth alone, the Earth where the meteoroid met it
+    au_km = reb.AU_M/1000.0
+    v_g = np.array(eclipticToRectangularVelocityVect(orbit.L_g, orbit.B_g, orbit.v_g/1000.0))
+    v_earth = (start[3:] - v_g*86400.0/au_km)*reb.SIM_TIME_DAYS
+    m_earth = 3.0035e-6
+    jd = reb.utcToTdb(traj.jdt_ref)
+
+    offset = {}
+    for hill in (3.0, 10.0):
+
+        dt_days = hill*reb.HILL_RADII_AU["Earth"]*reb.AU_M/orbit.v_g/86400.0
+        sim = reb.rb.Simulation()
+        sim.add(m=1.0)
+        sim.add(m=m_earth, x=start[0], y=start[1], z=start[2], vx=v_earth[0], vy=v_earth[1],
+            vz=v_earth[2])
+        sim.move_to_com()
+        sim.integrate(-dt_days/reb.SIM_TIME_DAYS)
+        planets = (["Sun", "Earth"], [list(p.xyz) + list(p.vxyz) for p in sim.particles], [1.0, m_earth])
+
+        for corrected in (False, True):
+            states = elementCloneStates(clone, dt_days)
+            if corrected:
+                states = addEarthAttraction(states, planets)
+            run = reb.integrateHeliocentricBodies(["c"], states, jd - dt_days,
+                [0.0, -365.25/reb.SIM_TIME_DAYS], planets=planets, gr='none', sun_j2=False,
+                lean_outputs=True)
+            offset[(hill, corrected)] = run['outputs']['c']['a'][-1] - orbit.a
+
+    # Far from the Earth the orbit is the one without its attraction, wherever the clone started
+    #   (2.7e-4 and 2.2e-4 AU when written)
+    assert abs(offset[(3.0, True)]) < 1e-3 and abs(offset[(10.0, True)]) < 1e-3
+
+    # Started at the speed at infinity, it loses GM/d on the way out: -0.014 AU from 3 R_H
+    assert offset[(3.0, False)] < -0.01
+    assert abs(offset[(3.0, False)]/offset[(10.0, False)] - 10.0/3.0) < 0.1*10.0/3.0
+
+
+@_needsRebound
+def test_shober2024_integrates_every_clone_with_the_setup_of_the_paper():
+
+    traj = SimpleNamespace(orbit=_ORBIT, uncertainties=_UNCERTAINTIES, jdt_ref=2459000.5)
+    result, fake = _runShober2024(lambda k: 'stay', traj, n_clones=30, seed=4)
+
+    # No early stop: every clone, though the first 20 would have settled the class
+    assert len(fake.calls) == 30 and result['n_integrated'] == 30 and result['n_batches'] == 1
+    assert sorted(name for call in fake.calls for name in call['names']) == \
+        sorted('obj_MC_{:d}'.format(k) for k in range(30))
+
+    dt_days = SHOBER2024_START_HILL*reb.HILL_RADII_AU["Earth"]*reb.AU_M/_ORBIT.v_g/86400.0
+    jd_start = reb.utcToTdb(traj.jdt_ref) - dt_days
+    for call in fake.calls:
+        assert (call['integrator'], call['gr'], call['sun_j2'], call['lean_outputs']) == \
+            ('ias15', 'none', False, True)
+        assert call['jd_tdb'] == jd_start and call['planets'] is _PLANETS
+        assert len(call['times']) == 101
+        assert np.isclose(call['times'][-1], -1000.0*365.25/reb.SIM_TIME_DAYS)
+
+    assert fake.planet_dates == [jd_start]
+    assert result['assumptions']['mode'] == 'shober2024'
+    assert result['assumptions']['start_days_before'] == dt_days
+    assert result['dynamics_class'] == 'not jupiter family' and result['p'] == 0.0
+
+
+@_needsRebound
+def test_shober2024_counts_like_the_adapted_mode():
+
+    kinds = ['reach', 'kozai', 'escape', 'ejected', 'impact', 'stay', 'unbound', 'far']
+    traj = SimpleNamespace(orbit=_ORBIT, uncertainties=_UNCERTAINTIES, jdt_ref=2459000.5)
+    result, _ = _runShober2024(lambda k: kinds[k%8], traj, n_clones=16, seed=1)
+    adapted, _ = _runDriver(lambda k: kinds[k%8], max_clones=16, batch=16, seed=1)
+
+    for key in ('n_integrated', 'n_clones', 'n_left_unbound', 'n_escaped', 'n_impacted', 'n_reached',
+            'n_reached_after_encounter', 'n_reached_without_encounter',
+            'n_reached_without_encounter_by_escape', 'f_q', 'f_a', 'p', 'p_low', 'p_high'):
+        assert result[key] == adapted[key], key
+
+
+@_needsRebound
+def test_shober2024_report_states_its_assumptions():
+
+    traj = SimpleNamespace(orbit=_ORBIT, uncertainties=None, jdt_ref=2459000.5)
+    result, _ = _runShober2024(lambda k: 'reach', traj, n_clones=20, seed=6)
+    text = "\n".join(formatJupiterFamilyDynamics(result))
+
+    for expected in ("setup of Shober et al. 2024", "1000 yr backward", "IAS15", "Newtonian",
+            "no GR, Sun J2, radiation", "20, a, e, i, node, peri drawn independently, seed 6",
+            "assumed by Shober et al. for MORP", "a 0.01 AU", "argument of latitude kept",
+            "3 Hill radii before the Earth", "every 10 yr", "20/20",
+            "Verdict: jupiter family (from the interval at 95%)"):
+        assert expected in text, expected
+
+
 if __name__ == "__main__":
 
     test_functions = [
@@ -456,10 +704,22 @@ if __name__ == "__main__":
         test_dynamics_of_an_unbound_orbit_is_not_classified,
         test_dynamics_refuses_what_it_cannot_run,
         test_dynamics_report_states_its_assumptions,
+        test_shober2024_draws_the_clones_from_the_diagonal_of_the_uncertainties,
+        test_shober2024_uses_the_uncertainties_the_paper_assumed_without_monte_carlo,
+        test_shober2024_refuses_clones_that_make_no_conic,
+        test_shober2024_clones_start_three_hill_radii_before_the_earth,
+        test_shober2024_start_does_not_depend_on_the_distance_from_the_earth,
+        test_shober2024_integrates_every_clone_with_the_setup_of_the_paper,
+        test_shober2024_counts_like_the_adapted_mode,
+        test_shober2024_report_states_its_assumptions,
         ]
 
     failed = 0
     for test_func in test_functions:
+
+        if (test_func.__name__ in _REBOUND_TESTS) and (not reb.REBOUND_FOUND):
+            print("SKIP: {:s}: rebound/reboundx not importable".format(test_func.__name__))
+            continue
 
         try:
             test_func()

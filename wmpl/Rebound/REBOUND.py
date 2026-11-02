@@ -3080,7 +3080,8 @@ def _heliocentricRecord(state_vect_hel, orb, jd_tdb):
 
 
 def integrateHeliocentricBodies(names, states_hel, jd_tdb, times, ephem_source="local",
-                                integrator="ias15", dt_days=None, planets=None, sun_j2=True, gr="gr_full"):
+                                integrator="ias15", dt_days=None, planets=None, sun_j2=True, gr="gr_full",
+                                lean_outputs=False):
     """ Integrate bodies given by their heliocentric states through the same simulation the meteoroid
     is integrated in by reboundSimulate (_integrateParticles): the Sun, the planets and the Moon, the
     Earth's J2 and J4, general relativity, and the close-encounter tracking.
@@ -3099,6 +3100,7 @@ def integrateHeliocentricBodies(names, states_hel, jd_tdb, times, ephem_source="
         planets: [tuple] Return of planetStatesAtEpoch at jd_tdb, if it has already been computed.
         sun_j2: [bool] Include the Sun's J2, as reboundSimulate. Default True.
         gr: [str] General relativity model, as reboundSimulate (see GR_MODELS). Default "gr_full".
+        lean_outputs: [bool] Return the outputs as arrays of elements, as reboundSimulate. Default False.
 
     Return:
         [dict] The return of _integrateParticles, with the bodies' heliocentric outputs.
@@ -3132,6 +3134,7 @@ def integrateHeliocentricBodies(names, states_hel, jd_tdb, times, ephem_source="
         "earth_spin_axis": earthSpinAxisEcliptic(jd_tdb) if harmonicsSpinAxisSupported() else None,
         "sun_j2": sun_j2,
         "gr": gr,
+        "lean_outputs": lean_outputs,
     }
 
     return _integrateParticles(task)
