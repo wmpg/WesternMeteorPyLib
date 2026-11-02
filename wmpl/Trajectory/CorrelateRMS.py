@@ -1187,12 +1187,15 @@ class RMSDataHandle(object):
                     log.info(f'   - removing duplicate trajectory {remove_id} from database')
                     self.trajectory_db.removeTrajectoryById(remove_id)
                 else:
-                    # If the locations are different, just remove the first one. 
+                    # If the locations are different, remove the first one. 
                     remove_id = rw.traj_id
+                    remove_path = rw.traj_file_path
                     log.info(f'   - removing duplicate trajectory {remove_id} from database')
                     self.trajectory_db.removeTrajectoryById(remove_id)
                     log.info(f'    - and removing files from {remove_path}')
                     shutil.rmtree(os.path.split(remove_path)[0], ignore_errors=True)
+                    if os.path.isfile(remove_path):
+                        log.warning(f'unable to remove {remove_path}')
 
                 # remove the row from the dataframe to avoid reprocessing it
                 traj_df.drop(idx, inplace=True)
@@ -1235,6 +1238,9 @@ class RMSDataHandle(object):
                         if (rw.traj_file_path != rw.traj_path_next) and os.path.isfile(remove_path):
                             log.info(f'   - removing mergeable {os.path.split(remove_path)[0]} from disk')
                             shutil.rmtree(os.path.split(remove_path)[0], ignore_errors=True)
+                            if os.path.isfile(remove_path):
+                                log.warning(f'unable to remove {remove_path}')
+
 
         # Finally, scan the disk for trajectories that need to be added to the database.
         # These can arise during distributed processing or phase2 analysis if the jdt_ref changes significantly.
@@ -1284,6 +1290,8 @@ class RMSDataHandle(object):
                                     # so remove the second version. 
                                     log.info(f'   - removing {traj_dir} from disk as its a duplicate')
                                     shutil.rmtree(full_traj_dir, ignore_errors=True)
+                                    if os.path.isfile(full_traj_dir):
+                                        log.warning(f'unable to remove {full_traj_dir}')
 
                                 # Print every 1000th trajectory
                                 if counter % 1000 == 0 and counter > 0:
@@ -1491,7 +1499,10 @@ class RMSDataHandle(object):
 
         # Save the picked trajectory structure
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
-        log.info(f'saved {traj.traj_id} to {output_dir}')
+        if not os.path.isfile(os.path.join(output_dir, traj.file_name + '_trajectory.pickle')):
+            log.warning(f'unable to save {os.path.join(output_dir, traj.file_name + '_trajectory.pickle')}')
+        else:
+            log.info(f'saved {traj.traj_id} to {output_dir}')
 
         if (self.mc_mode & MCMODE_PHASE1 and not self.mc_mode & MCMODE_PHASE2) or save_phase1:
             self.saveCandOrTraj(traj, f'{traj.longname}_trajectory.pickle', verbose=verbose)
@@ -1500,6 +1511,10 @@ class RMSDataHandle(object):
             # the MC phase may alter the trajectory details and if later on 
             # we're including additional observations we need to use the most recent version of the trajectory
             savePickle(traj, os.path.join(self.phase1_dir, 'processed'), f'{traj.pre_mc_longname}_trajectory.pickle')
+            if not os.path.isfile(os.path.join(self.phase1_dir, 'processed', f'{traj.pre_mc_longname}_trajectory.pickle')):
+                log.warning(f'unable to save {os.path.join(self.phase1_dir, 'processed', f'{traj.pre_mc_longname}_trajectory.pickle')}')
+            else:
+                log.info(f'saved {traj.traj_id} to {os.path.join(self.phase1_dir, 'processed')}')
 
         # Save the plots
         if save_plots:
@@ -1558,7 +1573,7 @@ class RMSDataHandle(object):
             if os.path.isfile(phase1_traj):
                 try:
                     os.remove(phase1_traj)
-                    log.info(f'removed {phase1_traj}')
+                    log.info(f'removed {phase1_traj} from phase1/')
                 except Exception: 
                     pass
 
@@ -1567,7 +1582,9 @@ class RMSDataHandle(object):
             traj_dir = os.path.dirname(traj_reduced.traj_file_path)
             shutil.rmtree(traj_dir, ignore_errors=True)
             if os.path.isfile(traj_reduced.traj_file_path):
-                log.warning(f'unable to remove {traj_dir}')        
+                log.warning(f'unable to remove {traj_dir}')
+            else:
+                log.info(f'removed {traj_dir} from disk')
 
         self.trajectory_db.removeTrajectoryById(traj_reduced.traj_id)
 
@@ -2098,6 +2115,8 @@ class RMSDataHandle(object):
                 tested_buckets.append(bucket_num)
                 
         savePickle(traj, save_dir, file_name)
+        if not os.path.isfile(os.path.join(save_dir, file_name)):
+            log.warning(f'unable to save {os.path.join(save_dir, file_name)}')
         return True
 
 
