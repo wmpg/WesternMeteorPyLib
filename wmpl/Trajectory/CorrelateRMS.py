@@ -1158,15 +1158,26 @@ class RMSDataHandle(object):
             log.info('  - looking for exact matches by observation id')
             same_obs = traj_df.query('obs_ids == obs_ids_next')
             for idx, rw in same_obs.iterrows():
-
+                # first check that both trajectories exist on disk. If either traj doesn't exist on disk
+                # remove it from the database and move onto the next row
                 if not os.path.isfile(rw.traj_file_path):
-                    # trajectory already doesn't exist on disk so remove it from the database
+                    log.info(f'   - removing nonexistent trajectory {rw.traj_id} from database')
                     self.trajectory_db.removeTrajectoryById(rw.traj_id)
+                    traj_df.drop(idx, inplace=True)
+                    continue
+                if not os.path.isfile(rw.traj_path_next):
+                    log.info(f'   - removing nonexistent trajectory {rw.traj_id_next} from database')
+                    self.trajectory_db.removeTrajectoryById(rw.traj_id_next)
+                    traj_df.drop(idx, inplace=True)
+                    continue
                
-                else:
-                    # load the trajectory from disk and determine which one it is
+                # if we get here, both trajectories exist on disk. 
+
+                if rw.traj_file_path == rw.traj_path_next:
+                    # If the locations are the same, then one trajectory overwrote the other. 
+                    # So, load the trajectory from disk, check its traj_id and remove the other 
+                    # one from the database. 
                     traj1 = loadPickle(*os.path.split(rw.traj_file_path))
-                    
                     if traj1.traj_id == rw.traj_id:
                         remove_id = rw.traj_id_next
                         remove_path = rw.traj_path_next
@@ -1175,11 +1186,13 @@ class RMSDataHandle(object):
                         remove_path = rw.traj_file_path
                     log.info(f'   - removing duplicate trajectory {remove_id} from database')
                     self.trajectory_db.removeTrajectoryById(remove_id)
-
-                    # only delete the disk file if they're in different physical locations
-                    if rw.traj_file_path != rw.traj_path_next:
-                        log.info(f'    - and removing files from {remove_path}')
-                        shutil.rmtree(os.path.split(remove_path)[0], ignore_errors=True)
+                else:
+                    # If the locations are different, just remove the first one. 
+                    remove_id = rw.traj_id
+                    log.info(f'   - removing duplicate trajectory {remove_id} from database')
+                    self.trajectory_db.removeTrajectoryById(remove_id)
+                    log.info(f'    - and removing files from {remove_path}')
+                    shutil.rmtree(os.path.split(remove_path)[0], ignore_errors=True)
 
                 # remove the row from the dataframe to avoid reprocessing it
                 traj_df.drop(idx, inplace=True)
@@ -1211,7 +1224,7 @@ class RMSDataHandle(object):
                             remove_path = rw.traj_file_path
                             unpair_ids = [id for id in traj_ids if id not in next_ids]
 
-                        log.info(f'   - removing {remove_id}')
+                        log.info(f'   - removing mergeable {remove_id}')
                         self.trajectory_db.removeTrajectoryById(remove_id)
 
                         if len(unpair_ids) > 0: 
@@ -1220,7 +1233,7 @@ class RMSDataHandle(object):
 
                         # only remove the physical on-disk files if the locations are different! 
                         if (rw.traj_file_path != rw.traj_path_next) and os.path.isfile(remove_path):
-                            log.info(f'   - removing {os.path.split(remove_path)[0]} from disk')
+                            log.info(f'   - removing mergeable {os.path.split(remove_path)[0]} from disk')
                             shutil.rmtree(os.path.split(remove_path)[0], ignore_errors=True)
 
         # Finally, scan the disk for trajectories that need to be added to the database.
