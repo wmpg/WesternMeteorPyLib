@@ -1500,7 +1500,7 @@ class RMSDataHandle(object):
         # Save the picked trajectory structure
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
         if not os.path.isfile(os.path.join(output_dir, traj.file_name + '_trajectory.pickle')):
-            log.warning(f'unable to save {os.path.join(output_dir, traj.file_name + '_trajectory.pickle')}')
+            log.warning(f'unable to save {os.path.join(output_dir, traj.file_name + "_trajectory.pickle")}')
         else:
             log.info(f'saved {traj.traj_id} to {output_dir}')
 
@@ -1512,9 +1512,9 @@ class RMSDataHandle(object):
             # we're including additional observations we need to use the most recent version of the trajectory
             savePickle(traj, os.path.join(self.phase1_dir, 'processed'), f'{traj.pre_mc_longname}_trajectory.pickle')
             if not os.path.isfile(os.path.join(self.phase1_dir, 'processed', f'{traj.pre_mc_longname}_trajectory.pickle')):
-                log.warning(f'unable to save {os.path.join(self.phase1_dir, 'processed', f'{traj.pre_mc_longname}_trajectory.pickle')}')
+                log.warning(f'unable to save {os.path.join(self.phase1_dir, "processed", f"{traj.pre_mc_longname}_trajectory.pickle")}')
             else:
-                log.info(f'saved {traj.traj_id} to {os.path.join(self.phase1_dir, 'processed')}')
+                log.info(f'saved {traj.traj_id} to {os.path.join(self.phase1_dir, "processed")}')
 
         # Save the plots
         if save_plots:
