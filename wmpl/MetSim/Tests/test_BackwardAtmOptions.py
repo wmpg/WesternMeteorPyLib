@@ -505,3 +505,22 @@ def test_back_time_stops_the_run_and_is_not_an_option_to_refuse_without_a_height
     (jd_top, _, _), *_ = backwardStatesFromArguments(_traj(), [sv], parser.parse_args(["--mass", "1.0"]), 180000.0,
         t_kill=1000.0)
     assert 7.0 < (JD - jd_top)*86400 < 12.0
+
+
+def test_back_time_on_its_own_starts_the_run_back_where_the_height_is_optional():
+    """ As in REBOUND, whose --back_height is None unless given: --back_time then sets the highest height to stop at, and
+        a --back_height given too wins, in either order. """
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--back_height", type=float, nargs="?", const=180.0, default=None)
+    addBackwardArguments(parser)
+
+    assert parser.parse_args([]).back_height is None
+    assert parser.parse_args(["--back_height"]).back_height == 180.0
+
+    args = parser.parse_args(["--back_time", "2"])
+    assert args.back_height == 180.0 and args.back_time == 2.0
+
+    assert parser.parse_args(["--back_time", "2", "--back_height", "150"]).back_height == 150.0
+    assert parser.parse_args(["--back_height", "150", "--back_time", "2"]).back_height == 150.0
+

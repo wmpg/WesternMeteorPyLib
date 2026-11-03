@@ -2515,10 +2515,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # A time on its own also starts from above the atmosphere, with the highest height to stop at
-    if (args.back_time != -1) and (args.back_height is None):
-        args.back_height = 180.0
-
     if args.back_height is not None:
         if args.forward is not None:
             parser.error("--back_height and --back_time start a backward integration above the atmosphere, so they "
