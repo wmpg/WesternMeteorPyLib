@@ -400,8 +400,18 @@ Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45), whos
 | 400 years | 54 years (−29/+∞) | no growth, 19, 74, no growth | no growth, 26, 44, 54 | 34 years |
 | 1000 years | 66 years (+30/−16) | 44, 42, 125, 174 | 44, 58, 55, 66 | 71 years |
 
-The deviation is rescaled to unit length at the outputs once it is large, so that it never overflows;
-the variational equations are linear, so this changes nothing (measured to 2e-12 in ln|δ|).
+The deviation is rescaled to unit length at the outputs once it exceeds 10⁸, so that it never overflows.
+The variational equations are linear, so this does not change its growth, except for the round-off that
+IAS15 keeps at the old scale in its compensated summation. That is why the limit is low: the jump of
+ln|δ| at a rescale is 5·10⁻⁹ at 10⁸, but 0.6 at 10¹⁶ and 8 at 10²⁰, which shortened the Lyapunov time by
+20–25% over 2000–4000 years.
+
+Round-off also limits how far the orbit itself can be followed. Past about 36 Lyapunov times (ln 10¹⁶),
+the integration follows an orbit like the one that started there, not that one. Even the seed of the
+initial deviation changes it, since IAS15's convergence test includes the variational particles. On an
+orbit with a Lyapunov time of about 20 years, five seeds gave the same time at 500 years, while their
+semi-major axes differed by 10⁻³ AU by 520–790 years and their times by 20–33 years at 1000 years. The
+same seed reproduces a run exactly.
 
 **MEGNO needs tens of orbital periods to settle**, so set `--days` accordingly. For an orbit with
 a = 3 AU (a period of about 5.2 years) that is at least 100 years, i.e. `--days 36525`. A run that is

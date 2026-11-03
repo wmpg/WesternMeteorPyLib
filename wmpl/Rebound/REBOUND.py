@@ -2022,8 +2022,12 @@ def _integrateParticles(task):
     return {"outputs": outputs, "diagnostics": diagnostics}
 
 
-# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno)
-MEGNO_RESCALE_ABOVE = 1e20
+# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno). It
+#   is small on purpose. IAS15 keeps the round-off of its compensated summation (csx, csv) across steps, also
+#   for the variational particles, at the scale they had, so a rescale adds about this limit x 1e-16 to a unit
+#   vector. Measured jump of ln|delta| at a rescale: 5e-9 at 1e8, 2e-5 at 1e12, 0.6 at 1e16, and 8 at 1e20,
+#   which shortened the Lyapunov time by 20-25% over 21 orbits in 2000-4000 years.
+MEGNO_RESCALE_ABOVE = 1e8
 
 
 def computeMegno(task, seed=1):
@@ -2108,8 +2112,8 @@ def computeMegno(task, seed=1):
 
     # The deviation grows as exp(lambda t) on a chaotic orbit and would overflow past exp(709), so it
     #   is rescaled to unit length at the output times once it is large, and the logarithm of the
-    #   factor is kept here. The variational equations are linear, so this is exact (measured: ln|delta|
-    #   within 2e-12 of an unscaled run over 400 years).
+    #   factor is kept here. The variational equations are linear, so this does not change its growth,
+    #   up to the round-off that the integrator keeps at the old scale (see MEGNO_RESCALE_ABOVE).
     norm = {"offset": 0.0}
 
     def logDeviation():
