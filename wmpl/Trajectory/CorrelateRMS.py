@@ -91,7 +91,7 @@ class TrajectoryReduced(object):
 
             else:
 
-                # Load values from a given trajectory file
+                # Load values from a given trajectory object
                 traj = traj_obj
                 self.traj_file_path = os.path.join(traj.output_dir, traj.file_name + "_trajectory.pickle")
 
@@ -154,6 +154,9 @@ class TrajectoryReduced(object):
             self.ign_obs_ids = None
             if hasattr(traj, 'ign_obs_ids'):
                 self.ign_obs_ids = traj.ign_obs_ids
+            self.cand_id = None
+            if hasattr(traj, 'cand_id'):
+                self.cand_id = traj.cand_id
 
         # Load values from a dictionary
         else:
@@ -161,6 +164,8 @@ class TrajectoryReduced(object):
                 json_dict['obs_ids'] = None
             if 'ign_obs_ids' not in json_dict.keys():
                 json_dict['ign_obs_ids'] = None
+            if 'cand_id' not in json_dict.keys():
+                json_dict['cand_id'] = None
             self.__dict__ = json_dict
 
 
@@ -783,8 +788,16 @@ class RMSDataHandle(object):
 
         return meteor_list
 
-    def loadUnpairedObservations(self, processing_list, dt_range=None):
-        """ Load unpaired meteor observations, i.e. observations that are not a part of any trajectory. """
+    def loadUnpairedObservations(self, processing_list, dt_range=None, verbose=True):
+        """ Load unpaired meteor observations, i.e. observations that are not a part of any trajectory. 
+        Arguments:
+            processing_list: [list of tuples] list of stations and folders to process. Created by FindUnprocessedFolders
+
+        keyword Arguments:
+            dt_range: [list] pair of julian dates for which to load data
+            verbose: [bool] log progress, default is True so that messages are emitted during initial load
+
+        """
 
         # Go through folders for processing
         unpaired_met_obs_list = []
@@ -802,8 +815,9 @@ class RMSDataHandle(object):
                 if (night_dt < dt_beg + datetime.timedelta(days=-1)) or (night_dt > dt_end):
                     continue
 
-            log.info("")
-            log.info(f"Processing station: {station_code} {rel_proc_path}")
+            if verbose:
+                log.info("")
+                log.info(f"Processing station: {station_code} {rel_proc_path}")
 
             ftpdetectinfo_name = None
             platepar_recalibrated_name = None
@@ -843,7 +857,8 @@ class RMSDataHandle(object):
             
             # Skip these observations if no data files were found inside
             if (ftpdetectinfo_name is None) or (platepar_recalibrated_name is None):
-                log.info(f"  Skipping {rel_proc_path} due to missing data files...")
+                if verbose:
+                    log.info(f"  Skipping {rel_proc_path} due to missing data files...")
                 continue
 
             if len(platepars_recalibrated_dict) == 0:
@@ -893,7 +908,8 @@ class RMSDataHandle(object):
                 if cams_met_obs.ff_name in platepars_recalibrated_dict:
                     pp_dict = platepars_recalibrated_dict[cams_met_obs.ff_name]
                 else:
-                    log.info("    Skipping {:s}, not found in platepar dict".format(cams_met_obs.ff_name))
+                    if verbose:
+                        log.info("    Skipping {:s}, not found in platepar dict".format(cams_met_obs.ff_name))
                     continue
 
                 pp = PlateparDummy(**pp_dict)
@@ -902,7 +918,8 @@ class RMSDataHandle(object):
                 # Skip observations which weren't recalibrated
                 if hasattr(pp, "auto_recalibrated"):
                     if not pp.auto_recalibrated:
-                        log.info("    Skipping {:s}, not recalibrated!".format(cams_met_obs.ff_name))
+                        if verbose:
+                            log.info("    Skipping {:s}, not recalibrated!".format(cams_met_obs.ff_name))
                         continue
 
 
@@ -939,11 +956,13 @@ class RMSDataHandle(object):
                     added_count += 1
                     unpaired_met_obs_list.append(met_obs)
 
-            log.info("  Added {:d} observations!".format(added_count))
+            if verbose:
+                log.info(f'  Added {added_count} observations!')
 
 
-        log.info("")
-        log.info("  Finished loading unpaired observations!")
+        if verbose:
+            log.info("")
+            log.info("  Finished loading unpaired observations!")
 
         return unpaired_met_obs_list
 
@@ -1497,7 +1516,7 @@ class RMSDataHandle(object):
             # keep track of when we originally saved a solution, so we can check how long its taking
             traj.save_date = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc)
 
-        # Save the picked trajectory structure
+        # Save the pickled trajectory structure
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
         if not os.path.isfile(os.path.join(output_dir, traj.file_name + '_trajectory.pickle')):
             log.warning(f'unable to save {os.path.join(output_dir, traj.file_name + "_trajectory.pickle")}')
@@ -1541,6 +1560,7 @@ class RMSDataHandle(object):
 
         # Convert the full trajectory object into the reduced trajectory object
         traj_reduced = TrajectoryReduced(None, traj_obj=traj)
+        # log.info(f'cand_id is {traj_reduced.cand_id}')
 
         # If the trajectory failed, keep track of the original reference Julian date, as it might have been
         #   changed during trajectory estimation
@@ -1569,13 +1589,19 @@ class RMSDataHandle(object):
 
         if (self.mc_mode & MCMODE_PHASE1 or self.mc_mode & MCMODE_CANDS) and remove_phase1:
             # remove any solution from the phase1 folder
-            phase1_traj = os.path.join(self.phase1_dir, traj_reduced.pre_mc_longname + '_trajectory.pickle')
+            if hasattr(traj_reduced, 'pre_mc_longname'):
+                phase1_traj = os.path.join(self.phase1_dir, f'{traj_reduced.pre_mc_longname}_trajectory.pickle')
+            else:
+                output_dir = os.path.split(traj_reduced.traj_file_path)[0]
+                phase1_traj = os.path.join(self.phase1_dir, f'{os.path.split(output_dir)[-1]}_trajectory.pickle')
             if os.path.isfile(phase1_traj):
                 try:
                     os.remove(phase1_traj)
-                    log.info(f'removed {phase1_traj} from phase1/')
+                    log.info(f'removed phase1 file {phase1_traj}')
                 except Exception: 
                     pass
+            else:
+                log.info(f'phase1 file {phase1_traj} not found')
 
         # Remove the trajectory folder from the disk
         if os.path.isfile(traj_reduced.traj_file_path):
@@ -1753,6 +1779,24 @@ class RMSDataHandle(object):
         safeCopyOrMove(pickle_name, self.phase1_dir, targ_dir, move=True)
         if self.trajectory_db:
             self.trajectory_db.unmarkBeingProcessed(traj.traj_id)
+
+    def removeCandidate(self, traj_reduced, verbose=False):
+        """
+        Remove a candidate from the candidates folder and mark it unprocessed in the database.
+        This is used when forcing a reprocess or augmenting an existing solution. 
+
+        Arguments
+        traj_reduce : a traj_reduced object to find the candidate for
+        """
+        if not self.candidate_db:
+            log.warning('candidate db not open')
+            return False
+
+        self.candidate_db.removeCandidate(traj_reduced.cand_id)
+
+        cand_file = f'{traj_reduced.cand_id}_trajectory.pickle'
+        safeCopyOrMove(cand_file, self.candidate_dir, os.path.join(self.candidate_dir, 'processed'), move=True)
+        return True
 
     def moveUploadedData(self, verbose=False):
         """
@@ -2007,7 +2051,6 @@ class RMSDataHandle(object):
         cand_id = f'{ref_dt.timestamp():.6f}_{ctries}'
         return cand_id
 
-    
     def saveCandidates(self, candidate_trajectories, verbose=False):
         """
         Save candidates to file by constructing a name, checking if we already processed it and then 

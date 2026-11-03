@@ -421,6 +421,7 @@ class TrajectoryDatabase():
                         rend_ele REAL,
                         obs_ids VARCHAR,
                         ign_obs_ids VARCHAR,
+                        cand_id VARCHAR,
                         status INTEGER) """)
 
         res = con.execute("SELECT name FROM sqlite_master WHERE name='failed_trajectories'")
@@ -441,6 +442,7 @@ class TrajectoryDatabase():
                         gravity_factor REAL,
                         obs_ids VARCHAR,
                         ign_obs_ids VARCHAR,
+                        cand_id VARCHAR,
                         status INTEGER) """)
                         
         con.commit()
@@ -598,13 +600,13 @@ class TrajectoryDatabase():
                 if failed:
                     self.dbhandle.execute('insert or replace into failed_trajectories values(:jdt_ref,:traj_id,:traj_file_path,:participating_stations,:ignored_stations,' \
                                         ':radiant_eci_mini,:state_vect_mini,:phase_1_only,:v_init,:gravity_factor,' \
-                                        ':obs_ids,:ign_obs_ids,:status)', \
+                                        ':obs_ids,:ign_obs_ids,:cand_id,:status)', \
                                         vals)
                 else:
                     self.dbhandle.execute('insert or replace into trajectories values(:jdt_ref,:traj_id,:traj_file_path,:participating_stations,:ignored_stations,' \
                                         ':radiant_eci_mini,:state_vect_mini,:phase_1_only,:v_init,:gravity_factor,' \
                                         ':v0z,:v_avg,:rbeg_jd,:rend_jd,:rbeg_lat,:rbeg_lon,:rbeg_ele,:rend_lat,:rend_lon,:rend_ele,' \
-                                        ':obs_ids,:ign_obs_ids,:status)', \
+                                        ':obs_ids,:ign_obs_ids,:cand_id,:status)', \
                                         vals)
                 self.dbhandle.commit()
                 return 1
@@ -690,6 +692,7 @@ class TrajectoryDatabase():
                          'state_vect_mini': json.loads(rw[6]),
                          'phase_1_only': rw[7], 'v_init': rw[8],'gravity_factor': rw[9],
                          'obs_ids': json.loads(rw[10]), 'ign_obs_ids': json.loads(rw[11]),
+                         'cand_id': rw[12],
                          }
             else:  
                 json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]),
@@ -703,6 +706,7 @@ class TrajectoryDatabase():
                          'rbeg_lat': rw[14], 'rbeg_lon': rw[15], 'rbeg_ele': rw[16], 
                          'rend_lat': rw[17], 'rend_lon': rw[18], 'rend_ele': rw[19],
                          'obs_ids': json.loads(rw[20]), 'ign_obs_ids': json.loads(rw[21]),
+                         'cand_id': rw[22],
                          }
             
             trajs.append(json_dict)
@@ -718,24 +722,44 @@ class TrajectoryDatabase():
         failed      : boolean, if true retrieve names of fails, otherwise retrieve successful 
     
         Returns:
-        trajs: a json list of tuples of {jdt_ref, traj_id, traj_file_path}
+        trajs: a json list of trajectory data suitable for feeding into TrajReduced
 
         """
 
         jdt_start, jdt_end = jdt_range
         table_name = 'failed_trajectories' if failed else 'trajectories'
         if not jdt_start:
-            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids FROM {table_name} where status=1 order by jdt_ref").fetchall()
+            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids, cand_id FROM {table_name} where status=1 order by jdt_ref").fetchall()
         elif not jdt_end:
-            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids FROM {table_name} WHERE jdt_ref=? and status=1 order by jdt_ref", (jdt_start,)).fetchall()
+            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids, cand_id FROM {table_name} WHERE jdt_ref=? and status=1 order by jdt_ref", (jdt_start,)).fetchall()
         else:
-            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids FROM {table_name} WHERE jdt_ref>=? and jdt_ref<=? and status=1 order by jdt_ref", (jdt_start, jdt_end,)).fetchall()
+            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids, cand_id FROM {table_name} WHERE jdt_ref>=? and jdt_ref<=? and status=1 order by jdt_ref", (jdt_start, jdt_end,)).fetchall()
+        trajs = []
+        for rw in rows:
+            trajs.append({'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]), 
+                'obs_ids':json.loads(rw[3]), 'ign_obs_ids':json.loads(rw[4]), 'cand_id':rw[5]})
+        return trajs
+
+    def getTrajById(self, output_dir, traj_id, failed=False, verbose=False):
+        """
+        Get basic trajectory details based on a traj_id
+        Arguments
+        output_dir  : output_dir specified when invoking CorrelateRMS - will be prepended to the trajectory path
+        traj_id     : trajectory ID
+        failed      : boolean, if true retrieve names of fails, otherwise retrieve successful 
+
+        Returns:
+        trajs: a json list of trajectory data suitable for feeding into TrajReduced
+        """
+
+        table_name = 'failed_trajectories' if failed else 'trajectories'
+        rows = self.dbhandle.execute(f"select jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids from {table_name} where traj_id=?", (traj_id,)).fetchall()
         trajs = []
         for rw in rows:
             trajs.append({'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]), 
                 'obs_ids':json.loads(rw[3]), 'ign_obs_ids':json.loads(rw[4])})
         return trajs
-
+    
     def isBeingProcessed(self, traj_id, clear=False):
         """
         Check if a trajectory is already being processed
@@ -1175,7 +1199,27 @@ class CandidateDatabase():
                 log.warning(f'reason: {e}')
                 return False
         # if we get to here, the retries failed
-        return False   
+        return False  
+
+    def removeCandidate(self, cand_id):
+        """
+        Remove a candidate by marking it logically-deleted. This allows it to be reprocessed
+        """
+        for retry in range(10):
+            try:
+                self.dbhandle.execute('update candidates set status=? WHERE cand_id=?', (0, cand_id,))
+                self.dbhandle.commit()
+                return True
+            except sqlite3.OperationalError as e:
+                log.warning(f'failed to set {cand_id} status, try {retry+1}/10')
+                log.warning(f'reason: {e}')
+                sleep(1)
+            except Exception as e:
+                log.warning(f'problem marking {cand_id} as being processed')
+                log.warning(e)
+                return False
+        # if we get to here, the retries failed
+        return False
 
     def safeDetachDatabase(self, dbname):
         try:

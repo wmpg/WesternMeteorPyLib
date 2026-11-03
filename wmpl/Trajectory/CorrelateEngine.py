@@ -659,8 +659,10 @@ class TrajectoryCorrelator(object):
         #   so we keep this one as a "hard" reference)
         jdt_ref = traj.jdt_ref
         saved_traj_id = traj.traj_id
+        saved_cand_id = traj.cand_id
         log.info("")
         log.info(f"Solving the trajectory at {jd2Date(jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S.%f')}...")
+        #log.info(f'cand id is {traj.cand_id}')
 
         # make a note of how many observations are already marked ignored.
         initial_ignore_count = len([obs for obs in traj.observations if obs.ignore_station])
@@ -881,6 +883,7 @@ class TrajectoryCorrelator(object):
                 log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
                 traj.obs_ids = [obs.obs_id for obs in traj.observations if obs.ignore_station is False]
                 traj.ign_obs_ids = [obs.obs_id for obs in traj.observations if obs.ignore_station is True]
+                traj.cand_id = saved_cand_id
                 self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref, verbose=verbose)
                 return False
 
@@ -900,6 +903,7 @@ class TrajectoryCorrelator(object):
                     log.info("2 station only solution, one station has an error above the maximum limit, skipping!")
 
                     log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
+                    traj.cand_id = saved_cand_id
                     self.dh.addTrajectory(traj_status, failed_jdt_ref=jdt_ref, verbose=verbose)
                     return False
 
@@ -999,6 +1003,7 @@ class TrajectoryCorrelator(object):
                     if mcmode != MCMODE_PHASE2:
                         traj.obs_ids = [obs.obs_id for obs in traj.observations if obs.ignore_station is False]
                         traj.ign_obs_ids = [obs.obs_id for obs in traj.observations if obs.ignore_station is True]
+                        traj.cand_id = saved_cand_id
                         self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref, verbose=verbose)
                     ref_dt = jd2Date(min([met_obs.jdt_ref for met_obs in traj.observations]), dt_obj=True)
                     log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
@@ -1081,8 +1086,9 @@ class TrajectoryCorrelator(object):
                 manage_phase1 = False
 
             log.info('Saving trajectory....')
-
+            traj.cand_id = saved_cand_id
             self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots, save_phase1=manage_phase1)
+            #log.info(f'cand id is now {traj.cand_id}')
 
             # we do not need to update the database for phase2 
             if mcmode != MCMODE_PHASE2:
@@ -1325,11 +1331,12 @@ class TrajectoryCorrelator(object):
                     # List of all candidate trajectories
                     candidate_trajectories = []
 
-                    ### CHECK FOR PAIRING WITH PREVIOUSLY ESTIMATED TRAJECTORIES ###
+                    ### CHECK FOR PAIRING WITH PREVIOUSLY CREATED CANDIDATES OR ESTIMATED TRAJECTORIES ###
                     if total_unpaired > 0: 
+
                         log.info("")
                         log.info("--------------------------------------------------------------------------")
-                        log.info("    1) CHECKING IF PREVIOUSLY ESTIMATED TRAJECTORIES HAVE NEW OBSERVATIONS")
+                        log.info("    1b) CHECKING IF PREVIOUSLY ESTIMATED TRAJECTORIES HAVE NEW OBSERVATIONS")
                         log.info("--------------------------------------------------------------------------")
                         log.info("")
 
@@ -1367,21 +1374,9 @@ class TrajectoryCorrelator(object):
 
                             # Skip trajectory if there are no new observations
                             if not traj_time_pairs:
+                                log.info(f'no traj pairs for {traj_reduced.traj_id}')
                                 continue
 
-                            # Issue #168
-                            # There are two approaches to adding new observations to existing solutions:
-                            #
-                            # If the solution includes observation IDs, we invalidate and remove the existing solution, 
-                            # add the observations to the unpaired list, and allow the next step of the solver to 
-                            # find a new candidate group.
-                            # This is the safest approach as it ensures all observations are treated equally. 
-                            #
-                            # However, legacy trajectories don't include obs_ids; in that case we must fall back on the 
-                            # legacy approach of attempting to augment the existing solution. 
-                            # This is less reliable because sometimes the augmentation fails, leaving two or more 
-                            # 'unpaired' observations. These will then be formed into a duplicate solution in the next step.  
-                            # Analysis of historical data by @AstroEloy indicates about 
 
                             log.info("")
                             log.info("Checking trajectory at {:s} in countries: {:s}".format( 
@@ -1389,25 +1384,6 @@ class TrajectoryCorrelator(object):
                                 ", ".join(list(set([stat_id[:2] for stat_id in traj_reduced.participating_stations])))))
                             log.info("--------")
                             
-                            if hasattr(traj_reduced, 'obs_ids') and hasattr(traj_reduced,'ign_obs_ids'):
-                                unpair_ids = traj_reduced.obs_ids + traj_reduced.obs_ids
-                                # some older trajectories may have simple numeric Obs IDs - we can't use these
-                                unusable = [x for x in unpair_ids if isinstance(x, int) or len(x) < 4]
-                                if len(unusable) == 0:
-                                    log.info(f'unpairing {unpair_ids}')
-                                    self.dh.observations_db.unpairObs(unpair_ids)
-                                    tmp_processing_list, tmp_dt_range = self.dh.dummyProcessingList(unpair_ids)
-                                    print([x[1] for x in tmp_processing_list], tmp_dt_range)
-                                    new_unpaired = self.dh.loadUnpairedObservations(tmp_processing_list, dt_range=tmp_dt_range)
-                                    print(len(new_unpaired))
-                                    for obs in new_unpaired:
-                                        unpaired_observations.append(obs)
-                                    self.dh.removeTrajectory(traj_reduced)
-                                    continue
-
-                            # okay, if we get to here, we have a legacy style trajectory without obs ids 
-                            # or with integer obs ids and so we have to check if we can augment the old solution 
-
                             # Filter out bad matches and only keep the good ones
                             candidate_observations = []
                             traj_full = None
@@ -1476,6 +1452,48 @@ class TrajectoryCorrelator(object):
                             if skip_traj_check:
                                 continue
 
+                            # Issue #168
+                            # There are two approaches to adding new observations to existing solutions:
+                            #
+                            # If the solution includes observation IDs, we invalidate and remove the existing solution, 
+                            # add the observations to the unpaired list, and allow the next step of the solver to 
+                            # find a new candidate group.
+                            # This is the safest approach as it ensures all observations are treated equally. 
+                            #
+                            # However, legacy trajectories don't include obs_ids; in that case we must fall back on the 
+                            # previous approach of attempting to augment the existing solution. 
+                            # This is less reliable because sometimes the augmentation fails, leaving two or more 
+                            # 'unpaired' observations. These will then be formed into a duplicate solution in the next step.  
+                            # Analysis of historical data by @AstroEloy indicates about 15% may fall into this category.
+
+                            if hasattr(traj_reduced, 'obs_ids') and hasattr(traj_reduced,'ign_obs_ids') \
+                                and hasattr(traj_reduced,'cand_id') and traj_reduced.cand_id is not None:
+                                unpair_ids = traj_reduced.obs_ids + traj_reduced.ign_obs_ids
+
+                                # some older trajectories may have simple numeric Obs IDs - we can't use these
+                                unusable = [x for x in unpair_ids if isinstance(x, int) or len(x) < 4]
+                                if len(unusable) == 0:
+                                    log.info('Potential new obs:')
+                                    for obs_new, _ in candidate_observations:
+                                        log.info(f'  {obs_new.obs_id}')
+
+                                    log.info(f'  unpairing {unpair_ids}')
+                                    self.dh.observations_db.unpairObs(unpair_ids)
+                                    tmp_processing_list, tmp_dt_range = self.dh.dummyProcessingList(unpair_ids)
+                                    new_unpaired = self.dh.loadUnpairedObservations(tmp_processing_list, dt_range=tmp_dt_range, verbose=False)
+                                    for obs in new_unpaired:
+                                        unpaired_observations.append(obs)
+
+                                    log.info(f'  removing previous candidate for {traj_reduced.traj_id}')
+                                    if not self.dh.removeCandidate(traj_reduced):
+                                        log.warning(f'unable to remove candidate')
+
+                                    log.info(f'  removing previous solution {traj_reduced.traj_id}')
+                                    self.dh.removeTrajectory(traj_reduced, remove_phase1=True)
+                                    continue
+
+                            # okay, if we get to here, we have a legacy style trajectory without usable obs ids 
+                            # so we have to check if we can augment the old solution 
 
                             # If there are any good new observations, add them to the trajectory and re-run the solution
                             if candidate_observations:
@@ -1492,6 +1510,8 @@ class TrajectoryCorrelator(object):
                                 # pass in orig_traj here so that it can be deleted from disk if the new solution succeeds
                                 # pass the new candidates in so that they can be marked paired if the new soln succeeds
                                 # Note: mcmode must be phase1 here to force a recompute
+                                traj_full.cand_id = cand_id
+                                traj_reduced.cand_id = cand_id
                                 successful_traj_fit = self.solveTrajectory(traj_full, traj_full.mc_runs, mcmode=MCMODE_PHASE1, 
                                                         matched_obs=candidate_observations, orig_traj=traj_reduced, verbose=verbose)
                                 
@@ -1676,8 +1696,11 @@ class TrajectoryCorrelator(object):
 
                 log.info("")
                 log.info("-----------------------")
-                cand_id = self.dh.getCandidateId(matched_observations) if mcmode & MCMODE_PHASE1 else ''
-                log.info(f'processing {"candidate" if mcmode==MCMODE_PHASE1 else "trajectory"} {cand_id} {i+1}/{num_traj}')
+                if hasattr(matched_observations, 'cand_id'):
+                    cand_id = matched_observations.cand_id
+                else:
+                    cand_id = self.dh.getCandidateId(matched_observations) if mcmode & MCMODE_PHASE1 else ''
+                log.info(f'processing {"candidate" if mcmode & MCMODE_PHASE1 else "trajectory"} {cand_id} {i+1}/{num_traj}')
 
                 # if mcmode is not 2, prepare to calculate the intersecting planes solutions
                 if mcmode != MCMODE_PHASE2:
@@ -1764,6 +1787,7 @@ class TrajectoryCorrelator(object):
                         if t0 != 0.0:
                             failed_traj.jdt_ref = failed_traj.jdt_ref + t0/86400.0
 
+                        failed_traj.cand_id = cand_id
                         log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
                         self.dh.addTrajectory(failed_traj, failed_traj.jdt_ref, verbose=verbose)
                         self.dh.markCandAsProcessed(cand_id)
@@ -1841,6 +1865,7 @@ class TrajectoryCorrelator(object):
                         continue
 
                     # pass in matched_observations here so that we can mark them paired if they're used
+                    traj.cand_id = cand_id
                     result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations, verbose=verbose)
                     self.dh.markCandAsProcessed(cand_id)
                     traj_solved_count += int(result)
@@ -1872,6 +1897,7 @@ class TrajectoryCorrelator(object):
                     mc_runs = int(np.ceil(mc_runs/self.traj_constraints.mc_cores)*self.traj_constraints.mc_cores)
 
                     # pass in matched_observations here so that we can mark them unpaired if the solver fails
+                    traj.cand_id = cand_id
                     result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations, orig_traj=traj, verbose=verbose)
                     traj_solved_count += int(result)
                     self.dh.markTrajAsProcessed(traj)
