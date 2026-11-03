@@ -49,11 +49,11 @@ way up gives, from the run without erosion, and the mass at 180 km over the star
 
 The speed is set within the first few km, while the mass keeps growing with any erosion higher up.
 
-From a script, backwardStates(..., const=fit, body_erosion=True) erodes the body at each height with the erosion of a
-MetSim fit (onset, coefficient and their change), instead of one coefficient all the way up, still without following
-its grains. A body eroding from 90 km and stopped at 69 km after 3.6 s, with its grains, came back with body_erosion
-within 0.08% in mass and 0.13 m/s; with sigma + eta all the way within 2% and 0.12 m/s, and with sigma alone with 58% of
-the mass and 10 m/s fast.
+--erosion_coeff and --erosion_height, or from a script backwardStates(..., const=fit, body_erosion=True) with the erosion
+of a MetSim fit (onset, coefficient and their change), erode the body at each height, instead of one coefficient all the
+way up, still without following its grains. A body eroding from 90 km and stopped at 69 km after 3.6 s, with its grains,
+came back with body_erosion within 0.08% in mass and 0.13 m/s; with sigma + eta all the way within 2% and 0.12 m/s, and
+with sigma alone with 58% of the mass and 10 m/s fast.
 
 Against a truth run forwards from 180 km (chondritic fireballs of 10 kg at 15, 20 and 30 km/s, intrinsic sigma =
 0.005 s^2/km^2, eta = 0.1-0.3 s^2/km^2 starting where the dynamic pressure reaches 0.04 MPa or the received energy 1
@@ -67,11 +67,20 @@ and 660 m/s from 50 km; for a body that did not erode, MetSim's 0.023 put it 7-2
 fragmentation above the reference point cannot be undone: with half the mass lost at 0.04 or 0.12 MPa and the right
 coefficient, the mass at 180 km came out half the true one and the speed 5-17 or 17-58 m/s high.
 
-So the command lines report the dynamic pressure and the energy received at the reference point (referenceLoading),
-warn when the pressure is over the 0.04 MPa of the first fragmentation of chondritic fireballs
-(FIRST_FRAGMENTATION_PRESSURE), and report the nominal run with the coefficients of Ceplecha's types I and IIIB, as
-a warning when the two speeds differ by more than the uncertainty of the initial velocity. When the coefficient is
-uncertain, --ablation_coeff_sigma draws one for each Monte Carlo realization.
+From a deep start the drag matters as much as the coefficient or more. Run back from 60 km, 1 kg at 15 km/s and 60 deg
+from the zenith changes its speed at 180 km by +24 and -25 m/s with the coefficients 0.014 and 0.21 s^2/km^2 instead of
+0.1, by -172 m/s with a Gamma*A of 0.55 instead of 1.21, and by +306 m/s with a density of 1000 instead of 3000 kg/m^3.
+
+So the command lines report the dynamic pressure and the energy received at the reference point (referenceLoading) and
+the speed the drag adds above it (dragSpeedGain), and warn (depthWarnings) when that speed is over the uncertainty of the
+initial velocity, or 10 m/s without one. It scales with the mass and the size of the body, unlike the pressure: on 30
+reference points of eroding bodies from 0.1 g to 10 kg, run back with the defaults, the error of the speed at 180 km was
+6-116% of it (median 13%) where it was over 10 m/s, and with an uncertainty of 30 m/s this warning covered all 4 errors
+over 30 m/s, against 2 of the 4 for a pressure over 0.04 MPa. That pressure, of the first fragmentation of ordinary chondrites
+(FIRST_FRAGMENTATION_PRESSURE), now only warns that the mass is a lower limit; weaker bodies fragment at less, and most
+of them never reach it. The command lines also report the nominal run with the coefficients of Ceplecha's types I and
+IIIB. Whatever is uncertain is drawn for each Monte Carlo realization with --mass_sigma, --density_sigma, --ga_sigma and
+--ablation_coeff_sigma.
 """
 
 import argparse
@@ -83,6 +92,7 @@ import warnings
 import numpy as np
 
 from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, runSimulation
+from wmpl.MetSim.MetSimErosion import G0
 from wmpl.Utils import AtmosphereDensity
 from wmpl.Utils.AtmosphereDensity import addAtmosphereArguments, fitAtmPoly, getAtmDensity, getAtmDensityTable, \
     getMSISVersion
@@ -333,7 +343,8 @@ def addBackwardArguments(arg_parser):
     arg_parser.add_argument("--ablation_coeff", type=float, default=Constants().sigma*1e6,
         help="Effective ablation coefficient in s^2/km^2: the mass lost for the kinetic energy lost to the drag "
         "(dm = sigma m v dv), so it sets how fast the mass grows back. It includes the erosion of the body "
-        "(sigma + eta) above the starting point. The speed at the end is set by its value over the first few km "
+        "(sigma + eta) above the starting point, unless --erosion_coeff gives the erosion apart. The speed at the "
+        "end is set by its value over the first few km "
         "above the starting point, so the best is one fitted at the start of the observed part (e.g. by "
         "DynamicMassFit or the trajectory solver's --vinitdrag); farther up it matters little for the speed and "
         "likely overestimates the mass growth. Ceplecha's 0.014, 0.042, 0.10 and 0.21 for fireball types I, II, "
@@ -344,6 +355,15 @@ def addBackwardArguments(arg_parser):
         help="1-sigma uncertainty of --ablation_coeff in s^2/km^2. Each Monte Carlo realization runs with a "
         "coefficient drawn from a log-normal distribution with --ablation_coeff as its mean and this standard "
         "deviation. Default: 0.")
+
+    arg_parser.add_argument("--erosion_coeff", type=float, default=0.0,
+        help="Erosion coefficient of the body in s^2/km^2, below --erosion_height, which is then required. "
+        "--ablation_coeff is then the ablation coefficient alone. Going back, the body gets back the mass it eroded "
+        "at each height; the grains are not followed. Default: 0, no erosion apart from what --ablation_coeff "
+        "includes.")
+
+    arg_parser.add_argument("--erosion_height", type=float, default=None,
+        help="Height in km below which the body erodes with --erosion_coeff. Above it, it only ablates.")
 
     arg_parser.add_argument("--density", type=float, default=3000.0,
         help="Bulk density of the meteoroid in kg/m^3, which with the mass sets the drag, and in REBOUND the "
@@ -385,6 +405,18 @@ def checkBackwardArguments(arg_parser, args):
     if (args.ablation_coeff_sigma > 0) and (args.ablation_coeff == 0):
         arg_parser.error("--ablation_coeff_sigma needs a positive --ablation_coeff, the mean it is drawn around.")
 
+    if args.erosion_coeff < 0:
+        arg_parser.error("--erosion_coeff cannot be negative.")
+
+    if (args.erosion_coeff > 0) != (args.erosion_height is not None):
+        arg_parser.error("--erosion_coeff and --erosion_height go together.")
+
+    if (args.erosion_height is not None) and (args.erosion_height <= 0):
+        arg_parser.error("--erosion_height must be positive.")
+
+    if (args.erosion_coeff > 0) and args.freeze_mass:
+        arg_parser.error("--freeze_mass keeps the mass constant, so it cannot be used with --erosion_coeff.")
+
     if args.density <= 0:
         arg_parser.error("--density must be positive.")
 
@@ -412,8 +444,8 @@ def unusedBackwardArguments(arg_parser, args):
         through the atmosphere takes. --mass and --density are not among them, as they also set the radiation pressure
         in REBOUND. """
 
-    names = ["mass_sigma", "freeze_mass", "ablation_coeff", "ablation_coeff_sigma", "density_sigma", "ga", "ga_sigma",
-        "atm", "atmtime"]
+    names = ["mass_sigma", "freeze_mass", "ablation_coeff", "ablation_coeff_sigma", "erosion_coeff", "erosion_height",
+        "density_sigma", "ga", "ga_sigma", "atm", "atmtime"]
 
     return ["--" + name for name in names if getattr(args, name) != arg_parser.get_default(name)]
 
@@ -423,8 +455,13 @@ def unusedBackwardArguments(arg_parser, args):
 CEPLECHA_SIGMA_RANGE = (0.014, 0.21)
 
 # Dynamic pressure (Pa) at which ordinary chondritic fireballs typically fragment a first time, 0.04-0.12 MPa
-#   (Borovicka et al. 2020): below it, a fragmentation above the starting point cannot be excluded
+#   (Borovicka et al. 2020, all type I). Weaker bodies fragment at less, and most never reach it (of the fireballs of
+#   Borovicka et al. 2022, 62, 76 and 100% of those of the classes Pf-III, Pf-IV and Pf-V have a lower maximum pressure)
 FIRST_FRAGMENTATION_PRESSURE = 0.04e6
+
+# Speed the drag adds above the reference point (m/s) that the command lines warn of, without an uncertainty of the
+#   initial velocity to compare it with
+DRAG_GAIN_WARNING = 10.0
 
 
 def referenceLoading(jd_ref, state_vect, n_top=200):
@@ -453,6 +490,73 @@ def referenceLoading(jd_ref, state_vect, n_top=200):
     column = np.sum(np.diff(hts)*(rho[1:] + rho[:-1])/2)/math.cos(const.zenith_angle)
 
     return rho[0]*const.v_init**2, const.v_init**2/2*column
+
+
+def dragSpeedGain(jd_ref, state_ref, jd_end, state_end):
+    """ The speed relative to the ground that the drag adds above a starting state: the speed at the end of a run back
+        minus what gravity alone would give at that height, from the energy in MetSim's spherical field.
+
+    Arguments:
+        jd_ref: [float] Julian date of the starting state vector.
+        state_ref: [ndarray] Starting state vector (see the module docstring).
+        jd_end: [float] Julian date of the end state vector.
+        state_end: [ndarray] End state vector.
+
+    Return:
+        [float] Speed (m/s).
+    """
+
+    r_earth = Constants().r_earth
+    r_ref = r_earth + cartesian2Geo(jd_ref, *state_ref[:3])[2]
+    r_end = r_earth + cartesian2Geo(jd_end, *state_end[:3])[2]
+
+    v_gravity = math.sqrt(groundSpeed(jd_ref, state_ref)**2 - 2*G0*r_earth**2*(1/r_ref - 1/r_end))
+
+    return groundSpeed(jd_end, state_end) - v_gravity
+
+
+def depthWarnings(pressure, gain, v_init_stddev=None):
+    """ The warnings of the command lines about how deep the reference point is.
+
+    Arguments:
+        pressure: [float] Dynamic pressure at the reference point (Pa), see referenceLoading().
+        gain: [float] Speed the drag adds above it (m/s), see dragSpeedGain().
+
+    Keyword arguments:
+        v_init_stddev: [float] Uncertainty of the initial velocity (m/s). None, or not positive, for DRAG_GAIN_WARNING.
+
+    Return:
+        [list] The warnings, none if the reference point is high enough.
+    """
+
+    warnings_text = []
+
+    known = (v_init_stddev is not None) and (v_init_stddev > 0)
+    limit = v_init_stddev if known else DRAG_GAIN_WARNING
+    if gain > limit:
+
+        text = ("WARNING: The drag above the reference point adds {:.1f} m/s to the speed, more than {:s}. It goes as "
+            "Gamma*A rho^(-2/3) m^(-1/3), so the speed at the end depends on --mass, --density and --ga as much as on "
+            "the ablation coefficient or more: give their uncertainties with --mass_sigma, --density_sigma, --ga_sigma "
+            "and --ablation_coeff_sigma. Run back with the defaults, synthetic eroding bodies were off by 6-116% of "
+            "this speed (median 13%).").format(gain, ("the {:.2f} m/s uncertainty of the initial velocity".format(limit)
+            if known else "{:.1f} m/s".format(limit)))
+
+        if pressure < FIRST_FRAGMENTATION_PRESSURE:
+            text += (" A body weaker than a chondrite may also have fragmented above the first point, which this "
+                "single-body run cannot undo.")
+
+        warnings_text.append(text)
+
+    if pressure >= FIRST_FRAGMENTATION_PRESSURE:
+        warnings_text.append("WARNING: The dynamic pressure at the reference point is over the {:g} MPa at which "
+            "ordinary chondritic fireballs typically fragment a first time (0.04-0.12 MPa, Borovicka et al. 2020), and "
+            "weaker bodies fragment at less. A fragmentation above the first point cannot be undone by this "
+            "single-body run: the mass at the end is then short by the mass that was lost, a lower limit, and the "
+            "speed comes out high (5-58 m/s in synthetic tests with half the mass lost at 0.04-0.12 MPa).".format(
+            FIRST_FRAGMENTATION_PRESSURE/1e6))
+
+    return warnings_text
 
 
 def _logNormal(rng, mean, stddev, n):
@@ -500,11 +604,9 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
 
     If the trajectory was solved with the drag fit of the initial velocity, it prints the effective ablation
     coefficient that fit found (dragFitCoefficientNote). It prints the dynamic pressure and the energy received at
-    the reference point, with a warning when the
-    pressure is over FIRST_FRAGMENTATION_PRESSURE, below which a fragmentation above the first point, which this
-    single-body run cannot undo, cannot be excluded. If the coefficient is not drawn and the mass is not frozen, it
-    also prints the speed and mass of the nominal run with the apparent coefficients of Ceplecha's fireball types I
-    and IIIB, as a warning when their speeds differ by more than the uncertainty of the initial velocity.
+    the reference point and the speed the drag adds above it, with the warnings of depthWarnings(). If the coefficient
+    is not drawn, the mass is not frozen and the erosion is not given apart, it also prints the speed and mass of the
+    nominal run with the apparent coefficients of Ceplecha's fireball types I and IIIB.
     """
 
     if (args.mass_sigma > 0) and (len(state_vects) == 1):
@@ -528,6 +630,14 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     # MetSim's drag only takes the product gamma*shape_factor, so the shape factor keeps its default
     const.gamma = args.ga/const.shape_factor
 
+    # The erosion of the body, given apart from the ablation coefficient, starts at one height
+    body_erosion = args.erosion_coeff > 0
+    if body_erosion:
+        const.erosion_on = True
+        const.erosion_coeff = args.erosion_coeff/1e6
+        const.erosion_height_start = 1000*args.erosion_height
+        const.erosion_height_change = -1.0
+
     # Log-normal with mean args.mass and standard deviation args.mass_sigma, from a generator of its own, so the
     #   state vector draws stay those of sampleStateVectors with the same seed
     rng = np.random.default_rng(None if (random_seed is None) else [1, random_seed])
@@ -548,50 +658,53 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     gas = [args.ga] + _logNormal(rng, args.ga, args.ga_sigma, n_mc)
 
     result = backwardStates(traj.jdt_ref, state_vects, m_inits, h_kill=h_kill, t_kill=t_kill, const=const,
-        sigmas=[sigma/1e6 for sigma in sigmas], rhos=rhos, gammas=[ga/const.shape_factor for ga in gas])
+        sigmas=[sigma/1e6 for sigma in sigmas], rhos=rhos, gammas=[ga/const.shape_factor for ga in gas],
+        body_erosion=body_erosion)
+
+    if body_erosion:
+        ht_ref = cartesian2Geo(traj.jdt_ref, *state_vects[0][:3])[2]
+        print("The body erodes with {:g} s^2/km^2 below {:g} km.".format(args.erosion_coeff, args.erosion_height))
+        if ht_ref > 1000*args.erosion_height:
+            print("The reference point, at {:.1f} km, is above that height, so the body does not erode in this "
+                "run.".format(ht_ref/1000))
 
     # A trajectory solved with the drag fit of the initial velocity (--vinitdrag) carries the effective ablation
     #   coefficient at the start of the observed part, the one that sets the speed of this run
     drag_fit = getattr(traj, "v_init_drag_fit", None)
     if drag_fit is not None:
-        print(dragFitCoefficientNote(drag_fit, args.ablation_coeff))
+        print(dragFitCoefficientNote(drag_fit, args.ablation_coeff + args.erosion_coeff))
 
     # How deep the reference point is
     pressure, energy = referenceLoading(traj.jdt_ref, state_vects[0])
     print("At the reference point: dynamic pressure {:.4f} MPa, energy received {:.3g} MJ/m^2.".format(
         pressure/1e6, energy/1e6))
-    if pressure >= FIRST_FRAGMENTATION_PRESSURE:
-        print("WARNING: The dynamic pressure at the reference point is over the {:g} MPa at which ordinary "
-            "chondritic fireballs typically fragment a first time (0.04-0.12 MPa, Borovicka et al. 2020). A "
-            "fragmentation above the first point cannot be undone by this single-body run: the mass at the end is "
-            "then short by the mass that was lost, a lower limit, and the speed comes out high (5-58 m/s in "
-            "synthetic tests with half the mass lost at 0.04-0.12 MPa). From this depth the ablation coefficient "
-            "also dominates the result: give one fitted at the start of the observed part, with "
-            "--ablation_coeff_sigma.".format(FIRST_FRAGMENTATION_PRESSURE/1e6))
 
-    if (args.ablation_coeff_sigma == 0) and (not args.freeze_mass):
-        line, speeds = [], []
+    # The speed the drag adds above it, against the Monte Carlo uncertainty of the initial velocity if there is one,
+    #   else the solver's formal one
+    gain = dragSpeedGain(traj.jdt_ref, state_vects[0], result[0], result[1][0])
+    print("Above the reference point the drag adds {:.1f} m/s to the speed.".format(gain))
+
+    v_init_stddev = getattr(getattr(traj, "uncertainties", None), "v_init", None)
+    if v_init_stddev is None:
+        v_init_stddev = getattr(traj, "v_init_stddev", None)
+
+    for warning in depthWarnings(pressure, gain, v_init_stddev):
+        print(warning)
+
+    if (args.ablation_coeff_sigma == 0) and (not args.freeze_mass) and (not body_erosion):
+        line = []
         for sigma in CEPLECHA_SIGMA_RANGE:
             const_type = copy.deepcopy(const)
             const_type.sigma = sigma/1e6
             _, states_type, masses_type = backwardStates(traj.jdt_ref, state_vects[:1], m_inits[0], h_kill=h_kill,
                 t_kill=t_kill, const=const_type)
-            speeds.append(np.linalg.norm(states_type[0][3:]))
-            line.append("{:.2f} m/s and {:.6g} kg with {:g}".format(speeds[-1], masses_type[0], sigma))
+            line.append("{:.2f} m/s and {:.6g} kg with {:g}".format(np.linalg.norm(states_type[0][3:]),
+                masses_type[0], sigma))
 
-        # The Monte Carlo uncertainty of the initial velocity if there is one, else the solver's formal one
-        v_init_stddev = getattr(getattr(traj, "uncertainties", None), "v_init", None)
-        if v_init_stddev is None:
-            v_init_stddev = getattr(traj, "v_init_stddev", None)
-        spread = abs(speeds[1] - speeds[0])
-        significant = (v_init_stddev is not None) and (spread > v_init_stddev)
-
-        print(("{:s}The nominal run ends at {:.2f} m/s with {:.6g} kg with --ablation_coeff {:g} s^2/km^2, and at "
-            "{:s} (Ceplecha's fireball types I and IIIB){:s}. If the erosion above the first point is uncertain, "
-            "give --ablation_coeff_sigma.").format("WARNING: " if significant else "",
-            np.linalg.norm(result[1][0][3:]), result[2][0], args.ablation_coeff, " and at ".join(line),
-            ": {:.2f} m/s apart, more than the {:.2f} m/s uncertainty of the initial velocity".format(spread,
-            v_init_stddev) if significant else ""))
+        print(("The nominal run ends at {:.2f} m/s with {:.6g} kg with --ablation_coeff {:g} s^2/km^2, and at "
+            "{:s} (Ceplecha's fireball types I and IIIB). If the erosion above the first point is uncertain, "
+            "give --ablation_coeff_sigma.").format(np.linalg.norm(result[1][0][3:]), result[2][0],
+            args.ablation_coeff, " and at ".join(line)))
 
     return result, m_inits, sigmas, rhos, gas
 
@@ -667,8 +780,9 @@ if __name__ == "__main__":
     out_path = os.path.splitext(args.pickle_path)[0] + "_backward_atm.txt"
     np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*15, header="JD {:.10f} (UTC), {:.6f} s from the reference "
         "point. Row 0 is the nominal solution, the others its realizations. State vectors in ECI, true equator and "
-        "equinox of date, velocity to the radiant. Atmosphere: {:s}.\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
+        "equinox of date, velocity to the radiant. Atmosphere: {:s}.{:s}\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
         "height MSL (m), speed (m/s), mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s), ablation "
         "coefficient (s^2/km^2), bulk density (kg/m^3), Gamma*A".format(jd,
-        (jd - traj.jdt_ref)*86400, atmosphereDescription()))
+        (jd - traj.jdt_ref)*86400, atmosphereDescription(), "" if (args.erosion_coeff == 0) else " Erosion of the body: "
+        "{:g} s^2/km^2 below {:g} km.".format(args.erosion_coeff, args.erosion_height)))
     print("Saved:", out_path)

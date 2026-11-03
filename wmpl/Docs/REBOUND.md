@@ -255,8 +255,9 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_height --mass 0.5
 | `--mass KG` | Mass at the reference point. Required. |
 | `--mass_sigma KG` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
 | `--freeze_mass` | Keep the mass constant instead of growing it back. |
-| `--ablation_coeff S2_KM2` | Effective ablation coefficient, including the erosion of the body (sigma + eta). Default: `0.023`. |
+| `--ablation_coeff S2_KM2` | Effective ablation coefficient, including the erosion of the body (sigma + eta), unless `--erosion_coeff` gives it apart. Default: `0.023`. |
 | `--ablation_coeff_sigma S2_KM2` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--erosion_coeff S2_KM2`, `--erosion_height KM` | Erosion coefficient of the body, and the height below which it erodes with it. `--ablation_coeff` is then the ablation coefficient alone. Default: no erosion apart from what `--ablation_coeff` includes. |
 | `--density KG_M3` | Bulk density, which with the mass sets the drag. Default: `3000`. |
 | `--density_sigma KG_M3` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
 | `--ga GAMMA_A` | Drag coefficient times shape coefficient. Default: `1.21`, MetSim's and the usual value in this high part of the trajectory; `DynamicMassFit` and `AlphaBeta` default to `0.55`. |
@@ -265,11 +266,11 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_height --mass 0.5
 
 These options, apart from `--mass` and `--density`, are refused without `--back_height`. `--back_height` cannot be combined with `--forward`.
 
-From a deep start the drag matters as much as the ablation coefficient or more, so uncertain densities and `--ga` are worth sampling. Run back from 60 km, 1 kg at 15 km/s and 60 deg from the zenith changes its speed at 180 km by +24 and -25 m/s with the coefficients 0.014 and 0.21 s²/km² instead of 0.1, by -172 m/s with `--ga 0.55` instead of 1.21, and by +306 m/s with a density of 1000 instead of 3000 kg/m³.
+From a deep start the drag matters as much as the ablation coefficient or more, so uncertain densities and `--ga` are worth sampling. Run back from 60 km, 1 kg at 15 km/s and 60 deg from the zenith changes its speed at 180 km by +24 and -25 m/s with the coefficients 0.014 and 0.21 s²/km² instead of 0.1, by -172 m/s with `--ga 0.55` instead of 1.21, and by +306 m/s with a density of 1000 instead of 3000 kg/m³. The command lines print the speed the drag adds above the reference point, and warn when it is more than the uncertainty of the initial velocity (10 m/s without one). Run back with the defaults, synthetic eroding bodies were off by 6-116% of that speed (median 13%).
 
 The radiation forces take the mass at the end of the run back, the one the orbit starts with. `--beta` or `--radius` replace it, and `--beta 0` integrates without them.
 
-The erosion of the body follows the same law as its ablation, so the effective coefficient already undoes it. The eroded grains and any fragmentation cannot be undone: after a fragmentation above the first point, the mass at the end is a lower limit. From a script, `backwardStates(..., const=fit, body_erosion=True)` takes the erosion of a MetSim fit at each height instead, without following its grains.
+The erosion of the body follows the same law as its ablation, so the effective coefficient already undoes it, all the way up. `--erosion_coeff` and `--erosion_height` make it start at a height instead, and from a script `backwardStates(..., const=fit, body_erosion=True)` takes the erosion of a MetSim fit at each height. A known onset matters for the mass, not for the speed. The eroded grains are not followed, and a fragmentation above the first point cannot be undone: the mass at the end is then a lower limit.
 
 ---
 

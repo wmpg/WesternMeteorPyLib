@@ -17,7 +17,7 @@ import pytest
 
 from wmpl.MetSim.BackwardAtmIntegration import BACKWARD_GA, BACKWARD_MAX_DT, _eciToEcef, addBackwardArguments, \
     backwardConstants, backwardState, backwardStates, backwardStatesFromArguments, checkBackHeight, \
-    checkBackwardArguments, groundSpeed, unusedBackwardArguments
+    checkBackwardArguments, depthWarnings, dragSpeedGain, groundSpeed, unusedBackwardArguments
 from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, runSimulation
 from wmpl.Utils.AtmosphereDensity import getAtmDensityTable
 from wmpl.Utils.TrajConversions import enu2ECEF, geo2Cartesian
@@ -313,6 +313,117 @@ def test_options_of_the_run_back_are_reported_when_given_without_it():
     assert unusedBackwardArguments(parser, parser.parse_args(["--mass", "1", "--density", "2000"])) == []
 
     used = unusedBackwardArguments(parser, parser.parse_args(["--ablation_coeff", "0.1", "--ga", "0.5", "--ga_sigma",
-        "0.1", "--density_sigma", "100", "--mass_sigma", "0.1", "--freeze_mass", "--atm", "2.1"]))
+        "0.1", "--density_sigma", "100", "--mass_sigma", "0.1", "--freeze_mass", "--atm", "2.1", "--erosion_coeff",
+        "0.3", "--erosion_height", "90"]))
     assert set(used) == {"--ablation_coeff", "--ga", "--ga_sigma", "--density_sigma", "--mass_sigma", "--freeze_mass",
-        "--atm"}
+        "--atm", "--erosion_coeff", "--erosion_height"}
+
+
+def _erosionConstants(sigma, eta, height, rho=3000.0, ga=1.21):
+    """ Constants of a MetSim fit with this erosion, as the command line sets them from its options. """
+
+    const = _noErosion()
+    const.rho, const.sigma, const.erosion_on = rho, sigma/1e6, True
+    const.gamma = ga/const.shape_factor
+    const.erosion_coeff, const.erosion_height_start, const.erosion_height_change = eta/1e6, 1000*height, -1.0
+
+    return const
+
+
+def test_erosion_options_erode_the_body_below_their_height(capsys):
+    """ --erosion_coeff and --erosion_height give the same run as the erosion of constants with body_erosion: more mass
+        than the ablation coefficient alone, and less than the same erosion all the way up. """
+
+    sv = _stateVector(60e3, 20000.0)
+    argv = ["--mass", "1.0", "--ablation_coeff", "0.02"]
+
+    (_, states, masses), *_ = backwardStatesFromArguments(_traj(), [sv], _parser().parse_args(argv + ["--erosion_coeff",
+        "0.3", "--erosion_height", "75"]), 180000.0)
+    out = capsys.readouterr().out
+    assert "The body erodes with 0.3 s^2/km^2 below 75 km" in out and "Ceplecha" not in out
+
+    _, states_direct, masses_direct = backwardStates(JD, [sv], 1.0, const=_erosionConstants(0.02, 0.3, 75.0),
+        body_erosion=True)
+    assert np.linalg.norm(states[0] - states_direct[0]) < 1e-6 and masses[0] == masses_direct[0]
+
+    (_, _, masses_sigma), *_ = backwardStatesFromArguments(_traj(), [sv], _parser().parse_args(argv), 180000.0)
+    (_, _, masses_all), *_ = backwardStatesFromArguments(_traj(), [sv], _parser().parse_args(["--mass", "1.0",
+        "--ablation_coeff", "0.32"]), 180000.0)
+    assert masses_sigma[0] < masses[0] < masses_all[0]
+
+
+def test_erosion_starting_below_the_reference_point_does_not_act(capsys):
+
+    sv = _stateVector(90e3, 20000.0)
+    (_, states, masses), *_ = backwardStatesFromArguments(_traj(), [sv], _parser().parse_args(["--mass", "1.0",
+        "--ablation_coeff", "0.02", "--erosion_coeff", "0.3", "--erosion_height", "80"]), 180000.0)
+    assert "so the body does not erode in this run" in capsys.readouterr().out
+
+    (_, states_none, masses_none), *_ = backwardStatesFromArguments(_traj(), [sv], _parser().parse_args(["--mass", "1.0",
+        "--ablation_coeff", "0.02"]), 180000.0)
+    assert np.linalg.norm(states[0] - states_none[0]) < 1e-6 and masses[0] == masses_none[0]
+
+
+def test_realizations_erode_as_the_nominal_solution_does():
+
+    sv = _stateVector(60e3, 20000.0)
+    args = _parser().parse_args(["--mass", "1.0", "--mass_sigma", "0.2", "--ablation_coeff", "0.02", "--erosion_coeff",
+        "0.3", "--erosion_height", "75"])
+    (_, _, masses), m_inits, *_ = backwardStatesFromArguments(_traj(), [sv]*3, args, 180000.0, random_seed=5)
+
+    # Starting with more mass, a body grows more in absolute terms, and with its erosion on it grows far more than 1%
+    assert np.all(np.array(masses)/np.array(m_inits) > 1.5)
+
+
+def test_erosion_options_that_do_not_go_together_are_command_line_errors():
+
+    parser = _parser()
+    for argv in [["--erosion_coeff", "0.3"], ["--erosion_height", "90"], ["--erosion_coeff", "-0.3", "--erosion_height",
+            "90"], ["--erosion_coeff", "0.3", "--erosion_height", "0"], ["--erosion_coeff", "0.3", "--erosion_height",
+            "90", "--freeze_mass"]]:
+        with pytest.raises(SystemExit):
+            checkBackwardArguments(parser, parser.parse_args(["--mass", "1"] + argv))
+
+    checkBackwardArguments(parser, parser.parse_args(["--mass", "1", "--erosion_coeff", "0.3", "--erosion_height", "90"]))
+
+
+def test_the_speed_the_drag_adds_matches_a_run_without_drag():
+    """ The speed gravity alone gives comes from the energy: a run of the engine without drag ends within 0.5 m/s of it
+        at 180 km. The gain is positive, and larger from deeper. """
+
+    gains = []
+    for ht in (90e3, 70e3, 55e3):
+        sv = _stateVector(ht, 20000.0)
+        const = _noErosion()
+        const.rho = 3000.0
+        jd, (end,), _ = backwardStates(JD, [sv], 1.0, const=const)
+        gain = dragSpeedGain(JD, sv, jd, end)
+        gains.append(gain)
+
+        no_drag = _noErosion()
+        no_drag.rho, no_drag.gamma = 3000.0, 0.0
+        jd_free, (end_free,), _ = backwardStates(JD, [sv], 1.0, const=no_drag)
+        assert abs(dragSpeedGain(JD, sv, jd_free, end_free)) < 0.5
+        assert abs(gain - (groundSpeed(jd, end) - groundSpeed(jd_free, end_free))) < 0.5
+
+    assert 0 < gains[0] < gains[1] < gains[2]
+
+
+def test_depth_warnings_follow_the_speed_gained_and_the_pressure():
+    """ The speed the drag adds warns against the uncertainty of the initial velocity, or 10 m/s without one, whatever
+        the pressure; the pressure over 0.04 MPa warns on its own, about the mass; none says the coefficient dominates. """
+
+    assert depthWarnings(0.001e6, 5.0) == []
+    assert depthWarnings(0.001e6, 15.0, v_init_stddev=30.0) == []
+
+    weak = depthWarnings(0.001e6, 15.0)
+    assert len(weak) == 1 and "adds 15.0 m/s" in weak[0] and "10.0 m/s" in weak[0] and "weaker than a chondrite" in weak[0]
+    assert "the 30.00 m/s uncertainty" in depthWarnings(0.001e6, 40.0, v_init_stddev=30.0)[0]
+
+    only_pressure = depthWarnings(0.05e6, 1.0)
+    assert len(only_pressure) == 1 and "over the 0.04 MPa" in only_pressure[0] and "lower limit" in only_pressure[0]
+
+    both = depthWarnings(0.1e6, 300.0)
+    assert len(both) == 2 and "weaker than a chondrite" not in both[0]
+
+    assert not any("dominates" in text for text in weak + only_pressure + both)

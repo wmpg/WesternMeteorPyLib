@@ -2502,7 +2502,8 @@ if __name__ == "__main__":
                         "reference point: run the nominal solution back up to this height in km (180 if no "
                         "value is given) with MetSim (single body, drag, gravity, Coriolis), and each Monte "
                         "Carlo realization back for the same time, with --mass (required), --mass_sigma, "
-                        "--freeze_mass, --ablation_coeff, --ablation_coeff_sigma, --density, --density_sigma, "
+                        "--freeze_mass, --ablation_coeff, --ablation_coeff_sigma, --erosion_coeff, "
+                        "--erosion_height, --density, --density_sigma, "
                         "--ga and --ga_sigma, in the atmosphere chosen with --atm and --atmtime. The radiation "
                         "forces then take the mass at the end of that run, unless --beta or --radius is given "
                         "(--beta 0 for none).")

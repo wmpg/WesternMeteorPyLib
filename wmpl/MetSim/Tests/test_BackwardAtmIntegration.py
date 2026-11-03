@@ -319,15 +319,16 @@ def test_reference_loading_gives_the_dynamic_pressure_and_the_received_energy():
 
 def test_command_line_warns_when_the_reference_point_is_deep(capsys):
     """ From 50 km, over the 0.04 MPa of a first fragmentation, the command line warns that a fragmentation above
-        cannot be undone, and that the speeds with Ceplecha's types I and IIIB differ by more than the initial
-        velocity's 10 m/s uncertainty; from the example's 116 km it warns of neither. """
+        cannot be undone, and that the drag adds more speed than the initial velocity's 10 m/s uncertainty; from the
+        example's 116 km it warns of neither. """
 
     traj, state_vect = _deepStart(50e3)
     backwardStatesFromArguments(traj, [state_vect], _parseArguments("--mass", "1"), 180000.0)
     out = capsys.readouterr().out
     assert "At the reference point: dynamic pressure 0.40" in out
     assert "WARNING: The dynamic pressure at the reference point is over the 0.04 MPa" in out
-    assert "WARNING: The nominal run ends" in out and "more than the 10.00 m/s uncertainty" in out
+    assert "WARNING: The drag above the reference point adds" in out and "the 10.00 m/s uncertainty" in out
+    assert "WARNING: The nominal run ends" not in out and "dominates" not in out
 
     traj, state_vect = _exampleStart()
     backwardStatesFromArguments(traj, [state_vect], _parseArguments("--mass", "1e-3"), 180000.0)
