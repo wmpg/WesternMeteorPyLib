@@ -47,8 +47,8 @@ class Constants(object):
         # Time step (s). A negative step runs the simulation backwards in time, from a state observed lower down back
         #   up the trajectory, with the mass growing as the ablation is undone. The grains and fragments released by
         #   erosion, disruption and fragmentation cannot be undone, so a backward run needs them off; the erosion of
-        #   the body itself follows the ablation law, so it is undone by running with sigma + eta. h_kill is then
-        #   the height to stop at, above h_init
+        #   the body itself follows the ablation law, so it is undone by running with sigma + eta, or with
+        #   erosion_body_only. h_kill is then the height to stop at, above h_init
         self.dt = 0.005
 
         # Time elapsed since the beginning
@@ -73,6 +73,12 @@ class Constants(object):
         # Keep the mass constant, without ablation or erosion, so a backward run does not grow it. The light is then
         #   only the drag term
         self.freeze_mass = False
+
+        # In a backward run, keep erosion_on for the body alone: it gets back the mass it eroded at each height, with
+        #   the erosion coefficient, density and ablation coefficient of that height (erosion_height_start,
+        #   erosion_coeff and the erosion_*_change values), and no grains are released or followed. Only for a
+        #   backward run; a forward one always releases its grains
+        self.erosion_body_only = False
 
         # Maximum length along the trajectory (m) after which the simulation will stop
         # -1 means no limit
@@ -754,6 +760,24 @@ def getErosionCoeff(const, h):
         return 0
 
 
+def setBackwardBodyErosion(const, frag):
+    """ Set the erosion coefficient, density and ablation coefficient of a fragment to those of its height, for a
+    backward run with const.erosion_body_only. A forward run changes them once, going down past each height; going
+    back up they have to change back, and the run can start already below those heights.
+    """
+
+    eroding = frag.h < const.erosion_height_start
+    changed = eroding and (const.erosion_height_change >= frag.h)
+
+    frag.erosion_coeff = getErosionCoeff(const, frag.h) if eroding else 0
+    frag.sigma = const.erosion_sigma_change if changed else const.sigma
+
+    rho = const.erosion_rho_change if changed else const.rho
+    if rho != frag.rho:
+        frag.rho = rho
+        frag.updateShapeDensityCoeff()
+
+
 def atmDensityTable(ht, table_ht, table_log10_rho):
     """ Atmosphere density from a tabulated profile, interpolating log10(density) linearly in height (i.e. an
     exponential atmosphere between the table points). Outside the table, the first/last segment is
@@ -912,6 +936,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     wind_e = wind_n = 0.0
     backward = const.dt < 0
     freeze_mass = const.freeze_mass
+    body_erosion = backward and const.erosion_on
 
     # Twice the Earth's rotation vector (north and up components) in the frame of the start, for the Coriolis
     #   acceleration
@@ -935,6 +960,10 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         if winds:
             wind_e, wind_n = const.wind_profile.wind(frag.h)
             frag.v = math.sqrt((frag.vx - wind_e)**2 + (frag.vy - wind_n)**2 + frag.vz**2)
+
+        # Going back, the body's erosion follows its height
+        if body_erosion:
+            setBackwardBodyErosion(const, frag)
 
         # Get atmosphere density for the given height
         if atm_table_ht is None:
@@ -1224,7 +1253,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         # For non-complex fragmentation only: Check if the erosion should start, given the height,
         #   and create grains
         if (not frag.complex) and (frag.h < const.erosion_height_start) and frag.erosion_enabled \
-            and const.erosion_on:
+            and const.erosion_on and (not backward):
 
             # Turn on the erosion of the fragment (disruption daughters keep the fixed, disruption-specific
             #   erosion coefficient they were assigned at birth instead - see disruption_child's docstring -
@@ -1246,8 +1275,8 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
                 frag.erosion_height_change_applied = True
 
-        # Create grains for erosion-enabled fragments
-        if frag.erosion_enabled:
+        # Create grains for erosion-enabled fragments (a backward run does not release any)
+        if frag.erosion_enabled and (not backward):
 
             # Generate new grains if there is some mass to distribute
             if abs(mass_loss_erosion) > 0:
@@ -1598,8 +1627,10 @@ def runSimulation(const, compute_wake=False):
     """ Run the ablation simulation. """
 
     if const.dt < 0:
-        if const.erosion_on or const.disruption_on or const.fragmentation_on or compute_wake:
-            raise ValueError("A backward run (dt < 0) needs erosion, disruption, fragmentation and the wake off.")
+        if (const.erosion_on and (not const.erosion_body_only)) or const.disruption_on or const.fragmentation_on \
+                or compute_wake:
+            raise ValueError("A backward run (dt < 0) needs erosion, disruption, fragmentation and the wake off. It "
+                "can only erode the body, with erosion_body_only.")
         if const.h_kill <= const.h_init:
             raise ValueError("A backward run (dt < 0) stops at h_kill, which must be above h_init.")
 

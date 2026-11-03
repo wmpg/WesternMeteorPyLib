@@ -138,7 +138,7 @@ def test_command_line_arguments_set_the_mass_and_the_physical_parameters():
     traj, state_vect = _exampleStart()
 
     def run(*argv):
-        (_, states, masses), m_inits, _ = backwardStatesFromArguments(traj, [state_vect],
+        (_, states, masses), m_inits, *_ = backwardStatesFromArguments(traj, [state_vect],
             _parseArguments("--mass", "1e-6", *argv), 180000.0)
         return m_inits[0], masses[0], np.linalg.norm(states[0][3:])
 
@@ -157,7 +157,7 @@ def test_gamma_a_sets_the_drag_as_metsims_gamma_times_shape_factor():
 
     traj, state_vect = _exampleStart()
 
-    (_, states, masses), _, _ = backwardStatesFromArguments(traj, [state_vect],
+    (_, states, masses), *_ = backwardStatesFromArguments(traj, [state_vect],
         _parseArguments("--mass", "1e-6", "--ga", "0.55"), 180000.0)
 
     const = Constants()
@@ -167,7 +167,7 @@ def test_gamma_a_sets_the_drag_as_metsims_gamma_times_shape_factor():
     assert np.allclose(states[0], states_direct[0], rtol=1e-12, atol=1e-6)
     assert np.isclose(masses[0], masses_direct[0], rtol=1e-12, atol=0)
 
-    (_, states_more, _), _, _ = backwardStatesFromArguments(traj, [state_vect],
+    (_, states_more, _), *_ = backwardStatesFromArguments(traj, [state_vect],
         _parseArguments("--mass", "1e-6", "--ga", "1.21"), 180000.0)
     assert np.linalg.norm(states_more[0][3:]) > np.linalg.norm(states[0][3:])
 
@@ -183,7 +183,7 @@ def test_mass_uncertainty_spreads_the_masses_of_the_realizations():
     traj.state_vect_cov = np.diag([50.0**2]*6)
     realizations = sampleStateVectors(traj, 2000, random_seed=5)
 
-    (_, states, _), m_inits, _ = backwardStatesFromArguments(traj, [state_vect] + realizations,
+    (_, states, _), m_inits, *_ = backwardStatesFromArguments(traj, [state_vect] + realizations,
         _parseArguments("--mass", "1e-3", "--mass_sigma", "4e-4"), 180000.0, random_seed=5)
     masses = np.array(m_inits[1:])
 
@@ -191,7 +191,7 @@ def test_mass_uncertainty_spreads_the_masses_of_the_realizations():
     assert abs(np.mean(masses)/1e-3 - 1) < 0.02 and abs(np.std(masses)/4e-4 - 1) < 0.05
     assert np.array_equal(realizations, sampleStateVectors(traj, 2000, random_seed=5))
 
-    (_, _, _), m_inits_none, _ = backwardStatesFromArguments(traj, [state_vect] + realizations[:3],
+    (_, _, _), m_inits_none, *_ = backwardStatesFromArguments(traj, [state_vect] + realizations[:3],
         _parseArguments("--mass", "1e-3"), 180000.0, random_seed=5)
     assert m_inits_none == [1e-3]*4
 
@@ -249,7 +249,7 @@ def test_ablation_coefficient_uncertainty_spreads_the_coefficients_of_the_realiz
     realizations = sampleStateVectors(traj, 2000, random_seed=5)
     argv = ["--mass", "1e-3", "--mass_sigma", "4e-4", "--ablation_coeff", "0.1"]
 
-    (_, _, masses_fixed), m_inits_fixed, sigmas_fixed = backwardStatesFromArguments(traj,
+    (_, _, masses_fixed), m_inits_fixed, sigmas_fixed, *_ = backwardStatesFromArguments(traj,
         [state_vect] + realizations[:3], _parseArguments(*argv), 180000.0, random_seed=5)
     assert sigmas_fixed == [0.1]*4
 
@@ -260,7 +260,7 @@ def test_ablation_coefficient_uncertainty_spreads_the_coefficients_of_the_realiz
     draws = 0.1*np.exp(sigma_ln*rng.normal(size=2000) - sigma_ln**2/2)
     assert abs(np.mean(draws)/0.1 - 1) < 0.03 and abs(np.std(draws)/0.05 - 1) < 0.06
 
-    (_, states, masses), m_inits, sigmas = backwardStatesFromArguments(traj, [state_vect] + realizations[:3], args,
+    (_, states, masses), m_inits, sigmas, *_ = backwardStatesFromArguments(traj, [state_vect] + realizations[:3], args,
         180000.0, random_seed=5)
     assert sigmas[0] == 0.1 and np.allclose(sigmas[1:], draws[:3], rtol=1e-12)
     assert m_inits == m_inits_fixed
@@ -319,15 +319,16 @@ def test_reference_loading_gives_the_dynamic_pressure_and_the_received_energy():
 
 def test_command_line_warns_when_the_reference_point_is_deep(capsys):
     """ From 50 km, over the 0.04 MPa of a first fragmentation, the command line warns that a fragmentation above
-        cannot be undone, and that the speeds with Ceplecha's types I and IIIB differ by more than the initial
-        velocity's 10 m/s uncertainty; from the example's 116 km it warns of neither. """
+        cannot be undone, and that the drag adds more speed than the initial velocity's 10 m/s uncertainty; from the
+        example's 116 km it warns of neither. """
 
     traj, state_vect = _deepStart(50e3)
     backwardStatesFromArguments(traj, [state_vect], _parseArguments("--mass", "1"), 180000.0)
     out = capsys.readouterr().out
     assert "At the reference point: dynamic pressure 0.40" in out
     assert "WARNING: The dynamic pressure at the reference point is over the 0.04 MPa" in out
-    assert "WARNING: The nominal run ends" in out and "more than the 10.00 m/s uncertainty" in out
+    assert "WARNING: The drag above the reference point adds" in out and "the 10.00 m/s uncertainty" in out
+    assert "WARNING: The nominal run ends" not in out and "dominates" not in out
 
     traj, state_vect = _exampleStart()
     backwardStatesFromArguments(traj, [state_vect], _parseArguments("--mass", "1e-3"), 180000.0)
@@ -395,7 +396,7 @@ def test_command_line_saves_the_nominal_solution_and_its_realizations(tmp_path, 
     _, states, masses = backwardStates(traj.jdt_ref, [state_vect] + sampleStateVectors(traj, 3, 1), rows[:, 1],
         const=const)
 
-    assert rows.shape == (4, 14) and rows[0, 1] == 1e-3 and len(set(rows[:, 1])) == 4
+    assert rows.shape == (4, 18) and rows[0, 1] == 1e-3 and len(set(rows[:, 1])) == 4
     assert np.allclose(rows[:, 7:13], states, rtol=1e-9, atol=1e-6) and np.allclose(rows[:, 6], masses, rtol=1e-9)
     assert np.all(rows[:, 13] == Constants().sigma*1e6)
 
