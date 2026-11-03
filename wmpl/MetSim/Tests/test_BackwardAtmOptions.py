@@ -73,12 +73,12 @@ def test_density_and_gamma_a_are_drawn_for_each_realization():
     state_vects = [sv]*4
     base = ["--mass", "1.0", "--mass_sigma", "0.2", "--ablation_coeff", "0.1", "--ablation_coeff_sigma", "0.02"]
 
-    (_, _, masses_fixed), m_fixed, s_fixed, rhos_fixed, gas_fixed = backwardStatesFromArguments(_traj(), state_vects,
+    (_, _, masses_fixed), m_fixed, s_fixed, rhos_fixed, gas_fixed, *_ = backwardStatesFromArguments(_traj(), state_vects,
         _parser().parse_args(base), 180000.0, random_seed=5)
     assert rhos_fixed == [3000.0]*4 and gas_fixed == [1.21]*4
 
     args = _parser().parse_args(base + ["--density_sigma", "1000", "--ga_sigma", "0.3"])
-    (_, states, masses), m_inits, sigmas, rhos, gas = backwardStatesFromArguments(_traj(), state_vects, args, 180000.0,
+    (_, states, masses), m_inits, sigmas, rhos, gas, *_ = backwardStatesFromArguments(_traj(), state_vects, args, 180000.0,
         random_seed=5)
 
     assert rhos[0] == 3000.0 and gas[0] == 1.21 and np.all(np.array(rhos) > 0) and np.all(np.array(gas) > 0)
@@ -87,7 +87,7 @@ def test_density_and_gamma_a_are_drawn_for_each_realization():
 
     # Independent generators: with one of them on, the other does not move
     args_rho = _parser().parse_args(base + ["--density_sigma", "1000"])
-    *_, rhos_only, gas_only = backwardStatesFromArguments(_traj(), state_vects, args_rho, 180000.0, random_seed=5)
+    _, _, _, rhos_only, gas_only, *_ = backwardStatesFromArguments(_traj(), state_vects, args_rho, 180000.0, random_seed=5)
     assert rhos_only == rhos and gas_only == gas_fixed
 
     # A realization ends as a run of the engine with its own values does, for as long as the nominal one
@@ -427,3 +427,81 @@ def test_depth_warnings_follow_the_speed_gained_and_the_pressure():
     assert len(both) == 2 and "weaker than a chondrite" not in both[0]
 
     assert not any("dominates" in text for text in weak + only_pressure + both)
+
+
+def test_erosion_is_drawn_for_each_realization():
+    """ With --erosion_coeff_sigma and --erosion_height_sigma each realization runs with its own values, log-normal
+        around the given ones. The nominal solution keeps them, the other draws stay the same, and each realization ends
+        as a run of the engine with its own values does. Without erosion, the values are 0 and NaN. """
+
+    sv = _stateVector(60e3, 20000.0)
+    state_vects = [sv]*4
+    base = ["--mass", "1.0", "--mass_sigma", "0.2", "--ablation_coeff", "0.02", "--density_sigma", "500",
+        "--erosion_coeff", "0.3", "--erosion_height", "75"]
+
+    (_, _, _), m_fixed, s_fixed, rhos_fixed, gas_fixed, etas_fixed, hts_fixed = backwardStatesFromArguments(_traj(),
+        state_vects, _parser().parse_args(base), 180000.0, random_seed=5)
+    assert etas_fixed == [0.3]*4 and hts_fixed == [75.0]*4
+
+    args = _parser().parse_args(base + ["--erosion_coeff_sigma", "0.1", "--erosion_height_sigma", "5"])
+    (_, states, masses), m_inits, sigmas, rhos, gas, etas, hts = backwardStatesFromArguments(_traj(), state_vects, args,
+        180000.0, random_seed=5)
+
+    assert etas[0] == 0.3 and hts[0] == 75.0 and len(set(etas)) == 4 and len(set(hts)) == 4
+    assert np.all(np.array(etas) > 0) and np.all(np.array(hts) > 0)
+    assert m_inits == m_fixed and sigmas == s_fixed and rhos == rhos_fixed and gas == gas_fixed
+
+    # A realization ends as a run of the engine with its own values does, for as long as the nominal one
+    def engine(i):
+        const = _erosionConstants(sigmas[i], etas[i], hts[i], rho=rhos[i], ga=gas[i])
+        return backwardConstants(JD, sv, m_inits[i], const=const, body_erosion=True)
+
+    t = runSimulation(engine(0))[1][-1][0]
+    for i in range(1, 4):
+        const = engine(i)
+        const.h_kill, const.t_kill = np.inf, abs(t)
+        frag, results, _ = runSimulation(const)
+        assert results[-1][0] == t
+        assert np.linalg.norm(backwardState(JD, sv, frag, t)[1] - states[i]) < 1e-6
+        assert np.isclose(frag.m, masses[i], rtol=1e-12, atol=0)
+
+    *_, etas_none, hts_none = backwardStatesFromArguments(_traj(), [sv]*2, _parser().parse_args(["--mass", "1.0"]),
+        180000.0, random_seed=5)
+    assert etas_none == [0.0]*2 and np.all(np.isnan(hts_none))
+
+
+def test_erosion_uncertainties_need_the_erosion():
+
+    parser = _parser()
+    for argv in [["--erosion_coeff_sigma", "0.1"], ["--erosion_height_sigma", "5"], ["--erosion_coeff", "0.3",
+            "--erosion_height", "90", "--erosion_coeff_sigma", "-0.1"], ["--erosion_coeff", "0.3", "--erosion_height",
+            "90", "--erosion_height_sigma", "-5"]]:
+        with pytest.raises(SystemExit):
+            checkBackwardArguments(parser, parser.parse_args(["--mass", "1"] + argv))
+
+    assert set(unusedBackwardArguments(parser, parser.parse_args(["--erosion_coeff_sigma", "0.1",
+        "--erosion_height_sigma", "5"]))) == {"--erosion_coeff_sigma", "--erosion_height_sigma"}
+
+
+def test_back_time_stops_the_run_and_is_not_an_option_to_refuse_without_a_height():
+    """ --back_time is shared by both command lines: it runs back for that long unless the height comes first, must be
+        positive, and in REBOUND it starts the run back on its own, so it is not among the ones refused without
+        --back_height. """
+
+    parser = _parser()
+    assert parser.parse_args([]).back_time == -1
+    assert unusedBackwardArguments(parser, parser.parse_args(["--back_time", "2"])) == []
+
+    for value in ("0", "-2"):
+        with pytest.raises(SystemExit):
+            checkBackwardArguments(parser, parser.parse_args(["--mass", "1", "--back_time", value]))
+
+    sv = _stateVector(70e3, 20000.0)
+    args = parser.parse_args(["--mass", "1.0", "--back_time", "1.0"])
+    (jd, (state,), _), *_ = backwardStatesFromArguments(_traj(), [sv], args, 180000.0, t_kill=args.back_time)
+    assert abs((JD - jd)*86400 - 1.0) < 2*BACKWARD_MAX_DT
+    assert groundSpeed(jd, state) > 0
+
+    (jd_top, _, _), *_ = backwardStatesFromArguments(_traj(), [sv], parser.parse_args(["--mass", "1.0"]), 180000.0,
+        t_kill=1000.0)
+    assert 7.0 < (JD - jd_top)*86400 < 12.0

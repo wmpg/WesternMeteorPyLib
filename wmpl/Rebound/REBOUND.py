@@ -2500,10 +2500,11 @@ if __name__ == "__main__":
     parser.add_argument("--back_height", type=float, nargs="?", const=180.0, default=None,
                         help="Start the orbit integration above the atmosphere instead of at the trajectory's "
                         "reference point: run the nominal solution back up to this height in km (180 if no "
-                        "value is given) with MetSim (single body, drag, gravity, Coriolis), and each Monte "
+                        "value is given), or for --back_time seconds if it is reached first, with MetSim "
+                        "(single body, drag, gravity, Coriolis), and each Monte "
                         "Carlo realization back for the same time, with --mass (required), --mass_sigma, "
                         "--freeze_mass, --ablation_coeff, --ablation_coeff_sigma, --erosion_coeff, "
-                        "--erosion_height, --density, --density_sigma, "
+                        "--erosion_coeff_sigma, --erosion_height, --erosion_height_sigma, --density, --density_sigma, "
                         "--ga and --ga_sigma, in the atmosphere chosen with --atm and --atmtime. The radiation "
                         "forces then take the mass at the end of that run, unless --beta or --radius is given "
                         "(--beta 0 for none).")
@@ -2514,10 +2515,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # A time on its own also starts from above the atmosphere, with the highest height to stop at
+    if (args.back_time != -1) and (args.back_height is None):
+        args.back_height = 180.0
+
     if args.back_height is not None:
         if args.forward is not None:
-            parser.error("--back_height starts a backward integration above the atmosphere, so it cannot be used "
-                "with --forward.")
+            parser.error("--back_height and --back_time start a backward integration above the atmosphere, so they "
+                "cannot be used with --forward.")
         checkBackwardArguments(parser, args)
         setAtmosphere(args)
 
@@ -2583,7 +2588,8 @@ if __name__ == "__main__":
     if args.back_height is not None:
         checkBackHeight(parser, traj.jdt_ref, state_vect, 1000*args.back_height)
         (jd_start, states, masses), m_inits, *_ = backwardStatesFromArguments(traj,
-            [state_vect] + state_vect_realizations, args, 1000*args.back_height, random_seed=random_seed)
+            [state_vect] + state_vect_realizations, args, 1000*args.back_height, t_kill=args.back_time,
+            random_seed=random_seed)
         state_vect, state_vect_realizations = states[0], states[1:]
         print("Ran {:d} state vector(s) back through the atmosphere ({:s}) for {:.3f} s, to {:.1f} km, from "
             "{:.6g} kg at the reference point to {:.6g} kg.".format(len(states), atmosphereDescription(),

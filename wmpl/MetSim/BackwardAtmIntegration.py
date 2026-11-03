@@ -80,7 +80,7 @@ over 30 m/s, against 2 of the 4 for a pressure over 0.04 MPa. That pressure, of 
 (FIRST_FRAGMENTATION_PRESSURE), now only warns that the mass is a lower limit; weaker bodies fragment at less, and most
 of them never reach it. The command lines also report the nominal run with the coefficients of Ceplecha's types I and
 IIIB. Whatever is uncertain is drawn for each Monte Carlo realization with --mass_sigma, --density_sigma, --ga_sigma and
---ablation_coeff_sigma.
+--ablation_coeff_sigma, and --erosion_coeff_sigma and --erosion_height_sigma with the erosion given apart.
 """
 
 import argparse
@@ -234,7 +234,7 @@ def backwardState(jd_ref, state_vect, frag, t):
 
 
 def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, const=None, sigmas=None, rhos=None,
-        gammas=None, body_erosion=False):
+        gammas=None, body_erosion=False, etas=None, erosion_heights=None):
     """ Run several state vectors back through the atmosphere to a common epoch, so the nominal solution and its
         Monte Carlo realizations can go into reboundSimulate() together. The first state vector, the nominal one,
         is run up to h_kill, or for t_kill seconds if it is given and h_kill is not reached first, and the others
@@ -253,6 +253,10 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
         rhos: [list] Bulk density of each state vector (kg/m^3). None by default, for const.rho for all of them.
         gammas: [list] Drag coefficient of each state vector, which MetSim multiplies by const.shape_factor. None by
             default, for const.gamma for all of them.
+        etas: [list] Erosion coefficient of each state vector (s^2/m^2) with body_erosion. None by default, for
+            const.erosion_coeff for all of them.
+        erosion_heights: [list] Height below which each state vector erodes (m) with body_erosion. None by default, for
+            const.erosion_height_start for all of them.
 
     Return:
         (jd, state_vects, masses): The common Julian date, and the state vectors and masses (kg) there, in the same
@@ -269,7 +273,12 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
         rhos = [const.rho]*len(state_vects)
     if gammas is None:
         gammas = [const.gamma]*len(state_vects)
+    if etas is None:
+        etas = [const.erosion_coeff]*len(state_vects)
+    if erosion_heights is None:
+        erosion_heights = [const.erosion_height_start]*len(state_vects)
     const.sigma, const.rho, const.gamma = sigmas[0], rhos[0], gammas[0]
+    const.erosion_coeff, const.erosion_height_start = etas[0], erosion_heights[0]
     const.t_kill = t_kill
     frag, results, _ = runSimulation(const)
     t = results[-1][0]
@@ -287,10 +296,12 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
     #   steps, and keep its atmosphere fit, made at practically the same place
     const.h_kill, const.t_kill = np.inf, abs(t)
 
-    for sv, m, sigma, rho, gamma in zip(state_vects[1:], m_inits[1:], sigmas[1:], rhos[1:], gammas[1:]):
+    for sv, m, sigma, rho, gamma, eta, ht in zip(state_vects[1:], m_inits[1:], sigmas[1:], rhos[1:], gammas[1:], etas[1:],
+            erosion_heights[1:]):
 
         const_mc = copy.deepcopy(const)
         const_mc.m_init, const_mc.sigma, const_mc.rho, const_mc.gamma = m, sigma, rho, gamma
+        const_mc.erosion_coeff, const_mc.erosion_height_start = eta, ht
         _startFrom(const_mc, jd_ref, sv)
         frag, results, _ = runSimulation(const_mc)
 
@@ -328,6 +339,10 @@ def addBackwardArguments(arg_parser):
         through the atmosphere, shared by this module's command line and REBOUND's, and those of the atmosphere
         model (--atm and --atmtime), which setAtmosphere() applies after parsing. """
 
+    arg_parser.add_argument("--back_time", type=float, default=-1,
+        help="Run back for this many seconds, unless the height of --back_height, 180 km if not given, is reached "
+        "first. Default: up to that height.")
+
     arg_parser.add_argument("--mass", type=float, default=None,
         help="Mass of the meteoroid at the trajectory's reference point in kg, e.g. a photometric mass. In REBOUND "
         "it also sets the radiation pressure (beta) with --density.")
@@ -362,8 +377,15 @@ def addBackwardArguments(arg_parser):
         "at each height; the grains are not followed. Default: 0, no erosion apart from what --ablation_coeff "
         "includes.")
 
+    arg_parser.add_argument("--erosion_coeff_sigma", type=float, default=0.0,
+        help="1-sigma uncertainty of --erosion_coeff in s^2/km^2. Each Monte Carlo realization runs with a value drawn "
+        "from a log-normal distribution with --erosion_coeff as its mean and this standard deviation. Default: 0.")
+
     arg_parser.add_argument("--erosion_height", type=float, default=None,
         help="Height in km below which the body erodes with --erosion_coeff. Above it, it only ablates.")
+
+    arg_parser.add_argument("--erosion_height_sigma", type=float, default=0.0,
+        help="1-sigma uncertainty of --erosion_height in km, drawn like --erosion_coeff_sigma. Default: 0.")
 
     arg_parser.add_argument("--density", type=float, default=3000.0,
         help="Bulk density of the meteoroid in kg/m^3, which with the mass sets the drag, and in REBOUND the "
@@ -393,6 +415,9 @@ def checkBackwardArguments(arg_parser, args):
     if (args.mass is None) or (args.mass <= 0):
         arg_parser.error("the meteoroid's --mass is required, and must be positive.")
 
+    if (args.back_time != -1) and (args.back_time <= 0):
+        arg_parser.error("--back_time must be positive.")
+
     if args.mass_sigma < 0:
         arg_parser.error("--mass_sigma cannot be negative.")
 
@@ -416,6 +441,12 @@ def checkBackwardArguments(arg_parser, args):
 
     if (args.erosion_coeff > 0) and args.freeze_mass:
         arg_parser.error("--freeze_mass keeps the mass constant, so it cannot be used with --erosion_coeff.")
+
+    if (args.erosion_coeff_sigma < 0) or (args.erosion_height_sigma < 0):
+        arg_parser.error("--erosion_coeff_sigma and --erosion_height_sigma cannot be negative.")
+
+    if ((args.erosion_coeff_sigma > 0) or (args.erosion_height_sigma > 0)) and (args.erosion_coeff == 0):
+        arg_parser.error("--erosion_coeff_sigma and --erosion_height_sigma need --erosion_coeff and --erosion_height.")
 
     if args.density <= 0:
         arg_parser.error("--density must be positive.")
@@ -444,8 +475,9 @@ def unusedBackwardArguments(arg_parser, args):
         through the atmosphere takes. --mass and --density are not among them, as they also set the radiation pressure
         in REBOUND. """
 
-    names = ["mass_sigma", "freeze_mass", "ablation_coeff", "ablation_coeff_sigma", "erosion_coeff", "erosion_height",
-        "density_sigma", "ga", "ga_sigma", "atm", "atmtime"]
+    names = ["mass_sigma", "freeze_mass", "ablation_coeff", "ablation_coeff_sigma", "erosion_coeff",
+        "erosion_coeff_sigma", "erosion_height", "erosion_height_sigma", "density_sigma", "ga", "ga_sigma", "atm",
+        "atmtime"]
 
     return ["--" + name for name in names if getattr(args, name) != arg_parser.get_default(name)]
 
@@ -598,9 +630,10 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     """ backwardStates() from the trajectory's reference point, with the mass and physical parameters given by the
         command-line arguments of addBackwardArguments(). The masses and ablation coefficients of the
         realizations are drawn with random_seed from --mass and --mass_sigma, and from --ablation_coeff and
-        --ablation_coeff_sigma, and the bulk densities and Gamma*A from --density, --density_sigma, --ga and
-        --ga_sigma. Also returns the starting masses, the ablation coefficients (s^2/km^2), the bulk densities (kg/m^3)
-        and the Gamma*A.
+        --ablation_coeff_sigma, the bulk densities and Gamma*A from --density, --density_sigma, --ga and --ga_sigma,
+        and the erosion from --erosion_coeff, --erosion_coeff_sigma, --erosion_height and --erosion_height_sigma. Also
+        returns the starting masses, the ablation coefficients (s^2/km^2), the bulk densities (kg/m^3), the Gamma*A,
+        the erosion coefficients (s^2/km^2, 0 without erosion) and the erosion heights (km, NaN without erosion).
 
     If the trajectory was solved with the drag fit of the initial velocity, it prints the effective ablation
     coefficient that fit found (dragFitCoefficientNote). It prints the dynamic pressure and the energy received at
@@ -620,6 +653,9 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
 
     if (args.ga_sigma > 0) and (len(state_vects) == 1):
         print("--ga_sigma has no effect without Monte Carlo realizations.")
+
+    if ((args.erosion_coeff_sigma > 0) or (args.erosion_height_sigma > 0)) and (len(state_vects) == 1):
+        print("--erosion_coeff_sigma and --erosion_height_sigma have no effect without Monte Carlo realizations.")
 
     const = Constants()
     const.erosion_on = const.disruption_on = const.fragmentation_on = False
@@ -657,9 +693,18 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     rng = np.random.default_rng(None if (random_seed is None) else [4, random_seed])
     gas = [args.ga] + _logNormal(rng, args.ga, args.ga_sigma, n_mc)
 
+    # And the erosion given apart, with none and no height otherwise
+    etas, erosion_heights = [0.0]*len(state_vects), [np.nan]*len(state_vects)
+    if body_erosion:
+        rng = np.random.default_rng(None if (random_seed is None) else [5, random_seed])
+        etas = [args.erosion_coeff] + _logNormal(rng, args.erosion_coeff, args.erosion_coeff_sigma, n_mc)
+        rng = np.random.default_rng(None if (random_seed is None) else [6, random_seed])
+        erosion_heights = [args.erosion_height] + _logNormal(rng, args.erosion_height, args.erosion_height_sigma, n_mc)
+
     result = backwardStates(traj.jdt_ref, state_vects, m_inits, h_kill=h_kill, t_kill=t_kill, const=const,
         sigmas=[sigma/1e6 for sigma in sigmas], rhos=rhos, gammas=[ga/const.shape_factor for ga in gas],
-        body_erosion=body_erosion)
+        body_erosion=body_erosion, etas=([eta/1e6 for eta in etas] if body_erosion else None),
+        erosion_heights=([1000*ht for ht in erosion_heights] if body_erosion else None))
 
     if body_erosion:
         ht_ref = cartesian2Geo(traj.jdt_ref, *state_vects[0][:3])[2]
@@ -706,7 +751,7 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
             "give --ablation_coeff_sigma.").format(np.linalg.norm(result[1][0][3:]), result[2][0],
             args.ablation_coeff, " and at ".join(line)))
 
-    return result, m_inits, sigmas, rhos, gas
+    return result, m_inits, sigmas, rhos, gas, etas, erosion_heights
 
 
 if __name__ == "__main__":
@@ -723,9 +768,6 @@ if __name__ == "__main__":
 
     arg_parser.add_argument("--back_height", type=float, default=180.0,
         help="Height in km to run back to. Default: 180.")
-
-    arg_parser.add_argument("--back_time", type=float, default=-1,
-        help="Run back for this many seconds instead, unless --back_height is reached first.")
 
     arg_parser.add_argument("--mc", type=int, default=1,
         help="Number of Monte Carlo realizations drawn from the trajectory's state vector covariance, run back for "
@@ -749,14 +791,15 @@ if __name__ == "__main__":
 
     checkBackHeight(arg_parser, traj.jdt_ref, state_vect, 1000*args.back_height)
 
-    (jd, states, masses), m_inits, sigmas, rhos, gas = backwardStatesFromArguments(traj, state_vects, args,
-        1000*args.back_height, t_kill=args.back_time, random_seed=random_seed)
+    (jd, states, masses), m_inits, sigmas, rhos, gas, etas, erosion_heights = backwardStatesFromArguments(traj,
+        state_vects, args, 1000*args.back_height, t_kill=args.back_time, random_seed=random_seed)
 
     rows = []
-    for i, (sv, m_ref, m, sigma, rho, ga) in enumerate(zip(states, m_inits, masses, sigmas, rhos, gas)):
+    for i, (sv, m_ref, m, sigma, rho, ga, eta, ht_eta) in enumerate(zip(states, m_inits, masses, sigmas, rhos, gas, etas,
+            erosion_heights)):
         lat, lon, ht = cartesian2Geo(jd, *sv[:3])
         rows.append([i, m_ref, np.degrees(lat), np.degrees(lon), ht, np.linalg.norm(sv[3:]), m] + list(sv)
-            + [sigma, rho, ga])
+            + [sigma, rho, ga, eta, ht_eta])
     rows = np.array(rows)
 
     print("Atmosphere: {:s}".format(atmosphereDescription()))
@@ -772,17 +815,18 @@ if __name__ == "__main__":
     if len(rows) > 1:
         print("Monte Carlo seed: {:d}".format(random_seed))
         for name, col, unit in [("mass at the reference point", 1, "kg"), ("ablation coefficient", 13, "s^2/km^2"),
-                ("bulk density", 14, "kg/m^3"), ("Gamma*A", 15, ""), ("height", 4, "m"), ("speed", 5, "m/s"),
-                ("mass", 6, "kg")]:
+                ("bulk density", 14, "kg/m^3"), ("Gamma*A", 15, "")] + ([("erosion coefficient", 16, "s^2/km^2"),
+                ("erosion height", 17, "km")] if (args.erosion_coeff > 0) else []) + [("height", 4, "m"),
+                ("speed", 5, "m/s"), ("mass", 6, "kg")]:
             print("Realizations {:s}: 2.5/50/97.5 percentiles {:s} {:s}".format(name,
                 " / ".join("{:.6g}".format(v) for v in np.percentile(rows[1:, col], [2.5, 50, 97.5])), unit))
 
     out_path = os.path.splitext(args.pickle_path)[0] + "_backward_atm.txt"
-    np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*15, header="JD {:.10f} (UTC), {:.6f} s from the reference "
+    np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*17, header="JD {:.10f} (UTC), {:.6f} s from the reference "
         "point. Row 0 is the nominal solution, the others its realizations. State vectors in ECI, true equator and "
-        "equinox of date, velocity to the radiant. Atmosphere: {:s}.{:s}\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
+        "equinox of date, velocity to the radiant. Atmosphere: {:s}.\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
         "height MSL (m), speed (m/s), mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s), ablation "
-        "coefficient (s^2/km^2), bulk density (kg/m^3), Gamma*A".format(jd,
-        (jd - traj.jdt_ref)*86400, atmosphereDescription(), "" if (args.erosion_coeff == 0) else " Erosion of the body: "
-        "{:g} s^2/km^2 below {:g} km.".format(args.erosion_coeff, args.erosion_height)))
+        "coefficient (s^2/km^2), bulk density (kg/m^3), Gamma*A, erosion coefficient (s^2/km^2), erosion height (km, "
+        "nan without erosion)".format(jd,
+        (jd - traj.jdt_ref)*86400, atmosphereDescription()))
     print("Saved:", out_path)

@@ -248,7 +248,13 @@ By default the integration starts at the trajectory's reference point, whose spe
 python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_height --mass 0.5 --mc 100
 ```
 
-`wmpl.MetSim.BackwardAtmIntegration` does the same run on its own and saves where each solution ended, to a height (`--back_height`) or for a time (`--back_time`).
+With `--back_time SECONDS` it runs back for that long instead, unless the height of `--back_height` (180 km if not given) is reached first, e.g. for a fireball whose first seconds are not calibrated:
+
+```
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_time 2.0 --mass 0.5 --mc 100
+```
+
+`wmpl.MetSim.BackwardAtmIntegration` does the same run on its own, with the same options, and saves where each solution ended.
 
 | Option | Meaning |
 | :--- | :--- |
@@ -258,6 +264,7 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_height --mass 0.5
 | `--ablation_coeff S2_KM2` | Effective ablation coefficient, including the erosion of the body (sigma + eta), unless `--erosion_coeff` gives it apart. Default: `0.023`. |
 | `--ablation_coeff_sigma S2_KM2` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
 | `--erosion_coeff S2_KM2`, `--erosion_height KM` | Erosion coefficient of the body, and the height below which it erodes with it. `--ablation_coeff` is then the ablation coefficient alone. Default: no erosion apart from what `--ablation_coeff` includes. |
+| `--erosion_coeff_sigma S2_KM2`, `--erosion_height_sigma KM` | Their 1-sigma uncertainties, drawn from log-normals for each realization. Default: `0`. |
 | `--density KG_M3` | Bulk density, which with the mass sets the drag. Default: `3000`. |
 | `--density_sigma KG_M3` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
 | `--ga GAMMA_A` | Drag coefficient times shape coefficient. Default: `1.21`, MetSim's and the usual value in this high part of the trajectory; `DynamicMassFit` and `AlphaBeta` default to `0.55`. |

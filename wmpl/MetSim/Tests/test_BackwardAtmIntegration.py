@@ -396,7 +396,7 @@ def test_command_line_saves_the_nominal_solution_and_its_realizations(tmp_path, 
     _, states, masses = backwardStates(traj.jdt_ref, [state_vect] + sampleStateVectors(traj, 3, 1), rows[:, 1],
         const=const)
 
-    assert rows.shape == (4, 16) and rows[0, 1] == 1e-3 and len(set(rows[:, 1])) == 4
+    assert rows.shape == (4, 18) and rows[0, 1] == 1e-3 and len(set(rows[:, 1])) == 4
     assert np.allclose(rows[:, 7:13], states, rtol=1e-9, atol=1e-6) and np.allclose(rows[:, 6], masses, rtol=1e-9)
     assert np.all(rows[:, 13] == Constants().sigma*1e6)
 
