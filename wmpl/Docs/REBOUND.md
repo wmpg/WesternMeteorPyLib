@@ -13,6 +13,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [Command line reference](#command-line-reference)
 - [Choosing an integrator](#choosing-an-integrator)
 - [Radiation forces](#radiation-forces)
+- [Starting above the atmosphere](#starting-above-the-atmosphere)
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
 - [Chaos: MEGNO](#chaos-megno)
@@ -133,7 +134,9 @@ python -m wmpl.Rebound.REBOUND --help
 | `--verbose` | Print the progress of the simulation. |
 
 `--beta`, `--radius` and `--mass` are mutually exclusive: give the beta directly, or give a size or a
-mass (with the density) and let the code compute it, but only one of them.
+mass (with the density) and let the code compute it, but only one of them. With `--back_height`, `--mass` is
+the mass of the run back through the atmosphere, and `--beta` or `--radius` can also be given: see
+[Starting above the atmosphere](#starting-above-the-atmosphere).
 
 ---
 
@@ -234,6 +237,39 @@ A 1 µm grain at 3000 kg/m³ gives beta = 0.19; a 1 cm meteoroid of the same den
 other words, radiation forces matter for small grains and are negligible for fireball-producing
 bodies — but they are not negligible over long integrations, where they changed the semi-major axis by
 25 % to 190 % in the cases measured here.
+
+---
+
+## Starting above the atmosphere
+
+By default the integration starts at the trajectory's reference point, whose speed already includes the deceleration above it. With `--back_height`, the nominal solution is first run back up through the atmosphere with MetSim (single body, drag, gravity, Coriolis) to that height (180 km if no value is given), and each Monte Carlo realization for the same time, so that they all start at one epoch:
+
+```
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_height --mass 0.5 --mc 100
+```
+
+`wmpl.MetSim.BackwardAtmIntegration` does the same run on its own and saves where each solution ended, to a height (`--back_height`) or for a time (`--back_time`).
+
+| Option | Meaning |
+| :--- | :--- |
+| `--mass KG` | Mass at the reference point. Required. |
+| `--mass_sigma KG` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--freeze_mass` | Keep the mass constant instead of growing it back. |
+| `--ablation_coeff S2_KM2` | Effective ablation coefficient, including the erosion of the body (sigma + eta). Default: `0.023`. |
+| `--ablation_coeff_sigma S2_KM2` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--density KG_M3` | Bulk density, which with the mass sets the drag. Default: `3000`. |
+| `--density_sigma KG_M3` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--ga GAMMA_A` | Drag coefficient times shape coefficient. Default: `1.21`, MetSim's and the usual value in this high part of the trajectory; `DynamicMassFit` and `AlphaBeta` default to `0.55`. |
+| `--ga_sigma GAMMA_A` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--atm`, `--atmtime` | The MSIS model of the air density, and the time it is evaluated at. |
+
+These options, apart from `--mass` and `--density`, are refused without `--back_height`. `--back_height` cannot be combined with `--forward`.
+
+From a deep start the drag matters as much as the ablation coefficient or more, so uncertain densities and `--ga` are worth sampling. Run back from 60 km, 1 kg at 15 km/s and 60 deg from the zenith changes its speed at 180 km by +24 and -25 m/s with the coefficients 0.014 and 0.21 s²/km² instead of 0.1, by -172 m/s with `--ga 0.55` instead of 1.21, and by +306 m/s with a density of 1000 instead of 3000 kg/m³.
+
+The radiation forces take the mass at the end of the run back, the one the orbit starts with. `--beta` or `--radius` replace it, and `--beta 0` integrates without them.
+
+The erosion of the body follows the same law as its ablation, so the effective coefficient already undoes it. The eroded grains and any fragmentation cannot be undone: after a fragmentation above the first point, the mass at the end is a lower limit. From a script, `backwardStates(..., const=fit, body_erosion=True)` takes the erosion of a MetSim fit at each height instead, without following its grains.
 
 ---
 

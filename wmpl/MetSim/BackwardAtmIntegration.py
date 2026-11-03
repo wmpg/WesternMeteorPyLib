@@ -8,6 +8,10 @@ From the command line, to a height or for a time, with or without Monte Carlo re
 
     python -m wmpl.MetSim.BackwardAtmIntegration traj.pickle --mass 0.5 --back_height 180 --mc 100 --atm 2.1
 
+The steps are at most 1 ms (BACKWARD_MAX_DT), as the integration is of first order. Against an independent high-order
+integration, from starts down to 35 km, MetSim's default of 5 ms left the speed up to 9.5 m/s high and the mass up to 1%
+high, and 1 ms up to 1.9 m/s and 0.2%.
+
 State vectors are [x, y, z, vx, vy, vz] in ECI (true equator and equinox of date), in m and m/s, with the
 velocity pointing to the radiant, as the solver gives them and reboundSimulate() takes them.
 
@@ -45,6 +49,12 @@ way up gives, from the run without erosion, and the mass at 180 km over the star
 
 The speed is set within the first few km, while the mass keeps growing with any erosion higher up.
 
+From a script, backwardStates(..., const=fit, body_erosion=True) erodes the body at each height with the erosion of a
+MetSim fit (onset, coefficient and their change), instead of one coefficient all the way up, still without following
+its grains. A body eroding from 90 km and stopped at 69 km after 3.6 s, with its grains, came back with body_erosion
+within 0.08% in mass and 0.13 m/s; with sigma + eta all the way within 2% and 0.12 m/s, and with sigma alone with 58% of
+the mass and 10 m/s fast.
+
 Against a truth run forwards from 180 km (chondritic fireballs of 10 kg at 15, 20 and 30 km/s, intrinsic sigma =
 0.005 s^2/km^2, eta = 0.1-0.3 s^2/km^2 starting where the dynamic pressure reaches 0.04 MPa or the received energy 1
 MJ/m^2, the same atmosphere in every run, reference points at 50-70 km), running back with the right sigma + eta all
@@ -68,6 +78,7 @@ import argparse
 import copy
 import math
 import os
+import warnings
 
 import numpy as np
 
@@ -116,7 +127,11 @@ def groundSpeed(jd, state_vect):
     return derotatedRadiantAltAz(state_vect[3:], state_vect[:3], jd, lat, lon)[2]
 
 
-def backwardConstants(jd_ref, state_vect, m_init, h_kill=180000.0, const=None):
+# Longest step of a run back (s). See the module docstring
+BACKWARD_MAX_DT = 0.001
+
+
+def backwardConstants(jd_ref, state_vect, m_init, h_kill=180000.0, const=None, body_erosion=False):
     """ Constants for a backward MetSimErosion run, in 3D with gravity and the Coriolis acceleration, from the given
         state vector up to h_kill.
 
@@ -131,21 +146,46 @@ def backwardConstants(jd_ref, state_vect, m_init, h_kill=180000.0, const=None):
             up to it, so to stop after a given time with t_kill instead, keep h_kill above the height that time
             reaches. To run in another atmosphere, replace the table (atm_table_ht, atm_table_log10_rho), which is
             used instead of dens_co.
-        const: [Constants] Physical parameters to start from (rho, sigma, gamma, shape_factor, dt, freeze_mass...),
-            e.g. from a MetSim fit. It is copied, not changed. Constants() by default.
+        const: [Constants] Physical parameters to start from (rho, sigma, gamma, shape_factor, freeze_mass...), e.g.
+            from a MetSim fit. It is copied, not changed. Its dt is kept if it is under BACKWARD_MAX_DT. Its grains,
+            disruption and fragmentation cannot be undone: a warning says what is left out, unless they are turned
+            off in it. Constants() by default.
+        body_erosion: [bool] Erode the body with const's erosion (erosion_on, erosion_height_start, erosion_coeff and
+            the erosion_*_change values), at each height, as a MetSim fit has it, instead of leaving it out. No
+            grains are followed. False by default, as Constants() has erosion on.
 
     Return:
         const: [Constants]
     """
 
-    const = Constants() if const is None else copy.deepcopy(const)
+    if const is None:
+        const = Constants()
+
+    else:
+        const = copy.deepcopy(const)
+
+        # Say what the constants have that this run leaves out, which would change its result
+        left_out = []
+        if const.erosion_on and (const.erosion_coeff > 0) and (not body_erosion):
+            left_out.append("the erosion (eta = {:g} s^2/km^2 from {:.1f} km; give body_erosion=True, or sigma + "
+                "eta as sigma)".format(const.erosion_coeff*1e6, const.erosion_height_start/1000))
+        if const.disruption_on:
+            left_out.append("the disruption")
+        if const.fragmentation_on:
+            left_out.append("the fragmentation")
+        if left_out:
+            warnings.warn("The constants of this run back have {:s}, which it leaves out. Turn them off in the "
+                "constants to remove this warning. A fragmentation or disruption above the start cannot be undone: "
+                "the mass at the end is then a lower limit.".format(" and ".join(left_out)))
 
     lat, lon = _startFrom(const, jd_ref, state_vect)
 
     const.m_init = m_init
     const.gravity_3d = True
-    const.dt, const.h_kill = -abs(const.dt), h_kill
-    const.erosion_on = const.disruption_on = const.fragmentation_on = False
+    const.dt, const.h_kill = -min(abs(const.dt), BACKWARD_MAX_DT), h_kill
+    const.erosion_on = const.erosion_on and body_erosion
+    const.erosion_body_only = body_erosion
+    const.disruption_on = const.fragmentation_on = False
     const.dens_co = fitAtmPoly(lat, lon, const.h_init, h_kill, jd_ref)
 
     # Tabulate the density too, the run uses the table instead of the polynomial. A run back from a deep start
@@ -183,7 +223,8 @@ def backwardState(jd_ref, state_vect, frag, t):
     return jd, np.concatenate([pos, -vel])
 
 
-def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, const=None, sigmas=None):
+def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, const=None, sigmas=None, rhos=None,
+        gammas=None, body_erosion=False):
     """ Run several state vectors back through the atmosphere to a common epoch, so the nominal solution and its
         Monte Carlo realizations can go into reboundSimulate() together. The first state vector, the nominal one,
         is run up to h_kill, or for t_kill seconds if it is given and h_kill is not reached first, and the others
@@ -195,10 +236,13 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
         m_init: [float or list] Mass at the start (kg), for all of them or for each one.
 
     Keyword arguments:
-        h_kill, const: As in backwardConstants().
+        h_kill, const, body_erosion: As in backwardConstants().
         t_kill: [float] Time to run back for (s). -1, the default, runs back to h_kill.
         sigmas: [list] Ablation coefficient of each state vector (s^2/m^2, MetSim's units). None by default, for
             const.sigma for all of them.
+        rhos: [list] Bulk density of each state vector (kg/m^3). None by default, for const.rho for all of them.
+        gammas: [list] Drag coefficient of each state vector, which MetSim multiplies by const.shape_factor. None by
+            default, for const.gamma for all of them.
 
     Return:
         (jd, state_vects, masses): The common Julian date, and the state vectors and masses (kg) there, in the same
@@ -207,13 +251,25 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
 
     m_inits = [m_init]*len(state_vects) if np.ndim(m_init) == 0 else m_init
 
-    const = backwardConstants(jd_ref, state_vects[0], m_inits[0], h_kill=h_kill, const=const)
+    const = backwardConstants(jd_ref, state_vects[0], m_inits[0], h_kill=h_kill, const=const,
+        body_erosion=body_erosion)
     if sigmas is None:
         sigmas = [const.sigma]*len(state_vects)
-    const.sigma = sigmas[0]
+    if rhos is None:
+        rhos = [const.rho]*len(state_vects)
+    if gammas is None:
+        gammas = [const.gamma]*len(state_vects)
+    const.sigma, const.rho, const.gamma = sigmas[0], rhos[0], gammas[0]
     const.t_kill = t_kill
     frag, results, _ = runSimulation(const)
     t = results[-1][0]
+
+    # MetSim's other limits stop a run too, e.g. a start under const.v_kill after one step
+    if (frag.h <= h_kill) and not ((t_kill > 0) and (abs(t) >= t_kill)):
+        raise RuntimeError("The run back stopped at {:.3f} km after {:.3f} s, before h_kill: speed {:.1f} m/s "
+            "(v_kill {:.1f}), mass {:.3g} kg (m_kill {:.3g}).".format(frag.h/1000, abs(t), frag.v, const.v_kill, frag.m,
+            const.m_kill))
+
     jd, state_vect = backwardState(jd_ref, state_vects[0], frag, t)
     states, masses = [state_vect], [frag.m]
 
@@ -221,10 +277,10 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
     #   steps, and keep its atmosphere fit, made at practically the same place
     const.h_kill, const.t_kill = np.inf, abs(t)
 
-    for sv, m, sigma in zip(state_vects[1:], m_inits[1:], sigmas[1:]):
+    for sv, m, sigma, rho, gamma in zip(state_vects[1:], m_inits[1:], sigmas[1:], rhos[1:], gammas[1:]):
 
         const_mc = copy.deepcopy(const)
-        const_mc.m_init, const_mc.sigma = m, sigma
+        const_mc.m_init, const_mc.sigma, const_mc.rho, const_mc.gamma = m, sigma, rho, gamma
         _startFrom(const_mc, jd_ref, sv)
         frag, results, _ = runSimulation(const_mc)
 
@@ -250,6 +306,11 @@ def atmosphereDescription():
 
     return name + ", at " + jd2Date(AtmosphereDensity.MSIS_JD, dt_obj=True).strftime("%Y-%m-%d %H:%M:%S") \
         + " UTC (--atmtime)"
+
+
+# Default Gamma*A of the run back, MetSim's gamma*shape_factor: the usual value in this high part of the trajectory.
+#   It is set here, and not taken from DynamicMassFit and AlphaBeta, whose --ga defaults to 0.55
+BACKWARD_GA = 1.21
 
 
 def addBackwardArguments(arg_parser):
@@ -288,10 +349,19 @@ def addBackwardArguments(arg_parser):
         help="Bulk density of the meteoroid in kg/m^3, which with the mass sets the drag, and in REBOUND the "
         "radiation pressure with --radius or --mass. Default: 3000.")
 
-    arg_parser.add_argument("-g", "--ga", metavar="GAMMA_A", type=float,
-        default=Constants().gamma*Constants().shape_factor,
-        help="The product of the drag coefficient Gamma and the shape coefficient A. Default: MetSim's, "
-        "{:g}.".format(Constants().gamma*Constants().shape_factor))
+    arg_parser.add_argument("--density_sigma", type=float, default=0.0,
+        help="1-sigma uncertainty of --density in kg/m^3. Each Monte Carlo realization runs with a density drawn "
+        "from a log-normal distribution with --density as its mean and this standard deviation. In REBOUND the "
+        "radiation pressure keeps --density. Default: 0.")
+
+    arg_parser.add_argument("-g", "--ga", metavar="GAMMA_A", type=float, default=BACKWARD_GA,
+        help="The product of the drag coefficient Gamma and the shape coefficient A. Default: {:g}, MetSim's and the "
+        "usual value in this high part of the trajectory (DynamicMassFit and AlphaBeta default to 0.55).".format(
+        BACKWARD_GA))
+
+    arg_parser.add_argument("--ga_sigma", type=float, default=0.0,
+        help="1-sigma uncertainty of --ga. Each Monte Carlo realization runs with a value drawn from a log-normal "
+        "distribution with --ga as its mean and this standard deviation. Default: 0.")
 
     # The MSIS model of the air density
     addAtmosphereArguments(arg_parser)
@@ -314,6 +384,38 @@ def checkBackwardArguments(arg_parser, args):
 
     if (args.ablation_coeff_sigma > 0) and (args.ablation_coeff == 0):
         arg_parser.error("--ablation_coeff_sigma needs a positive --ablation_coeff, the mean it is drawn around.")
+
+    if args.density <= 0:
+        arg_parser.error("--density must be positive.")
+
+    if args.ga <= 0:
+        arg_parser.error("--ga must be positive.")
+
+    if args.density_sigma < 0:
+        arg_parser.error("--density_sigma cannot be negative.")
+
+    if args.ga_sigma < 0:
+        arg_parser.error("--ga_sigma cannot be negative.")
+
+
+def checkBackHeight(arg_parser, jd_ref, state_vect, h_kill):
+    """ Stop with a command-line error for a height to run back to that is not above the starting point. """
+
+    ht = cartesian2Geo(jd_ref, *state_vect[:3])[2]
+    if h_kill <= ht:
+        arg_parser.error("--back_height ({:.1f} km) must be above the trajectory's reference point, at {:.1f} "
+            "km.".format(h_kill/1000, ht/1000))
+
+
+def unusedBackwardArguments(arg_parser, args):
+    """ The options of addBackwardArguments() given with a value other than their default, which only the run back
+        through the atmosphere takes. --mass and --density are not among them, as they also set the radiation pressure
+        in REBOUND. """
+
+    names = ["mass_sigma", "freeze_mass", "ablation_coeff", "ablation_coeff_sigma", "density_sigma", "ga", "ga_sigma",
+        "atm", "atmtime"]
+
+    return ["--" + name for name in names if getattr(args, name) != arg_parser.get_default(name)]
 
 
 # Apparent ablation coefficients of Ceplecha's fireball types I and IIIB (s^2/km^2), the range the command lines
@@ -392,7 +494,9 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     """ backwardStates() from the trajectory's reference point, with the mass and physical parameters given by the
         command-line arguments of addBackwardArguments(). The masses and ablation coefficients of the
         realizations are drawn with random_seed from --mass and --mass_sigma, and from --ablation_coeff and
-        --ablation_coeff_sigma. Also returns the starting masses and the ablation coefficients (s^2/km^2).
+        --ablation_coeff_sigma, and the bulk densities and Gamma*A from --density, --density_sigma, --ga and
+        --ga_sigma. Also returns the starting masses, the ablation coefficients (s^2/km^2), the bulk densities (kg/m^3)
+        and the Gamma*A.
 
     If the trajectory was solved with the drag fit of the initial velocity, it prints the effective ablation
     coefficient that fit found (dragFitCoefficientNote). It prints the dynamic pressure and the energy received at
@@ -409,7 +513,14 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     if (args.ablation_coeff_sigma > 0) and (len(state_vects) == 1):
         print("--ablation_coeff_sigma has no effect without Monte Carlo realizations.")
 
+    if (args.density_sigma > 0) and (len(state_vects) == 1):
+        print("--density_sigma has no effect without Monte Carlo realizations.")
+
+    if (args.ga_sigma > 0) and (len(state_vects) == 1):
+        print("--ga_sigma has no effect without Monte Carlo realizations.")
+
     const = Constants()
+    const.erosion_on = const.disruption_on = const.fragmentation_on = False
     const.freeze_mass = args.freeze_mass
     const.sigma = args.ablation_coeff/1e6
     const.rho = args.density
@@ -430,8 +541,14 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     else:
         sigmas = [args.ablation_coeff]*len(state_vects)
 
+    # And the bulk densities and Gamma*A, so everything else stays the same with or without them
+    rng = np.random.default_rng(None if (random_seed is None) else [3, random_seed])
+    rhos = [args.density] + _logNormal(rng, args.density, args.density_sigma, n_mc)
+    rng = np.random.default_rng(None if (random_seed is None) else [4, random_seed])
+    gas = [args.ga] + _logNormal(rng, args.ga, args.ga_sigma, n_mc)
+
     result = backwardStates(traj.jdt_ref, state_vects, m_inits, h_kill=h_kill, t_kill=t_kill, const=const,
-        sigmas=[sigma/1e6 for sigma in sigmas])
+        sigmas=[sigma/1e6 for sigma in sigmas], rhos=rhos, gammas=[ga/const.shape_factor for ga in gas])
 
     # A trajectory solved with the drag fit of the initial velocity (--vinitdrag) carries the effective ablation
     #   coefficient at the start of the observed part, the one that sets the speed of this run
@@ -476,7 +593,7 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
             ": {:.2f} m/s apart, more than the {:.2f} m/s uncertainty of the initial velocity".format(spread,
             v_init_stddev) if significant else ""))
 
-    return result, m_inits, sigmas
+    return result, m_inits, sigmas, rhos, gas
 
 
 if __name__ == "__main__":
@@ -517,14 +634,16 @@ if __name__ == "__main__":
     state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
     state_vects = [state_vect] + sampleStateVectors(traj, args.mc, random_seed)
 
-    (jd, states, masses), m_inits, sigmas = backwardStatesFromArguments(traj, state_vects, args,
+    checkBackHeight(arg_parser, traj.jdt_ref, state_vect, 1000*args.back_height)
+
+    (jd, states, masses), m_inits, sigmas, rhos, gas = backwardStatesFromArguments(traj, state_vects, args,
         1000*args.back_height, t_kill=args.back_time, random_seed=random_seed)
 
     rows = []
-    for i, (sv, m_ref, m, sigma) in enumerate(zip(states, m_inits, masses, sigmas)):
+    for i, (sv, m_ref, m, sigma, rho, ga) in enumerate(zip(states, m_inits, masses, sigmas, rhos, gas)):
         lat, lon, ht = cartesian2Geo(jd, *sv[:3])
         rows.append([i, m_ref, np.degrees(lat), np.degrees(lon), ht, np.linalg.norm(sv[3:]), m] + list(sv)
-            + [sigma])
+            + [sigma, rho, ga])
     rows = np.array(rows)
 
     print("Atmosphere: {:s}".format(atmosphereDescription()))
@@ -540,15 +659,16 @@ if __name__ == "__main__":
     if len(rows) > 1:
         print("Monte Carlo seed: {:d}".format(random_seed))
         for name, col, unit in [("mass at the reference point", 1, "kg"), ("ablation coefficient", 13, "s^2/km^2"),
-                ("height", 4, "m"), ("speed", 5, "m/s"), ("mass", 6, "kg")]:
+                ("bulk density", 14, "kg/m^3"), ("Gamma*A", 15, ""), ("height", 4, "m"), ("speed", 5, "m/s"),
+                ("mass", 6, "kg")]:
             print("Realizations {:s}: 2.5/50/97.5 percentiles {:s} {:s}".format(name,
                 " / ".join("{:.6g}".format(v) for v in np.percentile(rows[1:, col], [2.5, 50, 97.5])), unit))
 
     out_path = os.path.splitext(args.pickle_path)[0] + "_backward_atm.txt"
-    np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*13, header="JD {:.10f} (UTC), {:.6f} s from the reference "
+    np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*15, header="JD {:.10f} (UTC), {:.6f} s from the reference "
         "point. Row 0 is the nominal solution, the others its realizations. State vectors in ECI, true equator and "
         "equinox of date, velocity to the radiant. Atmosphere: {:s}.\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
         "height MSL (m), speed (m/s), mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s), ablation "
-        "coefficient (s^2/km^2)".format(jd,
+        "coefficient (s^2/km^2), bulk density (kg/m^3), Gamma*A".format(jd,
         (jd - traj.jdt_ref)*86400, atmosphereDescription()))
     print("Saved:", out_path)
