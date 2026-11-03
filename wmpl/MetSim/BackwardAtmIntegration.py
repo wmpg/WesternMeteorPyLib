@@ -329,6 +329,18 @@ def atmosphereDescription():
         + " UTC (--atmtime)"
 
 
+class _BackTime(argparse.Action):
+    """ Stores --back_time. Where --back_height is None unless it is given, as in REBOUND, a time on its own also
+        starts the run back, with the highest height to stop at. """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+
+        setattr(namespace, self.dest, values)
+
+        if getattr(namespace, "back_height", 0.0) is None:
+            namespace.back_height = 180.0
+
+
 # Default Gamma*A of the run back, MetSim's gamma*shape_factor: the usual value in this high part of the trajectory.
 #   It is set here, and not taken from DynamicMassFit and AlphaBeta, whose --ga defaults to 0.55
 BACKWARD_GA = 1.21
@@ -339,7 +351,7 @@ def addBackwardArguments(arg_parser):
         through the atmosphere, shared by this module's command line and REBOUND's, and those of the atmosphere
         model (--atm and --atmtime), which setAtmosphere() applies after parsing. """
 
-    arg_parser.add_argument("--back_time", type=float, default=-1,
+    arg_parser.add_argument("--back_time", type=float, default=-1, action=_BackTime,
         help="Run back for this many seconds, unless the height of --back_height, 180 km if not given, is reached "
         "first. Default: up to that height.")
 
