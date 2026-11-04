@@ -1,10 +1,14 @@
-# Motion along a trajectory and sampling it
+# Drag fit of the motion along a trajectory, and sampling it
 
-**`wmpl.Utils.TrajectoryMotion`** fits a physical drag model to the lengths and times of a solved
+**`wmpl.Utils.DragFit`** fits a physical drag model to the lengths and times of a solved
 trajectory. It gives smooth positions, times and velocities along the whole trajectory, extrapolates
 them above the beginning and below the end, and shows how the ballistic coefficient of the meteor
 changed during the flight. **`wmpl.Utils.SampleTrajectoryPositions`** uses it to sample the trajectory
 by height or by time, which is the usual first step of a dark flight model.
+
+The ballistic coefficient is fitted from the dynamics alone, unlike in
+[`wmpl.Utils.DynamicMassFit`](../Utils/DynamicMassFit.py), which computes a mass from the drag equation
+for an assumed shape and density.
 
 ## Table of Contents
 
@@ -24,7 +28,7 @@ by height or by time, which is the usual first step of a dark flight model.
 Fit the model to a trajectory, print the table of the ballistic coefficient and show the plots:
 
 ```
-python -m wmpl.Utils.TrajectoryMotion /path/to/20191023_091225_trajectory.pickle
+python -m wmpl.Utils.DragFit /path/to/20191023_091225_trajectory.pickle
 ```
 
 Sample the trajectory every 0.5 km between the observed beginning and end heights (`-1` means the
@@ -93,7 +97,7 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 
 ## Command line reference
 
-`python -m wmpl.Utils.TrajectoryMotion traj.pickle [options]`
+`python -m wmpl.Utils.DragFit traj.pickle [options]`
 
 | Flag | Description |
 | :--- | :--- |
@@ -112,7 +116,7 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 
 ## Reading the output
 
-**The table** printed by `TrajectoryMotion` (an example from a fireball over Ontario, 2022):
+**The table** printed by `DragFit` (an example from a fireball over Ontario, 2022):
 
 ```
 Drag model of the motion: dv/dt = -K*rho*v² + g
@@ -158,31 +162,31 @@ import os
 
 import numpy as np
 
-from wmpl.Utils.TrajectoryMotion import TrajectoryMotion, plotMotion
+from wmpl.Utils.DragFit import DragFit, plotDragFit
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 
 traj = loadPickle(*os.path.split("/path/to/20191023_091225_trajectory.pickle"))
 
 # Fit the model
-motion = TrajectoryMotion(traj)
-print(motion.summaryTable())
+drag_fit = DragFit(traj)
+print(drag_fit.summaryTable())
 
 # Smooth velocities and heights at any time (s, relative to traj.jdt_ref) or height (m)
 time_arr = np.linspace(0.0, 1.0, 11)
-vel = motion.velocityAtTime(time_arr)
-ht = motion.heightAtTime(time_arr)
-vel_30km = motion.velocityAtHeight(30000.0)
+vel = drag_fit.velocityAtTime(time_arr)
+ht = drag_fit.heightAtTime(time_arr)
+vel_30km = drag_fit.velocityAtHeight(30000.0)
 
 # The ballistic coefficient and the uncertainty of its logarithm at lengths along the trajectory
-k_arr, log_k_std = motion.ballisticCoeffAtLength(motion.lengthAtTime(time_arr))
+k_arr, log_k_std = drag_fit.ballisticCoeffAtLength(drag_fit.lengthAtTime(time_arr))
 
 # Positions and the direction of the radiant, bent by gravity
-eci = motion.eciAtLength(motion.lengthAtTime(time_arr))
-radiant = motion.radiantAtLength(motion.lengthAtTime(time_arr))
+eci = drag_fit.eciAtLength(drag_fit.lengthAtTime(time_arr))
+radiant = drag_fit.radiantAtLength(drag_fit.lengthAtTime(time_arr))
 
 # The plots
-plotMotion(motion)
+plotDragFit(drag_fit)
 
 # Samples every 100 m of height between the observed beginning and end (-1)
 samples = sampleTrajectory(traj, -1, -1, 100.0)
@@ -246,7 +250,7 @@ Keep in mind:
 
 ## Troubleshooting
 
-**`ValueError: The motion model could not be fitted, the lengths and times of the points of the
+**`ValueError: The drag model could not be fitted, the lengths and times of the points of the
 trajectory are not consistent`.** The lengths along the track and the times of the solution do not
 describe a physical motion, usually because of a bad solution or a wrong timing of a station. Check
 the lag and the residual plots of the trajectory solution.

@@ -1,8 +1,8 @@
-""" Tests of the drag model of the motion along the trajectory in wmpl.Utils.TrajectoryMotion, on a
+""" Tests of the drag model of the motion along the trajectory in wmpl.Utils.DragFit, on a
     synthetic fireball which decelerates from 18 to 10 km/s while it is observed.
 
 Run with pytest:
-    python -m pytest wmpl/Utils/Tests/test_TrajectoryMotion.py -v
+    python -m pytest wmpl/Utils/Tests/test_DragFit.py -v
 """
 
 from __future__ import print_function, division, absolute_import
@@ -21,7 +21,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import wmpl
-from wmpl.Utils.TrajectoryMotion import TrajectoryMotion, plotMotion
+from wmpl.Utils.DragFit import DragFit, plotDragFit
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
 from wmpl.Utils.Pickling import loadPickle
 
@@ -34,13 +34,13 @@ TRAJ_FILE = '20191023_091225_trajectory.pickle'
 
 @functools.lru_cache(maxsize=None)
 def _solvedMeteor():
-    """ Simulate, observe and solve the synthetic fireball, and fit the motion model (computed once).
+    """ Simulate, observe and solve the synthetic fireball, and fit the drag model (computed once).
 
     Return:
-        (meteor, traj, motion):
+        (meteor, traj, drag_fit):
             - meteor: [DragMeteor object] Synthetic fireball (the truth).
             - traj: [Trajectory object] Solved trajectory.
-            - motion: [TrajectoryMotion object] Fitted model of the motion.
+            - drag_fit: [DragFit object] Drag fit of the motion.
     """
 
     # The ballistic coefficient grows five times while the fireball is visible, from 86 to 48 km
@@ -50,20 +50,20 @@ def _solvedMeteor():
     with contextlib.redirect_stdout(io.StringIO()):
         traj = traj.run()
 
-    motion = TrajectoryMotion(traj)
+    drag_fit = DragFit(traj)
 
-    return meteor, traj, motion
+    return meteor, traj, drag_fit
 
 
 
-def _alongTrackError(meteor, motion, time_arr):
+def _alongTrackError(meteor, drag_fit, time_arr):
     """ Compute the error of the modelled positions along the trajectory, against the truth projected on the
         solved line. The median error in the observed part, which comes from the trajectory solution and not
         from the model of the motion, is subtracted.
 
     Arguments:
         meteor: [DragMeteor object] Synthetic fireball.
-        motion: [TrajectoryMotion object] Fitted model of the motion.
+        drag_fit: [DragFit object] Drag fit of the motion.
         time_arr: [ndarray] Times (s).
 
     Return:
@@ -71,8 +71,8 @@ def _alongTrackError(meteor, motion, time_arr):
     """
 
     def _error(t_arr):
-        len_true = (motion.state_vect[None, :] - meteor.eciAtTime(t_arr)).dot(motion.radiant_eci)
-        return motion.lengthAtTime(t_arr) - len_true
+        len_true = (drag_fit.state_vect[None, :] - meteor.eciAtTime(t_arr)).dot(drag_fit.radiant_eci)
+        return drag_fit.lengthAtTime(t_arr) - len_true
 
     # Take the median error in the observed part as the offset of the solution
     offset = np.median(_error(np.linspace(0.0, 3.3, 50)))
@@ -84,20 +84,20 @@ def _alongTrackError(meteor, motion, time_arr):
 def testFitsTheData():
     """ Check that the model fits the observed lengths to the noise level. """
 
-    _, _, motion = _solvedMeteor()
+    _, _, drag_fit = _solvedMeteor()
 
     # A noise of 30 arcsec at a range of about 100 km is about 15 m
-    assert motion.res_rms < 60.0
+    assert drag_fit.res_rms < 60.0
 
 
 
 def testVelocityInTheObservedPart():
     """ Check the velocity inside the observed part, including the deceleration at the end. """
 
-    meteor, _, motion = _solvedMeteor()
+    meteor, _, drag_fit = _solvedMeteor()
 
     time_arr = np.linspace(0.0, 3.3, 50)
-    vel_err = motion.velocityAtLength(motion.lengthAtTime(time_arr)) - meteor.velocityAtTime(time_arr)
+    vel_err = drag_fit.velocityAtLength(drag_fit.lengthAtTime(time_arr)) - meteor.velocityAtTime(time_arr)
 
     assert np.max(np.abs(vel_err)) < 300.0
     assert np.abs(vel_err[-1]) < 300.0
@@ -107,12 +107,12 @@ def testVelocityInTheObservedPart():
 def testExtrapolationAboveTheBeginning():
     """ Check that the motion above the beginning continues at the nearly constant initial velocity. """
 
-    meteor, _, motion = _solvedMeteor()
+    meteor, _, drag_fit = _solvedMeteor()
 
     time_arr = np.linspace(-1.5, -0.05, 20)
-    vel_err = motion.velocityAtLength(motion.lengthAtTime(time_arr)) - meteor.velocityAtTime(time_arr)
+    vel_err = drag_fit.velocityAtLength(drag_fit.lengthAtTime(time_arr)) - meteor.velocityAtTime(time_arr)
 
-    assert np.max(np.abs(_alongTrackError(meteor, motion, time_arr))) < 50.0
+    assert np.max(np.abs(_alongTrackError(meteor, drag_fit, time_arr))) < 50.0
     assert np.max(np.abs(vel_err)) < 50.0
 
 
@@ -120,12 +120,12 @@ def testExtrapolationAboveTheBeginning():
 def testExtrapolationBelowTheEnd():
     """ Check the drag-only flight below the end. """
 
-    meteor, _, motion = _solvedMeteor()
+    meteor, _, drag_fit = _solvedMeteor()
 
     time_arr = np.linspace(3.35, 4.0, 20)
-    vel_err = motion.velocityAtLength(motion.lengthAtTime(time_arr)) - meteor.velocityAtTime(time_arr)
+    vel_err = drag_fit.velocityAtLength(drag_fit.lengthAtTime(time_arr)) - meteor.velocityAtTime(time_arr)
 
-    assert np.max(np.abs(_alongTrackError(meteor, motion, time_arr))) < 300.0
+    assert np.max(np.abs(_alongTrackError(meteor, drag_fit, time_arr))) < 300.0
     assert np.max(np.abs(vel_err)) < 300.0
 
 
@@ -135,10 +135,10 @@ def testBallisticCoefficient():
         with time from 0.01 to 0.05 m^2/kg while the fireball is visible.
     """
 
-    _, _, motion = _solvedMeteor()
+    _, _, drag_fit = _solvedMeteor()
 
     time_arr = np.linspace(0.1, 3.2, 8)
-    k_arr, log_k_std = motion.ballisticCoeffAtLength(motion.lengthAtTime(time_arr))
+    k_arr, log_k_std = drag_fit.ballisticCoeffAtLength(drag_fit.lengthAtTime(time_arr))
     k_true = 0.01 + 0.04*np.clip(time_arr/3.3, 0.0, 1.0)
 
     # The truth is within 3 sigma of the fit, and the fit sees the growth
@@ -152,19 +152,19 @@ def testNoDragAboveTheBeginning():
         gravity going up, and that the drag can be kept there.
     """
 
-    _, traj, motion = _solvedMeteor()
+    _, traj, drag_fit = _solvedMeteor()
 
-    len_arr = motion.len_first - np.array([0.0, 1e3, 20e3])
+    len_arr = drag_fit.len_first - np.array([0.0, 1e3, 20e3])
 
-    k_arr, _ = motion.ballisticCoeffAtLength(np.concatenate([[motion.len_first - 1.0], len_arr[1:]]))
+    k_arr, _ = drag_fit.ballisticCoeffAtLength(np.concatenate([[drag_fit.len_first - 1.0], len_arr[1:]]))
     assert np.all(k_arr == 0)
 
-    vel = motion.velocityAtLength(len_arr)
+    vel = drag_fit.velocityAtLength(len_arr)
     assert np.all(np.diff(vel) < 0)
 
     # With the drag kept above the beginning, the meteor was faster above
-    motion_drag = TrajectoryMotion(traj, drag_above=True)
-    vel_drag = motion_drag.velocityAtLength(len_arr)
+    drag_fit_kept = DragFit(traj, drag_above=True)
+    vel_drag = drag_fit_kept.velocityAtLength(len_arr)
     assert vel_drag[1] > vel_drag[0]
     assert np.all(vel_drag[1:] > vel[1:])
 
@@ -173,33 +173,33 @@ def testNoDragAboveTheBeginning():
 def testTimeAndHeightFunctions():
     """ Check the velocities and heights at given times and heights against the functions of the length. """
 
-    _, _, motion = _solvedMeteor()
+    _, _, drag_fit = _solvedMeteor()
 
     time_arr = np.linspace(-0.5, 3.5, 20)
-    len_arr = motion.lengthAtTime(time_arr)
+    len_arr = drag_fit.lengthAtTime(time_arr)
 
-    assert np.allclose(motion.velocityAtTime(time_arr), motion.velocityAtLength(len_arr))
-    assert np.allclose(motion.heightAtTime(time_arr), motion.heightAtLength(len_arr))
-    vel_at_ht = motion.velocityAtHeight(motion.heightAtLength(len_arr))
-    assert np.allclose(vel_at_ht, motion.velocityAtLength(len_arr), rtol=1e-6)
+    assert np.allclose(drag_fit.velocityAtTime(time_arr), drag_fit.velocityAtLength(len_arr))
+    assert np.allclose(drag_fit.heightAtTime(time_arr), drag_fit.heightAtLength(len_arr))
+    vel_at_ht = drag_fit.velocityAtHeight(drag_fit.heightAtLength(len_arr))
+    assert np.allclose(vel_at_ht, drag_fit.velocityAtLength(len_arr), rtol=1e-6)
 
     # Outside the modelled part the values are not defined
-    assert np.isnan(motion.velocityAtTime(1e4)[0])
-    assert np.isnan(motion.heightAtTime(1e4)[0])
+    assert np.isnan(drag_fit.velocityAtTime(1e4)[0])
+    assert np.isnan(drag_fit.heightAtTime(1e4)[0])
 
 
 
 def testSummaryTable():
     """ Check that the table of the model has a row for every segment and finds the growth of K. """
 
-    _, _, motion = _solvedMeteor()
+    _, _, drag_fit = _solvedMeteor()
 
-    table = motion.summaryTable()
+    table = drag_fit.summaryTable()
     rows = [line for line in table.split("\n") if line[:4].strip().isdigit()]
 
-    assert len(rows) == motion.n_knots
+    assert len(rows) == drag_fit.n_knots
 
-    k_ratio, mass_ratio = motion.ballisticCoeffGrowth()
+    k_ratio, mass_ratio = drag_fit.ballisticCoeffGrowth()
     assert k_ratio > 2.0
     assert np.isclose(mass_ratio, k_ratio**(-3))
 
@@ -208,11 +208,11 @@ def testSummaryTable():
 def testVelocityIsPhysical():
     """ Check that the velocity is positive and only increases by gravity. """
 
-    _, _, motion = _solvedMeteor()
+    _, _, drag_fit = _solvedMeteor()
 
-    valid = np.isfinite(motion.vel_grid)
-    vel = motion.vel_grid[valid]
-    time = motion.time_grid[valid]
+    valid = np.isfinite(drag_fit.vel_grid)
+    vel = drag_fit.vel_grid[valid]
+    time = drag_fit.time_grid[valid]
 
     assert np.all(vel > 0)
     assert np.all(np.diff(vel) <= 9.81*np.diff(time) + 1e-6)
@@ -222,13 +222,13 @@ def testVelocityIsPhysical():
 def testHeightsAreConsistent():
     """ Check the heights against the trajectory solution, and that lengths and heights invert each other. """
 
-    _, traj, motion = _solvedMeteor()
+    _, traj, drag_fit = _solvedMeteor()
 
-    assert abs(motion.heightAtLength(motion.len_first)[0] - traj.rbeg_ele) < 1.0
-    assert abs(motion.heightAtLength(motion.len_last)[0] - traj.rend_ele) < 1.0
+    assert abs(drag_fit.heightAtLength(drag_fit.len_first)[0] - traj.rbeg_ele) < 1.0
+    assert abs(drag_fit.heightAtLength(drag_fit.len_last)[0] - traj.rend_ele) < 1.0
 
-    len_arr = np.linspace(motion.len_first - 50e3, motion.len_last + 5e3, 20)
-    assert np.allclose(motion.lengthAtHeight(motion.heightAtLength(len_arr)), len_arr, atol=0.1)
+    len_arr = np.linspace(drag_fit.len_first - 50e3, drag_fit.len_last + 5e3, 20)
+    assert np.allclose(drag_fit.lengthAtHeight(drag_fit.heightAtLength(len_arr)), len_arr, atol=0.1)
 
 
 
@@ -240,19 +240,19 @@ def testGravityDropMatchesTheSolution():
     traj = loadPickle(TRAJ_DIR, TRAJ_FILE)
     assert traj.gravity_correction
 
-    motion = TrajectoryMotion(traj)
+    drag_fit = DragFit(traj)
 
     for obs in traj.observations:
 
         used = np.array(obs.ignore_list) == 0
-        ht_diff = motion.heightAtLength(obs.state_vect_dist[used]) - obs.model_ht[used]
+        ht_diff = drag_fit.heightAtLength(obs.state_vect_dist[used]) - obs.model_ht[used]
 
         assert np.max(np.abs(ht_diff)) < 5.0
 
 
     # The drop is zero above the beginning, where the positions are on the line
-    len_arr = motion.len_first - np.array([1e3, 10e3])
-    assert np.allclose(motion.eciAtLength(len_arr), motion._lineEci(len_arr), rtol=0.0, atol=1e-6)
+    len_arr = drag_fit.len_first - np.array([1e3, 10e3])
+    assert np.allclose(drag_fit.eciAtLength(len_arr), drag_fit._lineEci(len_arr), rtol=0.0, atol=1e-6)
 
 
 
@@ -262,26 +262,26 @@ def testRadiantBentByGravity():
     """
 
     traj = loadPickle(TRAJ_DIR, TRAJ_FILE)
-    motion = TrajectoryMotion(traj)
+    drag_fit = DragFit(traj)
 
     def _angle(len_arr):
-        return np.arccos(np.clip(motion.radiantAtLength(len_arr).dot(motion.radiant_eci), -1, 1))
+        return np.arccos(np.clip(drag_fit.radiantAtLength(len_arr).dot(drag_fit.radiant_eci), -1, 1))
 
     # Above the beginning the path is the line
-    assert np.allclose(_angle(motion.len_first - np.array([1e3, 10e3])), 0.0, atol=1e-7)
+    assert np.allclose(_angle(drag_fit.len_first - np.array([1e3, 10e3])), 0.0, atol=1e-7)
 
     # The bending grows along the path and agrees with the integral of g_perp/v over time
-    len_valid = motion.len_grid[motion._valid]
-    len_arr = np.linspace(motion.len_first, len_valid[-1], 20)
+    len_valid = drag_fit.len_grid[drag_fit._valid]
+    len_arr = np.linspace(drag_fit.len_first, len_valid[-1], 20)
     angle = _angle(len_arr)
     assert np.all(np.diff(angle) >= 0)
 
-    valid = motion._valid & (motion.len_grid >= motion.len_first)
-    g_perp = motion.g_perp_grid[valid]
-    vel = motion.vel_grid[valid]
-    time = motion.time_grid[valid]
+    valid = drag_fit._valid & (drag_fit.len_grid >= drag_fit.len_first)
+    g_perp = drag_fit.g_perp_grid[valid]
+    vel = drag_fit.vel_grid[valid]
+    time = drag_fit.time_grid[valid]
     theta = np.concatenate([[0.0], np.cumsum(0.5*(g_perp[1:]/vel[1:] + g_perp[:-1]/vel[:-1])*np.diff(time))])
-    theta = np.interp(len_arr, motion.len_grid[valid], theta)
+    theta = np.interp(len_arr, drag_fit.len_grid[valid], theta)
 
     # Compare where the path is bent by less than 2 deg, as the steps are coarse when the meteor is slow
     bent = theta < np.radians(2.0)
@@ -291,12 +291,12 @@ def testRadiantBentByGravity():
     assert np.degrees(angle[-1]) <= 5.0
 
     # Below the end the path follows the bent direction, compared where it is bent by less than 2 deg
-    len_arr = np.linspace(motion.len_last + 100.0, len_valid[-1] - 100.0, 50)
+    len_arr = np.linspace(drag_fit.len_last + 100.0, len_valid[-1] - 100.0, 50)
     len_arr = len_arr[_angle(len_arr) < np.radians(2.0)]
-    tangent = motion.eciAtLength(len_arr + 10.0) - motion.eciAtLength(len_arr - 10.0)
+    tangent = drag_fit.eciAtLength(len_arr + 10.0) - drag_fit.eciAtLength(len_arr - 10.0)
     tangent /= np.linalg.norm(tangent, axis=1)[:, None]
     assert len(len_arr) > 10
-    assert np.allclose(motion.radiantAtLength(len_arr), -tangent, rtol=0.0, atol=1e-3)
+    assert np.allclose(drag_fit.radiantAtLength(len_arr), -tangent, rtol=0.0, atol=1e-3)
 
 
 
@@ -305,24 +305,24 @@ def testUnconstrainedCoefficient():
         table and the plot handle it.
     """
 
-    _, _, motion = _solvedMeteor()
+    _, _, drag_fit = _solvedMeteor()
 
     # All directions are constrained in the synthetic fit
-    assert motion.params_null.shape[1] == 0
-    _, log_k_std = motion.ballisticCoeffAtLength(np.array([motion.len_first, motion.len_last]))
+    assert drag_fit.params_null.shape[1] == 0
+    _, log_k_std = drag_fit.ballisticCoeffAtLength(np.array([drag_fit.len_first, drag_fit.len_last]))
     assert np.all(np.isfinite(log_k_std))
 
     # Make K at the first point unconstrained
-    motion = copy.copy(motion)
-    motion.params_null = np.zeros((len(motion.params), 1))
-    motion.params_null[2, 0] = 1.0
+    drag_fit = copy.copy(drag_fit)
+    drag_fit.params_null = np.zeros((len(drag_fit.params), 1))
+    drag_fit.params_null[2, 0] = 1.0
 
-    _, log_k_std = motion.ballisticCoeffAtLength(np.array([motion.len_first, motion.len_last]))
+    _, log_k_std = drag_fit.ballisticCoeffAtLength(np.array([drag_fit.len_first, drag_fit.len_last]))
     assert np.all(np.isinf(log_k_std))
 
-    assert 'inf' in motion.summaryTable()
+    assert 'inf' in drag_fit.summaryTable()
 
-    fig = plotMotion(motion, show=False)
+    fig = plotDragFit(drag_fit, show=False)
     assert np.all(np.isfinite(fig.axes[2].get_xlim()))
     plt.close(fig)
 
@@ -338,16 +338,16 @@ def testNoUsedPoints():
         obs.ignore_station = True
 
     with pytest.raises(ValueError, match="no used points"):
-        TrajectoryMotion(traj)
+        DragFit(traj)
 
 
 
-def testPlotMotion():
-    """ Check that the plots of the motion model are made. """
+def testPlotDragFit():
+    """ Check that the plots of the drag fit are made. """
 
-    _, _, motion = _solvedMeteor()
+    _, _, drag_fit = _solvedMeteor()
 
-    fig = plotMotion(motion, show=False)
+    fig = plotDragFit(drag_fit, show=False)
     assert len(fig.axes) == 3
 
     plt.close(fig)
@@ -362,7 +362,7 @@ if __name__ == "__main__":
         testExtrapolationBelowTheEnd, testBallisticCoefficient, testNoDragAboveTheBeginning, \
         testTimeAndHeightFunctions, testSummaryTable, testVelocityIsPhysical, \
         testHeightsAreConsistent, testGravityDropMatchesTheSolution, testRadiantBentByGravity, \
-        testUnconstrainedCoefficient, testNoUsedPoints, testPlotMotion]
+        testUnconstrainedCoefficient, testNoUsedPoints, testPlotDragFit]
 
     for test in test_list:
         test()

@@ -1,4 +1,7 @@
-""" Model of the motion of a meteor along its solved trajectory.
+""" Drag fit of the motion of a meteor along its solved trajectory.
+
+The ballistic coefficient is fitted from the dynamics alone. This differs from wmpl.Utils.DynamicMassFit,
+which computes the mass from the drag equation for an assumed shape and density.
 
 The meteor is assumed to move along the straight line of the trajectory solution and to decelerate by
 atmospheric drag:
@@ -91,7 +94,7 @@ def usedPoints(traj):
 
 
     if not time_data:
-        raise ValueError("The motion model could not be fitted, the trajectory has no used points")
+        raise ValueError("The drag model could not be fitted, the trajectory has no used points")
 
     time_data = np.concatenate(time_data)
     len_data = np.concatenate(len_data)
@@ -103,7 +106,7 @@ def usedPoints(traj):
 
 
 
-class TrajectoryMotion(object):
+class DragFit(object):
     def __init__(self, traj, n_knots=None, h_top=200000.0, penalty=1.0, drag_above=False, max_bending=5.0, \
         max_vel_growth=0.1):
         """ Fit the drag model to the lengths and times of the used points of the given trajectory.
@@ -181,7 +184,7 @@ class TrajectoryMotion(object):
 
         duration = np.max(self.time_data) - np.min(self.time_data)
         if (not np.isfinite(self.res_rms)) or (abs(self.params[0] - self.time_data[0]) > max(1.0, duration)):
-            raise ValueError("The motion model could not be fitted, the lengths and times of the points of " \
+            raise ValueError("The drag model could not be fitted, the lengths and times of the points of " \
                 + "the trajectory are not consistent")
 
 
@@ -995,12 +998,12 @@ class TrajectoryMotion(object):
 
 
 
-def plotMotion(motion, show=True):
-    """ Plot the observed heights and velocities together with the motion model, and the fitted ballistic
+def plotDragFit(drag_fit, show=True):
+    """ Plot the observed heights and velocities together with the drag model, and the fitted ballistic
         coefficient with its uncertainty.
 
     Arguments:
-        motion: [TrajectoryMotion object] Model of the motion along the trajectory.
+        drag_fit: [DragFit object] Drag fit of the motion along the trajectory.
 
     Keyword arguments:
         show: [bool] Show the plot. True by default.
@@ -1009,7 +1012,7 @@ def plotMotion(motion, show=True):
         fig: [matplotlib figure] Figure with the plots.
     """
 
-    traj = motion.traj
+    traj = drag_fit.traj
 
     fig, (ax_ht, ax_vel, ax_k) = plt.subplots(ncols=3, sharey=True, figsize=(14, 5))
 
@@ -1027,15 +1030,15 @@ def plotMotion(motion, show=True):
 
 
     # Plot the model, with the extrapolated parts dashed
-    k_grid, log_k_std = motion.ballisticCoeffAtLength(motion.len_grid)
-    valid = np.isfinite(motion.time_grid)
-    observed = valid & (motion.len_grid >= motion.len_first) & (motion.len_grid <= motion.len_last)
+    k_grid, log_k_std = drag_fit.ballisticCoeffAtLength(drag_fit.len_grid)
+    valid = np.isfinite(drag_fit.time_grid)
+    observed = valid & (drag_fit.len_grid >= drag_fit.len_first) & (drag_fit.len_grid <= drag_fit.len_last)
     for sel, line_style, label in [(observed, 'solid', 'Model'), \
         (valid & ~observed, 'dashed', 'Extrapolated')]:
 
-        time_plot = np.where(sel, motion.time_grid, np.nan)
-        ht_plot = np.where(sel, motion.ht_grid, np.nan)
-        vel_plot = np.where(sel, motion.vel_grid, np.nan)
+        time_plot = np.where(sel, drag_fit.time_grid, np.nan)
+        ht_plot = np.where(sel, drag_fit.ht_grid, np.nan)
+        vel_plot = np.where(sel, drag_fit.vel_grid, np.nan)
         k_plot = np.where(sel & (k_grid > 0), k_grid, np.nan)
 
         ax_ht.plot(time_plot, ht_plot/1000, color='k', linestyle=line_style, label=label, zorder=4)
@@ -1056,13 +1059,13 @@ def plotMotion(motion, show=True):
         k_min = np.min(k_grid[observed])/10
         k_max = 10*np.max(k_grid[observed])
 
-    ax_k.fill_betweenx(motion.ht_grid[observed]/1000, np.maximum(k_lo, k_min), np.minimum(k_hi, k_max), \
+    ax_k.fill_betweenx(drag_fit.ht_grid[observed]/1000, np.maximum(k_lo, k_min), np.minimum(k_hi, k_max), \
         color='0.7', label='1$\\sigma$', zorder=2)
 
 
     # Show the growth of the ballistic coefficient in the observed part and the equivalent mass loss of a
     #   single body
-    k_ratio, mass_ratio = motion.ballisticCoeffGrowth()
+    k_ratio, mass_ratio = drag_fit.ballisticCoeffGrowth()
 
     k_text = "$K_{\\mathrm{end}}/K_{\\mathrm{beg}}$ = " + "{:.2f}".format(k_ratio) + "\n" \
         + "Single body $m_{\\mathrm{end}}/m_{\\mathrm{beg}}$ = " + "{:.3g}".format(mass_ratio)
@@ -1072,11 +1075,11 @@ def plotMotion(motion, show=True):
 
 
     # Limit the plot to the observed part with a margin
-    ht_beg, ht_end = motion.heightAtLength(np.array([motion.len_first, motion.len_last]))
+    ht_beg, ht_end = drag_fit.heightAtLength(np.array([drag_fit.len_first, drag_fit.len_last]))
     ht_margin = 0.2*abs(ht_beg - ht_end)
     ax_ht.set_ylim(ht_end/1000 - ht_margin/1000, ht_beg/1000 + ht_margin/1000)
 
-    time_beg, time_end = motion.timeAtLength(np.array([motion.len_first, motion.len_last]))
+    time_beg, time_end = drag_fit.timeAtLength(np.array([drag_fit.len_first, drag_fit.len_last]))
     time_margin = 0.2*(time_end - time_beg)
     ax_ht.set_xlim(time_beg - time_margin, time_end + time_margin)
 
@@ -1135,9 +1138,9 @@ if __name__ == "__main__":
     dir_path, file_name = os.path.split(cml_args.traj_pickle_file)
     traj = loadPickle(dir_path, file_name)
 
-    # Fit the motion model
-    motion = TrajectoryMotion(traj, n_knots=cml_args.knots, drag_above=cml_args.dragabove)
+    # Fit the drag model
+    drag_fit = DragFit(traj, n_knots=cml_args.knots, drag_above=cml_args.dragabove)
 
-    print(motion.summaryTable())
+    print(drag_fit.summaryTable())
 
-    plotMotion(motion)
+    plotDragFit(drag_fit)

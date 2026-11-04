@@ -11,7 +11,7 @@ import argparse
 
 import numpy as np
 
-from wmpl.Utils.TrajectoryMotion import TrajectoryMotion, plotMotion
+from wmpl.Utils.DragFit import DragFit, plotDragFit
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Math import lineAndSphereIntersections
 from wmpl.Utils.Pickling import loadPickle
@@ -61,19 +61,19 @@ def _plotSphereAndArrow(centre, radius, origin, direction, intersection_list):
 
 
 class TrajectorySamples(object):
-    def __init__(self, traj, motion=None):
+    def __init__(self, traj, drag_fit=None):
         """ Container for the sampled positions on the trajectory.
 
         Arguments:
             traj: [Trajectory object] Sampled trajectory.
 
         Keyword arguments:
-            motion: [TrajectoryMotion object] Model of the motion along the trajectory used for sampling.
+            drag_fit: [DragFit object] Drag fit of the motion along the trajectory used for sampling.
                 None by default.
         """
 
         self.traj = traj
-        self.motion = motion
+        self.drag_fit = drag_fit
 
         self.t_est = []
         self.ht = []
@@ -105,7 +105,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
     """ Given the trajectory, beginning, end and step in meters, this function will sample the positions on
         the trajectory and compute the geographical coordinates, the ground-fixed azimuth and elevation of the
         radiant and the velocity for every sample. The times and velocities are computed from a drag model
-        fitted to the observations (see wmpl.Utils.TrajectoryMotion), which also extrapolates them
+        fitted to the observations (see wmpl.Utils.DragFit), which also extrapolates them
         above the beginning and below the end of the observed part of the trajectory.
 
     Arguments:
@@ -125,15 +125,15 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         traj_samples: [TrajectorySamples object] Sampled positions.
     """
 
-    # Fit the motion along the trajectory
-    motion = TrajectoryMotion(traj, drag_above=drag_above)
+    # Fit the drag model of the motion along the trajectory
+    drag_fit = DragFit(traj, drag_above=drag_above)
 
     if by_time:
 
         # Generate times for sampling and compute the positions along the trajectory
         time_array = np.arange(beg_ht, end_ht + sample_step/2, sample_step)
-        len_array = motion.lengthAtTime(time_array)
-        height_array = motion.heightAtLength(len_array)
+        len_array = drag_fit.lengthAtTime(time_array)
+        height_array = drag_fit.heightAtLength(len_array)
 
     else:
 
@@ -146,18 +146,18 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
 
         # Generate heights for sampling and compute the positions along the trajectory
         height_array = np.flipud(np.arange(end_ht, beg_ht + sample_step, sample_step))
-        len_array = motion.lengthAtHeight(height_array)
-        time_array = motion.timeAtLength(len_array)
+        len_array = drag_fit.lengthAtHeight(height_array)
+        time_array = drag_fit.timeAtLength(len_array)
 
 
-    vel_array = motion.velocityAtLength(len_array)
+    vel_array = drag_fit.velocityAtLength(len_array)
 
     if show_plots:
 
-        plotMotion(motion)
+        plotDragFit(drag_fit)
 
-        print('Motion model: residuals RMS = {:.1f} m, initial velocity = {:.3f} km/s'.format( \
-            motion.res_rms, motion.params[1]/1000))
+        print('Drag fit: residuals RMS = {:.1f} m, initial velocity = {:.3f} km/s'.format( \
+            drag_fit.res_rms, drag_fit.params[1]/1000))
         print()
         print('Beginning coordinates (observed):')
         print('    Lat: {:.6f}'.format(np.degrees(traj.rbeg_lat)))
@@ -170,7 +170,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
 
 
     # Open a trajectory sample container
-    traj_samples = TrajectorySamples(traj, motion)
+    traj_samples = TrajectorySamples(traj, drag_fit)
 
     # Compute the geo coordinates, the ground-fixed azimuth and elevation and the velocity of every sample
     n_skipped = 0
@@ -182,18 +182,18 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
             continue
 
         # Compute geographical coordinates
-        height_eci = motion.eciAtLength(len_val)[0]
+        height_eci = drag_fit.eciAtLength(len_val)[0]
         jd = traj.jdt_ref + t_est/86400.0
         lat, lon, ele_geo = cartesian2Geo(jd, *height_eci)
 
         # Compute the ground-fixed alt/az of the radiant with the instantaneous velocity, along the path bent
         #   by the gravity drop. The ECI coordinates are already in the epoch of date, so no precession is
         #   applied
-        azim_norot, elev_norot, vel_norot = derotatedRadiantAltAz(vel*motion.radiantAtLength(len_val)[0], \
+        azim_norot, elev_norot, vel_norot = derotatedRadiantAltAz(vel*drag_fit.radiantAtLength(len_val)[0], \
             height_eci, jd, lat, lon)
 
         # Mark the samples extrapolated outside the observed part
-        if (len_val < motion.len_first) or (len_val > motion.len_last):
+        if (len_val < drag_fit.len_first) or (len_val > drag_fit.len_last):
             time_marker = "*"
         else:
             time_marker = " "
@@ -213,9 +213,9 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
     #   path by 5 deg after the end
     if n_skipped:
 
-        valid = motion._valid
-        ht_valid = motion.ht_grid[valid]
-        time_valid = motion.time_grid[valid]
+        valid = drag_fit._valid
+        ht_valid = drag_fit.ht_grid[valid]
+        time_valid = drag_fit.time_grid[valid]
 
         if traj_samples.t_est:
             print('{:d} of {:d} samples were skipped, as they are outside the modelled part of the ' \

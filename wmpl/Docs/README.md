@@ -6,7 +6,7 @@ and what the options are for.
 
 - [Solving a trajectory](Trajectory.md) — turning observations into a trajectory pickle, which is the
   input to most of the other tools.
-- [Motion along a trajectory](TrajectoryMotion.md) — the drag model of the motion along a solved
+- [Drag fit of the motion along a trajectory](DragFit.md) — the drag model of the motion along a solved
   trajectory, sampling it by height or time for dark flight, and what the ballistic coefficient says
   about ablation and fragmentation.
 - [REBOUND orbital integration](REBOUND.md) — integrating a meteoroid orbit backwards or forwards,
