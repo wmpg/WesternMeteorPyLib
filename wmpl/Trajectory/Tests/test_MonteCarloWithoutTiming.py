@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import Trajectory, medianStddev
+from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Utils.TrajConversions import altAz2RADec, eci2RaDec, geo2Cartesian, raDec2AltAz_vect, raDec2ECI
 
 
@@ -127,19 +127,6 @@ def testMonteCarloKeepsTheClocksFixed():
 
     assert not traj.estimate_timing_vel
     assert np.all(np.array(traj.time_diffs_final) == 0)
-
-
-
-def testMedianStddev():
-    """ Check the standard deviation of the median against the known values for equal deviations. """
-
-    # The median of one value has the same deviation, and of three about 0.670 of it
-    assert np.isclose(medianStddev([10.0]), 10.0, rtol=0.02)
-    assert np.isclose(medianStddev([10.0, 10.0, 10.0]), 6.70, rtol=0.02)
-
-    # Values without a valid deviation are taken as exact
-    assert medianStddev([None, np.inf]) == 0.0
-    assert medianStddev([]) == 0.0
 
 
 

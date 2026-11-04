@@ -48,7 +48,8 @@ except ImportError:
 import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
-    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval
+    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval, \
+    medianStddev
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
@@ -1050,36 +1051,6 @@ def jacchiaVelocityFunc(t, a1, a2, v_init):
     """
 
     return v_init - np.abs(a1*a2)*np.exp(np.abs(a2)*t)
-
-
-
-def medianStddev(stddev_list, n_samples=100000):
-    """ Compute the standard deviation of the median of independent normally distributed values, by
-        sampling them. A fixed seed is used, so the result is repeatable and the global random state is not
-        changed.
-
-    Arguments:
-        stddev_list: [list] Standard deviations of the individual values. Values which are None or not
-            finite are taken as exact.
-
-    Keyword arguments:
-        n_samples: [int] Number of samples. 100000 by default.
-
-    Return:
-        [float] Standard deviation of the median.
-    """
-
-    # Take values without a valid standard deviation as exact
-    stddev_list = np.array([sd if ((sd is not None) and np.isfinite(sd)) else 0.0 for sd in stddev_list])
-
-    if len(stddev_list) == 0:
-        return 0.0
-
-    # Sample the values and compute the spread of their median
-    rng = np.random.RandomState(0)
-    samples = rng.normal(0, 1, (n_samples, len(stddev_list)))*stddev_list
-
-    return np.std(np.median(samples, axis=1))
 
 
 
