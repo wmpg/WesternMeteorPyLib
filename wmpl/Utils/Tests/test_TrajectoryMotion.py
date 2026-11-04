@@ -1,8 +1,8 @@
-""" Tests of the drag model of the motion along the trajectory in wmpl.Trajectory.TrajectoryMotion, on a
+""" Tests of the drag model of the motion along the trajectory in wmpl.Utils.TrajectoryMotion, on a
     synthetic fireball which decelerates from 18 to 10 km/s while it is observed.
 
 Run with pytest:
-    python -m pytest wmpl/Trajectory/Tests/test_TrajectoryMotion.py -v
+    python -m pytest wmpl/Utils/Tests/test_TrajectoryMotion.py -v
 """
 
 from __future__ import print_function, division, absolute_import
@@ -21,7 +21,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import wmpl
-from wmpl.Trajectory.TrajectoryMotion import TrajectoryMotion, plotMotion
+from wmpl.Utils.TrajectoryMotion import TrajectoryMotion, plotMotion
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
 from wmpl.Utils.Pickling import loadPickle
 

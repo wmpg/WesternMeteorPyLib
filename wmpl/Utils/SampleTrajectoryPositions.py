@@ -11,7 +11,7 @@ import argparse
 
 import numpy as np
 
-from wmpl.Trajectory.TrajectoryMotion import TrajectoryMotion, plotMotion
+from wmpl.Utils.TrajectoryMotion import TrajectoryMotion, plotMotion
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Math import lineAndSphereIntersections
 from wmpl.Utils.Pickling import loadPickle
@@ -105,7 +105,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
     """ Given the trajectory, beginning, end and step in meters, this function will sample the positions on
         the trajectory and compute the geographical coordinates, the ground-fixed azimuth and elevation of the
         radiant and the velocity for every sample. The times and velocities are computed from a drag model
-        fitted to the observations (see wmpl.Trajectory.TrajectoryMotion), which also extrapolates them
+        fitted to the observations (see wmpl.Utils.TrajectoryMotion), which also extrapolates them
         above the beginning and below the end of the observed part of the trajectory.
 
     Arguments:

@@ -1,6 +1,6 @@
 # Motion along a trajectory and sampling it
 
-**`wmpl.Trajectory.TrajectoryMotion`** fits a physical drag model to the lengths and times of a solved
+**`wmpl.Utils.TrajectoryMotion`** fits a physical drag model to the lengths and times of a solved
 trajectory. It gives smooth positions, times and velocities along the whole trajectory, extrapolates
 them above the beginning and below the end, and shows how the ballistic coefficient of the meteor
 changed during the flight. **`wmpl.Utils.SampleTrajectoryPositions`** uses it to sample the trajectory
@@ -24,7 +24,7 @@ by height or by time, which is the usual first step of a dark flight model.
 Fit the model to a trajectory, print the table of the ballistic coefficient and show the plots:
 
 ```
-python -m wmpl.Trajectory.TrajectoryMotion /path/to/20191023_091225_trajectory.pickle
+python -m wmpl.Utils.TrajectoryMotion /path/to/20191023_091225_trajectory.pickle
 ```
 
 Sample the trajectory every 0.5 km between the observed beginning and end heights (`-1` means the
@@ -93,7 +93,7 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 
 ## Command line reference
 
-`python -m wmpl.Trajectory.TrajectoryMotion traj.pickle [options]`
+`python -m wmpl.Utils.TrajectoryMotion traj.pickle [options]`
 
 | Flag | Description |
 | :--- | :--- |
@@ -158,7 +158,7 @@ import os
 
 import numpy as np
 
-from wmpl.Trajectory.TrajectoryMotion import TrajectoryMotion, plotMotion
+from wmpl.Utils.TrajectoryMotion import TrajectoryMotion, plotMotion
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 
