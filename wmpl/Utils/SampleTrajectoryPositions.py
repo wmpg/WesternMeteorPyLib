@@ -261,7 +261,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('end_height', type=float, help='Sampling end height (km). -1 to use the real end height')
     arg_parser.add_argument('height_step', type=float, help='Sampling step (km).')
 
-    arg_parser.add_argument('-d', '--dragabove', action='store_true', \
+    arg_parser.add_argument('-a', '--dragabove', action='store_true', \
         help='Compute the drag above the beginning with the ballistic coefficient at the beginning, ' \
         + 'instead of moving without drag.')
 

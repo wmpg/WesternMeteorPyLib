@@ -57,12 +57,18 @@ import scipy.optimize
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
+from wmpl.Utils.Physics import ballisticCoeffMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
 
 
 # Gravitational acceleration at the surface of the Earth (m/s^2)
 G_SURFACE = 9.80665
+
+# Product of the drag coefficient and the shape factor, and the bulk density (kg/m^3), assumed for the
+#   dynamic mass by default
+GAMMA_A = 0.78
+BULK_DENSITY = 3500.0
 
 
 
@@ -930,9 +936,48 @@ class DragFit(object):
 
 
 
-    def summaryTable(self):
-        """ Make a table of the fitted model, with the ballistic coefficient in every segment of the observed
-            part.
+    def dynamicMassAtLength(self, len_arr, gamma_a=GAMMA_A, bulk_density=BULK_DENSITY):
+        """ Compute the dynamic mass of the leading body at the given lengths along the trajectory from the
+            fitted ballistic coefficient, m = (Gamma*A/(K*rho_m^(2/3)))^3, for an assumed shape and density.
+            The uncertainty of K from the fit is propagated, as sigma(ln m) = 3*sigma(ln K).
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Keyword arguments:
+            gamma_a: [float] Product of the drag coefficient Gamma and the shape factor A. 0.78 by default.
+            bulk_density: [float] Bulk density (kg/m^3). 3500 by default.
+
+        Return:
+            (mass, mass_lo, mass_hi):
+                - mass: [ndarray] Dynamic masses (kg), NaN where the meteor moves without drag or outside
+                    the modelled part.
+                - mass_lo: [ndarray] Lower 1 sigma limits of the masses (kg).
+                - mass_hi: [ndarray] Upper 1 sigma limits of the masses (kg).
+        """
+
+        k_arr, log_k_std = self.ballisticCoeffAtLength(len_arr)
+        k_arr = np.where(k_arr > 0, k_arr, np.nan)
+
+        mass = ballisticCoeffMass(k_arr, bulk_density, gamma_a)
+
+        # The mass is proportional to K^-3, so its logarithm has three times the uncertainty
+        with np.errstate(over='ignore', invalid='ignore'):
+            mass_lo = mass*np.exp(-3*log_k_std)
+            mass_hi = mass*np.exp(3*log_k_std)
+
+        return mass, mass_lo, mass_hi
+
+
+
+    def summaryTable(self, gamma_a=GAMMA_A, bulk_density=BULK_DENSITY):
+        """ Make a table of the fitted model, with the ballistic coefficient and the dynamic mass in every
+            segment of the observed part.
+
+        Keyword arguments:
+            gamma_a: [float] Product of the drag coefficient Gamma and the shape factor A, assumed for the
+                dynamic mass. 0.78 by default.
+            bulk_density: [float] Bulk density assumed for the dynamic mass (kg/m^3). 3500 by default.
 
         Return:
             [str] Table, ready for printing.
@@ -958,15 +1003,22 @@ class DragFit(object):
         out.append("    Gravity drop: {:s}, above the first point: {:s}".format( \
             "yes" if self.gravity_correction else "no", above_str))
         out.append("    K end/beg = {:.2f}, single-body m end/beg = {:.3g}".format(k_ratio, mass_ratio))
+
+        # Report the dynamic mass at the last point
+        mass, mass_lo, mass_hi = self.dynamicMassAtLength(self.len_last, gamma_a=gamma_a, \
+            bulk_density=bulk_density)
+        out.append(("    Final dynamic mass = {:.3g} kg (1 sigma {:.3g} - {:.3g} kg), for Gamma*A = {:.2f} " \
+            + "and bulk density = {:.0f} kg/m\u00b3").format(mass[0], mass_lo[0], mass_hi[0], gamma_a, \
+            bulk_density))
         out.append("")
 
         # Compute the uncertainties of the growth of K in every segment
         d_std = self._paramStd(np.eye(len(self.params))[3:])
 
         out.append(" Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, " \
-            + "Growth, Signif")
+            + "Growth, Signif, Mass end")
         out.append(("    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m{:s}/kg),   (m{:s}/kg), " \
-            + "  (%),    (x), (sigma)").format(sq, sq))
+            + "  (%),    (x), (sigma),     (kg)").format(sq, sq))
 
         for i in range(self.n_knots):
 
@@ -975,6 +1027,7 @@ class DragFit(object):
             time_seg = self.timeAtLength(len_seg)
             vel_seg = self.velocityAtLength(len_seg)
             k_seg, log_k_std = self.ballisticCoeffAtLength(len_seg)
+            mass_seg, _, _ = self.dynamicMassAtLength(len_seg, gamma_a=gamma_a, bulk_density=bulk_density)
 
             # Compute the dynamic pressure at the beginning of the segment
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
@@ -987,18 +1040,20 @@ class DragFit(object):
                 signif = 0.0
 
             out.append(("{:4d}, {:6.2f}, {:6.2f}, {:8.3f}, {:8.3f}, {:9.1f}, {:9.2e}, {:9.2e}, {:5.0f}, " \
-                + "{:6.2f}, {:6.1f}{:s}").format(i + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
-                vel_seg[0]/1000, dyn_pres/1000, k_seg[0], k_seg[1], 100*log_k_std[1], \
-                np.exp(self.params[3 + i]), signif, " *" if signif > 2 else ""))
+                + "{:6.2f}, {:6.1f}, {:8.3g}{:s}").format(i + 1, ht_seg[0]/1000, ht_seg[1]/1000, \
+                time_seg[0], vel_seg[0]/1000, dyn_pres/1000, k_seg[0], k_seg[1], 100*log_k_std[1], \
+                np.exp(self.params[3 + i]), signif, mass_seg[1], " *" if signif > 2 else ""))
 
         out.append("The star * marks the segments where K grows significantly (more than 2 sigma). K std " \
             + "is the relative uncertainty of K at the segment end.")
+        out.append("The dynamic mass is the mass of the leading body for the assumed Gamma*A and density, " \
+            + "m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is propagated.")
 
         return "\n".join(out)
 
 
 
-def plotDragFit(drag_fit, show=True):
+def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
     """ Plot the observed heights and velocities together with the drag model, and the fitted ballistic
         coefficient with its uncertainty.
 
@@ -1007,6 +1062,9 @@ def plotDragFit(drag_fit, show=True):
 
     Keyword arguments:
         show: [bool] Show the plot. True by default.
+        gamma_a: [float] Product of the drag coefficient Gamma and the shape factor A, assumed for the final
+            dynamic mass shown in the plot. None by default, in which case the mass is not shown.
+        bulk_density: [float] Bulk density assumed for the final dynamic mass (kg/m^3). 3500 by default.
 
     Return:
         fig: [matplotlib figure] Figure with the plots.
@@ -1071,11 +1129,20 @@ def plotDragFit(drag_fit, show=True):
     #   single body
     k_ratio, mass_ratio = drag_fit.ballisticCoeffGrowth()
 
-    k_text = "$K_{\\mathrm{end}}/K_{\\mathrm{beg}}$ = " + "{:.2f}".format(k_ratio) + "\n" \
-        + "Single body $m_{\\mathrm{end}}/m_{\\mathrm{beg}}$ = " + "{:.3g}".format(mass_ratio)
+    k_text = "$K_{\\mathrm{end}}/K_{\\mathrm{beg}}$ = " + "{:.2f}".format(k_ratio) + ", single body " \
+        + "$m_{\\mathrm{end}}/m_{\\mathrm{beg}}$ = " + "{:.3g}".format(mass_ratio)
 
-    ax_k.text(0.03, 0.03, k_text, transform=ax_k.transAxes, verticalalignment='bottom', fontsize=8, \
-        bbox=dict(facecolor='w', edgecolor='0.7', alpha=0.8))
+    # Add the final dynamic mass with its 1 sigma range
+    if gamma_a is not None:
+
+        mass, mass_lo, mass_hi = drag_fit.dynamicMassAtLength(drag_fit.len_last, gamma_a=gamma_a, \
+            bulk_density=bulk_density)
+        k_text += "\n" + "Final dynamic mass = {:.3g} kg ({:.3g} - {:.3g})".format(mass[0], mass_lo[0], \
+            mass_hi[0]) + "\n" + "for $\\Gamma A$ = {:.2f}, ".format(gamma_a) + "$\\rho_m$ = " \
+            + "{:.0f} kg/m$^3$".format(bulk_density)
+
+    # Show the text above the plot, so it does not cover the data
+    ax_k.set_title(k_text, fontsize=9)
 
 
     # Limit the plot to the observed part with a margin
@@ -1120,7 +1187,8 @@ if __name__ == "__main__":
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description=""" Fit the drag model of the motion along the given
-        trajectory, print the table of the fitted ballistic coefficient and plot the model. """)
+        trajectory, print the table of the fitted ballistic coefficient and the dynamic mass, and plot the
+        model. """)
 
     arg_parser.add_argument('traj_pickle_file', type=str, help='Path to the trajectory .pickle file.')
 
@@ -1128,9 +1196,17 @@ if __name__ == "__main__":
         help='Number of segments of the ballistic coefficient. One for every 25 points by default, between ' \
         + '3 and 15.')
 
-    arg_parser.add_argument('-d', '--dragabove', action='store_true', \
+    arg_parser.add_argument('-a', '--dragabove', action='store_true', \
         help='Compute the drag above the beginning with the ballistic coefficient at the beginning, ' \
         + 'instead of moving without drag.')
+
+    arg_parser.add_argument('-g', '--ga', metavar='GAMMA_A', type=float, default=GAMMA_A, \
+        help='The product of the drag coefficient Gamma and the shape coefficient A, used for computing ' \
+        + 'the dynamic mass. Default is {:.2f}.'.format(GAMMA_A))
+
+    arg_parser.add_argument('-d', '--dens', metavar='DENS', type=float, default=BULK_DENSITY, \
+        help='Bulk density in kg/m^3 used for computing the dynamic mass. Default is {:.0f} kg/m^3.'.format( \
+        BULK_DENSITY))
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1145,6 +1221,6 @@ if __name__ == "__main__":
     # Fit the drag model
     drag_fit = DragFit(traj, n_knots=cml_args.knots, drag_above=cml_args.dragabove)
 
-    print(drag_fit.summaryTable())
+    print(drag_fit.summaryTable(gamma_a=cml_args.ga, bulk_density=cml_args.dens))
 
-    plotDragFit(drag_fit)
+    plotDragFit(drag_fit, gamma_a=cml_args.ga, bulk_density=cml_args.dens)

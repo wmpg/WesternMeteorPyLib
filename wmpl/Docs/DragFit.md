@@ -18,6 +18,7 @@ for an assumed shape and density.
 - [Reading the output](#reading-the-output)
 - [Using it as a library](#using-it-as-a-library)
 - [Interpreting the ballistic coefficient](#interpreting-the-ballistic-coefficient)
+- [The dynamic mass](#the-dynamic-mass)
 - [Limits of the model](#limits-of-the-model)
 - [Troubleshooting](#troubleshooting)
 
@@ -102,7 +103,9 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 | Flag | Description |
 | :--- | :--- |
 | `-k`, `--knots` | Number of segments of the ballistic coefficient. One for every 25 points by default, between 3 and 15. |
-| `-d`, `--dragabove` | Keep the ballistic coefficient of the first point above the beginning, instead of moving without drag. |
+| `-a`, `--dragabove` | Keep the ballistic coefficient of the first point above the beginning, instead of moving without drag. |
+| `-g`, `--ga` | The product of the drag coefficient Gamma and the shape factor A, assumed for the dynamic mass. 0.78 by default. |
+| `-d`, `--dens` | The bulk density assumed for the dynamic mass (kg/m³). 3500 by default. |
 
 `python -m wmpl.Utils.SampleTrajectoryPositions traj.pickle beg end step [options]`
 
@@ -110,7 +113,7 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 | :--- | :--- |
 | `beg`, `end`, `step` | Heights of the first and last sample and the step (km). `-1` uses the observed beginning or end height. With `--time` they are times relative to the reference time of the trajectory (s), and `-1` has no special meaning. |
 | `-t`, `--time` | Sample by time instead of height. |
-| `-d`, `--dragabove` | As above. |
+| `-a`, `--dragabove` | As above. |
 
 ---
 
@@ -124,13 +127,14 @@ Drag model of the motion: dv/dt = -K*rho*v² + g
     First point: t = 0.002 s, v = 14.821 km/s, h = 89.749 km
     Gravity drop: yes, above the first point: no drag
     K end/beg = 1.64, single-body m end/beg = 0.226
+    Final dynamic mass = 0.126 kg (1 sigma 0.0803 - 0.197 kg), for Gamma*A = 0.78 and bulk density = 3500 kg/m³
 
- Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, Growth, Signif
-    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m²/kg),   (m²/kg),   (%),    (x), (sigma)
-   1,  89.75,  83.80,    0.002,   14.821,       0.8,  4.11e-03,  4.12e-03,    81,   1.00,    0.0
+ Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, Growth, Signif, Mass end
+    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m²/kg),   (m²/kg),   (%),    (x), (sigma),     (kg)
+   1,  89.75,  83.80,    0.002,   14.821,       0.8,  4.11e-03,  4.12e-03,    81,   1.00,    0.0,    0.556
  ...
-   9,  42.18,  36.23,    3.749,   13.345,     511.9,  4.12e-03,  4.12e-03,     8,   1.00,    0.0
-  10,  36.23,  30.28,    4.289,   11.734,     958.7,  4.12e-03,  6.75e-03,    15,   1.64,    2.2 *
+   9,  42.18,  36.23,    3.749,   13.345,     511.9,  4.12e-03,  4.12e-03,     8,   1.00,    0.0,    0.554
+  10,  36.23,  30.28,    4.289,   11.734,     958.7,  4.12e-03,  6.75e-03,    15,   1.64,    2.2,    0.126 *
 ```
 
 - **Residuals RMS** is the scatter of the observed lengths around the model, along the track.
@@ -141,6 +145,9 @@ Drag model of the motion: dv/dt = -K*rho*v² + g
   sigma. A star marks the segments where `K` grows by more than 2 sigma.
 - **K end/beg** and **single-body m end/beg** are the total growth of `K` and the mass ratio a single
   body of a constant shape would need to explain it (`m ~ K^-3`).
+- **Final dynamic mass** and **Mass end** are the dynamic masses of the leading body at the last
+  point and at the end of every segment, for the assumed `Gamma*A` and density (see
+  [the dynamic mass](#the-dynamic-mass)).
 
 **The plots** show the height against time, the velocity against height and the ballistic
 coefficient against height with its 1 sigma band. The data are the solver's points, and the
@@ -159,7 +166,8 @@ The plots for the fireball of the table above:
 - **Ballistic coefficient against height.** `K` is constant down to 36 km and grows by a factor of
   1.64 in the last segment (2.2 sigma). The MetSim model of this fireball has a fragmentation of 70% of
   the mass of the main fragment at 33.8 km, which grows `K` by 1.56. The band widens above 60 km,
-  where the deceleration is too small to constrain `K`.
+  where the deceleration is too small to constrain `K`. The title of the panel gives the final dynamic mass of the
+  leading body, 0.13 kg (0.08 to 0.20 kg) for `Gamma*A = 0.78` and `rho_m = 3500 kg/m³`.
 
 **The samples** printed by `SampleTrajectoryPositions` give, for every sample, the time, the
 geographical coordinates, the ground-fixed azimuth and elevation of the radiant, and the velocity in
@@ -195,12 +203,16 @@ vel_30km = drag_fit.velocityAtHeight(30000.0)
 # The ballistic coefficient and the uncertainty of its logarithm at lengths along the trajectory
 k_arr, log_k_std = drag_fit.ballisticCoeffAtLength(drag_fit.lengthAtTime(time_arr))
 
+# The final dynamic mass with its 1 sigma range, for an assumed Gamma*A and bulk density
+mass, mass_lo, mass_hi = drag_fit.dynamicMassAtLength(drag_fit.len_last, gamma_a=0.78, bulk_density=3500.0)
+print(drag_fit.summaryTable(gamma_a=0.78, bulk_density=3500.0))
+
 # Positions and the direction of the radiant, bent by gravity
 eci = drag_fit.eciAtLength(drag_fit.lengthAtTime(time_arr))
 radiant = drag_fit.radiantAtLength(drag_fit.lengthAtTime(time_arr))
 
-# The plots
-plotDragFit(drag_fit)
+# The plots, with the final dynamic mass
+plotDragFit(drag_fit, gamma_a=0.78, bulk_density=3500.0)
 
 # Samples every 100 m of height between the observed beginning and end (-1)
 samples = sampleTrajectory(traj, -1, -1, 100.0)
@@ -224,10 +236,9 @@ along the trajectory from the state vector, as `obs.state_vect_dist` in the traj
   leading fragment has less mass for its area. A jump of `K` by a factor `f` means the leading
   fragment kept `1/f^3` of the mass. The dynamic pressure at that height is an estimate of the
   strength of the meteoroid.
-- **The value of K** gives a dynamic mass for an assumed shape and density,
-  `m = (Gamma*A / (K*rho_m^(2/3)))^3`. For example, a sphere (`A = 1.21`) with `Gamma = 0.5` and
-  `rho_m = 3500 kg/m^3` with `K = 2.5e-3 m²/kg` has a mass of about 1.2 kg. Comparing it with the
-  photometric mass constrains the shape and the density.
+- **The value of K** gives a dynamic mass for an assumed shape and density (see
+  [the dynamic mass](#the-dynamic-mass)). Comparing it with the photometric mass constrains the shape
+  and the density.
 
 Compared with nine MetSim fragmentation models of fireballs, the fit found the large fragmentations
 where the deceleration is measurable. For example, the 70% fragmentation of the Ontario 2022
@@ -247,6 +258,42 @@ Keep in mind:
 - **The centroid is not the leading fragment.** After a large fragmentation the measured positions
   follow the centroid of the luminous cloud, which can lag the leading fragment and inflate `K`.
 - **The air density model** (NRLMSISE-00) can be off by 10-20%, which goes directly into `K`.
+
+---
+
+## The dynamic mass
+
+For an assumed product of the drag coefficient and the shape factor `Gamma*A` and bulk density
+`rho_m`, the ballistic coefficient gives the mass of the leading body,
+
+```
+m = (Gamma*A / (K*rho_m^(2/3)))^3
+```
+
+This is the same dynamic mass as in `wmpl.Utils.Physics.dynamicMass` and
+`wmpl.Utils.DynamicMassFit`, as `K = decel/(rho*v^2)`. Here it comes from the fit of the whole
+trajectory instead of the deceleration at one point. By default `Gamma*A = 0.78` and
+`rho_m = 3500 kg/m³`, which can be changed with `--ga` and `--dens` (note that `DynamicMassFit` uses
+`Gamma*A = 0.55` by default).
+
+The **final dynamic mass** at the last point is the best estimate of the mass that leaves the
+luminous part of the trajectory. Below the end `K` is kept constant, so this is also the mass of the
+drag flight. The terminal velocity of the body at the ground is `sqrt(g/(K*rho_0))`, about 34 m/s for
+the 0.13 kg of the example.
+
+**The uncertainty.** The mass goes as `K^-3`, so the uncertainty of `ln K` from the fit is tripled,
+`sigma(ln m) = 3*sigma(ln K)`, and the 1 sigma range is asymmetric. In the example, `K` at the end is
+known to 15%, so the mass is known to a factor of 1.56 (0.08 to 0.20 kg). Only the uncertainty of the
+fit is propagated. The assumptions usually matter more: the mass scales as `(Gamma*A)^3/rho_m^2`, so
+changing `Gamma*A` by 20% changes the mass by a factor of 1.7, and an iron (`rho_m = 7800 kg/m³`)
+has 0.2 of the mass of a stone with the same `K`.
+
+High up, where `K` is poorly constrained, the uncertainty of the mass is three times larger still in
+the logarithm, so only the mass at the end is useful.
+
+The dynamic mass is meant for fireballs. For faint meteors, which fragment and erode into small
+grains, the deceleration follows the grains and the dynamic mass comes out orders of magnitude below
+the photometric mass (e.g. 1e-10 kg for the faint example trajectory in the repository).
 
 ---
 

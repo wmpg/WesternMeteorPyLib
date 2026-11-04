@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import wmpl
 from wmpl.Utils.DragFit import DragFit, plotDragFit
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
+from wmpl.Utils.Physics import ballisticCoeffMass
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -203,6 +204,38 @@ def testSummaryTable():
     assert k_ratio > 2.0
     assert np.isclose(mass_ratio, k_ratio**(-3))
 
+    assert "Final dynamic mass" in table
+
+
+
+def testDynamicMass():
+    """ Check the dynamic mass at the end and its uncertainty against the mass of the true ballistic
+        coefficient, and that the assumed shape and density scale it.
+    """
+
+    _, _, drag_fit = _solvedMeteor()
+
+    # The true ballistic coefficient at the last point
+    time_end = drag_fit.timeAtLength(drag_fit.len_last)[0]
+    k_true = 0.01 + 0.04*np.clip(time_end/3.3, 0.0, 1.0)
+    mass_true = ballisticCoeffMass(k_true, 3500.0, 0.78)
+
+    mass, mass_lo, mass_hi = drag_fit.dynamicMassAtLength(drag_fit.len_last)
+    assert mass_lo[0] < mass[0] < mass_hi[0]
+
+    # The truth is within 3 sigma, and the 1 sigma range is three times the relative uncertainty of K
+    log_mass_std = np.log(mass_hi[0]/mass[0])
+    assert abs(np.log(mass[0]/mass_true)) < 3*log_mass_std
+    _, log_k_std = drag_fit.ballisticCoeffAtLength(drag_fit.len_last)
+    assert np.isclose(log_mass_std, 3*log_k_std[0])
+
+    # The mass scales as (Gamma*A)^3/rho_m^2
+    mass_alt, _, _ = drag_fit.dynamicMassAtLength(drag_fit.len_last, gamma_a=0.55, bulk_density=7800.0)
+    assert np.isclose(mass_alt[0], mass[0]*(0.55/0.78)**3*(3500.0/7800.0)**2)
+
+    # There is no mass above the first point without drag
+    assert np.isnan(drag_fit.dynamicMassAtLength(drag_fit.len_first - 1e3)[0][0])
+
 
 
 def testVelocityIsPhysical():
@@ -347,10 +380,12 @@ def testPlotDragFit():
 
     _, _, drag_fit = _solvedMeteor()
 
-    fig = plotDragFit(drag_fit, show=False)
-    assert len(fig.axes) == 3
+    for gamma_a in (None, 0.78):
 
-    plt.close(fig)
+        fig = plotDragFit(drag_fit, show=False, gamma_a=gamma_a)
+        assert len(fig.axes) == 3
+
+        plt.close(fig)
 
 
 
@@ -360,7 +395,7 @@ if __name__ == "__main__":
     # Run all tests
     test_list = [testFitsTheData, testVelocityInTheObservedPart, testExtrapolationAboveTheBeginning, \
         testExtrapolationBelowTheEnd, testBallisticCoefficient, testNoDragAboveTheBeginning, \
-        testTimeAndHeightFunctions, testSummaryTable, testVelocityIsPhysical, \
+        testTimeAndHeightFunctions, testSummaryTable, testDynamicMass, testVelocityIsPhysical, \
         testHeightsAreConsistent, testGravityDropMatchesTheSolution, testRadiantBentByGravity, \
         testUnconstrainedCoefficient, testNoUsedPoints, testPlotDragFit]
 
