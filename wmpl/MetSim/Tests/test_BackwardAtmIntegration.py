@@ -463,20 +463,20 @@ def test_the_saved_file_reports_how_deep_the_reference_point_is(tmp_path, monkey
     assert re.search(r"the drag adds \d+\.\d\d m/s", header[1])
 
 
-def test_unknown_body_runs_its_realizations_from_the_command_line(tmp_path, monkeypatch):
+def test_draw_unknowns_runs_its_realizations_from_the_command_line(tmp_path, monkeypatch):
     """ The trajectory of the example has no uncertainties: the saved rows still differ in what was drawn. """
 
     traj, _ = _exampleStart()
     savePickle(traj, str(tmp_path), "traj.pickle")
 
     monkeypatch.setattr(sys, "argv", ["BackwardAtmIntegration", str(tmp_path/"traj.pickle"), "--mass", "1e-3",
-        "--unknown_body", "--mc", "3", "--seed", "1"])
+        "--draw_unknowns", "--mc", "3", "--seed", "1"])
     runpy.run_module("wmpl.MetSim.BackwardAtmIntegration", run_name="__main__")
 
     rows = np.loadtxt(str(tmp_path/"traj_backward_atm.txt"))
     assert rows.shape == (4, 18) and len(set(rows[:, 1])) == 4 and len(set(rows[:, 13])) == 4
     assert len(set(rows[:, 14])) == 4 and len(set(rows[:, 15])) == 4
-    assert np.allclose(rows[0, 13:16], [0.1, 2000.0, 1.21])
+    assert np.allclose(rows[0, 13:16], [0.1, 1500.0, 1.10])
 
 
 if __name__ == "__main__":

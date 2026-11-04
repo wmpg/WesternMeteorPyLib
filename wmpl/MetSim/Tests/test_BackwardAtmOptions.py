@@ -17,8 +17,8 @@ import pytest
 
 from wmpl.MetSim.BackwardAtmIntegration import BACKWARD_GA, BACKWARD_MAX_DT, _eciToEcef, addBackwardArguments, \
     backwardConstants, backwardState, backwardStates, backwardStatesFromArguments, checkBackHeight, \
-    checkBackwardArguments, depthWarnings, dragSpeedGain, groundSpeed, unusedBackwardArguments, UNKNOWN_BODY_DENSITY, \
-    UNKNOWN_BODY_GA_SIGMA, UNKNOWN_BODY_MASS_SIGMA, UNKNOWN_BODY_SIGMA
+    checkBackwardArguments, depthWarnings, dragSpeedGain, groundSpeed, unusedBackwardArguments, DRAW_UNKNOWNS_DENSITY, \
+    DRAW_UNKNOWNS_GA, DRAW_UNKNOWNS_MASS_SIGMA, DRAW_UNKNOWNS_SIGMA
 from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, runSimulation
 from wmpl.Utils.AtmosphereDensity import getAtmDensityTable
 from wmpl.Utils.TrajConversions import date2JD, enu2ECEF, geo2Cartesian
@@ -542,7 +542,7 @@ def test_the_drag_gives_the_speed_difference_published_by_vida_et_al_2018():
     assert abs(dragSpeedGain(jd, state, jd_end, states[0]) - 130.0) < 5.0
 
 
-def _unknownBody(*argv):
+def _drawUnknowns(*argv):
     parser = _parser()
     args = parser.parse_args(["--mass", "2.0"] + list(argv))
     args.mc = 3
@@ -551,48 +551,88 @@ def _unknownBody(*argv):
     return args
 
 
-def test_unknown_body_draws_what_is_left_at_its_default():
-    """ It fills what was not given, keeps a pair if either of it was given, and --ga stays the mean of Gamma*A. """
+def test_draw_unknowns_draws_what_is_left_at_its_default():
+    """ It fills what was not given and keeps a pair if either of it was given, so that what is known can be given. """
 
-    args = _unknownBody("--unknown_body")
-    assert (args.ablation_coeff, args.ablation_coeff_sigma) == UNKNOWN_BODY_SIGMA
-    assert (args.density, args.density_sigma) == UNKNOWN_BODY_DENSITY
-    assert (args.ga, args.ga_sigma) == (BACKWARD_GA, UNKNOWN_BODY_GA_SIGMA)
-    assert args.mass_sigma == UNKNOWN_BODY_MASS_SIGMA*2.0
+    args = _drawUnknowns("--draw_unknowns")
+    assert (args.ablation_coeff, args.ablation_coeff_sigma) == DRAW_UNKNOWNS_SIGMA
+    assert (args.density, args.density_sigma) == DRAW_UNKNOWNS_DENSITY
+    assert (args.ga, args.ga_sigma) == DRAW_UNKNOWNS_GA
+    assert args.mass_sigma == DRAW_UNKNOWNS_MASS_SIGMA*2.0
 
-    args = _unknownBody("--unknown_body", "--density", "3300", "--ablation_coeff_sigma", "0.01", "--ga", "0.55",
+    # An ordinary chondrite of known density
+    args = _drawUnknowns("--draw_unknowns", "--density", "3400", "--density_sigma", "100", "--ablation_coeff", "0.014",
+        "--ablation_coeff_sigma", "0.005")
+    assert (args.density, args.density_sigma) == (3400.0, 100.0)
+    assert (args.ablation_coeff, args.ablation_coeff_sigma) == (0.014, 0.005)
+    assert (args.ga, args.ga_sigma) == DRAW_UNKNOWNS_GA
+    assert args.mass_sigma == DRAW_UNKNOWNS_MASS_SIGMA*2.0
+
+    args = _drawUnknowns("--draw_unknowns", "--density", "3300", "--ablation_coeff_sigma", "0.01", "--ga", "0.55",
         "--mass_sigma", "0.1")
     assert (args.density, args.density_sigma) == (3300.0, 0.0)
     assert args.ablation_coeff_sigma == 0.01 and args.ablation_coeff == _parser().get_default("ablation_coeff")
     assert (args.ga, args.ga_sigma) == (0.55, 0.0)
     assert args.mass_sigma == 0.1
 
-    # Without the option nothing changes
-    args = _unknownBody()
+    # Without the option nothing changes, and --ga keeps its default
+    args = _drawUnknowns()
     assert args.density_sigma == 0.0 and args.ablation_coeff_sigma == 0.0 and args.ga_sigma == 0.0
-    assert args.mass_sigma == 0.0
+    assert args.mass_sigma == 0.0 and args.ga == BACKWARD_GA
 
 
-def test_unknown_body_is_refused_where_it_cannot_work():
+def test_draw_unknowns_keeps_gamma_a_in_the_range_of_the_high_regime():
+    """ 95% of the draws of Gamma*A within 1.00 to 1.21, the usual range high up. """
+
+    mean, stddev = DRAW_UNKNOWNS_GA
+    sigma_ln = np.sqrt(np.log(1 + (stddev/mean)**2))
+    median = mean*np.exp(-sigma_ln**2/2)
+
+    assert abs(median*np.exp(-1.96*sigma_ln) - 1.00) < 0.005
+    assert abs(median*np.exp(1.96*sigma_ln) - 1.21) < 0.005
+
+
+def test_the_help_gives_the_values_per_kind_of_body():
+    """ With a meteorite or a PE type in hand, the help leads to the coefficient and the density. """
+
+    text = " ".join(_parser().format_help().split())
+
+    assert "PE type I, ordinary chondrites, 0.014 and 3700" in text
+    assert "PE type II, carbonaceous chondrites, 0.042 and 2000" in text
+    assert "PE type IIIA, regular cometary material, 0.10 and 750" in text
+    assert "PE type IIIB, soft cometary material, 0.21 and 270" in text
+
+
+def test_draw_unknowns_reaches_the_density_of_every_pe_type():
+    """ 95% of the draws of the density hold types I to IIIB of Ceplecha et al. (1998), Table XVII. """
+
+    mean, stddev = DRAW_UNKNOWNS_DENSITY
+    sigma_ln = np.sqrt(np.log(1 + (stddev/mean)**2))
+    median = mean*np.exp(-sigma_ln**2/2)
+
+    assert median*np.exp(-1.96*sigma_ln) <= 270.0 and median*np.exp(1.96*sigma_ln) >= 3700.0
+
+
+def test_draw_unknowns_is_refused_where_it_cannot_work():
     """ With the erosion given apart its coefficients would count it twice; without realizations it draws nothing;
         without a run back through the atmosphere, in REBOUND, it does not apply. """
 
     with pytest.raises(SystemExit):
-        _unknownBody("--unknown_body", "--erosion_coeff", "0.1", "--erosion_height", "80")
+        _drawUnknowns("--draw_unknowns", "--erosion_coeff", "0.1", "--erosion_height", "80")
 
     parser = _parser()
-    args = parser.parse_args(["--mass", "1.0", "--unknown_body"])
+    args = parser.parse_args(["--mass", "1.0", "--draw_unknowns"])
     with pytest.raises(SystemExit):
         checkBackwardArguments(parser, args)
 
-    assert unusedBackwardArguments(parser, args) == ["--unknown_body"]
+    assert unusedBackwardArguments(parser, args) == ["--draw_unknowns"]
 
 
 def test_realizations_are_drawn_without_uncertainties_in_the_trajectory(capsys):
-    """ A trajectory without uncertainties has no state vector to draw, but the body of each realization still is. """
+    """ A trajectory without uncertainties has no state vector to draw, but what is unknown still is. """
 
     parser = _parser()
-    args = parser.parse_args(["--mass", "1e-3", "--unknown_body"])
+    args = parser.parse_args(["--mass", "1e-3", "--draw_unknowns"])
     args.mc = 3
     checkBackwardArguments(parser, args)
 
@@ -602,8 +642,8 @@ def test_realizations_are_drawn_without_uncertainties_in_the_trajectory(capsys):
 
     assert len(states) == 4 and len(set(m_inits)) == 4 and len(set(sigmas)) == 4 and len(set(rhos)) == 4
     assert len(set(gas)) == 4 and len(set(masses)) == 4
-    assert m_inits[0] == 1e-3 and sigmas[0] == UNKNOWN_BODY_SIGMA[0] and rhos[0] == UNKNOWN_BODY_DENSITY[0]
-    assert gas[0] == BACKWARD_GA
+    assert m_inits[0] == 1e-3 and sigmas[0] == DRAW_UNKNOWNS_SIGMA[0] and rhos[0] == DRAW_UNKNOWNS_DENSITY[0]
+    assert gas[0] == DRAW_UNKNOWNS_GA[0]
     assert "only differ in the parameters drawn" in capsys.readouterr().out
 
     # Without realizations asked for, the spreads have no effect, as they say
