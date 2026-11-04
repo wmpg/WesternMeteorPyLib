@@ -948,21 +948,18 @@ def raDec2Ecliptic(jd, ra, dec):
     # Calculate ecliptic longitude
     L = np.arctan2(np.sin(eps)*np.sin(dec) + np.sin(ra)*np.cos(dec)*np.cos(eps), np.cos(ra)*np.cos(dec))
 
-    # Calculate ecliptic latitude (the argument is clipped, as rounding can take it past +/-1 at a pole)
+    # Calculate ecliptic latitude (clip the argument to avoid NaNs from rounding at the poles)
     B = np.arcsin(np.clip(np.cos(eps)*np.sin(dec) - np.sin(ra)*np.cos(dec)*np.sin(eps), -1.0, 1.0))
 
     # Wrap the longitude to [0, 2pi] range
     L = L%(2*np.pi)
-
-    # The latitude is already in the [-pi/2, pi/2] range. It must not be wrapped with a modulo, which
-    #   would turn +pi/2 (the north ecliptic pole) into -pi/2.
 
     return L, B
 
 
 
 def ecliptic2RaDec(jd, L, B):
-    """ Convert right ascension and declination to ecliptic longitude and latitude.
+    """ Convert ecliptic longitude and latitude to right ascension and declination.
 
     Arguments:
         jd: [float] Julian date of the desired epoch
@@ -970,7 +967,7 @@ def ecliptic2RaDec(jd, L, B):
         B: [float] Ecliptic latitude in radians.
 
     Return:
-        ra, dec: [tuple of floats] ecliptic longitude and latitude in radians
+        ra, dec: [tuple of floats] right ascension and declination in radians
 
     """
 
@@ -980,14 +977,11 @@ def ecliptic2RaDec(jd, L, B):
 
     ra = np.arctan2(np.cos(eps)*np.sin(L)*np.cos(B) - np.sin(eps)*np.sin(B), np.cos(L)*np.cos(B))
 
-    # The argument is clipped, as rounding can take it past +/-1 at a pole
+    # Calculate declination (clip the argument to avoid NaNs from rounding at the poles)
     dec = np.arcsin(np.clip(np.sin(eps)*np.sin(L)*np.cos(B) + np.cos(eps)*np.sin(B), -1.0, 1.0))
 
     # Wrap the right ascension to [0, 2pi] range
     ra = ra%(2*np.pi)
-
-    # The declination is already in the [-pi/2, pi/2] range. It must not be wrapped with a modulo,
-    #   which would turn +pi/2 (the north celestial pole) into -pi/2.
 
     return ra, dec
 
@@ -1142,18 +1136,14 @@ def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
     # Calculate right ascension
     ra_corr = np.arctan2(A, B) + z
 
-    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees).
-    #   The arguments are clipped, as rounding can take them past 1.
+    # Calculate declination (apply a different equation if close to the pole, closer than 0.5 degrees)
     if (np.pi/2 - np.abs(dec)) < np.radians(0.5):
-        dec_corr = np.sign(C)*np.arccos(min(np.sqrt(A**2 + B**2), 1.0))
+        dec_corr = np.sign(C)*np.arccos(np.clip(np.sqrt(A**2 + B**2), -1.0, 1.0))
     else:
         dec_corr = np.arcsin(np.clip(C, -1.0, 1.0))
 
     # Wrap right ascension to [0, 2*pi] range
     ra_corr = ra_corr%(2*np.pi)
-
-    # The declination is already in the [-pi/2, pi/2] range. It must not be wrapped with a modulo,
-    #   which would turn +pi/2 (the north celestial pole) into -pi/2.
 
     return ra_corr, dec_corr
 
