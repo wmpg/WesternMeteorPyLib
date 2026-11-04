@@ -3059,8 +3059,8 @@ def loadParentBodies(file_path, jd_tdb, ephem_source="local", top_n=None, gr="gr
     return them at an epoch, ready to be integrated with integrateHeliocentricBodies.
 
     A body whose state the file holds at that epoch (saved with --propagate for the same trajectory)
-    is taken as it is. Otherwise it is brought there from its catalogue elements with
-    propagateBodiesToEpoch.
+    with the same general relativity model is taken as it is. Otherwise it is brought there from its
+    catalogue elements with propagateBodiesToEpoch, so that a run does not mix two force models.
 
     Arguments:
         file_path: [str] Path of the JSON file.
@@ -3070,7 +3070,8 @@ def loadParentBodies(file_path, jd_tdb, ephem_source="local", top_n=None, gr="gr
         ephem_source: [str] "local" (default) or "horizons".
         top_n: [int] Use only the first N bodies of the file. All of them by default.
         gr: [str] General relativity model of the propagation, one of GR_MODELS. Default "gr_full".
-            A body taken from the file as it is was propagated with the model ParentBodySearch used.
+            A file that does not name the model of its states was saved when "gr_full" was the only
+            one.
 
     Return:
         (bodies, criteria_keys, skipped): [tuple] The bodies as dictionaries with 'name', 'rank',
@@ -3096,8 +3097,9 @@ def loadParentBodies(file_path, jd_tdb, ephem_source="local", top_n=None, gr="gr
 
         at_epoch = m.get("at_epoch")
 
-        # The state saved at this same epoch
-        if at_epoch and (at_epoch.get("jd_tdb") is not None) and (abs(at_epoch["jd_tdb"] - jd_tdb) < 1e-6):
+        # The state saved at this same epoch, with this same model
+        if at_epoch and (at_epoch.get("jd_tdb") is not None) and (abs(at_epoch["jd_tdb"] - jd_tdb) < 1e-6) \
+                and (at_epoch.get("gr", "gr_full") == gr):
             bodies[k] = at_epoch["position"] + at_epoch["velocity"]
 
         else:
