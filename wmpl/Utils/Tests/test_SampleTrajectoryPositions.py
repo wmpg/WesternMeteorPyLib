@@ -7,6 +7,8 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import contextlib
+import io
 import os
 
 import numpy as np
@@ -103,11 +105,26 @@ def testVelocitiesArePhysical():
 
 
 
+def testSkippedSamplesAreReported():
+    """ Check that the samples outside the modelled part of the trajectory are skipped and reported. """
+
+    traj = loadPickle(TRAJ_DIR, TRAJ_FILE)
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        t_arr, _, _ = _sampleArrays(sampleTrajectory(traj, 0.0, 1000.0, 10.0, by_time=True))
+
+    assert len(t_arr) < 101
+    assert "samples were skipped" in out.getvalue()
+
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testHeightModeReturnsTheRequestedHeights, testTimeModeReturnsTheRequestedTimes, \
-        testTimeModeMatchesTheHeightMode, testVelocitiesArePhysical]
+        testTimeModeMatchesTheHeightMode, testVelocitiesArePhysical, testSkippedSamplesAreReported]
 
     for test in test_list:
         test()

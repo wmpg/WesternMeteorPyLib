@@ -61,12 +61,15 @@ def _plotSphereAndArrow(centre, radius, origin, direction, intersection_list):
 
 
 class TrajectorySamples(object):
-    def __init__(self, traj, motion):
+    def __init__(self, traj, motion=None):
         """ Container for the sampled positions on the trajectory.
 
         Arguments:
             traj: [Trajectory object] Sampled trajectory.
+
+        Keyword arguments:
             motion: [TrajectoryMotion object] Model of the motion along the trajectory used for sampling.
+                None by default.
         """
 
         self.traj = traj
@@ -84,7 +87,7 @@ class TrajectorySamples(object):
 
 
 
-    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel, vel_norot):
+    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel=None, vel_norot=None):
 
         self.t_est.append(t_est)
         self.ht.append(ht)
@@ -170,10 +173,12 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
     traj_samples = TrajectorySamples(traj, motion)
 
     # Compute the geo coordinates, the ground-fixed azimuth and elevation and the velocity of every sample
+    n_skipped = 0
     for t_est, ht, len_val, vel in zip(time_array, height_array, len_array, vel_array):
 
         # Skip the samples outside the modelled part of the trajectory
         if np.isnan(t_est) or np.isnan(len_val) or np.isnan(vel):
+            n_skipped += 1
             continue
 
         # Compute geographical coordinates
@@ -181,10 +186,11 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         jd = traj.jdt_ref + t_est/86400.0
         lat, lon, ele_geo = cartesian2Geo(jd, *height_eci)
 
-        # Compute the ground-fixed alt/az of the radiant with the instantaneous velocity. The ECI coordinates
-        #   are already in the epoch of date, so no precession is applied
-        azim_norot, elev_norot, vel_norot = derotatedRadiantAltAz(vel*motion.radiant_eci, height_eci, jd, \
-            lat, lon)
+        # Compute the ground-fixed alt/az of the radiant with the instantaneous velocity, along the path bent
+        #   by the gravity drop. The ECI coordinates are already in the epoch of date, so no precession is
+        #   applied
+        azim_norot, elev_norot, vel_norot = derotatedRadiantAltAz(vel*motion.radiantAtLength(len_val)[0], \
+            height_eci, jd, lat, lon)
 
         # Mark the samples extrapolated outside the observed part
         if (len_val < motion.len_first) or (len_val > motion.len_last):
@@ -202,10 +208,23 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
                 np.degrees(azim_norot), np.degrees(elev_norot), vel/1000, vel_norot/1000))
 
 
-    if not traj_samples.t_est:
-        print('Nothing produced - the sampling range is outside the modelled part of the trajectory, from ' \
-            + '200 km (or where the velocity above the beginning has grown by 10% with drag above) down to ' \
-            + 'where gravity bends the path by 5 deg after the end')
+    # Warn about the samples outside the modelled part of the trajectory, which goes from the top (or where
+    #   the velocity above the beginning has grown by 10% with drag above) down to where gravity bends the
+    #   path by 5 deg after the end
+    if n_skipped:
+
+        valid = motion._valid
+        ht_valid = motion.ht_grid[valid]
+        time_valid = motion.time_grid[valid]
+
+        if traj_samples.t_est:
+            print('{:d} of {:d} samples were skipped, as they are outside the modelled part of the ' \
+                .format(n_skipped, len(time_array)) + 'trajectory:')
+        else:
+            print('Nothing produced - the sampling range is outside the modelled part of the trajectory:')
+
+        print('    heights {:.3f} to {:.3f} km, times {:.3f} to {:.3f} s'.format(ht_valid[0]/1000, \
+            np.min(ht_valid)/1000, time_valid[0], time_valid[-1]))
 
     if show_plots:
         print('The star * denotes samples extrapolated outside the observed part of the trajectory with ' \

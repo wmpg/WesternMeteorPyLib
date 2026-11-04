@@ -23,13 +23,19 @@ only computed until the velocity has grown by a set fraction.
 Below the last observed point K is kept at its last value, which is drag-only flight with gravity, as at the
 beginning of the dark flight. Ablation essentially stops below about 3 km/s, so below that speed this is
 exact. A meteor which ends faster probably still ablates below its end, but letting K grow there by
-single-body ablation did not predict the hidden ends of real fireballs better. As the meteor slows down,
-gravity bends its path away from the line, so the model below the end is only computed until the path has
-bent by a few degrees. Further on, a dark flight model has to be used.
+single-body ablation did not predict the hidden ends of real fireballs better.
 
-If the trajectory was solved with the gravity correction, the positions are dropped from the line in the same
-way as in the trajectory solver, and the heights and the air density are computed on the dropped path. The
-drop is zero at the time of the first point, and the positions above it are on the line.
+Gravity bends the path of the meteor by the angle theta, dtheta/dt = g_perp/v, where g_perp is the component
+of gravity perpendicular to the path. Drag damps the velocity gained from gravity in the same way as the rest
+of the velocity, so the bending grows quickly as the meteor slows down. The model is only computed until the
+path has bent by a few degrees from the first point. Further on, a dark flight model has to be used.
+
+If the trajectory was solved with the gravity correction, the positions in the observed part are dropped from
+the line in the same way as in the trajectory solver, and the heights and the air density are computed on the
+dropped path. The drop is zero at the time of the first point, and the positions above it are on the line.
+The drop of the solver assumes a constant velocity, which overestimates the bending of a decelerating meteor,
+so below the last point the path is continued along the direction bent by theta, and the direction of the
+radiant is bent by theta everywhere.
 
 The fitted K shows how the meteor changed during its flight. If K is constant, the deceleration is only
 driven by the air density and the velocity. For a single body K grows as m**(-1/3) as it ablates, and it
@@ -84,6 +90,9 @@ def usedPoints(traj):
         len_data.append(np.array(obs.state_vect_dist)[used])
 
 
+    if not time_data:
+        raise ValueError("The motion model could not be fitted, the trajectory has no used points")
+
     time_data = np.concatenate(time_data)
     len_data = np.concatenate(len_data)
 
@@ -112,8 +121,8 @@ class TrajectoryMotion(object):
             drag_above: [bool] If True, the ballistic coefficient above the first observed point is kept at
                 its first value. If False, the meteor moves without drag above the first point. False by
                 default.
-            max_bending: [float] Largest bending of the path by gravity below the end of the observed part
-                (deg). The model is not computed further. 5 deg by default.
+            max_bending: [float] Largest bending of the path by gravity from the first point (deg). The model
+                is not computed further below the end. 5 deg by default.
             max_vel_growth: [float] Largest relative growth of the velocity above the beginning of the
                 observed part, only used if drag_above is True. The model is not computed further. 0.1 by
                 default.
@@ -121,6 +130,7 @@ class TrajectoryMotion(object):
 
         self.traj = traj
         self.drag_above = drag_above
+        self.gravity_factor = getattr(traj, 'gravity_factor', 1.0)
         self.max_bending = np.radians(max_bending)
         self.max_vel_growth = max_vel_growth
 
@@ -145,16 +155,9 @@ class TrajectoryMotion(object):
         self.ramp_beg = np.linspace(self.len_first, self.len_last, n_knots + 1)[:-1]
         self.ramp_len = (self.len_last - self.len_first)/n_knots
 
-        # Fit the model
+        # Fit the model and compute the solution along the whole line
         self._fit(penalty)
-
-        # Check that the fit is sensible, as the lengths and times of a bad solution can be inconsistent
-        duration = np.max(self.time_data) - np.min(self.time_data)
-        if (not np.isfinite(self.res_rms)) or (abs(self.params[0] - self.time_data[0]) > max(1.0, duration)):
-            raise ValueError("The motion model could not be fitted, the lengths and times of the points of " \
-                + "the trajectory are not consistent")
-
-        # Compute the solution along the whole line
+        self._checkFit()
         self._solveFull()
 
         # Apply the gravity drop if the trajectory was solved with it, and fit again on the dropped path
@@ -163,10 +166,23 @@ class TrajectoryMotion(object):
 
             self._computeGravityDrop()
             self._fit(penalty, params_init=self.params)
+            self._checkFit()
             self._solveFull()
 
-            # Recompute the drop with the final times
+            # Recompute the drop with the final times, and the solution on the final dropped path
             self._computeGravityDrop()
+            self._solveFull()
+
+
+
+    def _checkFit(self):
+        """ Check that the fit is sensible, as the lengths and times of a bad solution can be inconsistent.
+        """
+
+        duration = np.max(self.time_data) - np.min(self.time_data)
+        if (not np.isfinite(self.res_rms)) or (abs(self.params[0] - self.time_data[0]) > max(1.0, duration)):
+            raise ValueError("The motion model could not be fitted, the lengths and times of the points of " \
+                + "the trajectory are not consistent")
 
 
 
@@ -409,12 +425,48 @@ class TrajectoryMotion(object):
 
         self.params = res.x
 
-        # Estimate the covariance of the parameters from the Jacobian and the scale of the residuals
-        self.params_cov = self.res_scale**2*np.linalg.pinv(res.jac.T.dot(res.jac))
+        # Estimate the covariance of the parameters from the Jacobian and the scale of the residuals. The
+        #   columns of the Jacobian are normalized, so the parameters with different units can be compared
+        col_norm = np.linalg.norm(res.jac, axis=0)
+        col_norm[col_norm == 0] = 1.0
+        _, sing, vt = np.linalg.svd(res.jac/col_norm, full_matrices=False)
+
+        # The directions in which the residuals do not change are not constrained by the data
+        null = sing <= 1e-8*sing[0]
+        vt_good = vt[~null]/col_norm
+        self.params_cov = self.res_scale**2*(vt_good.T/sing[~null]**2).dot(vt_good)
+
+        # The unconstrained directions in the parameter space, J*x = 0
+        params_null = (vt[null]/col_norm).T
+        if params_null.size:
+            params_null /= np.linalg.norm(params_null, axis=0)
+        self.params_null = params_null
 
         # Compute the final residuals
         self.residuals = self._residuals(self.params, 0.0)[:len(self.len_data)]
         self.res_rms = np.sqrt(np.mean(self.residuals**2))
+
+
+
+    def _paramStd(self, grad):
+        """ Compute the standard deviations of linear combinations of the parameters, which are infinite if
+            they depend on a direction not constrained by the data.
+
+        Arguments:
+            grad: [ndarray] Coefficients of the combinations, one row per combination.
+
+        Return:
+            [ndarray] Standard deviations.
+        """
+
+        std = np.sqrt(np.maximum(np.sum(grad.dot(self.params_cov)*grad, axis=1), 0.0))
+
+        if self.params_null.size:
+            grad_norm = np.linalg.norm(grad, axis=1)[:, None]
+            unconstrained = np.any(np.abs(grad.dot(self.params_null)) > 1e-6*grad_norm, axis=1)
+            std[unconstrained] = np.inf
+
+        return std
 
 
 
@@ -430,6 +482,13 @@ class TrajectoryMotion(object):
         # Solve the observed part
         vel[self.i_first:self.i_last + 1], time[self.i_first:self.i_last + 1] = \
             self._solveObserved(self.params)
+
+        # Compute the bending of the path by gravity from the first point, dtheta/dL = g_perp/v**2
+        bend = np.full(n, np.nan)
+        obs_slice = slice(self.i_first, self.i_last + 1)
+        bend_rate = self.g_perp_grid[obs_slice]/vel[obs_slice]**2
+        bend[obs_slice] = np.concatenate([[0.0], np.cumsum(0.5*(bend_rate[1:] + bend_rate[:-1]) \
+            *np.diff(self.len_grid[obs_slice]))])
 
         # Take the ballistic coefficient at the first and the last point outside the observed part
         log_k_grid = self._logK(self.params, self.len_grid)
@@ -461,7 +520,7 @@ class TrajectoryMotion(object):
 
 
         energy = 0.5*vel[self.i_last]**2
-        bending = 0.0
+        bending = bend[self.i_last]
         for i in range(self.i_last, n - 1):
 
             dlen = self.len_grid[i + 1] - self.len_grid[i]
@@ -475,17 +534,22 @@ class TrajectoryMotion(object):
                 break
 
             # Stop when gravity has bent the path too far from the line
-            bending += self.g_perp_grid[i]*dlen/(2*energy)
+            bending += 0.5*(self.g_perp_grid[i]/vel[i]**2 + self.g_perp_grid[i + 1]/(2*energy))*dlen
             if bending > self.max_bending:
                 break
 
             vel[i + 1] = np.sqrt(2*energy)
             time[i + 1] = time[i] + dlen*0.5*(1/vel[i] + 1/vel[i + 1])
+            bend[i + 1] = bending
 
+
+        # The path above the first point is not bent
+        bend[:self.i_first][np.isfinite(time[:self.i_first])] = 0.0
 
         self.vel_grid = vel
         self.time_grid = time
         self.log_k_grid = log_k_grid
+        self.bend_grid = bend
 
         # Keep the part of the grid where the solution is defined, for interpolation
         self._valid = np.isfinite(time) & np.isfinite(vel) & (vel > 0)
@@ -517,8 +581,9 @@ class TrajectoryMotion(object):
 
 
     def _computeGravityDrop(self):
-        """ Compute the gravity drop along the line in the same way as the trajectory solver does, and update
-            the heights and the air density on the grid.
+        """ Compute the gravity drop along the line in the same way as the trajectory solver does in the
+            observed part, and from the bending by gravity below it, and update the heights and the air
+            density on the grid.
         """
 
         traj = self.traj
@@ -543,8 +608,18 @@ class TrajectoryMotion(object):
             if np.isfinite(t) and (t > t0):
                 drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, gravity_factor, v0z)
 
-        # Keep the drop constant outside the modelled part, so the heights stay continuous
+        # Below the last point, continue the path along the direction bent by gravity
         valid = np.where(np.isfinite(self.time_grid))[0]
+        pos = line_eci[self.i_last] - drop_grid[self.i_last]
+        for i in range(self.i_last + 1, valid[-1] + 1):
+
+            dlen = self.len_grid[i] - self.len_grid[i - 1]
+            theta = 0.5*(self.bend_grid[i - 1] + self.bend_grid[i])
+
+            pos = pos - dlen*self._bentRadiant(np.array([theta]), pos[None, :])[0]
+            drop_grid[i] = line_eci[i] - pos
+
+        # Keep the drop constant outside the modelled part, so the heights stay continuous
         drop_grid[:valid[0]] = drop_grid[valid[0]]
         drop_grid[valid[-1] + 1:] = drop_grid[valid[-1]]
 
@@ -591,6 +666,52 @@ class TrajectoryMotion(object):
                 eci[:, i] -= np.interp(len_arr, self.len_grid, self.drop_grid[:, i])
 
         return eci
+
+
+
+    def _bentRadiant(self, theta, eci_arr):
+        """ Bend the direction of the radiant upwards by the given angles, as the direction of motion is
+            bent downwards by gravity.
+
+        Arguments:
+            theta: [ndarray] Bending angles (radians), before the gravity factor is applied.
+            eci_arr: [ndarray] ECI coordinates of the points (m), one row per point.
+
+        Return:
+            [ndarray] Unit vectors towards the radiant in the ECI frame, one row per point.
+        """
+
+        theta = self.gravity_factor*theta
+
+        # Compute the upward direction perpendicular to the radiant
+        up = eci_arr/np.linalg.norm(eci_arr, axis=1)[:, None]
+        up_perp = up - up.dot(self.radiant_eci)[:, None]*self.radiant_eci[None, :]
+        up_perp /= np.linalg.norm(up_perp, axis=1)[:, None]
+
+        return np.cos(theta)[:, None]*self.radiant_eci[None, :] + np.sin(theta)[:, None]*up_perp
+
+
+
+    def radiantAtLength(self, len_arr):
+        """ Compute the directions of the radiant at the given lengths along the trajectory, opposite to the
+            direction of motion. If the trajectory was solved with the gravity correction, the direction is
+            bent by gravity from the first point, by the angle theta, dtheta/dt = g_perp/v.
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            [ndarray] Unit vectors towards the radiant in the ECI frame, one row per point.
+        """
+
+        len_arr = np.atleast_1d(len_arr)
+
+        if not self.gravity_correction:
+            return np.tile(self.radiant_eci, (len(len_arr), 1))
+
+        theta = np.interp(len_arr, self.len_grid[self._valid], self.bend_grid[self._valid])
+
+        return self._bentRadiant(theta, self.eciAtLength(len_arr))
 
 
 
@@ -707,15 +828,21 @@ class TrajectoryMotion(object):
 
         len_arr = np.atleast_1d(len_arr)
 
-        k_arr = np.interp(len_arr, self.len_grid[self._valid], np.exp(self.log_k_grid[self._valid]), \
-            left=np.nan, right=np.nan)
-
-        # Compute the uncertainty from the covariance of the parameters. Outside the observed part the
-        #   coefficient is constant, so its uncertainty is the one at the nearest observed point
+        # Outside the observed part the coefficient is constant, or zero above the first point without drag
         len_clip = np.clip(len_arr, self.len_first, self.len_last)
+        k_arr = np.exp(self._logK(self.params, len_clip))
+        if not self.drag_above:
+            k_arr[len_arr < self.len_first] = 0.0
+
+        # The coefficient is not defined outside the modelled part
+        len_valid = self.len_grid[self._valid]
+        k_arr[(len_arr < len_valid[0]) | (len_arr > len_valid[-1]) | np.isnan(len_arr)] = np.nan
+
+        # Compute the uncertainty from the covariance of the parameters, which outside the observed part is
+        #   the one at the nearest observed point
         ramps = np.clip((len_clip[:, None] - self.ramp_beg[None, :])/self.ramp_len, 0.0, 1.0)
         grad = np.hstack([np.zeros((len(len_arr), 2)), np.ones((len(len_arr), 1)), ramps])
-        log_k_std = np.sqrt(np.maximum(np.sum(grad.dot(self.params_cov)*grad, axis=1), 0.0))
+        log_k_std = self._paramStd(grad)
 
         # The coefficient is exactly zero above the first point without drag
         log_k_std[k_arr == 0] = 0.0
@@ -749,9 +876,7 @@ class TrajectoryMotion(object):
             [ndarray] Heights above the mean sea level (m), NaN outside the modelled part.
         """
 
-        len_arr = self.lengthAtTime(time_arr)
-
-        return np.where(np.isfinite(len_arr), self.heightAtLength(len_arr), np.nan)
+        return self.heightAtLength(self.lengthAtTime(time_arr))
 
 
 
@@ -833,7 +958,7 @@ class TrajectoryMotion(object):
         out.append("")
 
         # Compute the uncertainties of the growth of K in every segment
-        d_std = np.sqrt(np.maximum(np.diag(self.params_cov)[3:], 0.0))
+        d_std = self._paramStd(np.eye(len(self.params))[3:])
 
         out.append(" Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, " \
             + "Growth, Signif")
@@ -918,9 +1043,21 @@ def plotMotion(motion, show=True):
         ax_k.plot(k_plot, ht_plot/1000, color='k', linestyle=line_style, zorder=4)
 
 
-    # Plot the 1 sigma uncertainty of the ballistic coefficient in the observed part
-    ax_k.fill_betweenx(motion.ht_grid[observed]/1000, k_grid[observed]*np.exp(-log_k_std[observed]), \
-        k_grid[observed]*np.exp(log_k_std[observed]), color='0.7', label='1$\\sigma$', zorder=2)
+    # Plot the 1 sigma uncertainty of the ballistic coefficient in the observed part. Where it is not
+    #   constrained, the band covers the whole plot
+    k_lo = k_grid[observed]*np.exp(-log_k_std[observed])
+    k_hi = k_grid[observed]*np.exp(log_k_std[observed])
+
+    finite = np.isfinite(log_k_std[observed])
+    if np.any(finite):
+        k_min = np.min(k_lo[finite])/2
+        k_max = 2*np.max(k_hi[finite])
+    else:
+        k_min = np.min(k_grid[observed])/10
+        k_max = 10*np.max(k_grid[observed])
+
+    ax_k.fill_betweenx(motion.ht_grid[observed]/1000, np.maximum(k_lo, k_min), np.minimum(k_hi, k_max), \
+        color='0.7', label='1$\\sigma$', zorder=2)
 
 
     # Show the growth of the ballistic coefficient in the observed part and the equivalent mass loss of a
@@ -946,10 +1083,8 @@ def plotMotion(motion, show=True):
     vel_obs = np.concatenate([obs.velocities[1:] for obs in traj.observations if not obs.ignore_station])
     ax_vel.set_xlim(0, 1.2*np.percentile(vel_obs, 95)/1000)
 
-    k_min = np.min(k_grid[observed]*np.exp(-log_k_std[observed]))
-    k_max = np.max(k_grid[observed]*np.exp(log_k_std[observed]))
     ax_k.set_xscale('log')
-    ax_k.set_xlim(k_min/2, 2*k_max)
+    ax_k.set_xlim(k_min, k_max)
 
     ax_ht.set_xlabel('Time (s)')
     ax_ht.set_ylabel('Height (km)')

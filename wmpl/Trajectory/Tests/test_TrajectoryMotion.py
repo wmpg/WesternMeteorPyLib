@@ -7,12 +7,14 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import functools
 import io
 import contextlib
 import os
 
 import numpy as np
+import pytest
 
 import matplotlib
 matplotlib.use('Agg')
@@ -154,7 +156,7 @@ def testNoDragAboveTheBeginning():
 
     len_arr = motion.len_first - np.array([0.0, 1e3, 20e3])
 
-    k_arr, _ = motion.ballisticCoeffAtLength(len_arr[1:])
+    k_arr, _ = motion.ballisticCoeffAtLength(np.concatenate([[motion.len_first - 1.0], len_arr[1:]]))
     assert np.all(k_arr == 0)
 
     vel = motion.velocityAtLength(len_arr)
@@ -254,6 +256,92 @@ def testGravityDropMatchesTheSolution():
 
 
 
+def testRadiantBentByGravity():
+    """ Check that the radiant is bent by gravity from the first point by the angle theta,
+        dtheta/dt = g_perp/v, and that the path below the end follows the bent direction.
+    """
+
+    traj = loadPickle(TRAJ_DIR, TRAJ_FILE)
+    motion = TrajectoryMotion(traj)
+
+    def _angle(len_arr):
+        return np.arccos(np.clip(motion.radiantAtLength(len_arr).dot(motion.radiant_eci), -1, 1))
+
+    # Above the beginning the path is the line
+    assert np.allclose(_angle(motion.len_first - np.array([1e3, 10e3])), 0.0, atol=1e-7)
+
+    # The bending grows along the path and agrees with the integral of g_perp/v over time
+    len_valid = motion.len_grid[motion._valid]
+    len_arr = np.linspace(motion.len_first, len_valid[-1], 20)
+    angle = _angle(len_arr)
+    assert np.all(np.diff(angle) >= 0)
+
+    valid = motion._valid & (motion.len_grid >= motion.len_first)
+    g_perp = motion.g_perp_grid[valid]
+    vel = motion.vel_grid[valid]
+    time = motion.time_grid[valid]
+    theta = np.concatenate([[0.0], np.cumsum(0.5*(g_perp[1:]/vel[1:] + g_perp[:-1]/vel[:-1])*np.diff(time))])
+    theta = np.interp(len_arr, motion.len_grid[valid], theta)
+
+    # Compare where the path is bent by less than 2 deg, as the steps are coarse when the meteor is slow
+    bent = theta < np.radians(2.0)
+    assert np.allclose(angle[bent], theta[bent], rtol=0.01, atol=1e-6)
+
+    # The modelled part ends before the path has bent by 5 deg
+    assert np.degrees(angle[-1]) <= 5.0
+
+    # Below the end the path follows the bent direction, compared where it is bent by less than 2 deg
+    len_arr = np.linspace(motion.len_last + 100.0, len_valid[-1] - 100.0, 50)
+    len_arr = len_arr[_angle(len_arr) < np.radians(2.0)]
+    tangent = motion.eciAtLength(len_arr + 10.0) - motion.eciAtLength(len_arr - 10.0)
+    tangent /= np.linalg.norm(tangent, axis=1)[:, None]
+    assert len(len_arr) > 10
+    assert np.allclose(motion.radiantAtLength(len_arr), -tangent, rtol=0.0, atol=1e-3)
+
+
+
+def testUnconstrainedCoefficient():
+    """ Check that the uncertainty of K is infinite in a direction not constrained by the data, and that the
+        table and the plot handle it.
+    """
+
+    _, _, motion = _solvedMeteor()
+
+    # All directions are constrained in the synthetic fit
+    assert motion.params_null.shape[1] == 0
+    _, log_k_std = motion.ballisticCoeffAtLength(np.array([motion.len_first, motion.len_last]))
+    assert np.all(np.isfinite(log_k_std))
+
+    # Make K at the first point unconstrained
+    motion = copy.copy(motion)
+    motion.params_null = np.zeros((len(motion.params), 1))
+    motion.params_null[2, 0] = 1.0
+
+    _, log_k_std = motion.ballisticCoeffAtLength(np.array([motion.len_first, motion.len_last]))
+    assert np.all(np.isinf(log_k_std))
+
+    assert 'inf' in motion.summaryTable()
+
+    fig = plotMotion(motion, show=False)
+    assert np.all(np.isfinite(fig.axes[2].get_xlim()))
+    plt.close(fig)
+
+
+
+def testNoUsedPoints():
+    """ Check that a trajectory without used points raises a clear error. """
+
+    _, traj, _ = _solvedMeteor()
+
+    traj = copy.deepcopy(traj)
+    for obs in traj.observations:
+        obs.ignore_station = True
+
+    with pytest.raises(ValueError, match="no used points"):
+        TrajectoryMotion(traj)
+
+
+
 def testPlotMotion():
     """ Check that the plots of the motion model are made. """
 
@@ -273,7 +361,8 @@ if __name__ == "__main__":
     test_list = [testFitsTheData, testVelocityInTheObservedPart, testExtrapolationAboveTheBeginning, \
         testExtrapolationBelowTheEnd, testBallisticCoefficient, testNoDragAboveTheBeginning, \
         testTimeAndHeightFunctions, testSummaryTable, testVelocityIsPhysical, \
-        testHeightsAreConsistent, testGravityDropMatchesTheSolution, testPlotMotion]
+        testHeightsAreConsistent, testGravityDropMatchesTheSolution, testRadiantBentByGravity, \
+        testUnconstrainedCoefficient, testNoUsedPoints, testPlotMotion]
 
     for test in test_list:
         test()

@@ -836,7 +836,8 @@ def derotatedRadiantAltAz(v_eci, eci_pos, jd, lat, lon):
         applied.
 
     Arguments:
-        v_eci: [ndarray] Velocity vector in the ECI frame (m/s), pointing along the direction of motion.
+        v_eci: [ndarray] Velocity vector in the ECI frame (m/s), pointing towards the radiant (opposite to
+            the direction of motion), e.g. v_init*radiant_eci.
         eci_pos: [ndarray] ECI position of the point on the trajectory (m).
         jd: [float] Julian date of the point.
         lat: [float] Geodetic latitude of the point (radians).
