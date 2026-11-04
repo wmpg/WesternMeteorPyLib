@@ -189,17 +189,21 @@ Three choices are not in the paper:
   each uses the interval at 1 - 0.05/n_looks (Bonferroni over the possible looks).
 - **Clones that leave the 1000 AU volume** are told apart by their eccentricity after the epoch:
   bound at their last output, they keep their orbit; bound and then hyperbolic, they were thrown out
-  and count as beyond every limit; hyperbolic throughout, they are left out and reported.
+  and count as beyond every limit; hyperbolic throughout, they are left out and reported, also if the
+  run ends before they reach 1000 AU.
+- **Clones that fail to integrate** are in none of the counts and are reported, with `n_failed` in
+  the result. If a whole batch fails, or every clone of `shober2024`, the run stops with an error: that
+  says nothing about the orbit.
 - **The start of the shober2024 clones.** The elements are those of the orbit without the
   Earth's attraction, placed where the meteoroid met the Earth. A clone started there would feel the
   Earth a second time; one started at a distance d with the speed at infinity leaves it with v²
   short by 2GM/d. In a Sun-and-Earth test on the Orionid example, that left a short by 0.014 AU from 3 Hill
-  radii; with the speed it had at d, by 2.7e-4 AU. The paper does not say how its clones were
-  started.
+  radii; with the speed it had at d, by 2.7e-4 AU. The paper starts its clones at the beginning of
+  the fireball observation, and does not say how it treats the Earth's attraction there.
 
-**Cost.** IAS15 took 295 s per clone over 10 000 years on a 21P-like orbit with the Sun's
-post-Newtonian correction, and 211 s without it. That makes about 60 CPU-hours for the 1000 clones
-of `shober2024` on such an orbit, and minutes for an orbit whose class settles in one batch.
+**Cost.** With the setup of `shober2024`, 360 clones of 21P took a mean of 102 s each over 10 000
+years, on 10 cores of a machine that had other work. That makes about 30 CPU-hours for the 1000
+clones on such an orbit, and minutes for an orbit whose class settles in one batch.
 
 ---
 

@@ -489,8 +489,9 @@ def _runShober2024(clone, traj, **kwargs):
 
     fake = _FakeHeliocentric(clone)
     fake.planet_dates = []
-    names = ('integrateHeliocentricBodies', 'planetStatesAtEpoch', 'REBOUND_FOUND')
+    names = ('integrateHeliocentricBodies', 'planetStatesAtEpoch', 'REBOUND_FOUND', 'checkReboundxUsable')
     original = [getattr(reb, name) for name in names]
+    reb.checkReboundxUsable = lambda: None
     reb.integrateHeliocentricBodies, reb.REBOUND_FOUND = fake, True
     reb.planetStatesAtEpoch = lambda jd_tdb: fake.planet_dates.append(jd_tdb) or _PLANETS
 

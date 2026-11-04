@@ -1471,7 +1471,7 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
         dynamics_class=verdict['dynamics_class'] if summary['n_clones'] else 'unbound')
 
 
-# The setup of Shober et al. (2024), Sect. 2.3: 1000 clones drawn independently from the published
+# The setup of Shober et al. (2024), Sect. 2.4: 1000 clones drawn independently from the published
 #   uncertainties of a, e, i, node and peri, integrated 10 000 yr backward with IAS15 under the
 #   gravity of the Sun, the planets and the Moon, with 1000 outputs
 SHOBER2024_CLONES = 1000
@@ -1623,7 +1623,7 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
     output_years=SHOBER2024_OUTPUT_YEARS, confidence=0.95, seed=None,
     encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL, n_cpu=None, show_progress=False):
     """ Classify whether a meteoroid moved like a Jupiter-family comet with the setup of Shober et al.
-        (2024), Sect. 2.3, so that the result can be compared with theirs.
+        (2024), Sect. 2.4, so that the result can be compared with theirs.
 
         The clones are drawn from the uncertainties of a, e, i, node and peri independently
         (elementUncertainties, drawElementClones) and integrated 10 000 yr backward with IAS15 under
@@ -1636,7 +1636,8 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
         attraction a second time, so each clone starts SHOBER2024_START_HILL Hill radii before the
         Earth, at the time the meteoroid took to cover that distance at its geocentric velocity, moved
         back to it on its orbit around the Sun alone and given the geocentric speed it had there
-        (addEarthAttraction). Shober et al. do not say how they started theirs.
+        (addEarthAttraction). Shober et al. start theirs at the beginning of the fireball observation,
+        and do not say how they treat the Earth's attraction there.
 
         Reference: Shober et al. (2024), A&A 687, A181, doi:10.1051/0004-6361/202449635.
 
@@ -1658,7 +1659,9 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
     Return:
         [dict] As classifyJupiterFamilyDynamics, with the mode, the uncertainties and the start of the
             clones under 'assumptions'. The class comes from the interval of the fraction at the
-            requested confidence (one look).
+            requested confidence (one look). A clone that fails to integrate does not stop the others:
+            it is in none of the counts, 'n_failed' counts it and 'failed_clones' holds its error. If
+            they all fail, a RuntimeError is raised.
     """
 
     from wmpl.Rebound import REBOUND as reb
@@ -1666,7 +1669,16 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
     if not reb.REBOUND_FOUND:
         raise ImportError(reb._REBOUND_IMPORT_ERROR)
 
+    # Fail early, before the hours of integration, if REBOUNDx cannot attach to a simulation
+    reb.checkReboundxUsable()
+
     checkShober2024Inputs(traj)
+
+    t = dynamicsOutputTimes(years, output_years)
+    n_outputs = len(t)
+
+    if n_clones < 1:
+        raise ValueError("At least one clone is needed, got n_clones = {}.".format(n_clones))
 
     if seed is None:
         seed = int(np.random.SeedSequence().entropy%(2**32))
@@ -1679,8 +1691,6 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
     planets = reb.planetStatesAtEpoch(jd_start)
     states = addEarthAttraction(elementCloneStates(clones, dt_days), planets)
 
-    n_outputs = int(round(years/output_years)) + 1
-    t = np.linspace(0.0, -years, n_outputs)
     times = list(reb.outputTimes(years*365.25, n_outputs, 'backward'))
 
     names = ['obj_MC_{:d}'.format(k) for k in range(n_clones)]
@@ -1689,25 +1699,38 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
     if n_cpu is None:
         n_cpu = max(1, (os.cpu_count() or 1) - 1)
 
-    outputs_mc, diagnostics = {}, {}
+    outputs_mc, diagnostics, failed = {}, {}, {}
 
-    def collect(results):
-        for done, result in enumerate(results, start=1):
+    def collect(name, get_result):
+        """ Keep the result of a clone, or its error: one clone should not lose hours of the others. """
+
+        try:
+            result = get_result()
             outputs_mc.update(result['outputs'])
             diagnostics.update(result['diagnostics'])
-            if show_progress and (done%max(1, n_clones//20) == 0):
-                print("  {:d}/{:d} clones integrated".format(done, n_clones), flush=True)
+
+        except Exception as err:
+            failed[name] = repr(err)
+
+        done = len(outputs_mc) + len(failed)
+        if show_progress and (done%max(1, n_clones//20) == 0):
+            print("  {:d}/{:d} clones integrated".format(done, n_clones), flush=True)
 
     # One clone per simulation, so that each gets its own adaptive timestep
     if n_cpu == 1:
-        collect(reb.integrateHeliocentricBodies([name], [state], jd_start, times, **kwargs)
-            for name, state in zip(names, states))
+        for name, state in zip(names, states):
+            collect(name, lambda: reb.integrateHeliocentricBodies([name], [state], jd_start, times, **kwargs))
 
     else:
         with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
-            futures = [executor.submit(reb.integrateHeliocentricBodies, [name], [state], jd_start,
-                times, **kwargs) for name, state in zip(names, states)]
-            collect(future.result() for future in concurrent.futures.as_completed(futures))
+            futures = {executor.submit(reb.integrateHeliocentricBodies, [name], [state], jd_start, times,
+                **kwargs): name for name, state in zip(names, states)}
+            for future in concurrent.futures.as_completed(futures):
+                collect(futures[future], future.result)
+
+    if not outputs_mc:
+        raise RuntimeError("All the {:d} clones failed to integrate. One of the errors: {:s}".format(n_clones,
+            next(iter(failed.values()))))
 
     q, a, encounter_times, left_unbound = cloneEnsemble(outputs_mc, diagnostics, n_outputs,
         encounter_hill=encounter_hill)
@@ -1731,7 +1754,8 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
         n_integrated=len(outputs_mc), n_batches=1,
         n_escaped=sum(diagnostics[name]['escaped'] is not None for name in outputs_mc),
         n_impacted=sum(diagnostics[name]['impact'] is not None for name in outputs_mc),
-        n_failed=0, integrator_warning=None, look_confidence=confidence, dynamics_class=dynamics_class)
+        n_failed=len(failed), failed_clones=failed, integrator_warning=None, look_confidence=confidence,
+        dynamics_class=dynamics_class)
 
 
 def formatJupiterFamilyDynamics(result):
@@ -1832,6 +1856,10 @@ def formatJupiterFamilyDynamics(result):
     if result['n_failed']:
         lines.append("    {:d} clone(s) failed to integrate and are left out of the classification, which "
             "would bias it if the failures depend on the orbit".format(result['n_failed']))
+
+        if result.get('failed_clones'):
+            name = sorted(result['failed_clones'])[0]
+            lines.append("    The error of {:s}: {:s}".format(name, result['failed_clones'][name]))
 
     if result['integrator_warning']:
         lines.append("    {:s}".format(result['integrator_warning']))
