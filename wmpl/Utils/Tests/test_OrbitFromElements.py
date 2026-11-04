@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 
 from wmpl.Rebound import REBOUND as reb
-from wmpl.Utils.OrbitClassification import elementUncertainties, formatJupiterFamilyDynamics, \
-    classifyJupiterFamilyDynamicsShober2024
+from wmpl.Utils.OrbitClassification import drawElementClones, elementUncertainties, \
+    formatJupiterFamilyDynamics, classifyJupiterFamilyDynamicsShober2024
 from wmpl.Utils.OrbitFromElements import nodeAtTheEarth, trajectoryFromElements
 from wmpl.Utils.TrajConversions import datetime2JD
 
@@ -151,3 +151,84 @@ def test_the_command_line_refuses_elements_that_miss_the_earth():
 
     assert result.returncode == 1
     assert "from the Earth" in result.stderr + result.stdout
+
+
+### Drawing q instead of e ###
+
+_ELEMENTS_Q = dict(a=4.5, e=0.775, q=1.0125, i=np.radians(43.8), node=np.radians(109.8), peri=np.radians(187.4),
+    true_anomaly=np.radians(-7.4), v_g=27300.0)
+
+
+def _orbit(**changes):
+
+    from types import SimpleNamespace
+
+    return SimpleNamespace(**dict(_ELEMENTS_Q, **changes))
+
+
+SIGMA_E = {'a': 0.4, 'e': 0.021, 'i': 0.4, 'node': 1e-5, 'peri': 0.6}
+SIGMA_Q = {'a': 0.4, 'q': 0.0006, 'i': 0.4, 'node': 1e-5, 'peri': 0.6}
+
+
+def test_drawing_q_keeps_it_within_its_error_where_drawing_e_does_not():
+
+    with_e = drawElementClones(_orbit(), SIGMA_E, 2000, np.random.default_rng(1))
+    with_q = drawElementClones(_orbit(), SIGMA_Q, 2000, np.random.default_rng(1))
+
+    assert np.std(with_e['a']*(1 - with_e['e'])) > 0.1
+    assert np.std(with_q['a']*(1 - with_q['e'])) == pytest.approx(0.0006, rel=0.1)
+    assert np.mean(with_q['a']*(1 - with_q['e'])) == pytest.approx(1.0125, abs=1e-4)
+
+
+def test_drawing_q_leaves_the_other_elements_of_the_clones_as_they_were():
+
+    with_e = drawElementClones(_orbit(), SIGMA_E, 50, np.random.default_rng(1))
+    with_q = drawElementClones(_orbit(), SIGMA_Q, 50, np.random.default_rng(1))
+
+    for key in ('a', 'i', 'node', 'peri', 'f'):
+        assert np.array_equal(with_e[key], with_q[key])
+
+
+@pytest.mark.parametrize("sigma_a", [3.0, 9.0])
+def test_a_semi_major_axis_drawn_below_q_is_refused(sigma_a):
+
+    with pytest.raises(ValueError, match="no ellipse"):
+        drawElementClones(_orbit(), dict(SIGMA_Q, a=sigma_a), 1000, np.random.default_rng(1))
+
+
+@_needsEphemeris
+def test_the_elements_keep_the_error_of_q_and_the_report_says_it_is_not_the_paper():
+
+    a, e, i, node, peri, date, _, _, _ = PUBLISHED['Trigo-Rodriguez 2009']
+    traj = trajectoryFromElements(a, e, i, node, peri, _jd(date), sigma=SIGMA_Q)
+
+    sigma, _ = elementUncertainties(traj)
+    assert 'e' not in sigma and sigma['q'] == 0.0006
+
+    result = classifyJupiterFamilyDynamicsShober2024(traj, n_clones=2, years=60.0, seed=1, n_cpu=1)
+    report = "\n".join(formatJupiterFamilyDynamics(result))
+    assert "a, q, i, node, peri drawn independently and e = 1 - q/a, unlike the paper" in report
+    assert "q 0.0006 AU" in report
+
+
+@pytest.mark.parametrize("args, message", [
+    (ELEMENTS + DATE + ["--dynamics", "shober2024"] + SIGMA + ["--sigma_q", "0.001"], "either --sigma_e or --sigma_q"),
+    (ELEMENTS + DATE + ["--dynamics", "shober2024", "--sigma_q", "0.001"], "or none"),
+    ])
+def test_what_the_command_line_refuses_of_sigma_q(args, message):
+
+    result = _cli(*args)
+
+    assert result.returncode == 1
+    assert message in result.stderr + result.stdout
+
+
+def test_sigma_q_goes_with_the_elements_and_not_with_a_pickle():
+
+    example = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "Dynesty", "examples",
+        "20191023_091225", "20191023_091225_trajectory.pickle")
+
+    result = _cli(example, "--dynamics", "shober2024", "--sigma_q", "0.001")
+
+    assert result.returncode == 1
+    assert "--sigma_q goes with the elements" in result.stderr + result.stdout

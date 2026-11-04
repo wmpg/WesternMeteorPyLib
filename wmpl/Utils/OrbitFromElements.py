@@ -75,8 +75,9 @@ def trajectoryFromElements(a, e, incl, node, peri, jd_utc, sigma=None, max_node_
         jd_utc: [float] Julian date (UTC) of the fireball.
 
     Keyword arguments:
-        sigma: [dict] 1-sigma of 'a' (AU), 'e', 'i', 'node' and 'peri' (deg). None (default) leaves the
-            uncertainties out, so the clones take those Shober et al. assumed for the MORP fireballs.
+        sigma: [dict] 1-sigma of 'a' (AU), 'e' or 'q' (AU), 'i', 'node' and 'peri' (deg). With 'q', the clones
+            draw q and take e = 1 - q/a. None (default) leaves the uncertainties out, so the clones take those
+            Shober et al. assumed for the MORP fireballs.
         max_node_miss: [float] Farthest the node may lie from the Earth (AU). Default ELEMENTS_MAX_NODE_MISS.
 
     Return:
@@ -103,8 +104,9 @@ def trajectoryFromElements(a, e, incl, node, peri, jd_utc, sigma=None, max_node_
 
     uncertainties = None
     if sigma is not None:
-        uncertainties = SimpleNamespace(a=sigma['a'], e=sigma['e'], i=np.radians(sigma['i']),
-            node=np.radians(sigma['node']), peri=np.radians(sigma['peri']), source="given with the elements")
+        uncertainties = SimpleNamespace(a=sigma['a'], i=np.radians(sigma['i']), node=np.radians(sigma['node']),
+            peri=np.radians(sigma['peri']), source="given with the elements", draw_q='q' in sigma,
+            e=sigma.get('e'), q=sigma.get('q'))
 
     return SimpleNamespace(jdt_ref=jd_utc, uncertainties=uncertainties, node_passage=passage,
         orbit=SimpleNamespace(a=a, e=e, q=a*(1.0 - e), i=incl, node=node, peri=peri,

@@ -1523,7 +1523,7 @@ def elementUncertainties(traj):
         traj: [Trajectory] The trajectory.
 
     Return:
-        (sigma, source): [dict] {'a': AU, 'e', 'i': deg, 'node': deg, 'peri': deg}, and [str] where
+        (sigma, source): [dict] {'a': AU, 'e' or 'q': AU, 'i': deg, 'node': deg, 'peri': deg}, and [str] where
             they come from: the Monte Carlo runs of the trajectory or, without them, the values
             Shober et al. assumed for the MORP fireballs (SHOBER2024_DEFAULT_SIGMA).
     """
@@ -1533,8 +1533,16 @@ def elementUncertainties(traj):
     if unc is None:
         return dict(SHOBER2024_DEFAULT_SIGMA), "assumed by Shober et al. for MORP"
 
-    return {'a': unc.a, 'e': unc.e, 'i': np.degrees(unc.i), 'node': np.degrees(unc.node),
-        'peri': np.degrees(unc.peri)}, getattr(unc, 'source', "Monte Carlo of the trajectory")
+    sigma = {'a': unc.a, 'i': np.degrees(unc.i), 'node': np.degrees(unc.node), 'peri': np.degrees(unc.peri)}
+
+    # Elements given with the error of q instead of that of e. A trajectory has both, and draws e
+    if getattr(unc, 'draw_q', False):
+        sigma['q'] = unc.q
+
+    else:
+        sigma['e'] = unc.e
+
+    return sigma, getattr(unc, 'source', "Monte Carlo of the trajectory")
 
 
 def drawElementClones(orbit, sigma, n_clones, rng):
@@ -1544,9 +1552,14 @@ def drawElementClones(orbit, sigma, n_clones, rng):
         The anomaly is not drawn: each clone keeps the argument of latitude (peri + f) of the
         orbit, and so its place relative to the node, where the meteoroid met the Earth.
 
+        With a 1-sigma of q instead of one of e, q is drawn and e = 1 - q/a. A perihelion distance is usually known
+        far better than a and e, whose errors are strongly correlated, and drawing a and e independently spreads
+        it well beyond its error. This departs from the setup of Shober et al.
+
     Arguments:
         orbit: [Orbit] The orbit of the trajectory (angles in radians).
-        sigma: [dict] 1-sigma of 'a' (AU), 'e', 'i', 'node' and 'peri' (deg), see elementUncertainties.
+        sigma: [dict] 1-sigma of 'a' (AU), 'e' or 'q' (AU), 'i', 'node' and 'peri' (deg), see
+            elementUncertainties.
         n_clones: [int] Number of clones.
         rng: [numpy.random.Generator] Source of the draws.
 
@@ -1554,7 +1567,21 @@ def drawElementClones(orbit, sigma, n_clones, rng):
         [dict] Arrays 'a' (AU), 'e', 'i', 'node', 'peri' and 'f' (deg) of the clones.
     """
 
-    clones = {'a': rng.normal(orbit.a, sigma['a'], n_clones), 'e': rng.normal(orbit.e, sigma['e'], n_clones)}
+    clones = {'a': rng.normal(orbit.a, sigma['a'], n_clones)}
+
+    # In the place of the draws of e, so that with the same seed the other elements do not change
+    if 'q' in sigma:
+        q = rng.normal(orbit.q, sigma['q'], n_clones)
+        clones['e'] = 1.0 - q/clones['a']
+
+        n_invalid = int(np.count_nonzero((q <= 0) | (clones['a'] <= 0) | (clones['e'] < 0)))
+        if n_invalid:
+            raise ValueError("{:d} of the {:d} clones drawn have a semi-major axis or a perihelion distance that "
+                "make no ellipse: the uncertainty of a is too wide for this q.".format(n_invalid, n_clones))
+
+    else:
+        clones['e'] = rng.normal(orbit.e, sigma['e'], n_clones)
+
     for key in ('i', 'node', 'peri'):
         clones[key] = rng.normal(np.degrees(getattr(orbit, key)), sigma[key], n_clones)
 
@@ -1854,6 +1881,7 @@ def formatJupiterFamilyDynamics(result):
     if s['mode'] == 'shober2024':
 
         sigma = s['sigma']
+        size = "q {:.3g} AU".format(sigma['q']) if 'q' in sigma else "e {:.3g}".format(sigma['e'])
         lines = [
             "Jupiter-family dynamics (setup of Shober et al. 2024)",
             "-----------------------------------------------------",
@@ -1861,10 +1889,11 @@ def formatJupiterFamilyDynamics(result):
             "    Integration : {:s}, every clone in its own simulation".format(span),
             "    Forces      : Sun, planets and Moon (DE430), Newtonian; Earth J2/J4 (always in "
                 "wmpl.Rebound.REBOUND); no GR, Sun J2, radiation pressure, outgassing or Yarkovsky",
-            "    Clones      : {:d}, a, e, i, node, peri drawn independently, seed {:d}; 1-sigma ({:s}): "
-                "a {:.3g} AU, e {:.3g}, i {:.3g} deg, node {:.3g} deg, peri {:.3g} deg; argument of "
-                "latitude kept".format(s['n_clones'], s['seed'], s['sigma_source'], sigma['a'],
-                sigma['e'], sigma['i'], sigma['node'], sigma['peri']),
+            "    Clones      : {:d}, a, {:s}, i, node, peri drawn independently{:s}, seed {:d}; 1-sigma ({:s}): "
+                "a {:.3g} AU, {:s}, i {:.3g} deg, node {:.3g} deg, peri {:.3g} deg; argument of "
+                "latitude kept".format(s['n_clones'], 'q' if 'q' in sigma else 'e',
+                " and e = 1 - q/a, unlike the paper" if 'q' in sigma else "", s['seed'], s['sigma_source'],
+                sigma['a'], size, sigma['i'], sigma['node'], sigma['peri']),
             "    Start       : on each clone's orbit without the Earth's attraction, {:g} Hill radii "
                 "before the Earth ({:.2f} d before the epoch), at the geocentric speed it had "
                 "there".format(s['start_hill'], s['start_days_before']),
@@ -2048,13 +2077,16 @@ if __name__ == "__main__":
         dyn.add_argument('--sigma_' + name, metavar='SIGMA', type=float, default=None, \
             help="With --date: 1-sigma of {:s}{:s}. Give all five, or none for the values Shober et al. assumed for "
             "MORP.".format(name, ' ({:s})'.format(unit) if unit else ''))
+    dyn.add_argument('--sigma_q', metavar='SIGMA', type=float, default=None, \
+        help="With --date, in place of --sigma_e: 1-sigma of q (AU). q is then drawn and e = 1 - q/a, which respects a "
+        "perihelion distance known far better than a and e. This departs from the setup of Shober et al.")
     dyn.add_argument('--max_node_miss', metavar='AU', type=float, default=None, \
         help="With --date: farthest the node may lie from the Earth, or the elements are refused. Default: 0.05 AU; "
         "the elements of three published fireballs give 0.0004 to 0.012 AU.")
     dyn.add_argument('--dynamics_checkpoint', metavar='FILE', type=str, default=None, \
         help="Save each clone (shober2024) or batch (adapted) to this file as soon as it ends. Run the same "
         "command again to go on from there after an interruption, with the same clones. A file from a run "
-        "with other parameters is refused. It takes about 50 kB per clone with the outputs of shober2024.")
+        "with other parameters is refused. It takes about 60 kB per clone with the outputs of shober2024.")
 
     cml_args = arg_parser.parse_args()
 
@@ -2212,7 +2244,7 @@ if __name__ == "__main__":
 
     if cml_args.dynamics is not None:
 
-        element_options = ['date', 'max_node_miss'] + ['sigma_' + name for name in SHOBER2024_DEFAULT_SIGMA]
+        element_options = ['date', 'max_node_miss', 'sigma_q'] + ['sigma_' + name for name in SHOBER2024_DEFAULT_SIGMA]
         given = [name for name in element_options if getattr(cml_args, name) is not None]
 
         if (cml_args.traj_path is not None) and given:
@@ -2229,10 +2261,19 @@ if __name__ == "__main__":
                     "and --date.")
 
             sigma = {name: getattr(cml_args, 'sigma_' + name) for name in SHOBER2024_DEFAULT_SIGMA}
+
+            if cml_args.sigma_q is not None:
+
+                if sigma.pop('e') is not None:
+                    reportError("Give either --sigma_e or --sigma_q, not both.")
+
+                sigma['q'] = cml_args.sigma_q
+
             n_given = sum(value is not None for value in sigma.values())
 
             if n_given not in (0, len(sigma)):
-                reportError("Give all of --sigma_a, --sigma_e, --sigma_i, --sigma_node and --sigma_peri, or none.")
+                reportError("Give all of --sigma_a, --sigma_e (or --sigma_q), --sigma_i, --sigma_node and "
+                    "--sigma_peri, or none.")
 
             try:
                 jd_utc = datetime2JD(datetime.datetime.fromisoformat(cml_args.date))
