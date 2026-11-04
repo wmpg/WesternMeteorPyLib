@@ -1349,9 +1349,9 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
 
     ### Compute the residuals ###
 
-    # Count the total number of length and magnitude points
-    mag_point_count = len(~np.isnan(fit_input_data[:, 1]))
-    lag_point_count = len(~np.isnan(fit_input_data[:, 2]))
+    # Count the length and magnitude points with a measurement
+    mag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 1])), 1)
+    lag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 2])), 1)
 
     # Interpolate simulated magnitude and length
     len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr, \
@@ -1392,15 +1392,16 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # if np.isnan(mag_res):
         #     mag_res = 10.0
 
-        # Compute the magnitude residual in linear luminosity units
+        # Compute the magnitude residual in linear luminosity units, for the points with a magnitude
+        mag_res = 0
         if not np.isnan(mag):
             lum_obs = const.P_0m*10**(-0.4*mag)
             lum_sim = const.P_0m*10**(-0.4*mag_sim)
 
             mag_res = mag_weight*(lum_obs - lum_sim)**2
 
-        if np.isnan(mag_res):
-            mag_res = 1e6**2
+            if np.isnan(mag_res):
+                mag_res = 1e6**2
 
 
         # Choose the lag weight

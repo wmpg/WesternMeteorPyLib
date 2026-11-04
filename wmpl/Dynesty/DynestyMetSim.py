@@ -3803,7 +3803,10 @@ class ObservationData:
         # for the lum data delete all the keys that have values above 8
         if np.any(lum_data['absolute_magnitudes'] > 8):
             print(obs.station_id,'Found values below 8 absolute magnitudes :', lum_data['absolute_magnitudes'][lum_data['absolute_magnitudes'] > 8])
-            # delete any values above 8 absolute_magnitudes and delete the corresponding values in the other arrays
+
+        # delete any values above 8 absolute_magnitudes and the points without a magnitude (NaN), and the
+        #   corresponding values in the other arrays
+        if not np.all(lum_data['absolute_magnitudes'] < 8):
             lum_data = {key: lum_data[key][lum_data['absolute_magnitudes'] < 8] for key in lum_data.keys()}
 
         # # print all the keys in the lag_data
