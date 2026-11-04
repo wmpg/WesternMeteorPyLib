@@ -153,7 +153,8 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
 
         plotMotion(motion)
 
-        print(motion.summaryTable())
+        print('Motion model: residuals RMS = {:.1f} m, initial velocity = {:.3f} km/s'.format( \
+            motion.res_rms, motion.params[1]/1000))
         print()
         print('Beginning coordinates (observed):')
         print('    Lat: {:.6f}'.format(np.degrees(traj.rbeg_lat)))

@@ -55,6 +55,36 @@ from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
 # Gravitational acceleration at the surface of the Earth (m/s^2)
 G_SURFACE = 9.80665
 
+# Fireball types of Ceplecha et al. (1998, Space Sci. Rev. 84, 327), with their typical apparent ablation
+#   coefficients (s^2/km^2)
+CEPLECHA_TYPES = [
+    ('I', 0.014, 'ordinary chondrites'),
+    ('II', 0.042, 'carbonaceous chondrites'),
+    ('IIIA', 0.10, 'regular cometary material'),
+    ('IIIB', 0.21, 'soft cometary material'),
+]
+
+
+
+def ceplechaType(sigma):
+    """ Find the fireball type of Ceplecha et al. (1998) with the typical apparent ablation coefficient
+        closest to the given one, in the logarithm.
+
+    Arguments:
+        sigma: [float] Apparent ablation coefficient (s^2/km^2).
+
+    Return:
+        (type_name, sigma_type, description): Name of the type, its typical apparent ablation coefficient
+            (s^2/km^2) and the material. None if the given coefficient is not positive.
+    """
+
+    if not (sigma > 0):
+        return None
+
+    log_diff = [abs(np.log(sigma/sigma_type)) for _, sigma_type, _ in CEPLECHA_TYPES]
+
+    return CEPLECHA_TYPES[int(np.argmin(log_diff))]
+
 
 
 def usedPoints(traj):
@@ -786,24 +816,92 @@ class TrajectoryMotion(object):
 
     def ballisticCoeffGrowth(self):
         """ Compute the growth of the ballistic coefficient between the first and the last observed point,
-            the equivalent mass loss of a single body and the apparent ablation coefficient.
+            and the equivalent mass loss of a single body.
 
         Return:
-            (k_ratio, mass_ratio, sigma_app):
+            (k_ratio, mass_ratio):
                 - k_ratio: [float] Ratio of the ballistic coefficients at the last and the first point.
                 - mass_ratio: [float] Ratio of the masses at the last and the first point of a single body
                     of a constant shape, which has K proportional to m**(-1/3).
-                - sigma_app: [float] Apparent ablation coefficient (s^2/m^2), from
-                    ln(K_end/K_beg) = sigma*(v_beg**2 - v_end**2)/6.
         """
 
         k_beg, k_end = self.ballisticCoeffAtLength(np.array([self.len_first, self.len_last]))[0]
+        k_ratio = k_end/k_beg
+
+        return k_ratio, k_ratio**(-3)
+
+
+
+    def apparentAblationCoeff(self):
+        """ Compute the apparent ablation coefficient from the growth of the ballistic coefficient between
+            the first and the last observed point. For a single body of a constant shape K is proportional to
+            m**(-1/3), so ln(K_end/K_beg) = sigma*(v_beg**2 - v_end**2)/6. The coefficient is apparent, as
+            fragmentation also increases K.
+
+        Return:
+            (sigma_app, sigma_app_std):
+                - sigma_app: [float] Apparent ablation coefficient (s^2/m^2).
+                - sigma_app_std: [float] Its standard deviation from the fit (s^2/m^2).
+        """
+
+        k_ratio, _ = self.ballisticCoeffGrowth()
         vel_beg, vel_end = self.velocityAtLength(np.array([self.len_first, self.len_last]))
 
-        k_ratio = k_end/k_beg
-        sigma_app = 6*np.log(k_ratio)/(vel_beg**2 - vel_end**2)
+        # The logarithm of the growth of K is the sum of all ramp heights
+        log_ratio_std = np.sqrt(max(np.sum(self.params_cov[3:, 3:]), 0.0))
 
-        return k_ratio, k_ratio**(-3), sigma_app
+        sigma_app = 6*np.log(k_ratio)/(vel_beg**2 - vel_end**2)
+        sigma_app_std = 6*log_ratio_std/(vel_beg**2 - vel_end**2)
+
+        return sigma_app, sigma_app_std
+
+
+
+    def ablationReport(self):
+        """ Make a report of the apparent ablation coefficient and the closest fireball type of Ceplecha
+            et al. (1998).
+
+        Return:
+            [str] Report, ready for printing.
+        """
+
+        # Superscript 2 for the units
+        sq = "\u00b2"
+
+        sigma_app, sigma_app_std = self.apparentAblationCoeff()
+        sigma_app *= 1e6
+        sigma_app_std *= 1e6
+
+        out = []
+        out.append("Apparent ablation coefficient = {:.4f} +/- {:.4f} s{:s}/km{:s}".format(sigma_app, \
+            sigma_app_std, sq, sq))
+
+        fb_type = ceplechaType(sigma_app)
+        if fb_type is None:
+            out.append("    The ballistic coefficient does not grow, so the fireball type cannot be found.")
+
+        else:
+
+            type_name, sigma_type, description = fb_type
+            out.append(("    Closest fireball type of Ceplecha et al. (1998): {:s} ({:s}, typical {:.3f} " \
+                + "s{:s}/km{:s})").format(type_name, description, sigma_type, sq, sq))
+
+            # List all types within 1 sigma
+            types_1sig = [name for name, sigma_t, _ in CEPLECHA_TYPES \
+                if abs(sigma_t - sigma_app) <= sigma_app_std]
+            if types_1sig:
+                out.append("    Types within 1 sigma: " + ", ".join(types_1sig))
+
+            if sigma_app_std > 0.5*sigma_app:
+                out.append("    The coefficient is poorly constrained, the type is not reliable.")
+
+        out.append("    The coefficient is apparent: it assumes K ~ m^(-1/3) between the first and the " \
+            + "last point, and fragmentation also increases K.")
+
+        out.append("    Types: " + ", ".join(["{:s} = {:.3f}".format(name, sigma_t) \
+            for name, sigma_t, _ in CEPLECHA_TYPES]) + " s{:s}/km{:s}".format(sq, sq))
+
+        return "\n".join(out)
 
 
 
@@ -816,7 +914,7 @@ class TrajectoryMotion(object):
         """
 
         n_data = len(self.len_data)
-        k_ratio, mass_ratio, sigma_app = self.ballisticCoeffGrowth()
+        k_ratio, mass_ratio = self.ballisticCoeffGrowth()
 
         if self.drag_above:
             above_str = "the ballistic coefficient at the first point"
@@ -834,8 +932,7 @@ class TrajectoryMotion(object):
             self.params[1]/1000, self.heightAtLength(self.len_first)[0]/1000))
         out.append("    Gravity drop: {:s}, above the first point: {:s}".format( \
             "yes" if self.gravity_correction else "no", above_str))
-        out.append(("    K end/beg = {:.2f}, single-body m end/beg = {:.3g}, apparent ablation coeff = " \
-            + "{:.4f} s{:s}/km{:s}").format(k_ratio, mass_ratio, 1e6*sigma_app, sq, sq))
+        out.append("    K end/beg = {:.2f}, single-body m end/beg = {:.3g}".format(k_ratio, mass_ratio))
         out.append("")
 
         # Compute the uncertainties of the growth of K in every segment
@@ -876,7 +973,7 @@ class TrajectoryMotion(object):
 
 
 
-def plotMotion(motion, show=True):
+def plotMotion(motion, show=True, show_ablation=False):
     """ Plot the observed heights and velocities together with the motion model, and the fitted ballistic
         coefficient with its uncertainty.
 
@@ -885,6 +982,8 @@ def plotMotion(motion, show=True):
 
     Keyword arguments:
         show: [bool] Show the plot. True by default.
+        show_ablation: [bool] Show the apparent ablation coefficient and the closest fireball type of
+            Ceplecha et al. (1998). False by default.
 
     Return:
         fig: [matplotlib figure] Figure with the plots.
@@ -929,14 +1028,25 @@ def plotMotion(motion, show=True):
         k_grid[observed]*np.exp(log_k_std[observed]), color='0.7', label='1$\\sigma$', zorder=2)
 
 
-    # Show the growth of the ballistic coefficient in the observed part, the equivalent mass loss of a single
-    #   body, and the apparent ablation coefficient
-    k_ratio, mass_ratio, sigma_app = motion.ballisticCoeffGrowth()
+    # Show the growth of the ballistic coefficient in the observed part and the equivalent mass loss of a
+    #   single body
+    k_ratio, mass_ratio = motion.ballisticCoeffGrowth()
 
-    ax_k.text(0.03, 0.03, "$K_{\\mathrm{end}}/K_{\\mathrm{beg}}$ = " + "{:.2f}".format(k_ratio) + "\n" \
-        + "Single body $m_{\\mathrm{end}}/m_{\\mathrm{beg}}$ = " + "{:.3g}".format(mass_ratio) + "\n" \
-        + "Apparent $\\sigma$ = " + "{:.3f}".format(1e6*sigma_app) + " s$^2$/km$^2$", \
-        transform=ax_k.transAxes, verticalalignment='bottom', fontsize=8, \
+    k_text = "$K_{\\mathrm{end}}/K_{\\mathrm{beg}}$ = " + "{:.2f}".format(k_ratio) + "\n" \
+        + "Single body $m_{\\mathrm{end}}/m_{\\mathrm{beg}}$ = " + "{:.3g}".format(mass_ratio)
+
+    # Add the apparent ablation coefficient and the closest fireball type
+    if show_ablation:
+
+        sigma_app, sigma_app_std = motion.apparentAblationCoeff()
+        k_text += "\n" + "Apparent $\\sigma$ = " + "{:.3f} $\\pm$ {:.3f}".format(1e6*sigma_app, \
+            1e6*sigma_app_std) + " s$^2$/km$^2$"
+
+        fb_type = ceplechaType(1e6*sigma_app)
+        if fb_type is not None:
+            k_text += "\n" + "Closest Ceplecha type: {:s}".format(fb_type[0])
+
+    ax_k.text(0.03, 0.03, k_text, transform=ax_k.transAxes, verticalalignment='bottom', fontsize=8, \
         bbox=dict(facecolor='w', edgecolor='0.7', alpha=0.8))
 
 
@@ -984,7 +1094,8 @@ if __name__ == "__main__":
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description=""" Fit the drag model of the motion along the given
-        trajectory, print the table of the fitted ballistic coefficient and plot the model. """)
+        trajectory, print the table of the fitted ballistic coefficient and the apparent ablation coefficient
+        with the closest fireball type of Ceplecha et al. (1998), and plot the model. """)
 
     arg_parser.add_argument('traj_pickle_file', type=str, help='Path to the trajectory .pickle file.')
 
@@ -1010,5 +1121,7 @@ if __name__ == "__main__":
     motion = TrajectoryMotion(traj, n_knots=cml_args.knots, drag_above=cml_args.dragabove)
 
     print(motion.summaryTable())
+    print()
+    print(motion.ablationReport())
 
-    plotMotion(motion)
+    plotMotion(motion, show_ablation=True)
