@@ -2367,9 +2367,13 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
         # Plot additional magnitudes for all sites
         for site in ecsv_obs.sites:
 
-            # Extract data (filter out inf values)
-            height_data = ecsv_obs.height_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
-            abs_mag_data = ecsv_obs.abs_mag_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
+            # Extract data (filter out inf values and the points without a magnitude)
+            height_data = ecsv_obs.height_data[site][np.isfinite(ecsv_obs.abs_mag_data[site])]
+            abs_mag_data = ecsv_obs.abs_mag_data[site][np.isfinite(ecsv_obs.abs_mag_data[site])]
+
+            # Skip the sites without magnitudes
+            if len(abs_mag_data) == 0:
+                continue
 
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(height_data)
@@ -3251,6 +3255,11 @@ class MetSimGUI(QMainWindow):
         
         # Average out the magnitudes
         time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
+
+        # A light curve of a single point cannot be integrated, so the default mass is used
+        if len(np.unique(time_arr)) < 2:
+            print("Too few photometry points, assuming default mass:", self.const.m_init)
+            return 0, self.const.m_init
 
 
         # Calculate the radiated energy

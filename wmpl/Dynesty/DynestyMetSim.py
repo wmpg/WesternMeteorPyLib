@@ -3884,6 +3884,10 @@ class ObservationData:
             # Get all indices where this station appears
             indices = np.where(self.stations_lum == station)[0]
 
+            # A station with a single point has no height difference, so its height is not adjusted
+            if len(indices) < 2:
+                continue
+
             # Compute the differences between consecutive heights
             diffs = np.diff(self.height_lum[indices])
             
