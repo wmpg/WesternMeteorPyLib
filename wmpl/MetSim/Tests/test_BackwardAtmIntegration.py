@@ -7,6 +7,7 @@ Run under pytest, or directly:
 
 import argparse
 import os
+import re
 import runpy
 import sys
 from types import SimpleNamespace
@@ -430,6 +431,7 @@ def test_command_line_runs_in_the_atmosphere_chosen_with_atm(tmp_path, monkeypat
 
     assert "Atmosphere: NRLMSISE-00, at the trajectory's time" in headers["00"]
     assert "Atmosphere: NRLMSIS 2.1, at the trajectory's time" in headers["2.1"]
+    assert np.ndim(rows["00"]) == 1 and len(rows["00"]) == 18
     assert rows["2.1"][5] != rows["00"][5] and rows["2.1"][6] != rows["00"][6]
 
     monkeypatch.setattr(sys, "argv", ["BackwardAtmIntegration", str(tmp_path/"traj.pickle"), "--mass", "1e-3",
@@ -437,6 +439,44 @@ def test_command_line_runs_in_the_atmosphere_chosen_with_atm(tmp_path, monkeypat
     runpy.run_module("wmpl.MetSim.BackwardAtmIntegration", run_name="__main__")
     with open(str(tmp_path/"traj_backward_atm.txt")) as f:
         assert "NRLMSIS 2.1, at 2020-01-01 00:00:00 UTC (--atmtime)" in f.readline()
+
+
+def test_the_saved_file_reports_how_deep_the_reference_point_is(tmp_path, monkeypatch):
+    """ The dynamic pressure, the energy received and the speed the drag adds are in the header of the saved file, as
+        the command line prints them, and the rows still load. """
+
+    traj, state_vect = _exampleStart()
+    savePickle(traj, str(tmp_path), "traj.pickle")
+
+    monkeypatch.setattr(sys, "argv", ["BackwardAtmIntegration", str(tmp_path/"traj.pickle"), "--mass", "1e-3"])
+    runpy.run_module("wmpl.MetSim.BackwardAtmIntegration", run_name="__main__")
+
+    out_path = str(tmp_path/"traj_backward_atm.txt")
+    assert np.loadtxt(out_path).shape == (18,)
+    with open(out_path) as f:
+        header = [line for line in f if line.startswith("#")]
+
+    pressure, energy = referenceLoading(traj.jdt_ref, state_vect)
+    assert len(header) == 3
+    assert "dynamic pressure {:.6g} MPa".format(pressure/1e6) in header[1]
+    assert "energy received {:.4g} MJ/m^2".format(energy/1e6) in header[1]
+    assert re.search(r"the drag adds \d+\.\d\d m/s", header[1])
+
+
+def test_unknown_body_runs_its_realizations_from_the_command_line(tmp_path, monkeypatch):
+    """ The trajectory of the example has no uncertainties: the saved rows still differ in what was drawn. """
+
+    traj, _ = _exampleStart()
+    savePickle(traj, str(tmp_path), "traj.pickle")
+
+    monkeypatch.setattr(sys, "argv", ["BackwardAtmIntegration", str(tmp_path/"traj.pickle"), "--mass", "1e-3",
+        "--unknown_body", "--mc", "3", "--seed", "1"])
+    runpy.run_module("wmpl.MetSim.BackwardAtmIntegration", run_name="__main__")
+
+    rows = np.loadtxt(str(tmp_path/"traj_backward_atm.txt"))
+    assert rows.shape == (4, 18) and len(set(rows[:, 1])) == 4 and len(set(rows[:, 13])) == 4
+    assert len(set(rows[:, 14])) == 4 and len(set(rows[:, 15])) == 4
+    assert np.allclose(rows[0, 13:16], [0.1, 2000.0, 1.21])
 
 
 if __name__ == "__main__":

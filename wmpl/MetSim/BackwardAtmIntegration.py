@@ -21,11 +21,15 @@ which are not followed, cannot be undone. The coefficient is the effective one b
 the run ends, which nothing observed measures. An apparent coefficient fitted to the meteoroid's deceleration (e.g.
 by DynamicMassFit, AlphaBeta or the trajectory solver's --vinitdrag over all its points) includes its erosion, but
 over the observed part, lower down: where the erosion or fragmentation grows with the dynamic pressure, it is larger
-there than above, so taking it overestimates the mass growth. The same holds for Ceplecha et al. (1998)'s 0.014,
-0.042, 0.10 and 0.21 s^2/km^2 for fireball types I, II, IIIA and IIIB, apparent coefficients over whole trajectories
-including their gross fragmentation; single bright meteors range from 0.001 to 0.19 s^2/km^2 (Silber et al. 2015).
-It matters when the run starts deep. Run back to 180 km, the speed there relative to a run with a frozen mass, and
-the mass there over the starting one, were, for sigma = 0.023 and sigma + eta = 0.123 and 0.323 s^2/km^2:
+there than above, so taking it overestimates the mass growth. The same holds for the apparent coefficients of the
+fireball types of Ceplecha et al. (1998, Table XVII): 0.014, 0.042, 0.10 and 0.21 s^2/km^2 for the types I, II, IIIA
+and IIIB, of densities 3700, 2000, 750 and 270 kg/m^3. They are averages over whole trajectories and reflect mostly
+the fragmentation (Ceplecha and ReVelle 2005); in the fits behind them a fragmentation at one point is fitted apart
+and the continuous one stays in the coefficient (Ceplecha et al. 1998, Sect. 5.2.2). Table VIII there gives 0.0013 to
+0.19 for single fireballs brighter than magnitude -10. Ceplecha (1988, Table 1) has the same densities, with 0.017 and
+0.041 for the first two types, and Vida et al. (2018) take 0.042 and 0.10 from Table XVII. It matters when the run
+starts deep. Run back to 180 km, the speed there relative to a run with a frozen mass, and the mass there over the
+starting one, were, for sigma = 0.023 and sigma + eta = 0.123 and 0.323 s^2/km^2:
 
 | Start | Speed change (m/s) | Mass ratio |
 |---|---|---|
@@ -81,6 +85,24 @@ over 30 m/s, against 2 of the 4 for a pressure over 0.04 MPa. That pressure, of 
 of them never reach it. The command lines also report the nominal run with the coefficients of Ceplecha's types I and
 IIIB. Whatever is uncertain is drawn for each Monte Carlo realization with --mass_sigma, --density_sigma, --ga_sigma and
 --ablation_coeff_sigma, and --erosion_coeff_sigma and --erosion_height_sigma with the erosion given apart.
+
+--unknown_body draws them all for a body of unknown kind, so nobody has to choose them from the pressure: the spread
+they give shrinks by itself the higher the start. No paper publishes these ranges. They were chosen here around
+published values, 95% of the draws being within: 0.014-0.36 s^2/km^2, from type I of Ceplecha et al. (1998, Table
+XVII) to past type IIIB; 430-5900 kg/m^3, which leaves out the 270 of type IIIB; Gamma*A 0.53-2.4, around the 1.21 of
+a sphere with Gamma = 1 and reaching the 0.55 with the Gamma = 0.46 of their Table XIII; and a factor of 2 in the
+mass, as Vida et al. (2018) had to scale photometric masses by 0.5 and 4. They were tested on synthetic single bodies
+only. On 396 reference points of eroding bodies and of bodies of those types, with the mass given right, half or twice
+the true one, the true speed at 180 km was inside the 95% range of the realizations in 84% of the cases and the true
+mass in 97%: 96 and 95% with a true Gamma*A of 1.21, 73 and 99% with 0.55, where chondrites and a mass given too low
+fail most. Limits taken exactly at types I to IIIB (0.014-0.21 and 270-3700) gave 70 and 96%, and 45% for the speed
+with 0.55. The range is wide, as little is known from deep: for eroding bodies with their mass known, 12, 38, 110, 364
+and 1108 m/s from 0.001, 0.003, 0.01, 0.03 and 0.1 MPa.
+
+Against a published number: from the point where Vida et al. (2018, Fig. 5) detect 0.1 g at 20 km/s (19.870 km/s at
+88.38 km, 45 deg from the zenith, 1510 kg/m^3, sigma 0.1 s^2/km^2, Gamma*A 1.21, NRLMSISE-00 at 45N 0E on 2000-01-01
+12:00 UTC), the run back gives 125-134 m/s of drag for 0.1-0.08 g at that point, against their 130 m/s, gravity apart.
+Their simulations also start at 180 km, with Gamma = 1, A = 1.21 and RK4 steps of 1 ms, as here.
 """
 
 import argparse
@@ -139,6 +161,14 @@ def groundSpeed(jd, state_vect):
 
 # Longest step of a run back (s). See the module docstring
 BACKWARD_MAX_DT = 0.001
+
+# What --unknown_body draws, see the module docstring: means and standard deviations in s^2/km^2 and kg/m^3, the standard
+#   deviation of Gamma*A, that of the mass relative to it, and the realizations of this module's command line
+UNKNOWN_BODY_SIGMA = (0.1, 0.1)
+UNKNOWN_BODY_DENSITY = (2000.0, 1500.0)
+UNKNOWN_BODY_GA_SIGMA = 0.48
+UNKNOWN_BODY_MASS_SIGMA = 0.78
+UNKNOWN_BODY_MC = 200
 
 
 def backwardConstants(jd_ref, state_vect, m_init, h_kill=180000.0, const=None, body_erosion=False):
@@ -374,8 +404,9 @@ def addBackwardArguments(arg_parser):
         "end is set by its value over the first few km "
         "above the starting point, so the best is one fitted at the start of the observed part (e.g. by "
         "DynamicMassFit or the trajectory solver's --vinitdrag); farther up it matters little for the speed and "
-        "likely overestimates the mass growth. Ceplecha's 0.014, 0.042, 0.10 and 0.21 for fireball types I, II, "
-        "IIIA and IIIB are apparent coefficients over whole trajectories, and 0.005 is the intrinsic one of "
+        "likely overestimates the mass growth. The 0.014, 0.042, 0.10 and 0.21 for fireball types I, II, IIIA and "
+        "IIIB (Ceplecha et al. 1998, Table XVII) are apparent coefficients over whole trajectories, and 0.005 is the "
+        "intrinsic one of "
         "chondritic fireballs (Borovicka et al. 2020). Default: MetSim's, {:g}.".format(Constants().sigma*1e6))
 
     arg_parser.add_argument("--ablation_coeff_sigma", type=float, default=0.0,
@@ -416,6 +447,16 @@ def addBackwardArguments(arg_parser):
     arg_parser.add_argument("--ga_sigma", type=float, default=0.0,
         help="1-sigma uncertainty of --ga. Each Monte Carlo realization runs with a value drawn from a log-normal "
         "distribution with --ga as its mean and this standard deviation. Default: 0.")
+
+    arg_parser.add_argument("--unknown_body", action="store_true",
+        help="The kind of body is not known: for what is left at its default, draw the ablation coefficient "
+        "({:g} +/- {:g} s^2/km^2, spanning fireball types I to IIIB of Ceplecha et al. 1998), the density ({:g} +/- {:g} "
+        "kg/m^3), Gamma*A (--ga +/- {:g}) and the mass (+/- {:g} of --mass, about a factor of 2) for each realization. These "
+        "ranges are chosen here and tested on synthetic bodies, not published. A pair like --density and --density_sigma "
+        "is kept if either is given. Needs --mc in REBOUND; in this module's command line it defaults to {:d} "
+        "realizations. It cannot be combined with --erosion_coeff, as these coefficients already include the "
+        "erosion.".format(UNKNOWN_BODY_SIGMA[0], UNKNOWN_BODY_SIGMA[1], UNKNOWN_BODY_DENSITY[0], UNKNOWN_BODY_DENSITY[1],
+        UNKNOWN_BODY_GA_SIGMA, UNKNOWN_BODY_MASS_SIGMA, UNKNOWN_BODY_MC))
 
     # The MSIS model of the air density
     addAtmosphereArguments(arg_parser)
@@ -472,6 +513,40 @@ def checkBackwardArguments(arg_parser, args):
     if args.ga_sigma < 0:
         arg_parser.error("--ga_sigma cannot be negative.")
 
+    if args.unknown_body:
+        applyUnknownBody(arg_parser, args)
+
+
+def applyUnknownBody(arg_parser, args):
+    """ What --unknown_body draws: the means and spreads of a body of unknown kind, for what is left at its default. A
+        pair of a value and its spread is kept if either is given, a value equal to its default counting as not given. """
+
+    if args.erosion_coeff > 0:
+        arg_parser.error("--unknown_body draws coefficients that already include the erosion, so it cannot be used with "
+            "--erosion_coeff.")
+
+    if getattr(args, "mc", 0) <= 1:
+        arg_parser.error("--unknown_body draws the body of each realization, so it needs them: give --mc.")
+
+    def notGiven(*names):
+        return all(getattr(args, name) == arg_parser.get_default(name) for name in names)
+
+    if notGiven("ablation_coeff", "ablation_coeff_sigma"):
+        args.ablation_coeff, args.ablation_coeff_sigma = UNKNOWN_BODY_SIGMA
+
+    if notGiven("density", "density_sigma"):
+        args.density, args.density_sigma = UNKNOWN_BODY_DENSITY
+
+    if notGiven("ga", "ga_sigma"):
+        args.ga_sigma = UNKNOWN_BODY_GA_SIGMA
+
+    if notGiven("mass_sigma"):
+        args.mass_sigma = UNKNOWN_BODY_MASS_SIGMA*args.mass
+
+    print("Body of unknown kind (--unknown_body), drawn for each realization: ablation coefficient {:g} +/- {:g} s^2/km^2, "
+        "density {:g} +/- {:g} kg/m^3, Gamma*A {:g} +/- {:g}, mass {:g} +/- {:g} kg.".format(args.ablation_coeff,
+        args.ablation_coeff_sigma, args.density, args.density_sigma, args.ga, args.ga_sigma, args.mass, args.mass_sigma))
+
 
 def checkBackHeight(arg_parser, jd_ref, state_vect, h_kill):
     """ Stop with a command-line error for a height to run back to that is not above the starting point. """
@@ -489,7 +564,7 @@ def unusedBackwardArguments(arg_parser, args):
 
     names = ["mass_sigma", "freeze_mass", "ablation_coeff", "ablation_coeff_sigma", "erosion_coeff",
         "erosion_coeff_sigma", "erosion_height", "erosion_height_sigma", "density_sigma", "ga", "ga_sigma", "atm",
-        "atmtime"]
+        "atmtime", "unknown_body"]
 
     return ["--" + name for name in names if getattr(args, name) != arg_parser.get_default(name)]
 
@@ -582,8 +657,8 @@ def depthWarnings(pressure, gain, v_init_stddev=None):
         text = ("WARNING: The drag above the reference point adds {:.1f} m/s to the speed, more than {:s}. It goes as "
             "Gamma*A rho^(-2/3) m^(-1/3), so the speed at the end depends on --mass, --density and --ga as much as on "
             "the ablation coefficient or more: give their uncertainties with --mass_sigma, --density_sigma, --ga_sigma "
-            "and --ablation_coeff_sigma. Run back with the defaults, synthetic eroding bodies were off by 6-116% of "
-            "this speed (median 13%).").format(gain, ("the {:.2f} m/s uncertainty of the initial velocity".format(limit)
+            "and --ablation_coeff_sigma, or with --unknown_body if the kind of body is not known. Run back with the "
+            "defaults, synthetic eroding bodies were off by 6-116% of this speed (median 13%).").format(gain, ("the {:.2f} m/s uncertainty of the initial velocity".format(limit)
             if known else "{:.1f} m/s".format(limit)))
 
         if pressure < FIRST_FRAGMENTATION_PRESSURE:
@@ -653,6 +728,14 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     is not drawn, the mass is not frozen and the erosion is not given apart, it also prints the speed and mass of the
     nominal run with the apparent coefficients of Ceplecha's fireball types I and IIIB.
     """
+
+    # Without the trajectory's uncertainties there is no state vector to draw, but the physical parameters still are
+    drawn = (args.mass_sigma, args.ablation_coeff_sigma, args.density_sigma, args.ga_sigma, args.erosion_coeff_sigma,
+        args.erosion_height_sigma)
+    if (len(state_vects) == 1) and (getattr(args, "mc", 0) > 1) and any(spread > 0 for spread in drawn):
+        print("The trajectory has no uncertainties, so its {:d} realizations only differ in the parameters "
+            "drawn.".format(args.mc))
+        state_vects = list(state_vects)*(args.mc + 1)
 
     if (args.mass_sigma > 0) and (len(state_vects) == 1):
         print("--mass_sigma has no effect without Monte Carlo realizations.")
@@ -791,6 +874,9 @@ if __name__ == "__main__":
 
     args = arg_parser.parse_args()
 
+    if args.unknown_body and (args.mc <= 1):
+        args.mc = UNKNOWN_BODY_MC
+
     checkBackwardArguments(arg_parser, args)
     setAtmosphere(args)
 
@@ -833,12 +919,18 @@ if __name__ == "__main__":
             print("Realizations {:s}: 2.5/50/97.5 percentiles {:s} {:s}".format(name,
                 " / ".join("{:.6g}".format(v) for v in np.percentile(rows[1:, col], [2.5, 50, 97.5])), unit))
 
+    # How deep the reference point is, as printed by backwardStatesFromArguments, so the file can be judged by itself
+    pressure, energy = referenceLoading(traj.jdt_ref, state_vect)
+    gain = dragSpeedGain(traj.jdt_ref, state_vect, jd, states[0])
+
     out_path = os.path.splitext(args.pickle_path)[0] + "_backward_atm.txt"
     np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*17, header="JD {:.10f} (UTC), {:.6f} s from the reference "
         "point. Row 0 is the nominal solution, the others its realizations. State vectors in ECI, true equator and "
-        "equinox of date, velocity to the radiant. Atmosphere: {:s}.\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
+        "equinox of date, velocity to the radiant. Atmosphere: {:s}.\nAt the reference point: dynamic pressure {:.6g} "
+        "MPa (rho_air v^2, speed relative to the ground), energy received {:.4g} MJ/m^2. Above it the drag adds {:.2f} "
+        "m/s to the speed of the nominal solution.\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
         "height MSL (m), speed (m/s), mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s), ablation "
         "coefficient (s^2/km^2), bulk density (kg/m^3), Gamma*A, erosion coefficient (s^2/km^2), erosion height (km, "
         "nan without erosion)".format(jd,
-        (jd - traj.jdt_ref)*86400, atmosphereDescription()))
+        (jd - traj.jdt_ref)*86400, atmosphereDescription(), pressure/1e6, energy/1e6, gain))
     print("Saved:", out_path)

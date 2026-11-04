@@ -17,24 +17,25 @@ import pytest
 
 from wmpl.MetSim.BackwardAtmIntegration import BACKWARD_GA, BACKWARD_MAX_DT, _eciToEcef, addBackwardArguments, \
     backwardConstants, backwardState, backwardStates, backwardStatesFromArguments, checkBackHeight, \
-    checkBackwardArguments, depthWarnings, dragSpeedGain, groundSpeed, unusedBackwardArguments
+    checkBackwardArguments, depthWarnings, dragSpeedGain, groundSpeed, unusedBackwardArguments, UNKNOWN_BODY_DENSITY, \
+    UNKNOWN_BODY_GA_SIGMA, UNKNOWN_BODY_MASS_SIGMA, UNKNOWN_BODY_SIGMA
 from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, runSimulation
 from wmpl.Utils.AtmosphereDensity import getAtmDensityTable
-from wmpl.Utils.TrajConversions import enu2ECEF, geo2Cartesian
+from wmpl.Utils.TrajConversions import date2JD, enu2ECEF, geo2Cartesian
 
 
 JD = 2460600.25
 LAT, LON = np.radians(45.0), np.radians(10.0)
 
 
-def _stateVector(ht, v_ground, zenith_deg=45.0, azim_deg=90.0):
-    """ ECI state vector, with the velocity to the radiant, of a meteor at LAT, LON and ht moving at v_ground relative to
+def _stateVector(ht, v_ground, zenith_deg=45.0, azim_deg=90.0, jd=JD, lat=LAT, lon=LON):
+    """ ECI state vector, with the velocity to the radiant, of a meteor at lat, lon and ht moving at v_ground relative to
         the ground. """
 
-    pos = np.array(geo2Cartesian(LAT, LON, ht, JD))
+    pos = np.array(geo2Cartesian(lat, lon, ht, jd))
     azim, elev = np.radians(azim_deg), np.radians(90.0 - zenith_deg)
     rad_enu = [np.cos(elev)*np.sin(azim), np.cos(elev)*np.cos(azim), np.sin(elev)]
-    rad_eci = _eciToEcef(JD).T.dot(np.array(enu2ECEF(LAT, LON, *rad_enu)))
+    rad_eci = _eciToEcef(jd).T.dot(np.array(enu2ECEF(lat, lon, *rad_enu)))
 
     return np.concatenate([pos, v_ground*rad_eci - np.cross([0.0, 0.0, EARTH_ROTATION_RATE], pos)])
 
@@ -524,3 +525,88 @@ def test_back_time_on_its_own_starts_the_run_back_where_the_height_is_optional()
     assert parser.parse_args(["--back_time", "2", "--back_height", "150"]).back_height == 150.0
     assert parser.parse_args(["--back_height", "150", "--back_time", "2"]).back_height == 150.0
 
+
+def test_the_drag_gives_the_speed_difference_published_by_vida_et_al_2018():
+    """ Vida et al. (2018), Fig. 5: 0.1 g entering at 20 km/s, 45 deg from the zenith, of 1510 kg/m^3, sigma 0.1 s^2/km^2
+        and Gamma*A = 1.21, is detected at 88.38 km with 19.870 km/s, 130 m/s below its speed out of the atmosphere with
+        gravity apart. Their ablation model is another, so the mass left there is not known: 0.1-0.08 g give 125-134
+        m/s. """
+
+    jd = date2JD(2000, 1, 1, 12, 0, 0)
+    state = _stateVector(88380.0, 19870.0, jd=jd, lat=np.radians(45.0), lon=0.0)
+
+    const = _noErosion()
+    const.rho, const.sigma, const.gamma = 1510.0, 0.1e-6, 1.21/const.shape_factor
+    jd_end, states, _ = backwardStates(jd, [state], 0.9e-4, const=const)
+
+    assert abs(dragSpeedGain(jd, state, jd_end, states[0]) - 130.0) < 5.0
+
+
+def _unknownBody(*argv):
+    parser = _parser()
+    args = parser.parse_args(["--mass", "2.0"] + list(argv))
+    args.mc = 3
+    checkBackwardArguments(parser, args)
+
+    return args
+
+
+def test_unknown_body_draws_what_is_left_at_its_default():
+    """ It fills what was not given, keeps a pair if either of it was given, and --ga stays the mean of Gamma*A. """
+
+    args = _unknownBody("--unknown_body")
+    assert (args.ablation_coeff, args.ablation_coeff_sigma) == UNKNOWN_BODY_SIGMA
+    assert (args.density, args.density_sigma) == UNKNOWN_BODY_DENSITY
+    assert (args.ga, args.ga_sigma) == (BACKWARD_GA, UNKNOWN_BODY_GA_SIGMA)
+    assert args.mass_sigma == UNKNOWN_BODY_MASS_SIGMA*2.0
+
+    args = _unknownBody("--unknown_body", "--density", "3300", "--ablation_coeff_sigma", "0.01", "--ga", "0.55",
+        "--mass_sigma", "0.1")
+    assert (args.density, args.density_sigma) == (3300.0, 0.0)
+    assert args.ablation_coeff_sigma == 0.01 and args.ablation_coeff == _parser().get_default("ablation_coeff")
+    assert (args.ga, args.ga_sigma) == (0.55, 0.0)
+    assert args.mass_sigma == 0.1
+
+    # Without the option nothing changes
+    args = _unknownBody()
+    assert args.density_sigma == 0.0 and args.ablation_coeff_sigma == 0.0 and args.ga_sigma == 0.0
+    assert args.mass_sigma == 0.0
+
+
+def test_unknown_body_is_refused_where_it_cannot_work():
+    """ With the erosion given apart its coefficients would count it twice; without realizations it draws nothing;
+        without a run back through the atmosphere, in REBOUND, it does not apply. """
+
+    with pytest.raises(SystemExit):
+        _unknownBody("--unknown_body", "--erosion_coeff", "0.1", "--erosion_height", "80")
+
+    parser = _parser()
+    args = parser.parse_args(["--mass", "1.0", "--unknown_body"])
+    with pytest.raises(SystemExit):
+        checkBackwardArguments(parser, args)
+
+    assert unusedBackwardArguments(parser, args) == ["--unknown_body"]
+
+
+def test_realizations_are_drawn_without_uncertainties_in_the_trajectory(capsys):
+    """ A trajectory without uncertainties has no state vector to draw, but the body of each realization still is. """
+
+    parser = _parser()
+    args = parser.parse_args(["--mass", "1e-3", "--unknown_body"])
+    args.mc = 3
+    checkBackwardArguments(parser, args)
+
+    state = _stateVector(90e3, 20e3)
+    (_, states, masses), m_inits, sigmas, rhos, gas, _, _ = backwardStatesFromArguments(_traj(), [state], args, 180e3,
+        random_seed=1)
+
+    assert len(states) == 4 and len(set(m_inits)) == 4 and len(set(sigmas)) == 4 and len(set(rhos)) == 4
+    assert len(set(gas)) == 4 and len(set(masses)) == 4
+    assert m_inits[0] == 1e-3 and sigmas[0] == UNKNOWN_BODY_SIGMA[0] and rhos[0] == UNKNOWN_BODY_DENSITY[0]
+    assert gas[0] == BACKWARD_GA
+    assert "only differ in the parameters drawn" in capsys.readouterr().out
+
+    # Without realizations asked for, the spreads have no effect, as they say
+    args = parser.parse_args(["--mass", "1e-3", "--density_sigma", "100"])
+    (_, states, _), *_ = backwardStatesFromArguments(_traj(), [state], args, 180e3, random_seed=1)
+    assert len(states) == 1 and "--density_sigma has no effect" in capsys.readouterr().out
