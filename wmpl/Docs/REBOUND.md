@@ -339,7 +339,8 @@ which is recoverable, but passing it is less work than reading it back out of th
 ## Chaos: MEGNO
 
 `--compute_megno` runs a second, separate integration of the nominal solution over the same span, with
-Newtonian gravity only and always with IAS15, and computes the MEGNO chaos indicator.
+Newtonian gravity only and always with IAS15, and computes the MEGNO chaos indicator. In a run with clones
+it does the same for 32 of them, which give the Lyapunov time to quote (see [below](#over-the-clones)).
 
 MEGNO (Mean Exponential Growth factor of Nearby Orbits) follows how fast a small deviation from the
 orbit grows. Its running mean ⟨Y⟩ tends to **2** for a regular, quasi-periodic orbit, tends to **0**
@@ -393,6 +394,7 @@ fewer than 10 orbital periods (or a tenth of the run), since the fit is not reli
 Lyapunov time is of the nominal orbit alone, in its Newtonian re-integration; for how long the clones
 keep their order, see the [Predictability horizon](#predictability-horizon).
 
+<a id="over-the-clones"></a>
 **Over the clones.** The Lyapunov time of one orbit is one draw. In a run with clones and with enough
 orbits for a verdict, `--compute_megno` also integrates the first 32 clones in the same way, sharing the
 cores. The report gives their verdicts and the median of their times with its 16–84% range, which is the
