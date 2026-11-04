@@ -1026,7 +1026,11 @@ def plotDragFit(drag_fit, show=True):
 
         ax_ht.scatter(obs.time_data[used], obs.model_ht[used]/1000, label=obs.station_id, marker='x', s=10, \
             zorder=3)
-        ax_vel.scatter(obs.velocities[used]/1000, obs.model_ht[used]/1000, marker='x', s=10, zorder=3)
+
+        # The first point of every station has no velocity
+        used_vel = used.copy()
+        used_vel[0] = False
+        ax_vel.scatter(obs.velocities[used_vel]/1000, obs.model_ht[used_vel]/1000, marker='x', s=10, zorder=3)
 
 
     # Plot the model, with the extrapolated parts dashed

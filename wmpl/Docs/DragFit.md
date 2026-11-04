@@ -147,6 +147,20 @@ coefficient against height with its 1 sigma band. The data are the solver's poin
 velocities of the data are point-to-point differences, which are noisy. The model is solid in the
 observed part and dashed where it is extrapolated.
 
+![Drag fit of the 2022-04-18 fireball over Ontario](figures/DragFit_example.png)
+
+The plots for the fireball of the table above:
+
+- **Height against time.** The model goes through the points of all six cameras. Above the beginning
+  it continues without drag, and below the end at 30 km it continues as a drag flight, which goes
+  beyond the plotted time range down to 20 km, where the path has bent by 5 deg.
+- **Velocity against height.** The meteor barely decelerates above 50 km, and slows from 14.3 km/s at
+  50 km to 7.6 km/s at the end. The drag flight below the end slows it down to 0.25 km/s at 20 km.
+- **Ballistic coefficient against height.** `K` is constant down to 36 km and grows by a factor of
+  1.64 in the last segment (2.2 sigma). The MetSim model of this fireball has a fragmentation of 70% of
+  the mass of the main fragment at 33.8 km, which grows `K` by 1.56. The band widens above 60 km,
+  where the deceleration is too small to constrain `K`.
+
 **The samples** printed by `SampleTrajectoryPositions` give, for every sample, the time, the
 geographical coordinates, the ground-fixed azimuth and elevation of the radiant, and the velocity in
 the ECI frame (`Vel`) and relative to the ground (`Vgnd`). Samples outside the observed part are
