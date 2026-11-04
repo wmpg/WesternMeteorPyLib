@@ -194,7 +194,9 @@ def _checkReboundxAttached(sim):
             "This installs the latest reboundx, which needs rebound 5 or newer, so update rebound "
             "first. To keep this rebound, pin the reboundx released with it instead by appending "
             "'==<version>' (e.g. reboundx 4.3.0 for rebound 4.3.0); a newer reboundx does not compile "
-            "against an older rebound.".format(rb.__version__, reboundx.__version__))
+            "against an older rebound. If reboundx cannot be built on this platform at all, uninstall it "
+            "(pip uninstall reboundx): wmpl then reports REBOUND as unavailable instead of failing "
+            "here.".format(rb.__version__, reboundx.__version__))
 
 
 # Hill-sphere radii in AU used for close-encounter detection.
