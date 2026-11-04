@@ -104,6 +104,23 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
     return dyn_mass
 
 
+def ballisticCoeffMass(ballistic_coeff, bulk_density, gamma_a):
+    """ Calculate the mass of a body from its ballistic coefficient K = Gamma*A/(m^(1/3)*rho_m^(2/3)), the
+        coefficient of the drag equation dv/dt = -K*rho_atm*v^2. This is the dynamic mass, as
+        K = decel/(rho_atm*v^2).
+
+    Arguments:
+        ballistic_coeff: [float or ndarray] Ballistic coefficient K (m^2/kg).
+        bulk_density: [float] Bulk density of the body (kg/m^3).
+        gamma_a: [float] Product of the drag coefficient Gamma and the shape factor A.
+
+    Return:
+        [float or ndarray] Mass (kg).
+    """
+
+    return (gamma_a/(ballistic_coeff*bulk_density**(2.0/3)))**3
+
+
 def calcIntensity(mag_abs, P_0m=840.0):
     """ Calculate the radiated power (intensity) from absolute magnitudes.
 
