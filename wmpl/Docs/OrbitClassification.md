@@ -159,7 +159,8 @@ reliable.
 The criteria above read one orbit. Shober et al. (2024, A&A 687, A181) asked instead how the orbit
 *behaves*: integrate clones of it 10 000 years back and count how many raise their perihelion above
 2.5 AU, as Jupiter-family comets do and asteroids on comet-like orbits rarely do. `--dynamics` runs
-this through [`wmpl.Rebound.REBOUND`](REBOUND.md), on a trajectory pickle:
+this through [`wmpl.Rebound.REBOUND`](REBOUND.md), on a trajectory pickle or, further below, on published
+elements:
 
 ```
 python -m wmpl.Utils.OrbitClassification traj.pickle --dynamics              # adapted mode
@@ -204,6 +205,24 @@ Three choices are not in the paper:
 **Cost.** With the setup of `shober2024`, 360 clones of 21P took a mean of 102 s each over 10 000
 years, on 10 cores of a machine that had other work. That makes about 30 CPU-hours for the 1000
 clones on such an orbit, and minutes for an orbit whose class settles in one batch.
+
+**From published elements.** `shober2024` also runs without a pickle, from the elements and the time of the
+fireball, here those of Table 2 of Madiedo et al. (2014):
+
+```
+python -m wmpl.Utils.OrbitClassification -a 4.3 -e 0.79 -i 7.1 -p 40.95 -n 203.945 --dynamics shober2024 \
+    --date "2013-04-13 21:43:55.4" --sigma_a 0.7 --sigma_e 0.04 --sigma_i 0.1 --sigma_node 1e-4 --sigma_peri 0.03
+```
+
+A list of elements does not say where on the orbit the meteoroid was, but a fireball is at the Earth, so the
+clones start at the node the Earth was at that moment (`wmpl.Utils.OrbitFromElements`). The report gives that
+node, its distance from the Earth and the geocentric speed there, to compare with the paper. A node more than
+0.05 AU from the Earth is refused, as the elements or the date are then wrong: published fireballs give 0.0004 to
+0.012 AU. `--max_node_miss` raises the limit. Without the five `--sigma` options, the clones take the
+uncertainties the paper assumed for MORP. a and e are drawn independently, as the paper does, which spreads the
+perihelion of the clones far beyond its measured error when a is poorly known: for the fireball of Trigo-Rodriguez
+et al. (2009), P was 10% this way and 4% with q held at its measured value. The adapted mode needs a pickle,
+since it takes the clones from the full covariance.
 
 **Checkpoint.** A run this long can be cut. `--dynamics_checkpoint FILE` saves each clone of `shober2024`,
 or each batch of the adapted mode, as soon as it ends:

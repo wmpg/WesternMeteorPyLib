@@ -1534,7 +1534,7 @@ def elementUncertainties(traj):
         return dict(SHOBER2024_DEFAULT_SIGMA), "assumed by Shober et al. for MORP"
 
     return {'a': unc.a, 'e': unc.e, 'i': np.degrees(unc.i), 'node': np.degrees(unc.node),
-        'peri': np.degrees(unc.peri)}, "Monte Carlo of the trajectory"
+        'peri': np.degrees(unc.peri)}, getattr(unc, 'source', "Monte Carlo of the trajectory")
 
 
 def drawElementClones(orbit, sigma, n_clones, rng):
@@ -1823,6 +1823,7 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
             'integrator': 'ias15', 'gr': 'none', 'beta': None, 'seed': seed,
             'n_clones': n_clones, 'sigma': sigma, 'sigma_source': sigma_source,
             'start_hill': SHOBER2024_START_HILL, 'start_days_before': dt_days,
+            'node_passage': getattr(traj, 'node_passage', None),
             'output_years': output_years, 'q_limit': JFC_DYNAMICS_Q_LIMIT,
             'a_limit': JFC_DYNAMICS_A_LIMIT, 'p_threshold': JFC_DYNAMICS_P_THRESHOLD,
             'encounter_hill': encounter_hill, 'confidence': confidence, 'checkpoint': checkpoint_path},
@@ -1871,6 +1872,12 @@ def formatJupiterFamilyDynamics(result):
             "    Limits      : {:s}".format(limits),
             "  Result",
             ]
+
+        # What a reader can compare with the paper the elements came from
+        if s.get('node_passage') is not None:
+            lines.insert(-1, "    Orbit       : from the elements given; at the {:s} node, {:.4f} AU from the Earth, "
+                "v_g = {:.1f} km/s".format(s['node_passage']['node'], s['node_passage']['miss_au'],
+                s['node_passage']['v_g']/1000.0))
 
     else:
 
@@ -1952,7 +1959,11 @@ if __name__ == "__main__":
     import json
     import argparse
 
+    import datetime
+
+    from wmpl.Utils.OrbitFromElements import ELEMENTS_MAX_NODE_MISS, trajectoryFromElements
     from wmpl.Utils.Pickling import loadPickle
+    from wmpl.Utils.TrajConversions import datetime2JD
 
     # The choices of the dynamics options are those of the integrator, so that they cannot drift apart
     from wmpl.Rebound.REBOUND import GR_MODELS, INTEGRATORS, radiationPressureBeta
@@ -1992,8 +2003,8 @@ if __name__ == "__main__":
     dyn = arg_parser.add_argument_group('Jupiter-family dynamics',
         "Integrate clones of the orbit backwards with wmpl.Rebound.REBOUND and classify whether it "
         "moved like a Jupiter-family comet: the fraction of clones whose perihelion rises above 2.5 AU, "
-        "after Shober et al. (2024), A&A 687, A181. Needs a trajectory pickle, rebound/reboundx and the "
-        "DE430 ephemeris. The adapted mode draws the clones from the Monte Carlo state-vector "
+        "after Shober et al. (2024), A&A 687, A181. Needs rebound/reboundx and the DE430 ephemeris. The "
+        "orbit comes from a trajectory pickle or, with shober2024, from the elements with --date. The adapted mode draws the clones from the Monte Carlo state-vector "
         "covariance and integrates them in batches until the class is settled or --max_clones is "
         "reached. The shober2024 mode repeats the setup of the paper: 1000 clones from the "
         "uncertainties of the elements (or, without Monte Carlo, those the paper assumed for MORP), "
@@ -2029,6 +2040,17 @@ if __name__ == "__main__":
         help="Processes for the clones. Default: all cores but one.")
     dyn.add_argument('--dynamics_save', metavar='FILE', type=str, default=None, \
         help="Save the result of the classification, with its assumptions, to this JSON file.")
+    dyn.add_argument('--date', metavar='DATE', type=str, default=None, \
+        help="With the elements given by hand: UTC time of the fireball, as 'YYYY-MM-DD HH:MM:SS'. It says which "
+        "node of the orbit the Earth was at, where the clones start. --q or --a, --e, --i, --peri and --node are "
+        "all needed.")
+    for name, unit in (('a', 'AU'), ('e', ''), ('i', 'deg'), ('node', 'deg'), ('peri', 'deg')):
+        dyn.add_argument('--sigma_' + name, metavar='SIGMA', type=float, default=None, \
+            help="With --date: 1-sigma of {:s}{:s}. Give all five, or none for the values Shober et al. assumed for "
+            "MORP.".format(name, ' ({:s})'.format(unit) if unit else ''))
+    dyn.add_argument('--max_node_miss', metavar='AU', type=float, default=None, \
+        help="With --date: farthest the node may lie from the Earth, or the elements are refused. Default: 0.05 AU; "
+        "the elements of three published fireballs give 0.0004 to 0.012 AU.")
     dyn.add_argument('--dynamics_checkpoint', metavar='FILE', type=str, default=None, \
         help="Save each clone (shober2024) or batch (adapted) to this file as soon as it ends. Run the same "
         "command again to go on from there after an interruption, with the same clones. A file from a run "
@@ -2190,8 +2212,40 @@ if __name__ == "__main__":
 
     if cml_args.dynamics is not None:
 
+        element_options = ['date', 'max_node_miss'] + ['sigma_' + name for name in SHOBER2024_DEFAULT_SIGMA]
+        given = [name for name in element_options if getattr(cml_args, name) is not None]
+
+        if (cml_args.traj_path is not None) and given:
+            reportError("--{:s} goes with the elements given by hand, not with a trajectory pickle.".format(given[0]))
+
         if cml_args.traj_path is None:
-            reportError("--dynamics needs a trajectory pickle: the clones are drawn from its orbit.")
+
+            if cml_args.dynamics != 'shober2024':
+                reportError("The adapted mode of --dynamics draws the clones from the covariance of a trajectory "
+                    "pickle. With the elements given by hand, use --dynamics shober2024.")
+
+            if (peri is None) or (cml_args.date is None):
+                reportError("--dynamics with the elements given by hand needs --q or --a, --e, --i, --peri, --node "
+                    "and --date.")
+
+            sigma = {name: getattr(cml_args, 'sigma_' + name) for name in SHOBER2024_DEFAULT_SIGMA}
+            n_given = sum(value is not None for value in sigma.values())
+
+            if n_given not in (0, len(sigma)):
+                reportError("Give all of --sigma_a, --sigma_e, --sigma_i, --sigma_node and --sigma_peri, or none.")
+
+            try:
+                jd_utc = datetime2JD(datetime.datetime.fromisoformat(cml_args.date))
+            except ValueError:
+                reportError("--date has to be given as 'YYYY-MM-DD HH:MM:SS', got '{:s}'.".format(cml_args.date))
+
+            try:
+                traj = trajectoryFromElements(a, e, np.degrees(incl), np.degrees(node), np.degrees(peri), jd_utc,
+                    sigma=sigma if n_given else None, max_node_miss=ELEMENTS_MAX_NODE_MISS
+                    if cml_args.max_node_miss is None else cml_args.max_node_miss)
+
+            except (ImportError, ValueError, OSError, RuntimeError) as err:
+                reportError("--dynamics: {:s}".format(str(err)))
 
         if cml_args.dynamics == 'shober2024':
 
