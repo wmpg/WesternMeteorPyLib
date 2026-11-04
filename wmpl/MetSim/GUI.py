@@ -4078,9 +4078,11 @@ class MetSimGUI(QMainWindow):
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x', 
                     linestyle='dashed', label=str(site), markersize=5, linewidth=1)
 
-                # Keep track of the faintest and the brightest magnitude
-                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
-                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+                # Keep track of the faintest and the brightest magnitude, skipping the points without one
+                abs_mag_finite = abs_mag_data[np.isfinite(abs_mag_data)]
+                if len(abs_mag_finite):
+                    mag_brightest = min(mag_brightest, np.min(abs_mag_finite))
+                    mag_faintest = max(mag_faintest, np.max(abs_mag_finite))
 
 
         # Plot additional observations from the .met file (if available)
@@ -4234,6 +4236,11 @@ class MetSimGUI(QMainWindow):
 
         self.magnitudePlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, \
             self.plot_beg_ht + BEG_HT_PAD])
+        # Use the default limits if no magnitudes were plotted
+        if not (np.isfinite(mag_brightest) and np.isfinite(mag_faintest)):
+            mag_brightest = -2.0
+            mag_faintest = 6.0
+
         self.magnitudePlot.canvas.axes.set_xlim([mag_brightest - 1, mag_faintest + 1])
         self.magnitudePlot.canvas.axes.invert_xaxis()
 
