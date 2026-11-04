@@ -3800,25 +3800,25 @@ class ObservationData:
                     self.fps_lum = fps_prior
                     self.fps_lag = fps_prior
 
-        # Compute the height step of every point between the frames of its station (heights sorted from the
-        #   highest), before the points are filtered, for the pick position adjustment below
-        height_step = np.zeros(len(lum_data['height']))
-        for station in np.unique(lum_data['flag_station']):
-            indices = np.where(lum_data['flag_station'] == station)[0]
-            indices = indices[np.argsort(lum_data['height'][indices])[::-1]]
-            if len(indices) > 1:
-                diffs = np.diff(lum_data['height'][indices])
-                height_step[indices] = np.concatenate(([diffs[0]], diffs))
-        lum_data['height_step'] = height_step
-
         # for the lum data delete all the keys that have values above 8
         if np.any(lum_data['absolute_magnitudes'] > 8):
             print(obs.station_id,'Found values below 8 absolute magnitudes :', lum_data['absolute_magnitudes'][lum_data['absolute_magnitudes'] > 8])
 
-        # delete any values above 8 absolute_magnitudes and the points without a magnitude (NaN), and the
-        #   corresponding values in the other arrays
-        if not np.all(lum_data['absolute_magnitudes'] < 8):
-            lum_data = {key: lum_data[key][lum_data['absolute_magnitudes'] < 8] for key in lum_data.keys()}
+            # delete any values above 8 absolute_magnitudes and delete the corresponding values in the other
+            #   arrays, keeping the points without a magnitude (NaN) until the station clocks are aligned
+            keep = (lum_data['absolute_magnitudes'] < 8) | np.isnan(lum_data['absolute_magnitudes'])
+            lum_data = {key: lum_data[key][keep] for key in lum_data.keys()}
+
+        # Compute the height step of every point between the frames of its station (in the order of time),
+        #   before the points without a magnitude are removed, for the pick position adjustment below
+        height_step = np.zeros(len(lum_data['height']))
+        for station in np.unique(lum_data['flag_station']):
+            indices = np.where(lum_data['flag_station'] == station)[0]
+            indices = indices[np.argsort(lum_data['time'][indices], kind='stable')]
+            if len(indices) > 1:
+                diffs = np.diff(lum_data['height'][indices])
+                height_step[indices] = np.concatenate(([diffs[0]], diffs))
+        lum_data['height_step'] = height_step
 
         # # print all the keys in the lag_data
         # print('Keys in lag_data:',lag_data.keys())
@@ -3855,6 +3855,11 @@ class ObservationData:
         lum_data, lum_aligned = buildGlobalTimeAxis(lum_data,offset_tol=offset_tol_use)
         if lum_aligned:
             print('Luminosity data aligned to global time axis.')
+
+        # delete the points without a magnitude (NaN), after their positions were used to align the clocks
+        keep = ~np.isnan(lum_data['absolute_magnitudes'])
+        if not np.all(keep):
+            lum_data = {key: lum_data[key][keep] for key in lum_data.keys()}
 
         if self.fps_lag > 80:
             offset_tol_use=0.2*(1/self.fps_lag)
