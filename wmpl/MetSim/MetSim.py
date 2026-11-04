@@ -1049,9 +1049,28 @@ def runSimulation(met, consts, fragmentation_model=None, no_atmosphere_end_ht=-1
 if __name__ == "__main__":
 
     import os
+    import argparse
     import datetime
     
     from wmpl.Utils.TrajConversions import datetime2JD
+    from wmpl.Utils.AtmosphereDensity import addAtmosphereArguments, setAtmosphere
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Run the original MetSim ablation model using the meteor parameters in the input file hardcoded below.")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
+
+    #########################
 
 
     # Name of input file for meteor parameters

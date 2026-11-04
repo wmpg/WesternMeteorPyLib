@@ -64,7 +64,7 @@ from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, sav
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
 
@@ -1863,6 +1863,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
     constjson_bestfit.__dict__['lum_eff_type'] = obs_data.lum_eff_type
     constjson_bestfit.__dict__['disruption_on'] = obs_data.disruption_on
     constjson_bestfit.__dict__['dens_co'] = obs_data.dens_co
+    constjson_bestfit.__dict__['atm_table_ht'] = getattr(obs_data, 'atm_table_ht', None)
+    constjson_bestfit.__dict__['atm_table_log10_rho'] = getattr(obs_data, 'atm_table_log10_rho', None)
     constjson_bestfit.__dict__['dt'] = obs_data.dt
     constjson_bestfit.__dict__['h_kill'] = obs_data.h_kill
     constjson_bestfit.__dict__['v_kill'] = obs_data.v_kill
@@ -3923,8 +3925,12 @@ class ObservationData:
             lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
             jd_dat=traj.jdt_ref
 
-            # Fit the polynomail describing the density
+            # Fit the polynomial describing the density
             self.dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
+
+            # Tabulate the density, the simulation uses the table instead of the polynomial
+            self.atm_table_ht, self.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, 
+                dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4462,6 +4468,8 @@ class ObservationData:
             self.m_init = self.const.m_init
 
             self.dens_co = np.array(self.const.dens_co) 
+            self.atm_table_ht = getattr(self.const, 'atm_table_ht', None)
+            self.atm_table_log10_rho = getattr(self.const, 'atm_table_log10_rho', None)
 
             # Compute absolute magnitudes
             absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)
@@ -5775,6 +5783,11 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
     # Assign the density coefficients
     const_nominal.dens_co = dens_co
 
+    # Assign the density table (used instead of the polynomial), observation data saved before the table was 
+    #   introduced don't have it and keep using the polynomial
+    const_nominal.atm_table_ht = getattr(real_event, 'atm_table_ht', None)
+    const_nominal.atm_table_log10_rho = getattr(real_event, 'atm_table_log10_rho', None)
+
     # # Turn on plotting of LCs of individual fragments 
     # const_nominal.fragmentation_show_individual_lcs = True
 
@@ -6408,8 +6421,14 @@ if __name__ == "__main__":
     # Optional: suppress warnings
     # warnings.filterwarnings('ignore')
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     # check if the pick position is between 0 and 1
     if cml_args.pick_pos < 0 or cml_args.pick_pos > 1:

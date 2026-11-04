@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QLa
 from PyQt5.QtGui import QPixmap, QIcon, QColor, QPainter
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QCoreApplication
 
+from wmpl.Utils.AtmosphereDensity import setAtmosphere
 from wmpl.Formats.ECSV import loadECSVs
 from wmpl.Formats.GenericFunctions import solveTrajectoryGeneric, addSolverOptions
 from wmpl.Utils.Pickling import savePickle
@@ -334,6 +335,8 @@ class FileMonitorApp(QMainWindow):
                 gravity_factor=kwargs.gfact,
                 plot_all_spatial_residuals=False, plot_file_type=kwargs.imgformat, \
                 show_plots=False, v_init_part=kwargs.velpart, v_init_ht=vinitht, \
+                v_init_drag=kwargs.vinitdrag, v_init_drag_time=kwargs.vinitdragtime, \
+                v_init_drag_ht=kwargs.vinitdraght, \
                 show_jacchia=kwargs.jacchia,
                 estimate_timing_vel=(False if kwargs.notimefit is None else kwargs.notimefit), \
                 fixed_times=kwargs.fixedtimes, mc_noise_std=kwargs.mcstd)
@@ -846,6 +849,9 @@ if __name__ == "__main__":
     arg_parser = addSolverOptions(arg_parser, skip_velpart=False)
 
     cml_args = arg_parser.parse_args()
+
+    # Atmosphere model for any density the solver evaluates, also in its Monte Carlo processes
+    setAtmosphere(cml_args)
 
     ### ###
 
