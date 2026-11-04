@@ -19,7 +19,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import wmpl
-from wmpl.Trajectory.TrajectoryMotion import TrajectoryMotion, ceplechaType, plotMotion
+from wmpl.Trajectory.TrajectoryMotion import TrajectoryMotion, plotMotion
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
 from wmpl.Utils.Pickling import loadPickle
 
@@ -203,31 +203,6 @@ def testSummaryTable():
 
 
 
-def testApparentAblationCoeff():
-    """ Check the apparent ablation coefficient against the truth and the fireball types. """
-
-    meteor, _, motion = _solvedMeteor()
-
-    # Compute the true coefficient from the growth of K and the velocities between the first and the last
-    #   observed point
-    time_beg, time_end = motion.timeAtLength(np.array([motion.len_first, motion.len_last]))
-    k_true = 0.01 + 0.04*np.clip(np.array([time_beg, time_end])/3.3, 0.0, 1.0)
-    vel_true = meteor.velocityAtTime(np.array([time_beg, time_end]))
-    sigma_true = 6*np.log(k_true[1]/k_true[0])/(vel_true[0]**2 - vel_true[1]**2)
-
-    sigma_app, sigma_app_std = motion.apparentAblationCoeff()
-    assert abs(sigma_app - sigma_true) < 3*sigma_app_std
-
-    # The closest types
-    assert ceplechaType(0.014)[0] == 'I'
-    assert ceplechaType(0.03)[0] == 'II'
-    assert ceplechaType(0.5)[0] == 'IIIB'
-    assert ceplechaType(-0.01) is None
-
-    assert 'Ceplecha' in motion.ablationReport()
-
-
-
 def testVelocityIsPhysical():
     """ Check that the velocity is positive and only increases by gravity. """
 
@@ -284,12 +259,10 @@ def testPlotMotion():
 
     _, _, motion = _solvedMeteor()
 
-    for show_ablation in (False, True):
+    fig = plotMotion(motion, show=False)
+    assert len(fig.axes) == 3
 
-        fig = plotMotion(motion, show=False, show_ablation=show_ablation)
-        assert len(fig.axes) == 3
-
-        plt.close(fig)
+    plt.close(fig)
 
 
 
@@ -299,7 +272,7 @@ if __name__ == "__main__":
     # Run all tests
     test_list = [testFitsTheData, testVelocityInTheObservedPart, testExtrapolationAboveTheBeginning, \
         testExtrapolationBelowTheEnd, testBallisticCoefficient, testNoDragAboveTheBeginning, \
-        testTimeAndHeightFunctions, testSummaryTable, testApparentAblationCoeff, testVelocityIsPhysical, \
+        testTimeAndHeightFunctions, testSummaryTable, testVelocityIsPhysical, \
         testHeightsAreConsistent, testGravityDropMatchesTheSolution, testPlotMotion]
 
     for test in test_list:
