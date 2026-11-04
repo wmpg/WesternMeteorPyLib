@@ -134,3 +134,12 @@ def test_the_command_line_saves_the_figure_and_draws_it_again_from_the_checkpoin
     assert second.returncode == 0, second.stderr
     assert "2 clone(s) read back" in second.stdout
     assert os.path.getsize(again) > 1000
+
+
+def test_the_figure_says_when_the_clones_depart_from_the_paper():
+
+    from wmpl.Utils.OrbitDynamicsPlot import _modeLabel
+
+    assert _modeLabel({'mode': 'adapted'}) == 'adapted mode'
+    assert _modeLabel({'mode': 'shober2024', 'sigma': {'e': 0.02}}) == 'setup of Shober et al. 2024'
+    assert _modeLabel({'mode': 'shober2024', 'sigma': {'q': 0.001}}).endswith('but drawing q')

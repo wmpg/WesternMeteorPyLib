@@ -92,6 +92,18 @@ def _panel(ax, elapsed, x, reached, limit, label, y_label, max_lines):
     ax.set_ylabel(y_label, color=_INK)
 
 
+def _modeLabel(assumptions):
+    """ How the clones of a run were set up, in a few words. """
+
+    if assumptions['mode'] != 'shober2024':
+        return 'adapted mode'
+
+    if 'q' in assumptions.get('sigma', {}):
+        return 'setup of Shober et al. 2024 but drawing q'
+
+    return 'setup of Shober et al. 2024'
+
+
 def plotJupiterFamilyDynamics(result, file_path, max_lines=40):
     """ Draw the Jupiter-family dynamics of a run and save the figure.
 
@@ -168,8 +180,7 @@ def plotJupiterFamilyDynamics(result, file_path, max_lines=40):
     shown = min(max_lines, int(np.count_nonzero(reached)))
     subtitle = ("P = {:.1f}% [{:.1f}, {:.1f}]   f_q = {:.3f}   f_a = {:.3f}   {:d} clones, {:.0f} yr, {:s}".format(
         100*result['p'], 100*result['p_low'], 100*result['p_high'], result['f_q'], result['f_a'],
-        result['n_clones'], s['years'], 'setup of Shober et al. 2024' if s['mode'] == 'shober2024'
-        else 'adapted mode'))
+        result['n_clones'], s['years'], _modeLabel(s)))
     if shown < np.count_nonzero(reached):
         subtitle += "\nOf the {:d} clones that reach the limit, {:d} are drawn one by one".format(
             int(np.count_nonzero(reached)), shown)
