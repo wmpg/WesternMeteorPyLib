@@ -1,5 +1,5 @@
-""" Given the trajectory, beginning and ending height of sampling and the step, this code will sample the 
-    trajectory and produce time, height, geo and ECI coordinates for every sample.
+""" Given the trajectory, beginning and ending height (or time) of sampling and the step, this code will
+    sample the trajectory and produce time, height, geo coordinates and velocity for every sample.
 
     This is used as a step in dark flight modelling.
 """
@@ -10,12 +10,10 @@ import os
 import argparse
 
 import numpy as np
-import matplotlib.pyplot as plt
-import scipy.interpolate
-import scipy.signal
 
+from wmpl.Trajectory.TrajectoryMotion import TrajectoryMotion, plotMotion
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
-from wmpl.Utils.Math import lineAndSphereIntersections, vectMag, vectNorm
+from wmpl.Utils.Math import lineAndSphereIntersections
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -63,9 +61,16 @@ def _plotSphereAndArrow(centre, radius, origin, direction, intersection_list):
 
 
 class TrajectorySamples(object):
-    def __init__(self, traj):
+    def __init__(self, traj, motion):
+        """ Container for the sampled positions on the trajectory.
+
+        Arguments:
+            traj: [Trajectory object] Sampled trajectory.
+            motion: [TrajectoryMotion object] Model of the motion along the trajectory used for sampling.
+        """
 
         self.traj = traj
+        self.motion = motion
 
         self.t_est = []
         self.ht = []
@@ -74,8 +79,12 @@ class TrajectorySamples(object):
         self.ele_geo = []
         self.azim_norot = []
         self.elev_norot = []
+        self.vel = []
+        self.vel_norot = []
 
-    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot):
+
+
+    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel, vel_norot):
 
         self.t_est.append(t_est)
         self.ht.append(ht)
@@ -84,218 +93,125 @@ class TrajectorySamples(object):
         self.ele_geo.append(ele_geo)
         self.azim_norot.append(azim_norot)
         self.elev_norot.append(elev_norot)
+        self.vel.append(vel)
+        self.vel_norot.append(vel_norot)
 
 
-def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_time=False):
-    """ Given the trajectory, beginning, end and step in km, this function will interpolate the 
-        fireball height vs. distance and return the coordinates of sampled positions and compute the azimuth
-        and elevation for every point.
-    
+
+def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_time=False, drag_above=False):
+    """ Given the trajectory, beginning, end and step in meters, this function will sample the positions on
+        the trajectory and compute the geographical coordinates, the ground-fixed azimuth and elevation of the
+        radiant and the velocity for every sample. The times and velocities are computed from a drag model
+        fitted to the observations (see wmpl.Trajectory.TrajectoryMotion), which also extrapolates them
+        above the beginning and below the end of the observed part of the trajectory.
+
     Arguments:
-
+        traj: [Trajectory object] Trajectory to sample.
+        beg_ht: [float] Beginning height of sampling (m). -1 to use the observed beginning height.
+        end_ht: [float] End height of sampling (m). -1 to use the observed end height.
+        sample_step: [float] Sampling step (m).
 
     Keyword arguments:
+        show_plots: [bool] Show the model of the motion and print the samples. False by default.
         by_time: [bool] If True, beg_ht, end_ht and sample_step are times (s, relative to traj.jdt_ref)
-            instead of heights (m), and the samples are taken at those times.
+            instead of heights, and -1 does not mean the observed beginning and end. False by default.
+        drag_above: [bool] If True, the drag above the beginning is computed with the ballistic coefficient
+            at the beginning. If False, the meteor moves without drag above the beginning. False by default.
 
     Return:
+        traj_samples: [TrajectorySamples object] Sampled positions.
     """
 
+    # Fit the motion along the trajectory
+    motion = TrajectoryMotion(traj, drag_above=drag_above)
 
-    # Set begin and end heights, if not given
-    if (beg_ht < 0) and not by_time:
-        beg_ht = traj.rbeg_ele
-
-    if (end_ht < 0) and not by_time:
-        end_ht = traj.rend_ele
-
-
-    # Generate heights for sampling
-    height_array = np.flipud(np.arange(end_ht, beg_ht + sample_step, sample_step))
-
-    ### Fit time vs. height
-
-    time_data = []
-    height_data = []
-
-    for obs in traj.observations:
-
-        time_data += obs.time_data.tolist()
-        height_data += obs.model_ht.tolist()
-
-        if show_plots:
-
-            # Plot the station data
-            plt.scatter(obs.time_data, obs.model_ht/1000, label=obs.station_id, marker='x', zorder=3)
-
-
-    height_data = np.array(height_data)
-    time_data = np.array(time_data)
-
-    # Sort the arrays by decreasing time
-    arr_sort_indices = np.argsort(time_data)[::-1]
-    height_data = height_data[arr_sort_indices]
-    time_data = time_data[arr_sort_indices]
-
-
-    # Plot the non-smoothed time vs. height
-    #plt.scatter(time_data, height_data/1000, label='Data')
-
-
-    # Apply Savitzky-Golay to smooth out the height change
-    height_data = scipy.signal.savgol_filter(height_data, 21, 5)
-
-    if show_plots:
-        plt.scatter(time_data, height_data/1000, label='Savitzky-Golay filtered', marker='+', zorder=3)
-
-
-    # Sort the arrays by increasing heights (needed for interpolation)
-    arr_sort_indices = np.argsort(height_data)
-    height_data = height_data[arr_sort_indices]
-    time_data = time_data[arr_sort_indices]
-
-
-    # Interpolate height vs. time
-    ht_vs_time_interp = scipy.interpolate.PchipInterpolator(height_data, time_data)
-
-
-    # Plot the interpolation
-    ht_arr = np.linspace(np.min(height_data), np.max(height_data), 1000)
-    time_arr = ht_vs_time_interp(ht_arr)
-
-    # If sampling by time, invert the time vs. height fit to get the height at every sampled time. Times
-    #   after the end of the fireball are extrapolated with the fixed velocity of 3 km/s
     if by_time:
+
+        # Generate times for sampling and compute the positions along the trajectory
         time_array = np.arange(beg_ht, end_ht + sample_step/2, sample_step)
-        t_end = ht_vs_time_interp(traj.rend_ele)
-        height_array = np.where(time_array > t_end, traj.rend_ele - 3000*(time_array - t_end),
-            scipy.interpolate.interp1d(time_arr, ht_arr, fill_value='extrapolate')(time_array))
+        len_array = motion.lengthAtTime(time_array)
+        height_array = motion.heightAtLength(len_array)
 
-    if show_plots:
-        plt.plot(time_arr, ht_arr/1000, label='Interpolation', zorder=3)
+    else:
 
+        # Set begin and end heights, if not given
+        if beg_ht < 0:
+            beg_ht = traj.rbeg_ele
 
-        plt.legend()
+        if end_ht < 0:
+            end_ht = traj.rend_ele
 
-
-        plt.xlabel('Time (s)')
-        plt.ylabel('Height (km)')
-
-        plt.grid()
-
-        plt.show()
-
-    ###
+        # Generate heights for sampling and compute the positions along the trajectory
+        height_array = np.flipud(np.arange(end_ht, beg_ht + sample_step, sample_step))
+        len_array = motion.lengthAtHeight(height_array)
+        time_array = motion.timeAtLength(len_array)
 
 
-
-    # Take the ground above the state vector as the reference distance from the surface of the Earth
-    ref_radius = vectMag(traj.state_vect_mini) - np.max(height_data)
-
-    # Compute distance from the centre of the Earth to each height
-    radius_array = ref_radius + height_array
+    vel_array = motion.velocityAtLength(len_array)
 
     if show_plots:
 
+        plotMotion(motion)
+
+        print(motion.summaryTable())
+        print()
         print('Beginning coordinates (observed):')
         print('    Lat: {:.6f}'.format(np.degrees(traj.rbeg_lat)))
         print('    Lon: {:.6f}'.format(np.degrees(traj.rbeg_lon)))
         print('    Elev: {:.1f}'.format(traj.rbeg_ele))
         print()
         print("Ground-fixed azimuth and altitude:")
-        print(' Time(s), Sample ht (m),  Lat (deg),   Lon (deg), Height (m), Azim (deg), Elev (deg)')
+        print(' Time(s), Sample ht (m),  Lat (deg),   Lon (deg), Height (m), Azim (deg), Elev (deg), ' \
+            + 'Vel (km/s), Vgnd (km/s)')
 
 
     # Open a trajectory sample container
-    traj_samples = TrajectorySamples(traj)
+    traj_samples = TrajectorySamples(traj, motion)
 
-    # Go through every distance from the Earth centre and compute the geo coordinates at the given distance,
-    #   as well as the point-to-point azimuth and elevation
-    prev_eci = None
-    good_data = False
-    for i, (ht, radius) in enumerate(zip(height_array, radius_array)):
+    # Compute the geo coordinates, the ground-fixed azimuth and elevation and the velocity of every sample
+    for t_est, ht, len_val, vel in zip(time_array, height_array, len_array, vel_array):
 
-        # If the height is lower than the eng height, use a fixed velocity of 3 km/s
-
-        if ht < traj.rend_ele:
-            t_est = ht_vs_time_interp(traj.rend_ele) + abs(ht - traj.rend_ele)/3000
-            time_marker = "*"
-
-        else:
-            
-            # Estimate the fireball time at the given height using interpolated values
-            t_est = ht_vs_time_interp(ht)
-            time_marker = " "
-
-        # When sampling by time, keep the exact requested time
-        if by_time:
-            t_est = time_array[i]
-
-        # Compute the intersection between the trajectory line and the sphere of radius at the given height
-        intersections = lineAndSphereIntersections(np.array([0, 0, 0]), radius, traj.state_vect_mini, 
-            traj.radiant_eci_mini)
-        
-        # if there are no intersections it means that the height was outside the observed start/end height of the meteor
-        if len(intersections) == 0:
+        # Skip the samples outside the modelled part of the trajectory
+        if np.isnan(t_est) or np.isnan(len_val) or np.isnan(vel):
             continue
-        # if we get here we have at least one valid row of data 
-        good_data = True
-
-        # Choose the intersection that is closer to the state vector
-        inter_min_dist_indx = np.argmin([vectMag(inter - traj.state_vect_mini) for inter in intersections])
-        height_eci = intersections[inter_min_dist_indx]
-
-
-        # Compute the Julian date at the given height
-        jd = traj.jdt_ref + t_est/86400.0
 
         # Compute geographical coordinates
+        height_eci = motion.eciAtLength(len_val)[0]
+        jd = traj.jdt_ref + t_est/86400.0
         lat, lon, ele_geo = cartesian2Geo(jd, *height_eci)
 
-        # Compute azimuth and elevation
-        if prev_eci is not None:
+        # Compute the ground-fixed alt/az of the radiant with the instantaneous velocity. The ECI coordinates
+        #   are already in the epoch of date, so no precession is applied
+        azim_norot, elev_norot, vel_norot = derotatedRadiantAltAz(vel*motion.radiant_eci, height_eci, jd, \
+            lat, lon)
 
-            # Compute the vector pointing from the previous point to the current point
-            direction_vect = vectNorm(prev_eci - height_eci)
-
-
-            ### Compute the ground-fixed alt/az
-
-            # The reference velocity vector has the average velocity and the given direction
-            # Note that ideally this would be the instantaneous velocity
-            v_ref_vect = traj.orbit.v_avg_norot*direction_vect
-
-            # Derotate it at this point of the trajectory. The ECI coordinates are already in the epoch of
-            #   date, so no precession is applied
-            azim_norot, elev_norot, _ = derotatedRadiantAltAz(v_ref_vect, height_eci, jd, lat, lon)
-
-            ###
-
-
+        # Mark the samples extrapolated outside the observed part
+        if (len_val < motion.len_first) or (len_val > motion.len_last):
+            time_marker = "*"
         else:
-            azim_norot = -np.inf
-            elev_norot = -np.inf
-
-        prev_eci = np.copy(height_eci)
+            time_marker = " "
 
 
         # Add point parameters
-        traj_samples.addSample(t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot)
+        traj_samples.addSample(t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel, vel_norot)
 
         if show_plots:
+            print(("{:s}{:7.3f}, {:13.1f}, {:10.6f}, {:11.6f}, {:10.1f}, {:10.6f}, {:10.6f}, {:10.3f}, " \
+                + "{:11.3f}").format(time_marker, t_est, ht, np.degrees(lat), np.degrees(lon), ele_geo, \
+                np.degrees(azim_norot), np.degrees(elev_norot), vel/1000, vel_norot/1000))
 
-            print("{:s}{:7.3f}, {:13.1f}, {:10.6f}, {:11.6f}, {:10.1f}, {:10.6f}, {:10.6f}".format(time_marker, t_est, ht, np.degrees(lat), np.degrees(lon), ele_geo, np.degrees(azim_norot), np.degrees(elev_norot)))
 
+    if not traj_samples.t_est:
+        print('Nothing produced - the sampling range is outside the modelled part of the trajectory, from ' \
+            + '200 km (or where the velocity above the beginning has grown by 10% with drag above) down to ' \
+            + 'where gravity bends the path by 5 deg after the end')
 
-    if not good_data: 
-        # if the height is outside the observed range
-        print('nothing produced - probably the height range you chose was outside the observed meteor heights printed above and below')
-        
     if show_plots:
-        print('The star * denotes heights extrapolated after the end of the fireball, with the fixed velocity of 3 km/s.')
+        print('The star * denotes samples extrapolated outside the observed part of the trajectory with ' \
+            + 'the drag model.')
         print("The horizontal coordinates are apparent above a fixed ground, not topocentric in J2000!")
-
-
+        print('Vel is the velocity in the ECI frame, Vgnd the velocity relative to the ground.')
+        print()
         print('End coordinates (observed):')
         print('    Lat: {:.6f}'.format(np.degrees(traj.rend_lat)))
         print('    Lon: {:.6f}'.format(np.degrees(traj.rend_lon)))
@@ -325,7 +241,11 @@ if __name__ == "__main__":
     arg_parser.add_argument('end_height', type=float, help='Sampling end height (km). -1 to use the real end height')
     arg_parser.add_argument('height_step', type=float, help='Sampling step (km).')
 
-    arg_parser.add_argument('-t', '--time', action='store_true', help='Sample by time instead of height. The begin, end and step are then given in seconds.')
+    arg_parser.add_argument('-d', '--dragabove', action='store_true', \
+        help='Compute the drag above the beginning with the ballistic coefficient at the beginning, ' \
+        + 'instead of moving without drag.')
+
+    arg_parser.add_argument('-t', '--time', action='store_true', help='Sample by time instead of height. The begin, end and step are then given in seconds relative to the reference time of the trajectory, and -1 does not mean the observed begin and end.')
 
 
 
@@ -336,11 +256,15 @@ if __name__ == "__main__":
     # Unpack the file name and the directory path from the given arguments
     dir_path, file_name = os.path.split(cml_args.traj_pickle_file)
 
-    # Convert units to meters (times are kept in seconds)
-    unit = 1 if cml_args.time else 1000
-    beg_ht = unit*cml_args.beg_height
-    end_ht = unit*cml_args.end_height
-    sample_step = unit*cml_args.height_step
+    # Convert units to meters, or keep the times in seconds
+    if cml_args.time:
+        units_conv = 1.0
+    else:
+        units_conv = 1000.0
+
+    beg_ht = units_conv*cml_args.beg_height
+    end_ht = units_conv*cml_args.end_height
+    sample_step = units_conv*cml_args.height_step
 
     ############################
 
@@ -369,7 +293,8 @@ if __name__ == "__main__":
 
 
     # Run trajectory sampling
-    sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True, by_time=cml_args.time)
+    sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True, by_time=cml_args.time, \
+        drag_above=cml_args.dragabove)
 
 
     # # Test the line and sphere intersection
