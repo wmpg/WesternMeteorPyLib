@@ -524,6 +524,24 @@ def testRadiationBetaRejectsUnphysicalInput(reb):
             reb.radiationPressureBeta(radius, density)
 
 
+def testEquivalentSphereRadiusInvertsTheSphereMass(reb):
+    """ The radius must give back the mass it was computed from, m = 4/3*pi*rho*s^3. """
+
+    radius = reb.equivalentSphereRadius(1e-6, 3000.0)
+    assert (4/3)*np.pi*3000.0*radius**3 == pytest.approx(1e-6)
+
+    # A 1 micron grain at 3000 kg/m^3 weighs 1.2566e-14 kg, and must come back at that size
+    assert reb.equivalentSphereRadius(1.2566e-14, 3000.0) == pytest.approx(1e-6, rel=1e-3)
+
+
+def testEquivalentSphereRadiusRejectsUnphysicalInput(reb):
+    """ A non-positive mass or density is an error, not a silent NaN. """
+
+    for mass, density in [(0.0, 3000.0), (-1e-6, 3000.0), (1e-6, 0.0), (1e-6, -10.0)]:
+        with pytest.raises(ValueError):
+            reb.equivalentSphereRadius(mass, density)
+
+
 ### Hill-radius table ###
 
 def testHillRadiiAreSelfConsistent(reb):

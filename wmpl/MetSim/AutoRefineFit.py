@@ -15,7 +15,7 @@ from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Pickling import loadPickle
 
@@ -544,8 +544,14 @@ if __name__ == "__main__":
     arg_parser.add_argument('--updated', action='store_true', \
         help="Load the updated simulation JSON file instead of the original one.")
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
@@ -739,6 +745,10 @@ if __name__ == "__main__":
 
     # Assign the density coefficients
     const.dens_co = dens_co
+
+    # Tabulate the density, the simulation uses the table instead of the polynomial
+    const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, dens_fit_ht_end, 
+        dens_fit_ht_beg, traj.jdt_ref)
 
     ### ###
 

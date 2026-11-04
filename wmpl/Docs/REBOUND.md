@@ -13,6 +13,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [Command line reference](#command-line-reference)
 - [Choosing an integrator](#choosing-an-integrator)
 - [Radiation forces](#radiation-forces)
+- [Starting above the atmosphere](#starting-above-the-atmosphere)
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
 - [Chaos: MEGNO](#chaos-megno)
@@ -125,14 +126,17 @@ python -m wmpl.Rebound.REBOUND --help
 | `--horizons` | Use the JPL Horizons web service for planet positions instead of the local DE430 kernel. |
 | `--integrator {ias15,whfast,trace}` | Which integrator to use. Default: `ias15`. See [Choosing an integrator](#choosing-an-integrator). |
 | `--dt DAYS` | Timestep in days for `whfast` and `trace`. Default: `0.5`. Must be positive. Ignored by `ias15`. |
-| `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. Mutually exclusive with `--radius`/`--density`. |
+| `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. |
 | `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
-| `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
+| `--mass KG` | Object mass in kg at the trajectory's reference point (e.g. a photometric mass). With `--density`, beta is computed from it. It is also the mass of the run back through the atmosphere with `--back_height`. |
+| `--density KG_M3` | Bulk density in kg/m³, used with `--radius` or `--mass`. Default: `3000`. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
 | `--verbose` | Print the progress of the simulation. |
 
-`--beta` and `--radius` are mutually exclusive: give the beta directly, or give the size and density
-and let the code compute it, but not both.
+`--beta`, `--radius` and `--mass` are mutually exclusive: give the beta directly, or give a size or a
+mass (with the density) and let the code compute it, but only one of them. With `--back_height`, `--mass` is
+the mass of the run back through the atmosphere, and `--beta` or `--radius` can also be given: see
+[Starting above the atmosphere](#starting-above-the-atmosphere).
 
 ---
 
@@ -218,11 +222,97 @@ or let it be computed from a size and a density:
 python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --radius 1e-5 --density 3000
 ```
 
+A size is not what a meteor solution gives, so a mass works too (e.g. a photometric mass):
+
+```
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --mass 1e-6 --density 3000
+```
+
+The mass is turned into the radius of the sphere of that mass and density, `s = (3m/(4πρ))^(1/3)`.
+Since beta goes as `m^(-1/3)`, the assumed density and luminous efficiency matter less than they
+look: a factor of 2 in the mass moves beta by 26%.
+
 For a spherical grain, `beta = 5.7425e-4*Q_pr/(rho*s)` with the density in kg/m³ and the radius in m.
 A 1 µm grain at 3000 kg/m³ gives beta = 0.19; a 1 cm meteoroid of the same density gives 1.9e-5. In
 other words, radiation forces matter for small grains and are negligible for fireball-producing
 bodies — but they are not negligible over long integrations, where they changed the semi-major axis by
 25 % to 190 % in the cases measured here.
+
+---
+
+## Starting above the atmosphere
+
+By default the integration starts at the trajectory's reference point, whose speed already includes the deceleration above it. With `--back_height`, the nominal solution is first run back up through the atmosphere with MetSim (single body, drag, gravity, Coriolis) to that height (180 km if no value is given), and each Monte Carlo realization for the same time, so that they all start at one epoch:
+
+```
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_height --mass 0.5 --mc 100
+```
+
+With `--back_time SECONDS` it runs back for that long instead, unless the height of `--back_height` (180 km if not given) is reached first, e.g. for a fireball whose first seconds are not calibrated:
+
+```
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_time 2.0 --mass 0.5 --mc 100
+```
+
+`wmpl.MetSim.BackwardAtmIntegration` does the same run on its own, with the same options, and saves where each solution ended.
+
+| Option | Meaning |
+| :--- | :--- |
+| `--mass KG` | Mass at the reference point. Required. |
+| `--mass_sigma KG` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--freeze_mass` | Keep the mass constant instead of growing it back. |
+| `--ablation_coeff S2_KM2` | Effective ablation coefficient, including the erosion of the body (sigma + eta), unless `--erosion_coeff` gives it apart. Default: `0.023`. |
+| `--ablation_coeff_sigma S2_KM2` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--erosion_coeff S2_KM2`, `--erosion_height KM` | Erosion coefficient of the body, and the height below which it erodes with it. `--ablation_coeff` is then the ablation coefficient alone. Default: no erosion apart from what `--ablation_coeff` includes. |
+| `--erosion_coeff_sigma S2_KM2`, `--erosion_height_sigma KM` | Their 1-sigma uncertainties, drawn from log-normals for each realization. Default: `0`. |
+| `--density KG_M3` | Bulk density, which with the mass sets the drag. Default: `3000`. |
+| `--density_sigma KG_M3` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--ga GAMMA_A` | Drag coefficient times shape coefficient. Default: `1.21`, MetSim's and the usual value in this high part of the trajectory; `DynamicMassFit` and `AlphaBeta` default to `0.55`. |
+| `--ga_sigma GAMMA_A` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
+| `--draw_unknowns` | Draw what is not known for each realization, for what is left at its default: the coefficient (`0.1 ± 0.1`), the density (`1500 ± 1300`), `--ga` (`1.10 ± 0.054`) and the mass (`± 0.3` of `--mass`). Needs `--mc`. It cannot be combined with `--erosion_coeff`. |
+| `--atm`, `--atmtime` | The MSIS model of the air density, and the time it is evaluated at. |
+
+These options, apart from `--mass` and `--density`, are refused without `--back_height`. `--back_height` cannot be combined with `--forward`.
+
+From a deep start the drag matters as much as the ablation coefficient or more, so uncertain densities and `--ga` are worth sampling. Run back from 60 km, 1 kg at 15 km/s and 60 deg from the zenith changes its speed at 180 km by +24 and -25 m/s with the coefficients 0.014 and 0.21 s²/km² instead of 0.1, by -172 m/s with `--ga 0.55` instead of 1.21, and by +306 m/s with a density of 1000 instead of 3000 kg/m³. The command lines print the speed the drag adds above the reference point, and warn when it is more than the uncertainty of the initial velocity (10 m/s without one). Run back with the defaults, synthetic eroding bodies were off by 6-116% of that speed (median 13%).
+
+The run prints the dynamic pressure (`ρ_air v²`, as Ceplecha et al. 1998 define it) and the energy received at the reference point, and the speed the drag adds above it, and warns if that speed is over the uncertainty of the initial velocity, or 10 m/s without one. Nothing has to be entered by hand. `BackwardAtmIntegration` also saves them in the header of its file; REBOUND only prints them.
+
+Published values per PE type of the fireball, from Table XVII of Ceplecha et al. (1998):
+
+| PE type | Ablation coefficient (s²/km²) | Bulk density (kg/m³) | Material |
+|---|---|---|---|
+| I | 0.014 | 3700 | Ordinary chondrites |
+| II | 0.042 | 2000 | Carbonaceous chondrites |
+| IIIA | 0.10 | 750 | Regular cometary material |
+| IIIB | 0.21 | 270 | Soft cometary material |
+| None (meteor group B) | 0.08 | 1000 | Dense cometary material |
+| None (irons) | about 0.07 | 7800 | Iron meteorites |
+
+Ceplecha (1988, Table 1) gives the same densities, with 0.017 and 0.041 for the first two; they change the speed at 180 km by 11 m/s from 1 kg at 50 km, and by under 1 m/s from 60 km and higher. Vida et al. (2018) take 0.042 and 0.10 from this table. These are averages over whole trajectories that reflect mostly the fragmentation (Ceplecha and ReVelle 2005), not the intrinsic coefficient of the material, and the table gives no uncertainties. A dense body that erodes strongly can read as PE type IIIA, so a PE alone does not fix these values; a recovered meteorite does.
+
+`--draw_unknowns` keeps a pair like `--density` and `--density_sigma` if either is given, so what is known can be given and the rest drawn. For an H5 ordinary chondrite, with the density measured on its meteorites:
+
+```
+--back_height --mc 200 --mass M --density RHO --density_sigma DRHO --ablation_coeff 0.014 --ablation_coeff_sigma 0.005 --draw_unknowns
+```
+
+`--mass` is the mass at the reference point, not that of the meteorite: Lost City entered with 163 kg, and the largest piece found had 9.83 kg. The ± 0.005 is the spread of type I in Table VIII of the same paper, chosen here.
+
+The ranges of `--draw_unknowns` are not published. They were chosen here and tested on synthetic single bodies only. 95% of the draws fall within 0.014-0.36 s²/km², 260-4900 kg/m³, a `--ga` of 1.00-1.21 (the usual range this high: 1.0 in Borovička et al. 2022, 1.10 ± 0.04 for Lost City, 1.21 in Vida et al. 2018) and ± 30% in the mass, around the values below:
+
+| True values on 206 reference points | Speed at 180 km inside the 95% range | Mass inside |
+|---|---|---|
+| `--ga` 1.00-1.21, mass given right | 97% | 95% |
+| Only PE type IIIB | 76% | 76% |
+| Mass given half or twice the true one | 83% | 33% |
+| `--ga` 0.55, as lower down | 38% | 100% |
+
+So a photometric mass of uncertain luminous efficiency needs a larger `--mass_sigma` (0.78 of `--mass` is about a factor of 2), and a deep start may need `--ga`. The spread shrinks by itself the higher the start: 12, 37, 127, 332 and 919 m/s from 0.001, 0.003, 0.01, 0.03 and 0.1 MPa. Without `--density`, it also replaces the density of the radiation forces.
+
+The radiation forces take the mass at the end of the run back, the one the orbit starts with. `--beta` or `--radius` replace it, and `--beta 0` integrates without them.
+
+The erosion of the body follows the same law as its ablation, so the effective coefficient already undoes it, all the way up. `--erosion_coeff` and `--erosion_height` make it start at a height instead, and from a script `backwardStates(..., const=fit, body_erosion=True)` takes the erosion of a MetSim fit at each height. A known onset matters for the mass, not for the speed. The eroded grains are not followed, and a fragmentation above the first point cannot be undone: the mass at the end is then a lower limit.
 
 ---
 
@@ -509,6 +599,7 @@ Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 | Function | Purpose |
 | :--- | :--- |
 | `radiationPressureBeta(radius_m, density_kgm3)` | Beta for a spherical grain. |
+| `equivalentSphereRadius(mass_kg, density_kgm3)` | The radius that beta needs, from a mass and a bulk density. |
 | `encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0)` | The close-encounter list from the closest-approach dictionaries, one entry per body, with the same gates as the integration (Hill radii, and `SUN_ENCOUNTER_AU` for the Sun). The per-particle `encounters` diagnostic lists every passage instead. |
 | `sunPassageSummary(encounters, max_listed=3)` / `formatSunPassageSummary(summary)` | Collapse more than `max_listed` Sun passages into one summary, and its report line. |
 | `cloneEncounterSummary(clone_diag)` | Per body, how many clones met it, how many passages they made, and the closest approach over all of them. |
