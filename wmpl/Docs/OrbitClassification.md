@@ -219,10 +219,17 @@ clones start at the node the Earth was at that moment (`wmpl.Utils.OrbitFromElem
 node, its distance from the Earth and the geocentric speed there, to compare with the paper. A node more than
 0.05 AU from the Earth is refused, as the elements or the date are then wrong: published fireballs give 0.0004 to
 0.012 AU. `--max_node_miss` raises the limit. Without the five `--sigma` options, the clones take the
-uncertainties the paper assumed for MORP. a and e are drawn independently, as the paper does, which spreads the
-perihelion of the clones far beyond its measured error when a is poorly known: for the fireball of Trigo-Rodriguez
-et al. (2009), P was 10% this way and 4% with q held at its measured value. The adapted mode needs a pickle,
-since it takes the clones from the full covariance.
+uncertainties the paper assumed for MORP. The adapted mode needs a pickle, since it takes the clones from the
+full covariance.
+
+a and e are drawn independently, as the paper does, which spreads the perihelion of the clones far beyond its
+measured error when a is poorly known, since a and e are strongly correlated. `--sigma_q`, in place of
+`--sigma_e`, draws q and takes e = 1 - q/a. This departs from the setup of the paper, and the report says so.
+
+For the fireball of Trigo-Rodriguez et al. (2009), whose q is known to 0.0006 AU, a and e drawn independently spread
+the perihelion of the clones from 0.67 to 1.66 AU, and give P = 10.0% [6.6, 14.9]. Respecting q, two runs of 200 clones
+gave 4.0% [2.0, 7.7] (q held at its value) and 7.5% [4.6, 12.0] (`--sigma_q`), 5.8% [3.9, 8.5] together. The difference
+from the independent draws is about 1.8 sigma: it points to an inflated fraction, but this does not settle it.
 
 **Figure.** `--dynamics_plot FILE` saves a figure of the run, with the format given by the extension. Over the
 time before the fireball, it draws the perihelion distance and the semi-major axis of the clones, as the band and
@@ -241,7 +248,7 @@ Run the same command again to go on from there. The clones are the same, with th
 none is given, so the result does not depend on the interruption. A batch or a clone cut halfway starts
 again, and so does a clone that failed. A file from a run with other parameters, or one that is not a
 checkpoint, is refused and left as it is. The verdict settings (`confidence`, `encounter_hill`) are not
-part of the comparison, since they change nothing in the integration. The file takes about 50 kB per clone
+part of the comparison, since they change nothing in the integration. The file takes about 60 kB per clone
 with the outputs of `shober2024`, and stays in place at the end: delete it once you have the result. It is
 a pickle, so read only your own.
 
