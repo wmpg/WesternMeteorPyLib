@@ -224,6 +224,12 @@ perihelion of the clones far beyond its measured error when a is poorly known: f
 et al. (2009), P was 10% this way and 4% with q held at its measured value. The adapted mode needs a pickle,
 since it takes the clones from the full covariance.
 
+**Figure.** `--dynamics_plot FILE` saves a figure of the run, with the format given by the extension. Over the
+time before the fireball, it draws the perihelion distance and the semi-major axis of the clones, as the band and
+median of all of them, with up to 40 of those that reach q > 2.5 AU one by one, and the fraction that have reached
+it so far with its interval. That last panel shows what P alone does not: whether it has settled by the end of the
+integration. With `--dynamics_checkpoint`, a run already finished draws the figure again without integrating.
+
 **Checkpoint.** A run this long can be cut. `--dynamics_checkpoint FILE` saves each clone of `shober2024`,
 or each batch of the adapted mode, as soon as it ends:
 

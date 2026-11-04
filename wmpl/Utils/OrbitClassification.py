@@ -1338,7 +1338,7 @@ def checkDynamicsInputs(traj, batch):
 def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNAMICS_BATCH,
     max_clones=JFC_DYNAMICS_MAX_CLONES, confidence=0.95, integrator='ias15', gr='gr', beta=None,
     seed=None, output_years=JFC_DYNAMICS_OUTPUT_YEARS, encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL,
-    n_cpu=None, checkpoint_path=None):
+    n_cpu=None, checkpoint_path=None, return_ensemble=False):
     """ Classify whether a meteoroid moved like a Jupiter-family comet, from clones of its orbit
         integrated backwards.
 
@@ -1379,6 +1379,8 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
             of a run with the same parameters, they are read back instead of integrated again, with the
             seed they were drawn with if none is given. A batch cut halfway starts again. The file is
             left in place at the end. None (default) saves nothing. See wmpl.Utils.DynamicsCheckpoint.
+        return_ensemble: [bool] Add 'ensemble' to the result, with the arrays 't', 'q' and 'a' of
+            cloneEnsemble, for wmpl.Utils.OrbitDynamicsPlot. Default False.
 
     Return:
         [dict] The settings (under 'assumptions'), and: 'n_integrated', 'n_clones' (those that count:
@@ -1487,6 +1489,9 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
 
     # WHFast does not resolve a close encounter, which is what lifts most perihelia here
     integrator_warning = reb.whfastEncounterWarning(all_diagnostics) if integrator == 'whfast' else None
+
+    if return_ensemble:
+        summary['ensemble'] = {'t': t, 'q': q, 'a': np.vstack(a_parts)}
 
     return dict(summary,
         assumptions={'mode': 'adapted', 'years': years, 'epoch_jd': traj.jdt_ref,
@@ -1649,7 +1654,8 @@ def checkShober2024Inputs(traj):
 
 def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, years=SHOBER2024_YEARS,
     output_years=SHOBER2024_OUTPUT_YEARS, confidence=0.95, seed=None,
-    encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL, n_cpu=None, show_progress=False, checkpoint_path=None):
+    encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL, n_cpu=None, show_progress=False, checkpoint_path=None,
+    return_ensemble=False):
     """ Classify whether a meteoroid moved like a Jupiter-family comet with the setup of Shober et al.
         (2024), Sect. 2.4, so that the result can be compared with theirs.
 
@@ -1687,6 +1693,7 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
             a run with the same parameters, they are read back instead of integrated again, with the seed
             they were drawn with if none is given. A clone that failed is tried again. The file is left
             in place at the end. None (default) saves nothing. See wmpl.Utils.DynamicsCheckpoint.
+        return_ensemble: [bool] Add 'ensemble' to the result, as classifyJupiterFamilyDynamics. Default False.
 
     Return:
         [dict] As classifyJupiterFamilyDynamics, with the mode, the uncertainties and the start of the
@@ -1817,6 +1824,9 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
 
     else:
         dynamics_class = 'unbound'
+
+    if return_ensemble:
+        summary['ensemble'] = {'t': t, 'q': q, 'a': a}
 
     return dict(summary,
         assumptions={'mode': 'shober2024', 'years': years, 'epoch_jd': traj.jdt_ref,
@@ -2051,6 +2061,10 @@ if __name__ == "__main__":
     dyn.add_argument('--max_node_miss', metavar='AU', type=float, default=None, \
         help="With --date: farthest the node may lie from the Earth, or the elements are refused. Default: 0.05 AU; "
         "the elements of three published fireballs give 0.0004 to 0.012 AU.")
+    dyn.add_argument('--dynamics_plot', metavar='FILE', type=str, default=None, \
+        help="Save a figure of the run to this file (the extension gives the format): the perihelion distance and "
+        "the semi-major axis of the clones over time, and how the fraction that reached q > 2.5 AU builds up. With "
+        "--dynamics_checkpoint, a run already finished draws it again without integrating anything.")
     dyn.add_argument('--dynamics_checkpoint', metavar='FILE', type=str, default=None, \
         help="Save each clone (shober2024) or batch (adapted) to this file as soon as it ends. Run the same "
         "command again to go on from there after an interruption, with the same clones. A file from a run "
@@ -2272,7 +2286,8 @@ if __name__ == "__main__":
             try:
                 result = classifyJupiterFamilyDynamicsShober2024(traj, n_clones=n_clones,
                     years=cml_args.years, seed=cml_args.seed, n_cpu=cml_args.cores,
-                    show_progress=verbose, checkpoint_path=cml_args.dynamics_checkpoint)
+                    show_progress=verbose, checkpoint_path=cml_args.dynamics_checkpoint,
+                    return_ensemble=cml_args.dynamics_plot is not None)
 
             except (ImportError, ValueError, OSError, RuntimeError) as err:
                 reportError("--dynamics: {:s}".format(str(err)))
@@ -2304,10 +2319,14 @@ if __name__ == "__main__":
                     max_clones=max_clones,
                     integrator='ias15' if cml_args.integrator is None else cml_args.integrator,
                     gr='gr' if cml_args.gr is None else cml_args.gr, beta=beta, seed=cml_args.seed,
-                    n_cpu=cml_args.cores, checkpoint_path=cml_args.dynamics_checkpoint)
+                    n_cpu=cml_args.cores, checkpoint_path=cml_args.dynamics_checkpoint,
+                    return_ensemble=cml_args.dynamics_plot is not None)
 
             except (ImportError, ValueError, OSError, RuntimeError) as err:
                 reportError("--dynamics: {:s}".format(str(err)))
+
+        # The arrays are for the figure, not for the JSON file
+        ensemble = result.pop('ensemble', None)
 
         if verbose:
             print()
@@ -2321,3 +2340,12 @@ if __name__ == "__main__":
         if cml_args.dynamics_save is not None:
             with open(cml_args.dynamics_save, 'w') as f:
                 json.dump(result, f, indent=2, default=float)
+
+        if cml_args.dynamics_plot is not None:
+
+            from wmpl.Utils.OrbitDynamicsPlot import plotJupiterFamilyDynamics
+
+            try:
+                plotJupiterFamilyDynamics(dict(result, ensemble=ensemble), cml_args.dynamics_plot)
+            except (ValueError, OSError) as err:
+                reportError("--dynamics_plot: {:s}".format(str(err)))
