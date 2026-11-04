@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import Trajectory
+from wmpl.Trajectory.Trajectory import Trajectory, medianStddev
 from wmpl.Utils.TrajConversions import altAz2RADec, eci2RaDec, geo2Cartesian, raDec2AltAz_vect, raDec2ECI
 
 
@@ -127,6 +127,43 @@ def testMonteCarloKeepsTheClocksFixed():
 
     assert not traj.estimate_timing_vel
     assert np.all(np.array(traj.time_diffs_final) == 0)
+
+
+
+def testMedianStddev():
+    """ Check the standard deviation of the median against the known values for equal deviations. """
+
+    # The median of one value has the same deviation, and of three about 0.670 of it
+    assert np.isclose(medianStddev([10.0]), 10.0, rtol=0.02)
+    assert np.isclose(medianStddev([10.0, 10.0, 10.0]), 6.70, rtol=0.02)
+
+    # Values without a valid deviation are taken as exact
+    assert medianStddev([None, np.inf]) == 0.0
+    assert medianStddev([]) == 0.0
+
+
+
+def testMonteCarloVelocityUncertaintyWithoutTimingEstimation():
+    """ Check that the velocity uncertainty without timing estimation reflects the scatter of the lengths,
+        and that the reported velocity is not perturbed.
+    """
+
+    # Solve without the Monte Carlo runs to get the nominal velocity
+    traj, _ = _simulateTrajectory(estimate_timing_vel=False, monte_carlo=False)
+    traj_nominal = traj.run()
+
+    np.random.seed(1)
+    traj, _ = _simulateTrajectory(estimate_timing_vel=False, monte_carlo=True)
+    traj.mc_runs = 10
+    traj = traj.run()
+
+    # On this meteor the velocity scatters by about 15 m/s between noise realizations
+    assert 5.0 < traj_nominal.v_init_stddev < 50.0
+    assert 5.0 < traj.uncertainties.v_init < 50.0
+    assert 5.0 < traj.uncertainties.v_g < 50.0
+
+    # The noise is not applied to the velocity of the reported solution
+    assert abs(traj.v_init - traj_nominal.v_init) < 1.0
 
 
 
