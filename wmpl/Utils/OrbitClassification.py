@@ -949,7 +949,11 @@ def calcExcursionFractions(t, q, a, q_limit=JFC_DYNAMICS_Q_LIMIT, a_limit=JFC_DY
 
         Each output is held until the next one, so the times are exact for a series that changes only
         at the outputs, and otherwise off by at most one output interval per crossing of a limit. A
-        clone that ends between two outputs is likewise taken as followed until the second.
+        clone that ends between two outputs is likewise taken as followed until the second. The first
+        output is the state the integration starts from, not a result of it, so the first interval
+        takes the state of the second output instead: a clone started beyond a limit that leaves it
+        at once would otherwise count one interval beyond it, which is 0.5% of the time with 200
+        outputs and more the shorter the run.
 
         Reference: Fernandez et al. (2014), Icarus 238, 1; Shober et al. (2024), A&A 687, A181,
         sec. 2.4.1, doi:10.1051/0004-6361/202449635.
@@ -974,12 +978,13 @@ def calcExcursionFractions(t, q, a, q_limit=JFC_DYNAMICS_Q_LIMIT, a_limit=JFC_DY
     # An unbound orbit has no semi-major axis to compare, and it is leaving: beyond any limit
     a = np.where(a < 0, np.inf, a)
 
-    # Each interval between two outputs takes the state of its first output
+    # Each interval between two outputs takes the state of its first output, but for the first
+    #   interval, which takes the state of the first output after the start
     dt = np.diff(elapsed)
 
     def _fraction(x, limit):
 
-        x = x[:, :-1]
+        x = np.column_stack((x[:, 1], x[:, 1:-1]))
         has_state = ~np.isnan(x)
 
         total = np.sum(dt*has_state)
