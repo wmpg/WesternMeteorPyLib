@@ -65,9 +65,9 @@ def test_the_clones_do_not_change_without_the_nominal_solution(reb, traj):
     calls = []
     original = reb._integrateParticles
 
-    def counting(task):
+    def counting(task, **kwargs):
         calls.append(task["particle_names"])
-        return original(task)
+        return original(task, **kwargs)
 
     reb._integrateParticles = counting
 
