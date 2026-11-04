@@ -1,10 +1,11 @@
-""" Tests that loadECSVs() gives no magnitude to the points SkyFit2 picked without photometry: it sets their
-integrated pixel value to 1, which leaves their magnitude at the photometric offset.
+""" Tests that loadECSVs() gives no magnitude to the points SkyFit2 picked without photometry. SkyFit2 sets
+    their integrated pixel value to 1, which leaves their magnitude at the photometric offset.
 
-Run under pytest, or directly:
-
-    python -m wmpl.Formats.Tests.test_ECSVPhotometry
+Run with pytest:
+    python -m pytest wmpl/Formats/Tests/test_ECSVPhotometry.py -v
 """
+
+from __future__ import print_function, division, absolute_import
 
 import os
 import tempfile
@@ -14,7 +15,7 @@ import numpy as np
 from wmpl.Formats.ECSV import loadECSVs
 
 
-# The header SkyFit2 (RMS) writes, with the station of the points
+# Header written by SkyFit2 (RMS), with the station of the points
 HEADER = """# %ECSV 0.9
 # ---
 # datatype:
@@ -41,25 +42,38 @@ HEADER = """# %ECSV 0.9
 # schema: astropy-2.0
 """
 COLUMNS = "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,background_pixel_value," \
-    "saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
+    + "saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
 
-# Points: integrated pixel value and magnitude. The first three were picked without photometry
-POINTS = [(1, 9.52), (1, 9.55), (1, 9.49), (52000, -2.10), (81000, -2.58), (120000, -3.01), (90000, -2.70),
+# Integrated pixel values and magnitudes of the points. The first three were picked without photometry
+POINTS = [(1, 9.52), (1, 9.55), (1, 9.49), (52000, -2.10), (81000, -2.58), (120000, -3.01), (90000, -2.70), \
     (40000, -1.82)]
 
 
+
 def _writeECSV(dir_path, columns=COLUMNS, points=POINTS):
-    """ Write an ECSV of a meteor moving across the sky at 25 frames per second. """
+    """ Write an ECSV file of a meteor moving across the sky at 25 frames per second.
+
+    Arguments:
+        dir_path: [str] Directory where the file is written.
+
+    Keyword arguments:
+        columns: [str] Header line of the columns. All SkyFit2 columns by default.
+        points: [list] Integrated pixel values and magnitudes of the points.
+
+    Return:
+        path: [str] Path to the file.
+    """
 
     rows = []
     for i, (intensity, mag) in enumerate(points):
-        row = ["2024-01-01T00:00:{:09.6f}".format(10 + i*0.04), "{:10.6f}".format(100.0 + i*0.2),
-            "{:+10.6f}".format(20.0 + i*0.1), "{:10.6f}".format(90.0 + i*0.3), "{:+10.6f}".format(40.0 - i*0.2),
-            "{:9.3f}".format(300.0 + 5*i), "{:9.3f}".format(200.0 + 3*i), "{:10d}".format(intensity),
-            "{:10d}".format(500), "False", "{:+7.2f}".format(mag), "-0.10", "+0.10",
-            "{:10.2f}".format(0.0 if intensity <= 1 else 50.0)]
 
-        # Without the photometry columns, as older files
+        row = ["2024-01-01T00:00:{:09.6f}".format(10 + i*0.04), "{:10.6f}".format(100.0 + i*0.2), \
+            "{:+10.6f}".format(20.0 + i*0.1), "{:10.6f}".format(90.0 + i*0.3), \
+            "{:+10.6f}".format(40.0 - i*0.2), "{:9.3f}".format(300.0 + 5*i), "{:9.3f}".format(200.0 + 3*i), \
+            "{:10d}".format(intensity), "{:10d}".format(500), "False", "{:+7.2f}".format(mag), "-0.10", \
+            "+0.10", "{:10.2f}".format(0.0 if intensity <= 1 else 50.0)]
+
+        # Leave out the photometry columns, as in older files
         if "integrated_pixel_value" not in columns:
             row = row[:7] + [row[10]]
 
@@ -72,7 +86,11 @@ def _writeECSV(dir_path, columns=COLUMNS, points=POINTS):
     return path
 
 
-def test_points_without_photometry_have_no_magnitude():
+
+def testPointsWithoutPhotometryHaveNoMagnitude():
+    """ Check that the points with the integrated pixel value of 1 have no magnitude, and that the others
+        keep theirs.
+    """
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         _, meteor_list = loadECSVs([_writeECSV(tmp_dir)], no_prepare=True)
@@ -83,7 +101,9 @@ def test_points_without_photometry_have_no_magnitude():
     assert np.allclose(mag_data[3:], [mag for _, mag in POINTS[3:]])
 
 
-def test_files_without_the_photometry_columns_keep_their_magnitudes():
+
+def testFilesWithoutThePhotometryColumnsKeepTheirMagnitudes():
+    """ Check that the magnitudes of files without the photometry columns are not changed. """
 
     columns = "datetime,ra,dec,azimuth,altitude,x_image,y_image,mag_data\n"
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -92,7 +112,14 @@ def test_files_without_the_photometry_columns_keep_their_magnitudes():
     assert np.allclose(np.array(meteor_list[0].mag_data, dtype=np.float64), [mag for _, mag in POINTS])
 
 
+
+
 if __name__ == "__main__":
-    test_points_without_photometry_have_no_magnitude()
-    test_files_without_the_photometry_columns_keep_their_magnitudes()
-    print("All ECSVPhotometry checks passed.")
+
+    # Run all tests
+    test_list = [testPointsWithoutPhotometryHaveNoMagnitude, \
+        testFilesWithoutThePhotometryColumnsKeepTheirMagnitudes]
+
+    for test in test_list:
+        test()
+        print("PASS {:s}".format(test.__name__))
