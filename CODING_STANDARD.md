@@ -248,11 +248,26 @@ if __name__ == "__main__":
 - Argument names and options are in single quotes (99%).
 
 
-## 12. Tests
+## 12. Where functions and tests go
+
+A function that is not specific to one script goes into the shared module for its kind, even if only one script
+uses it so far:
+
+- mathematical and statistical functions into `wmpl/Utils/Math.py`
+- coordinate and time conversions into `wmpl/Utils/TrajConversions.py`
+- plotting helpers into `wmpl/Utils/Plotting.py`
+- file and system helpers into `wmpl/Utils/OSTools.py`
 
 The pre-2022 code has no pytest tests. It runs examples in the `if __name__ == "__main__":` block of each module.
-New tests go in a `Tests/` folder next to the module, are named `test_<Module>.py`, and follow every rule above,
-including docstrings and comments.
+New tests follow every rule above, including docstrings and comments, and are organized like this:
+
+- Tests go in a `Tests/` folder next to the module they test.
+- The tests of a small module go in `test_<Module>.py`, e.g. `Utils/Tests/test_Math.py`.
+- For a large module, the tests of one feature may go in their own file named after the feature, e.g.
+  `Trajectory/Tests/test_MonteCarloWithoutTiming.py`.
+- Helpers shared by several test files, such as the simulation of a synthetic meteor, go into one common file in
+  the same `Tests/` folder instead of being copied between them.
+- Test functions are named in camelCase starting with `test`, e.g. `testMedianStddev`, so pytest collects them.
 
 
 ## 13. Review checklist
@@ -272,3 +287,5 @@ These are the most common ways new code departs from this standard:
 - [ ] `np.deg2rad` / `np.rad2deg`, `x == None`, `1.` floats, `class Foo:` without `object`.
 - [ ] Type hints.
 - [ ] Inline end-of-line comments.
+- [ ] General helper functions defined in a script instead of the shared module in `wmpl/Utils/`.
+- [ ] Test helpers copied between test files.
