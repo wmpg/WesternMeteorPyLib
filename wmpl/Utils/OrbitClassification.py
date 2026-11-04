@@ -1520,12 +1520,17 @@ SHOBER2024_DEFAULT_SIGMA = {'a': 0.01, 'e': 0.001, 'i': 0.1, 'node': 0.01, 'peri
 SHOBER2024_START_HILL = 3.0
 
 
-def elementUncertainties(traj):
+def elementUncertainties(traj, draw_q=False):
     """ The 1-sigma uncertainties of a, e, i, node and peri of a trajectory's orbit, as Shober et al.
         (2024) drew their clones from.
 
     Arguments:
         traj: [Trajectory] The trajectory.
+
+    Keyword arguments:
+        draw_q: [bool] Take the uncertainty of q instead of that of e, for a trajectory with Monte Carlo
+            uncertainties, which has both. Without them it raises a ValueError: the values assumed for MORP do not
+            include one. Default False.
 
     Return:
         (sigma, source): [dict] {'a': AU, 'e' or 'q': AU, 'i': deg, 'node': deg, 'peri': deg}, and [str] where
@@ -1536,12 +1541,16 @@ def elementUncertainties(traj):
     unc = traj.uncertainties
 
     if unc is None:
+
+        if draw_q:
+            raise ValueError("Drawing q needs its uncertainty, and this trajectory has no Monte Carlo uncertainties.")
+
         return dict(SHOBER2024_DEFAULT_SIGMA), "assumed by Shober et al. for MORP"
 
     sigma = {'a': unc.a, 'i': np.degrees(unc.i), 'node': np.degrees(unc.node), 'peri': np.degrees(unc.peri)}
 
-    # Elements given with the error of q instead of that of e. A trajectory has both, and draws e
-    if getattr(unc, 'draw_q', False):
+    # Elements given with the error of q instead of that of e. A trajectory has both, and draws e unless asked
+    if draw_q or getattr(unc, 'draw_q', False):
         sigma['q'] = unc.q
 
     else:
@@ -1682,7 +1691,7 @@ def checkShober2024Inputs(traj):
 def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, years=SHOBER2024_YEARS,
     output_years=SHOBER2024_OUTPUT_YEARS, confidence=0.95, seed=None,
     encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL, n_cpu=None, show_progress=False, checkpoint_path=None,
-    return_ensemble=False):
+    return_ensemble=False, draw_q=False):
     """ Classify whether a meteoroid moved like a Jupiter-family comet with the setup of Shober et al.
         (2024), Sect. 2.4, so that the result can be compared with theirs.
 
@@ -1721,6 +1730,8 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
             they were drawn with if none is given. A clone that failed is tried again. The file is left
             in place at the end. None (default) saves nothing. See wmpl.Utils.DynamicsCheckpoint.
         return_ensemble: [bool] Add 'ensemble' to the result, as classifyJupiterFamilyDynamics. Default False.
+        draw_q: [bool] Draw q from its Monte Carlo uncertainty and take e = 1 - q/a, instead of drawing e, which
+            departs from the setup of the paper (see drawElementClones). Default False.
 
     Return:
         [dict] As classifyJupiterFamilyDynamics, with the mode, the uncertainties and the start of the
@@ -1752,7 +1763,7 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
     if seed is None:
         seed = int(np.random.SeedSequence().entropy%(2**32))
 
-    sigma, sigma_source = elementUncertainties(traj)
+    sigma, sigma_source = elementUncertainties(traj, draw_q=draw_q)
     clones = drawElementClones(traj.orbit, sigma, n_clones, np.random.default_rng(seed))
 
     dt_days = SHOBER2024_START_HILL*reb.HILL_RADII_AU["Earth"]*reb.AU_M/traj.orbit.v_g/86400.0
@@ -2090,6 +2101,11 @@ if __name__ == "__main__":
     dyn.add_argument('--sigma_q', metavar='SIGMA', type=float, default=None, \
         help="With --date, in place of --sigma_e: 1-sigma of q (AU). q is then drawn and e = 1 - q/a, which respects a "
         "perihelion distance known far better than a and e. This departs from the setup of Shober et al.")
+    dyn.add_argument('--draw_q', action='store_true', \
+        help="With shober2024 and a trajectory pickle solved with the Monte Carlo uncertainties: draw q from its "
+        "uncertainty and take e = 1 - q/a, instead of drawing e, as --sigma_q does for elements given by hand. This "
+        "departs from the setup of Shober et al. To measure a fireball, the adapted mode already respects these "
+        "correlations, since it draws from the full covariance.")
     dyn.add_argument('--max_node_miss', metavar='AU', type=float, default=None, \
         help="With --date: farthest the node may lie from the Earth, or the elements are refused. Default: 0.05 AU; "
         "the elements of three published fireballs give 0.0004 to 0.012 AU.")
@@ -2262,7 +2278,16 @@ if __name__ == "__main__":
         given = [name for name in element_options if getattr(cml_args, name) is not None]
 
         if (cml_args.traj_path is not None) and given:
+
+            if given == ['sigma_q']:
+                reportError("--sigma_q goes with the elements given by hand, not with a trajectory pickle. With a pickle "
+                    "solved with the Monte Carlo uncertainties, --draw_q takes the uncertainty of q from it.")
+
             reportError("--{:s} goes with the elements given by hand, not with a trajectory pickle.".format(given[0]))
+
+        if cml_args.draw_q and ((cml_args.traj_path is None) or (cml_args.dynamics != 'shober2024')):
+            reportError("--draw_q goes with --dynamics shober2024 and a trajectory pickle. With the elements given by "
+                "hand, use --sigma_q. The adapted mode already respects the correlations of the orbit.")
 
         if cml_args.traj_path is None:
 
@@ -2328,7 +2353,7 @@ if __name__ == "__main__":
                 result = classifyJupiterFamilyDynamicsShober2024(traj, n_clones=n_clones,
                     years=cml_args.years, seed=cml_args.seed, n_cpu=cml_args.cores,
                     show_progress=verbose, checkpoint_path=cml_args.dynamics_checkpoint,
-                    return_ensemble=cml_args.dynamics_plot is not None)
+                    return_ensemble=cml_args.dynamics_plot is not None, draw_q=cml_args.draw_q)
 
             except (ImportError, ValueError, OSError, RuntimeError) as err:
                 reportError("--dynamics: {:s}".format(str(err)))

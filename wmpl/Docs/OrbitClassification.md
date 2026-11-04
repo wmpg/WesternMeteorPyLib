@@ -224,7 +224,10 @@ full covariance.
 
 a and e are drawn independently, as the paper does, which spreads the perihelion of the clones far beyond its
 measured error when a is poorly known, since a and e are strongly correlated. `--sigma_q`, in place of
-`--sigma_e`, draws q and takes e = 1 - q/a. This departs from the setup of the paper, and the report says so.
+`--sigma_e`, draws q and takes e = 1 - q/a. This departs from the setup of the paper, and the report says so. With
+a pickle solved with the Monte Carlo uncertainties, `--draw_q` does the same with the uncertainty of q it holds. A
+pickle without them has no such uncertainty, so it is refused. To measure a fireball with a Monte Carlo pickle, the
+adapted mode is still the better choice, since it draws from the full covariance.
 
 For the fireball of Trigo-Rodriguez et al. (2009), whose q is known to 0.0006 AU, a and e drawn independently spread
 the perihelion of the clones from 0.67 to 1.66 AU, and give P = 10.0% [6.6, 14.9]. Respecting q, two runs of 200 clones
