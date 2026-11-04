@@ -269,7 +269,7 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --back_time 2.0 --mass 0
 | `--density_sigma KG_M3` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
 | `--ga GAMMA_A` | Drag coefficient times shape coefficient. Default: `1.21`, MetSim's and the usual value in this high part of the trajectory; `DynamicMassFit` and `AlphaBeta` default to `0.55`. |
 | `--ga_sigma GAMMA_A` | Its 1-sigma uncertainty, drawn from a log-normal for each realization. Default: `0`. |
-| `--unknown_body` | The kind of body is not known: for what is left at its default, draw the coefficient (`0.1 ± 0.1`), the density (`2000 ± 1500`), `--ga` (`± 0.48`) and the mass (`± 0.78` of `--mass`) for each realization. Needs `--mc`. It cannot be combined with `--erosion_coeff`. |
+| `--draw_unknowns` | Draw what is not known for each realization, for what is left at its default: the coefficient (`0.1 ± 0.1`), the density (`1500 ± 1300`), `--ga` (`1.10 ± 0.054`) and the mass (`± 0.3` of `--mass`). Needs `--mc`. It cannot be combined with `--erosion_coeff`. |
 | `--atm`, `--atmtime` | The MSIS model of the air density, and the time it is evaluated at. |
 
 These options, apart from `--mass` and `--density`, are refused without `--back_height`. `--back_height` cannot be combined with `--forward`.
@@ -278,19 +278,37 @@ From a deep start the drag matters as much as the ablation coefficient or more, 
 
 The run prints the dynamic pressure (`ρ_air v²`, as Ceplecha et al. 1998 define it) and the energy received at the reference point, and the speed the drag adds above it, and warns if that speed is over the uncertainty of the initial velocity, or 10 m/s without one. Nothing has to be entered by hand. `BackwardAtmIntegration` also saves them in the header of its file; REBOUND only prints them.
 
-Published values for each kind of body, from Table XVII of Ceplecha et al. (1998):
+Published values per PE type of the fireball, from Table XVII of Ceplecha et al. (1998):
 
-| Type | Ablation coefficient (s²/km²) | Bulk density (kg/m³) | Material |
+| PE type | Ablation coefficient (s²/km²) | Bulk density (kg/m³) | Material |
 |---|---|---|---|
 | I | 0.014 | 3700 | Ordinary chondrites |
-| II (A) | 0.042 | 2000 | Carbonaceous chondrites |
-| B | 0.08 | 1000 | Dense cometary material |
-| IIIA (C) | 0.10 | 750 | Regular cometary material |
-| IIIB (D) | 0.21 | 270 | Soft cometary material |
+| II | 0.042 | 2000 | Carbonaceous chondrites |
+| IIIA | 0.10 | 750 | Regular cometary material |
+| IIIB | 0.21 | 270 | Soft cometary material |
+| None (meteor group B) | 0.08 | 1000 | Dense cometary material |
+| None (irons) | about 0.07 | 7800 | Iron meteorites |
 
-Ceplecha (1988, Table 1) gives the same densities, with 0.017 and 0.041 for the first two; they change the speed at 180 km by 11 m/s from 1 kg at 50 km, and by under 1 m/s from 60 km and higher. Vida et al. (2018) take 0.042 and 0.10 from this table. These are averages over whole trajectories that reflect mostly the fragmentation (Ceplecha and ReVelle 2005), not the intrinsic coefficient of the material.
+Ceplecha (1988, Table 1) gives the same densities, with 0.017 and 0.041 for the first two; they change the speed at 180 km by 11 m/s from 1 kg at 50 km, and by under 1 m/s from 60 km and higher. Vida et al. (2018) take 0.042 and 0.10 from this table. These are averages over whole trajectories that reflect mostly the fragmentation (Ceplecha and ReVelle 2005), not the intrinsic coefficient of the material, and the table gives no uncertainties. A dense body that erodes strongly can read as PE type IIIA, so a PE alone does not fix these values; a recovered meteorite does.
 
-The ranges of `--unknown_body` are not published. They were chosen here around those values and tested on synthetic single bodies only. 95% of the draws fall within 0.014-0.36 s²/km², 430-5900 kg/m³ (which leaves out the 270 of type IIIB), a `--ga` of 0.53-2.4 and a factor of 2 in the mass. On 396 reference points, with the mass given right, half or twice the true one, the true speed at 180 km was inside the 95% range of the realizations in 96% of the cases with a true `--ga` of 1.21 and in 73% with 0.55, and the true mass in 95% and 99%. The spread shrinks by itself the higher the start: 12, 38, 110, 364 and 1108 m/s from 0.001, 0.003, 0.01, 0.03 and 0.1 MPa, for eroding bodies with their mass known. Without `--density`, it also replaces the density of the radiation forces.
+`--draw_unknowns` keeps a pair like `--density` and `--density_sigma` if either is given, so what is known can be given and the rest drawn. For an H5 ordinary chondrite, with the density measured on its meteorites:
+
+```
+--back_height --mc 200 --mass M --density RHO --density_sigma DRHO --ablation_coeff 0.014 --ablation_coeff_sigma 0.005 --draw_unknowns
+```
+
+`--mass` is the mass at the reference point, not that of the meteorite: Lost City entered with 163 kg, and the largest piece found had 9.83 kg. The ± 0.005 is the spread of type I in Table VIII of the same paper, chosen here.
+
+The ranges of `--draw_unknowns` are not published. They were chosen here and tested on synthetic single bodies only. 95% of the draws fall within 0.014-0.36 s²/km², 260-4900 kg/m³, a `--ga` of 1.00-1.21 (the usual range this high: 1.0 in Borovička et al. 2022, 1.10 ± 0.04 for Lost City, 1.21 in Vida et al. 2018) and ± 30% in the mass, around the values below:
+
+| True values on 206 reference points | Speed at 180 km inside the 95% range | Mass inside |
+|---|---|---|
+| `--ga` 1.00-1.21, mass given right | 97% | 95% |
+| Only PE type IIIB | 76% | 76% |
+| Mass given half or twice the true one | 83% | 33% |
+| `--ga` 0.55, as lower down | 38% | 100% |
+
+So a photometric mass of uncertain luminous efficiency needs a larger `--mass_sigma` (0.78 of `--mass` is about a factor of 2), and a deep start may need `--ga`. The spread shrinks by itself the higher the start: 12, 37, 127, 332 and 919 m/s from 0.001, 0.003, 0.01, 0.03 and 0.1 MPa. Without `--density`, it also replaces the density of the radiation forces.
 
 The radiation forces take the mass at the end of the run back, the one the orbit starts with. `--beta` or `--radius` replace it, and `--beta 0` integrates without them.
 
