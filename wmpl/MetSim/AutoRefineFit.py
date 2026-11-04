@@ -187,11 +187,13 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
                 ax_magres.scatter(abs_mag_data - sim_mag_sampled, height_data/1000)
 
 
-    # Compute the average magnitude residual
+    # Compute the average magnitude residual, zero without photometry
+    mag_res = 0
     if mag_res_count > 0:
         mag_res = mag_res_sum/mag_res_count
     
     # Compute the average length residual
+    len_res = 0
     if len_res_count > 0:
         len_res = len_res_sum/len_res_count
 
