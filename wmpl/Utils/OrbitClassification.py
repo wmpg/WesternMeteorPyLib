@@ -1183,6 +1183,8 @@ def cloneEnsemble(outputs_mc, diagnostics, n_outputs, encounter_hill=JFC_DYNAMIC
             limit from then on (+inf), as calcExcursionFractions expects;
           - unbound at every output after the epoch: it was never part of the bound dynamics being
             classified, and is left out of the metrics altogether (nan at every output).
+        A clone unbound at every output after the epoch that has not reached the volume by the end of
+        the run is left out too: it is the same orbit, only with less time to get there.
         The output at the epoch is not used for this, because it is taken at the Earth, whose pull
         changes the heliocentric orbit: on a Halley-type orbit with a = 10 AU it gave a = 36-108 AU.
 
@@ -1217,18 +1219,22 @@ def cloneEnsemble(outputs_mc, diagnostics, n_outputs, encounter_hill=JFC_DYNAMIC
 
         q[k, :n] = columns['a']*(1.0 - columns['e'])
         a[k, :n] = columns['a']
-        if diagnostics[name]['escaped'] is not None:
 
-            e_after_epoch = columns['e'][1:] if n > 1 else columns['e']
+        escaped = diagnostics[name]['escaped'] is not None
+        e_after_epoch = columns['e'][1:] if n > 1 else columns['e']
+
+        # A clone with a single output that stayed inside the volume hit a body at once, so nothing
+        #   is known of its orbit after the epoch
+        if (escaped or (n > 1)) and np.all(e_after_epoch >= 1.0):
+            left_unbound[k] = True
+            q[k] = np.nan
+            a[k] = np.nan
+
+        elif escaped:
 
             if columns['e'][-1] < 1.0:
                 q[k, n:] = q[k, n - 1]
                 a[k, n:] = a[k, n - 1]
-
-            elif np.all(e_after_epoch >= 1.0):
-                left_unbound[k] = True
-                q[k] = np.nan
-                a[k] = np.nan
 
             else:
                 q[k, n:] = np.inf
@@ -1238,6 +1244,27 @@ def cloneEnsemble(outputs_mc, diagnostics, n_outputs, encounter_hill=JFC_DYNAMIC
             if (enc['body'] == 'Jupiter') and (enc['n_hill'] < encounter_hill)])
 
     return q, a, encounter_times, left_unbound
+
+
+def dynamicsOutputTimes(years, output_years):
+    """ The output times of a backward integration of the Jupiter-family metrics.
+
+    Arguments:
+        years: [float] Span of the integration.
+        output_years: [float] Spacing of the outputs.
+
+    Return:
+        [ndarray] The times (yr), from 0 to -years. A span too short to leave an output after the
+            start has no metrics to give, so it raises a ValueError.
+    """
+
+    n_outputs = int(round(years/output_years)) + 1
+
+    if n_outputs < 2:
+        raise ValueError("A span of {:g} yr leaves no output after the start with one every {:g} yr, "
+            "so there would be nothing to measure.".format(years, output_years))
+
+    return np.linspace(0.0, -years, n_outputs)
 
 
 def checkDynamicsInputs(traj, batch):
@@ -1307,7 +1334,9 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
             'n_left_unbound' (clones unbound at every output after the epoch, see cloneEnsemble),
             'n_escaped' (clones that left the simulation volume), 'n_impacted', 'p', 'p_low' and
             'p_high' (plain interval), 'look_confidence', 'jupiter_family_shober' and
-            'dynamics_class' (from the last look; 'unbound' if every clone was unbound).
+            'dynamics_class' (from the last look; 'unbound' if every clone was unbound), 'n_failed'
+            (clones that failed to integrate and are in none of the counts; a RuntimeError if a whole
+            batch did) and 'integrator_warning' (the WHFast warning of wmpl.Rebound.REBOUND, or None).
     """
 
     from wmpl.Rebound import REBOUND as reb
@@ -1320,8 +1349,11 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
     if seed is None:
         seed = int(np.random.SeedSequence().entropy%(2**32))
 
-    n_outputs = int(round(years/output_years)) + 1
-    t = np.linspace(0.0, -years, n_outputs)
+    t = dynamicsOutputTimes(years, output_years)
+    n_outputs = len(t)
+
+    if max_clones < 1:
+        raise ValueError("At least one clone is needed, got max_clones = {}.".format(max_clones))
 
     n_looks = int(np.ceil(float(max_clones)/batch))
     look_confidence = 1.0 - (1.0 - confidence)/n_looks
@@ -1330,6 +1362,8 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
     n_integrated = 0
     n_escaped = 0
     n_impacted = 0
+    n_failed = 0
+    all_diagnostics = {}
 
     for look in range(n_looks):
 
@@ -1338,7 +1372,13 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
         _, outputs_mc, diagnostics = reb.reboundSimulate(None, None, traj=traj, direction='backward',
             sim_days=years*365.25, n_outputs=n_outputs, mc_runs=n_batch, random_seed=seed + look,
             integrator=integrator, gr=gr, beta=beta, lean_outputs=True, return_diagnostics=True,
-            show_progress=False, n_cpu=n_cpu)
+            show_progress=False, n_cpu=n_cpu, skip_nominal=True)
+
+        # reboundSimulate skips a clone that failed. With none left there is nothing to say about the
+        #   orbit, which is not the same as every clone being unbound
+        if not outputs_mc:
+            raise RuntimeError("All the {:d} clones of batch {:d} failed to integrate.".format(n_batch,
+                look + 1))
 
         q_batch, a_batch, encounters_batch, unbound_batch = cloneEnsemble(outputs_mc, diagnostics,
             n_outputs, encounter_hill=encounter_hill)
@@ -1348,6 +1388,8 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
         unbound_parts.append(unbound_batch)
         encounter_times += encounters_batch
         n_integrated += len(outputs_mc)
+        n_failed += n_batch - len(outputs_mc)
+        all_diagnostics.update(('{:d}_{:s}'.format(look, name), diagnostics[name]) for name in outputs_mc)
         n_escaped += sum(diagnostics[name]['escaped'] is not None for name in outputs_mc)
         n_impacted += sum(diagnostics[name]['impact'] is not None for name in outputs_mc)
 
@@ -1374,6 +1416,9 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
         plain = {'p': np.nan, 'p_low': np.nan, 'p_high': np.nan, 'jupiter_family_shober': False}
         verdict = {'dynamics_class': 'unbound'}
 
+    # WHFast does not resolve a close encounter, which is what lifts most perihelia here
+    integrator_warning = reb.whfastEncounterWarning(all_diagnostics) if integrator == 'whfast' else None
+
     # Of the clones that reached the limit without an encounter, those that did it by being thrown out
     #   of the solar system, rather than by a slow rise of the perihelion as the Kozai mechanism gives
     elapsed = np.abs(t)
@@ -1395,7 +1440,8 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
         'n_reached_after_encounter': n_with, 'n_reached_without_encounter': n_without,
         'n_reached_without_encounter_by_escape': n_without_by_escape,
         'n_left_unbound': int(np.count_nonzero(np.concatenate(unbound_parts))),
-        'n_escaped': n_escaped, 'n_impacted': n_impacted, 'p': plain['p'], 'p_low': plain['p_low'],
+        'n_escaped': n_escaped, 'n_impacted': n_impacted, 'n_failed': n_failed,
+        'integrator_warning': integrator_warning, 'p': plain['p'], 'p_low': plain['p_low'],
         'p_high': plain['p_high'], 'look_confidence': look_confidence,
         'jupiter_family_shober': plain['jupiter_family_shober'],
         'dynamics_class': verdict['dynamics_class'],
@@ -1459,8 +1505,15 @@ def formatJupiterFamilyDynamics(result):
             result['n_escaped'], result['n_impacted']))
 
     if result['n_left_unbound']:
-        lines.append("    {:d} of them were unbound at every output after the epoch and are left out of "
+        lines.append("    {:d} clone(s) were unbound at every output after the epoch and are left out of "
             "the classification".format(result['n_left_unbound']))
+
+    if result['n_failed']:
+        lines.append("    {:d} clone(s) failed to integrate and are left out of the classification, which "
+            "would bias it if the failures depend on the orbit".format(result['n_failed']))
+
+    if result['integrator_warning']:
+        lines.append("    {:s}".format(result['integrator_warning']))
 
     return lines
 
@@ -1725,7 +1778,7 @@ if __name__ == "__main__":
                 max_clones=cml_args.max_clones, integrator=cml_args.integrator, gr=cml_args.gr,
                 beta=beta, seed=cml_args.seed, n_cpu=cml_args.cores)
 
-        except (ImportError, ValueError) as err:
+        except (ImportError, ValueError, RuntimeError) as err:
             reportError("--dynamics: {:s}".format(str(err)))
 
         if verbose:
@@ -1733,7 +1786,7 @@ if __name__ == "__main__":
             print("\n".join(formatJupiterFamilyDynamics(result)))
 
         else:
-            for key in ('n_clones', 'n_reached', 'p', 'p_low', 'p_high', 'f_q', 'f_a'):
+            for key in ('n_clones', 'n_reached', 'p', 'p_low', 'p_high', 'f_q', 'f_a', 'n_failed'):
                 print("JFC_DYNAMICS_{:s} {}".format(key.upper(), result[key]))
             print("JFC_DYNAMICS_CLASS {:s}".format(result['dynamics_class']))
 
