@@ -3800,6 +3800,17 @@ class ObservationData:
                     self.fps_lum = fps_prior
                     self.fps_lag = fps_prior
 
+        # Compute the height step of every point between the frames of its station (heights sorted from the
+        #   highest), before the points are filtered, for the pick position adjustment below
+        height_step = np.zeros(len(lum_data['height']))
+        for station in np.unique(lum_data['flag_station']):
+            indices = np.where(lum_data['flag_station'] == station)[0]
+            indices = indices[np.argsort(lum_data['height'][indices])[::-1]]
+            if len(indices) > 1:
+                diffs = np.diff(lum_data['height'][indices])
+                height_step[indices] = np.concatenate(([diffs[0]], diffs))
+        lum_data['height_step'] = height_step
+
         # for the lum data delete all the keys that have values above 8
         if np.any(lum_data['absolute_magnitudes'] > 8):
             print(obs.station_id,'Found values below 8 absolute magnitudes :', lum_data['absolute_magnitudes'][lum_data['absolute_magnitudes'] > 8])
@@ -3884,15 +3895,8 @@ class ObservationData:
             # Get all indices where this station appears
             indices = np.where(self.stations_lum == station)[0]
 
-            # A station with a single point has no height difference, so its height is not adjusted
-            if len(indices) < 2:
-                continue
-
-            # Compute the differences between consecutive heights
-            diffs = np.diff(self.height_lum[indices])
-            
-            # Prepend the first difference to match the array length
-            diffheight = np.concatenate(([diffs[0]], diffs))
+            # Take the height steps between the frames, computed before the points were filtered
+            diffheight = lum_data['height_step'][indices]
             
             # Subtract half of diffheight from the heights
             self.height_lum[indices] = self.height_lum[indices] - diffheight*pick_position
@@ -3979,6 +3983,11 @@ class ObservationData:
 
             # Average out the magnitudes
             time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
+
+            # A light curve of a single point cannot be integrated
+            if len(np.unique(time_arr)) < 2:
+                print('Too few valid luminosity points to compute the photometric mass')
+                continue
 
             # # Calculate the radiated energy
             # radiated_energy = calcRadiatedEnergy(np.array(time_arr), np.array(mag_arr), P_0m=self.P_0m)
