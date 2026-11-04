@@ -971,8 +971,8 @@ class DragFit(object):
 
 
     def summaryTable(self, gamma_a=GAMMA_A, bulk_density=BULK_DENSITY):
-        """ Make a table of the fitted model, with the ballistic coefficient and the dynamic mass in every
-            segment of the observed part.
+        """ Make a table of the fitted model, with the ballistic coefficient in every segment of the observed
+            part, and the final dynamic mass.
 
         Keyword arguments:
             gamma_a: [float] Product of the drag coefficient Gamma and the shape factor A, assumed for the
@@ -1016,9 +1016,9 @@ class DragFit(object):
         d_std = self._paramStd(np.eye(len(self.params))[3:])
 
         out.append(" Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, " \
-            + "Growth, Signif, Mass end")
+            + "Growth, Signif")
         out.append(("    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m{:s}/kg),   (m{:s}/kg), " \
-            + "  (%),    (x), (sigma),     (kg)").format(sq, sq))
+            + "  (%),    (x), (sigma)").format(sq, sq))
 
         for i in range(self.n_knots):
 
@@ -1027,7 +1027,6 @@ class DragFit(object):
             time_seg = self.timeAtLength(len_seg)
             vel_seg = self.velocityAtLength(len_seg)
             k_seg, log_k_std = self.ballisticCoeffAtLength(len_seg)
-            mass_seg, _, _ = self.dynamicMassAtLength(len_seg, gamma_a=gamma_a, bulk_density=bulk_density)
 
             # Compute the dynamic pressure at the beginning of the segment
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
@@ -1040,14 +1039,15 @@ class DragFit(object):
                 signif = 0.0
 
             out.append(("{:4d}, {:6.2f}, {:6.2f}, {:8.3f}, {:8.3f}, {:9.1f}, {:9.2e}, {:9.2e}, {:5.0f}, " \
-                + "{:6.2f}, {:6.1f}, {:8.3g}{:s}").format(i + 1, ht_seg[0]/1000, ht_seg[1]/1000, \
-                time_seg[0], vel_seg[0]/1000, dyn_pres/1000, k_seg[0], k_seg[1], 100*log_k_std[1], \
-                np.exp(self.params[3 + i]), signif, mass_seg[1], " *" if signif > 2 else ""))
+                + "{:6.2f}, {:6.1f}{:s}").format(i + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
+                vel_seg[0]/1000, dyn_pres/1000, k_seg[0], k_seg[1], 100*log_k_std[1], \
+                np.exp(self.params[3 + i]), signif, " *" if signif > 2 else ""))
 
         out.append("The star * marks the segments where K grows significantly (more than 2 sigma). K std " \
             + "is the relative uncertainty of K at the segment end.")
-        out.append("The dynamic mass is the mass of the leading body for the assumed Gamma*A and density, " \
-            + "m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is propagated.")
+        out.append("The final dynamic mass is the mass of the leading body at the last point for the " \
+            + "assumed Gamma*A and density, m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is " \
+            + "propagated.")
 
         return "\n".join(out)
 

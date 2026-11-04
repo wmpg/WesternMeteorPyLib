@@ -129,12 +129,12 @@ Drag model of the motion: dv/dt = -K*rho*v² + g
     K end/beg = 1.64, single-body m end/beg = 0.226
     Final dynamic mass = 0.126 kg (1 sigma 0.0803 - 0.197 kg), for Gamma*A = 0.78 and bulk density = 3500 kg/m³
 
- Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, Growth, Signif, Mass end
-    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m²/kg),   (m²/kg),   (%),    (x), (sigma),     (kg)
-   1,  89.75,  83.80,    0.002,   14.821,       0.8,  4.11e-03,  4.12e-03,    81,   1.00,    0.0,    0.556
+ Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, Growth, Signif
+    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m²/kg),   (m²/kg),   (%),    (x), (sigma)
+   1,  89.75,  83.80,    0.002,   14.821,       0.8,  4.11e-03,  4.12e-03,    81,   1.00,    0.0
  ...
-   9,  42.18,  36.23,    3.749,   13.345,     511.9,  4.12e-03,  4.12e-03,     8,   1.00,    0.0,    0.554
-  10,  36.23,  30.28,    4.289,   11.734,     958.7,  4.12e-03,  6.75e-03,    15,   1.64,    2.2,    0.126 *
+   9,  42.18,  36.23,    3.749,   13.345,     511.9,  4.12e-03,  4.12e-03,     8,   1.00,    0.0
+  10,  36.23,  30.28,    4.289,   11.734,     958.7,  4.12e-03,  6.75e-03,    15,   1.64,    2.2 *
 ```
 
 - **Residuals RMS** is the scatter of the observed lengths around the model, along the track.
@@ -145,9 +145,8 @@ Drag model of the motion: dv/dt = -K*rho*v² + g
   sigma. A star marks the segments where `K` grows by more than 2 sigma.
 - **K end/beg** and **single-body m end/beg** are the total growth of `K` and the mass ratio a single
   body of a constant shape would need to explain it (`m ~ K^-3`).
-- **Final dynamic mass** and **Mass end** are the dynamic masses of the leading body at the last
-  point and at the end of every segment, for the assumed `Gamma*A` and density (see
-  [the dynamic mass](#the-dynamic-mass)).
+- **Final dynamic mass** is the dynamic mass of the leading body at the last point, for the assumed
+  `Gamma*A` and density (see [the dynamic mass](#the-dynamic-mass)).
 
 **The plots** show the height against time, the velocity against height and the ballistic
 coefficient against height with its 1 sigma band. The data are the solver's points, and the
@@ -287,9 +286,6 @@ known to 15%, so the mass is known to a factor of 1.56 (0.08 to 0.20 kg). Only t
 fit is propagated. The assumptions usually matter more: the mass scales as `(Gamma*A)^3/rho_m^2`, so
 changing `Gamma*A` by 20% changes the mass by a factor of 1.7, and an iron (`rho_m = 7800 kg/m³`)
 has 0.2 of the mass of a stone with the same `K`.
-
-High up, where `K` is poorly constrained, the uncertainty of the mass is three times larger still in
-the logarithm, so only the mass at the end is useful.
 
 The dynamic mass is meant for fireballs. For faint meteors, which fragment and erode into small
 grains, the deceleration follows the grains and the dynamic mass comes out orders of magnitude below
