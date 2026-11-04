@@ -19,6 +19,7 @@ import scipy.optimize
 import scipy.special
 
 # Re-exported so that a caller can keep importing them from here
+from wmpl.Utils.DynamicsCheckpoint import DynamicsCheckpoint, checkpointSeed, fingerprint
 from wmpl.Utils.OrbitConstants import (GAUSS_K, GAUSS_K_SQUARED, A_JUPITER, A_SATURN, A_URANUS,
     A_NEPTUNE)
 
@@ -1337,7 +1338,7 @@ def checkDynamicsInputs(traj, batch):
 def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNAMICS_BATCH,
     max_clones=JFC_DYNAMICS_MAX_CLONES, confidence=0.95, integrator='ias15', gr='gr', beta=None,
     seed=None, output_years=JFC_DYNAMICS_OUTPUT_YEARS, encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL,
-    n_cpu=None):
+    n_cpu=None, checkpoint_path=None):
     """ Classify whether a meteoroid moved like a Jupiter-family comet, from clones of its orbit
         integrated backwards.
 
@@ -1374,6 +1375,10 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
         encounter_hill: [float] Depth of the encounters with Jupiter, in Hill radii, that count as
             lifting a perihelion. Default JFC_DYNAMICS_ENCOUNTER_HILL.
         n_cpu: [int] Processes for the clones. None uses all cores but one.
+        checkpoint_path: [str] File to save each batch to as soon as it ends. If it already holds batches
+            of a run with the same parameters, they are read back instead of integrated again, with the
+            seed they were drawn with if none is given. A batch cut halfway starts again. The file is
+            left in place at the end. None (default) saves nothing. See wmpl.Utils.DynamicsCheckpoint.
 
     Return:
         [dict] The settings (under 'assumptions'), and: 'n_integrated', 'n_clones' (those that count:
@@ -1395,14 +1400,25 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
 
     checkDynamicsInputs(traj, batch)
 
-    if seed is None:
-        seed = int(np.random.SeedSequence().entropy%(2**32))
-
     t = dynamicsOutputTimes(years, output_years)
     n_outputs = len(t)
 
     if max_clones < 1:
         raise ValueError("At least one clone is needed, got max_clones = {}.".format(max_clones))
+
+    if (seed is None) and (checkpoint_path is not None):
+        seed = checkpointSeed(checkpoint_path)
+
+    if seed is None:
+        seed = int(np.random.SeedSequence().entropy%(2**32))
+
+    checkpoint = None
+    if checkpoint_path is not None:
+        checkpoint = DynamicsCheckpoint(checkpoint_path, {'mode': 'adapted', 'years': years,
+            'output_years': output_years, 'epoch_jd': traj.jdt_ref, 'integrator': integrator, 'gr': gr,
+            'beta': beta, 'seed': seed, 'batch': batch, 'max_clones': max_clones,
+            'trajectory': fingerprint([np.asarray(getattr(traj, key, 0.0), dtype=float).tolist()
+                for key in ('state_vect_mini', 'v_init', 'radiant_eci_mini', 'state_vect_cov')])})
 
     n_looks = int(np.ceil(float(max_clones)/batch))
     look_confidence = 1.0 - (1.0 - confidence)/n_looks
@@ -1412,16 +1428,28 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
     n_escaped = 0
     n_impacted = 0
     n_failed = 0
+    n_resumed = 0
     all_diagnostics = {}
 
     for look in range(n_looks):
 
         n_batch = max(2, min(batch, max_clones - look*batch))
 
-        _, outputs_mc, diagnostics = reb.reboundSimulate(None, None, traj=traj, direction='backward',
-            sim_days=years*365.25, n_outputs=n_outputs, mc_runs=n_batch, random_seed=seed + look,
-            integrator=integrator, gr=gr, beta=beta, lean_outputs=True, return_diagnostics=True,
-            show_progress=False, n_cpu=n_cpu, skip_nominal=True)
+        key = 'batch_{:d}'.format(look)
+
+        if (checkpoint is not None) and (key in checkpoint.records):
+            outputs_mc, diagnostics = checkpoint.records[key]
+            n_resumed += len(outputs_mc)
+
+        else:
+
+            _, outputs_mc, diagnostics = reb.reboundSimulate(None, None, traj=traj, direction='backward',
+                sim_days=years*365.25, n_outputs=n_outputs, mc_runs=n_batch, random_seed=seed + look,
+                integrator=integrator, gr=gr, beta=beta, lean_outputs=True, return_diagnostics=True,
+                show_progress=False, n_cpu=n_cpu, skip_nominal=True)
+
+            if (checkpoint is not None) and outputs_mc:
+                checkpoint.add(key, (outputs_mc, diagnostics))
 
         # reboundSimulate skips a clone that failed. With none left there is nothing to say about the
         #   orbit, which is not the same as every clone being unbound
@@ -1465,8 +1493,8 @@ def classifyJupiterFamilyDynamics(traj, years=JFC_DYNAMICS_YEARS, batch=JFC_DYNA
             'integrator': integrator, 'gr': gr, 'beta': beta, 'seed': seed, 'batch': batch,
             'max_clones': max_clones, 'output_years': output_years, 'q_limit': JFC_DYNAMICS_Q_LIMIT,
             'a_limit': JFC_DYNAMICS_A_LIMIT, 'p_threshold': JFC_DYNAMICS_P_THRESHOLD,
-            'encounter_hill': encounter_hill, 'confidence': confidence},
-        n_integrated=n_integrated, n_batches=look + 1, n_escaped=n_escaped, n_impacted=n_impacted,
+            'encounter_hill': encounter_hill, 'confidence': confidence, 'checkpoint': checkpoint_path},
+        n_resumed=n_resumed, n_integrated=n_integrated, n_batches=look + 1, n_escaped=n_escaped, n_impacted=n_impacted,
         n_failed=n_failed, integrator_warning=integrator_warning, look_confidence=look_confidence,
         dynamics_class=verdict['dynamics_class'] if summary['n_clones'] else 'unbound')
 
@@ -1621,7 +1649,7 @@ def checkShober2024Inputs(traj):
 
 def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, years=SHOBER2024_YEARS,
     output_years=SHOBER2024_OUTPUT_YEARS, confidence=0.95, seed=None,
-    encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL, n_cpu=None, show_progress=False):
+    encounter_hill=JFC_DYNAMICS_ENCOUNTER_HILL, n_cpu=None, show_progress=False, checkpoint_path=None):
     """ Classify whether a meteoroid moved like a Jupiter-family comet with the setup of Shober et al.
         (2024), Sect. 2.4, so that the result can be compared with theirs.
 
@@ -1655,6 +1683,10 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
             lifting a perihelion. Default JFC_DYNAMICS_ENCOUNTER_HILL.
         n_cpu: [int] Processes for the clones. None uses all cores but one.
         show_progress: [bool] Print how many clones have been integrated. Default False.
+        checkpoint_path: [str] File to save each clone to as soon as it ends. If it already holds clones of
+            a run with the same parameters, they are read back instead of integrated again, with the seed
+            they were drawn with if none is given. A clone that failed is tried again. The file is left
+            in place at the end. None (default) saves nothing. See wmpl.Utils.DynamicsCheckpoint.
 
     Return:
         [dict] As classifyJupiterFamilyDynamics, with the mode, the uncertainties and the start of the
@@ -1680,6 +1712,9 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
     if n_clones < 1:
         raise ValueError("At least one clone is needed, got n_clones = {}.".format(n_clones))
 
+    if (seed is None) and (checkpoint_path is not None):
+        seed = checkpointSeed(checkpoint_path)
+
     if seed is None:
         seed = int(np.random.SeedSequence().entropy%(2**32))
 
@@ -1699,34 +1734,74 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
     if n_cpu is None:
         n_cpu = max(1, (os.cpu_count() or 1) - 1)
 
+    # Fails here, before the hours of integration, if the file cannot be written or belongs to another run
+    checkpoint = None
+    if checkpoint_path is not None:
+        checkpoint = DynamicsCheckpoint(checkpoint_path, {'mode': 'shober2024', 'years': years,
+            'output_years': output_years, 'epoch_jd': traj.jdt_ref, 'seed': seed, 'n_clones': n_clones,
+            'states': fingerprint([jd_start, states])})
+
     outputs_mc, diagnostics, failed = {}, {}, {}
+
+    def keep(result):
+        outputs_mc.update(result['outputs'])
+        diagnostics.update(result['diagnostics'])
 
     def collect(name, get_result):
         """ Keep the result of a clone, or its error: one clone should not lose hours of the others. """
 
         try:
             result = get_result()
-            outputs_mc.update(result['outputs'])
-            diagnostics.update(result['diagnostics'])
 
         except Exception as err:
             failed[name] = repr(err)
+
+        # Outside the try: a checkpoint that cannot be written is no failure of the clone
+        else:
+            keep(result)
+            if checkpoint is not None:
+                checkpoint.add(name, result)
 
         done = len(outputs_mc) + len(failed)
         if show_progress and (done%max(1, n_clones//20) == 0):
             print("  {:d}/{:d} clones integrated".format(done, n_clones), flush=True)
 
+    pending = list(zip(names, states))
+    n_resumed = 0
+
+    if checkpoint is not None:
+
+        for name, _ in pending:
+            if name in checkpoint.records:
+                keep(checkpoint.records[name])
+                n_resumed += 1
+
+        pending = [(name, state) for name, state in pending if name not in checkpoint.records]
+
+        if show_progress and n_resumed:
+            print("  {:d}/{:d} clones read back from {:s}".format(n_resumed, n_clones, checkpoint_path),
+                flush=True)
+
     # One clone per simulation, so that each gets its own adaptive timestep
     if n_cpu == 1:
-        for name, state in zip(names, states):
+        for name, state in pending:
             collect(name, lambda: reb.integrateHeliocentricBodies([name], [state], jd_start, times, **kwargs))
 
-    else:
+    elif pending:
         with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
             futures = {executor.submit(reb.integrateHeliocentricBodies, [name], [state], jd_start, times,
-                **kwargs): name for name, state in zip(names, states)}
-            for future in concurrent.futures.as_completed(futures):
-                collect(futures[future], future.result)
+                **kwargs): name for name, state in pending}
+
+            # Leaving the pool waits for all that is queued, which may be hours, if a run that stops here
+            #   (an interruption, a full disk) does not cancel it
+            try:
+                for future in concurrent.futures.as_completed(futures):
+                    collect(futures[future], future.result)
+
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
 
     if not outputs_mc:
         raise RuntimeError("All the {:d} clones failed to integrate. One of the errors: {:s}".format(n_clones,
@@ -1750,8 +1825,8 @@ def classifyJupiterFamilyDynamicsShober2024(traj, n_clones=SHOBER2024_CLONES, ye
             'start_hill': SHOBER2024_START_HILL, 'start_days_before': dt_days,
             'output_years': output_years, 'q_limit': JFC_DYNAMICS_Q_LIMIT,
             'a_limit': JFC_DYNAMICS_A_LIMIT, 'p_threshold': JFC_DYNAMICS_P_THRESHOLD,
-            'encounter_hill': encounter_hill, 'confidence': confidence},
-        n_integrated=len(outputs_mc), n_batches=1,
+            'encounter_hill': encounter_hill, 'confidence': confidence, 'checkpoint': checkpoint_path},
+        n_resumed=n_resumed, n_integrated=len(outputs_mc), n_batches=1,
         n_escaped=sum(diagnostics[name]['escaped'] is not None for name in outputs_mc),
         n_impacted=sum(diagnostics[name]['impact'] is not None for name in outputs_mc),
         n_failed=len(failed), failed_clones=failed, integrator_warning=None, look_confidence=confidence,
@@ -1853,6 +1928,10 @@ def formatJupiterFamilyDynamics(result):
         lines.append("    {:d} clone(s) were unbound at every output after the epoch and are left out of "
             "the classification".format(result['n_left_unbound']))
 
+    if s.get('checkpoint') is not None:
+        lines.append("    Checkpoint: {:s}, {:d} clone(s) read back from it".format(s['checkpoint'],
+            result['n_resumed']))
+
     if result['n_failed']:
         lines.append("    {:d} clone(s) failed to integrate and are left out of the classification, which "
             "would bias it if the failures depend on the orbit".format(result['n_failed']))
@@ -1950,6 +2029,10 @@ if __name__ == "__main__":
         help="Processes for the clones. Default: all cores but one.")
     dyn.add_argument('--dynamics_save', metavar='FILE', type=str, default=None, \
         help="Save the result of the classification, with its assumptions, to this JSON file.")
+    dyn.add_argument('--dynamics_checkpoint', metavar='FILE', type=str, default=None, \
+        help="Save each clone (shober2024) or batch (adapted) to this file as soon as it ends. Run the same "
+        "command again to go on from there after an interruption, with the same clones. A file from a run "
+        "with other parameters is refused. It takes about 50 kB per clone with the outputs of shober2024.")
 
     cml_args = arg_parser.parse_args()
 
@@ -2135,7 +2218,7 @@ if __name__ == "__main__":
             try:
                 result = classifyJupiterFamilyDynamicsShober2024(traj, n_clones=n_clones,
                     years=cml_args.years, seed=cml_args.seed, n_cpu=cml_args.cores,
-                    show_progress=verbose)
+                    show_progress=verbose, checkpoint_path=cml_args.dynamics_checkpoint)
 
             except (ImportError, ValueError, OSError, RuntimeError) as err:
                 reportError("--dynamics: {:s}".format(str(err)))
@@ -2167,7 +2250,7 @@ if __name__ == "__main__":
                     max_clones=max_clones,
                     integrator='ias15' if cml_args.integrator is None else cml_args.integrator,
                     gr='gr' if cml_args.gr is None else cml_args.gr, beta=beta, seed=cml_args.seed,
-                    n_cpu=cml_args.cores)
+                    n_cpu=cml_args.cores, checkpoint_path=cml_args.dynamics_checkpoint)
 
             except (ImportError, ValueError, OSError, RuntimeError) as err:
                 reportError("--dynamics: {:s}".format(str(err)))

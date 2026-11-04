@@ -205,6 +205,25 @@ Three choices are not in the paper:
 years, on 10 cores of a machine that had other work. That makes about 30 CPU-hours for the 1000
 clones on such an orbit, and minutes for an orbit whose class settles in one batch.
 
+**Checkpoint.** A run this long can be cut. `--dynamics_checkpoint FILE` saves each clone of `shober2024`,
+or each batch of the adapted mode, as soon as it ends:
+
+```
+python -m wmpl.Utils.OrbitClassification traj.pickle --dynamics shober2024 --dynamics_checkpoint run.pkl
+```
+
+Run the same command again to go on from there. The clones are the same, with the seed kept in the file if
+none is given, so the result does not depend on the interruption. A batch or a clone cut halfway starts
+again, and so does a clone that failed. A file from a run with other parameters, or one that is not a
+checkpoint, is refused and left as it is. The verdict settings (`confidence`, `encounter_hill`) are not
+part of the comparison, since they change nothing in the integration. The file takes about 50 kB per clone
+with the outputs of `shober2024`, and stays in place at the end: delete it once you have the result. It is
+a pickle, so read only your own.
+
+After Ctrl-C the run stops once the clones already handed to the processes have ended, which is up to a few
+clones' time. What they integrated meanwhile is not saved. If the process is killed outright, its workers
+end the clone they are on before exiting.
+
 ---
 
 ## Supporting machinery
