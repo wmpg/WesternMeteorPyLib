@@ -3482,7 +3482,7 @@ def reboundSimulate(
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
         dt_days=None, compute_megno=False, sun_j2=True, gr="gr_full", lean_outputs=False,
-        verbose=False):
+        verbose=False, skip_nominal=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -3549,6 +3549,11 @@ def reboundSimulate(
             output 60 bytes, so 1000 clones with 2000 outputs each need 3.1 GB in rows and 0.12 GB
             in arrays. Default False.
         verbose: [bool] If True, print out the progress of the simulation.
+        skip_nominal: [bool] If True, integrate only the Monte Carlo realizations, which are the same
+            ones for the same random_seed, for a caller that has no use for the nominal solution:
+            it runs serially, before them, and takes as long as one of them on a whole core.
+            outputs is then None and the diagnostics have no entry for it. Not available with
+            compute_megno. Default False.
 
     Return:
         outputs: [list] List of outputs, each containing the time, state vector and orbital elements at that
@@ -3574,6 +3579,10 @@ def reboundSimulate(
 
     if gr not in GR_MODELS:
         raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr), ", ".join(GR_MODELS)))
+
+    # The MEGNO belongs to the nominal orbit
+    if skip_nominal and compute_megno:
+        raise ValueError("compute_megno needs the nominal solution, which skip_nominal leaves out.")
 
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
@@ -3688,9 +3697,12 @@ def reboundSimulate(
         print(f"Direction: {direction}")
 
     # Nominal solution, integrated in its own simulation (in the main process)
-    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
-    outputs = nominal_result["outputs"][obj_name]
-    diagnostics = dict(nominal_result["diagnostics"])
+    outputs = None
+    diagnostics = {}
+    if not skip_nominal:
+        nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
+        outputs = nominal_result["outputs"][obj_name]
+        diagnostics = dict(nominal_result["diagnostics"])
 
     # Monte Carlo realizations, each integrated in its own independent simulation, optionally across
     # multiple processes
