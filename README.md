@@ -304,6 +304,12 @@ print(math.degrees(lasun), ' deg')
 ```
 
 
+## Contributing
+
+New code has to follow the [WMPL coding standard](CODING_STANDARD.md), so that it reads like the code around it.
+Pull requests that do not follow it will be asked to change before they are merged.
+
+
 ## Citations
 
 For academic use, please cite the paper:
