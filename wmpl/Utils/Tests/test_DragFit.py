@@ -361,6 +361,25 @@ def testUnconstrainedCoefficient():
 
 
 
+def testPlotWithALargeUncertainty():
+    """ Check that the plot can be made when the uncertainty of K is finite but so large that its
+        exponential overflows.
+    """
+
+    _, _, drag_fit = _solvedMeteor()
+
+    drag_fit = copy.copy(drag_fit)
+    drag_fit.params_cov = drag_fit.params_cov*1e12
+
+    _, log_k_std = drag_fit.ballisticCoeffAtLength(np.array([drag_fit.len_first]))
+    assert np.isfinite(log_k_std[0]) and (log_k_std[0] > 1000)
+
+    fig = plotDragFit(drag_fit, show=False, gamma_a=0.78)
+    assert np.all(np.isfinite(fig.axes[2].get_xlim()))
+    plt.close(fig)
+
+
+
 def testNoUsedPoints():
     """ Check that a trajectory without used points raises a clear error. """
 
@@ -397,7 +416,7 @@ if __name__ == "__main__":
         testExtrapolationBelowTheEnd, testBallisticCoefficient, testNoDragAboveTheBeginning, \
         testTimeAndHeightFunctions, testSummaryTable, testDynamicMass, testVelocityIsPhysical, \
         testHeightsAreConsistent, testGravityDropMatchesTheSolution, testRadiantBentByGravity, \
-        testUnconstrainedCoefficient, testNoUsedPoints, testPlotDragFit]
+        testUnconstrainedCoefficient, testPlotWithALargeUncertainty, testNoUsedPoints, testPlotDragFit]
 
     for test in test_list:
         test()

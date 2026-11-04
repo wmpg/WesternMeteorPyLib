@@ -1108,21 +1108,27 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
         ax_k.plot(k_plot, ht_plot/1000, color='k', linestyle=line_style, zorder=4)
 
 
-    # Plot the 1 sigma uncertainty of the ballistic coefficient in the observed part. Where it is not
-    #   constrained, the band covers the whole plot
-    k_lo = k_grid[observed]*np.exp(-log_k_std[observed])
-    k_hi = k_grid[observed]*np.exp(log_k_std[observed])
+    # Plot the 1 sigma uncertainty of the ballistic coefficient in the observed part, in the logarithm so
+    #   that a large uncertainty does not overflow. The limits of the plot are set by the uncertainties
+    #   smaller than a factor of 100, and where K is less constrained the band covers the whole plot
+    log_k = np.log(k_grid[observed])
+    log_std = log_k_std[observed]
 
-    finite = np.isfinite(log_k_std[observed])
-    if np.any(finite):
-        k_min = np.min(k_lo[finite])/2
-        k_max = 2*np.max(k_hi[finite])
-    else:
-        k_min = np.min(k_grid[observed])/10
-        k_max = 10*np.max(k_grid[observed])
+    bounded = log_std < np.log(100.0)
+    log_min = np.min(log_k) - np.log(2.0)
+    log_max = np.max(log_k) + np.log(2.0)
+    if np.any(bounded):
+        log_min = min(log_min, np.min(log_k[bounded] - log_std[bounded]) - np.log(2.0))
+        log_max = max(log_max, np.max(log_k[bounded] + log_std[bounded]) + np.log(2.0))
 
-    ax_k.fill_betweenx(drag_fit.ht_grid[observed]/1000, np.maximum(k_lo, k_min), np.minimum(k_hi, k_max), \
-        color='0.7', label='1$\\sigma$', zorder=2)
+    k_min = np.exp(log_min)
+    k_max = np.exp(log_max)
+
+    with np.errstate(invalid='ignore'):
+        k_lo = np.exp(np.clip(log_k - log_std, log_min, log_max))
+        k_hi = np.exp(np.clip(log_k + log_std, log_min, log_max))
+
+    ax_k.fill_betweenx(drag_fit.ht_grid[observed]/1000, k_lo, k_hi, color='0.7', label='1$\\sigma$', zorder=2)
 
 
     # Show the growth of the ballistic coefficient in the observed part and the equivalent mass loss of a
