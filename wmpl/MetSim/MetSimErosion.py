@@ -20,8 +20,8 @@ import scipy.integrate
 
 
 # Cython init
-from wmpl.Utils.CythonBuild import installPyximport
-installPyximport()
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
     ionizationEfficiency, atmDensityPoly
 

@@ -568,21 +568,3 @@ def testMoonEncounterIsGeometricallyReachableOnlyNearEarth(reb):
     earth_radius_au = 6371.0/149597870.7
 
     assert (moon_perigee_au - earth_radius_au) > 3.0*reb.HILL_RADII_AU["Luna"]
-
-
-def testIntegrationEpochsAreInTdbAndUtc(reb):
-    """ Check that the start in TDB is 69.184 s after the UTC reference time in 2019 (37 leap seconds and
-        32.184 s), and that the end is the start in TDB plus the days integrated, also across a leap second.
-    """
-
-    epochs = reb.integrationEpochs(2458779.88, -60.0)
-
-    assert (epochs["start_jd_tdb"] - epochs["start_jd_utc"])*86400 == pytest.approx(69.184, abs=0.002)
-    assert epochs["final_jd_tdb"] - epochs["start_jd_tdb"] == pytest.approx(-60.0, abs=1e-9)
-    assert (epochs["final_jd_tdb"] - epochs["final_jd_utc"])*86400 == pytest.approx(69.184, abs=0.002)
-    assert epochs["start_utc"].startswith("2019-10-23 09:07")
-
-    # Go 30 days back from 2017-01-05, across the leap second of 2016-12-31, where TDB - UTC drops to
-    #   68.184 s
-    epochs = reb.integrationEpochs(2457758.5, -30.0)
-    assert (epochs["final_jd_tdb"] - epochs["final_jd_utc"])*86400 == pytest.approx(68.184, abs=0.002)

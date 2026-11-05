@@ -836,8 +836,7 @@ def derotatedRadiantAltAz(v_eci, eci_pos, jd, lat, lon):
         applied.
 
     Arguments:
-        v_eci: [ndarray] Velocity vector in the ECI frame (m/s), pointing towards the radiant (opposite to
-            the direction of motion), e.g. v_init*radiant_eci.
+        v_eci: [ndarray] Velocity vector in the ECI frame (m/s), pointing along the direction of motion.
         eci_pos: [ndarray] ECI position of the point on the trajectory (m).
         jd: [float] Julian date of the point.
         lat: [float] Geodetic latitude of the point (radians).
@@ -949,18 +948,21 @@ def raDec2Ecliptic(jd, ra, dec):
     # Calculate ecliptic longitude
     L = np.arctan2(np.sin(eps)*np.sin(dec) + np.sin(ra)*np.cos(dec)*np.cos(eps), np.cos(ra)*np.cos(dec))
 
-    # Calculate ecliptic latitude (clip the argument to avoid NaNs from rounding at the poles)
-    B = np.arcsin(np.clip(np.cos(eps)*np.sin(dec) - np.sin(ra)*np.cos(dec)*np.sin(eps), -1.0, 1.0))
+    # Calculate ecliptic latitude
+    B = np.arcsin(np.cos(eps)*np.sin(dec) - np.sin(ra)*np.cos(dec)*np.sin(eps))
 
     # Wrap the longitude to [0, 2pi] range
     L = L%(2*np.pi)
+
+    # Wrap latitude to [-pi/2, pi/2] range
+    B = (B + np.pi/2)%np.pi - np.pi/2
 
     return L, B
 
 
 
 def ecliptic2RaDec(jd, L, B):
-    """ Convert ecliptic longitude and latitude to right ascension and declination.
+    """ Convert right ascension and declination to ecliptic longitude and latitude.
 
     Arguments:
         jd: [float] Julian date of the desired epoch
@@ -968,7 +970,7 @@ def ecliptic2RaDec(jd, L, B):
         B: [float] Ecliptic latitude in radians.
 
     Return:
-        ra, dec: [tuple of floats] right ascension and declination in radians
+        ra, dec: [tuple of floats] ecliptic longitude and latitude in radians
 
     """
 
@@ -978,11 +980,13 @@ def ecliptic2RaDec(jd, L, B):
 
     ra = np.arctan2(np.cos(eps)*np.sin(L)*np.cos(B) - np.sin(eps)*np.sin(B), np.cos(L)*np.cos(B))
 
-    # Calculate declination (clip the argument to avoid NaNs from rounding at the poles)
-    dec = np.arcsin(np.clip(np.sin(eps)*np.sin(L)*np.cos(B) + np.cos(eps)*np.sin(B), -1.0, 1.0))
+    dec = np.arcsin(np.sin(eps)*np.sin(L)*np.cos(B) + np.cos(eps)*np.sin(B))
 
     # Wrap the right ascension to [0, 2pi] range
     ra = ra%(2*np.pi)
+
+    # Wrap the declination to [-pi/2, pi/2] range
+    dec = (dec + np.pi/2)%np.pi - np.pi/2
 
     return ra, dec
 
@@ -1137,14 +1141,17 @@ def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
     # Calculate right ascension
     ra_corr = np.arctan2(A, B) + z
 
-    # Calculate declination (apply a different equation if close to the pole, closer than 0.5 degrees)
+    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (np.pi/2 - np.abs(dec)) < np.radians(0.5):
-        dec_corr = np.sign(C)*np.arccos(np.clip(np.sqrt(A**2 + B**2), -1.0, 1.0))
+        dec_corr = np.sign(C)*np.arccos(np.sqrt(A**2 + B**2))
     else:
-        dec_corr = np.arcsin(np.clip(C, -1.0, 1.0))
+        dec_corr = np.arcsin(C)
 
     # Wrap right ascension to [0, 2*pi] range
     ra_corr = ra_corr%(2*np.pi)
+
+    # Wrap declination to [-pi/2, pi/2] range
+    dec_corr = (dec_corr + np.pi/2)%np.pi - np.pi/2
 
     return ra_corr, dec_corr
 

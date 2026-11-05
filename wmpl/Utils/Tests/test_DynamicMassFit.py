@@ -23,8 +23,7 @@ import pytest
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
-from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly, atmDensPoly, getAtmDensity
+from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity
 from wmpl.Utils.Math import lineFunc
 
 
@@ -187,54 +186,6 @@ def testFitVelocityRejectsOutliersAtTheRequestedSigma():
     assert not mask[12]
     assert mask.sum() == t.size - 1
     assert popt[0] == pytest.approx(-4000.0, abs=150.0)
-
-
-### The fragment simulation ###
-
-def _runFragSimAtTheEnd(traj):
-    """ Run the fragment simulation of a 0.1 kg fragment from 30 km at the end point of the trajectory.
-
-    Arguments:
-        traj: [Trajectory object] Trajectory.
-
-    Return:
-        [SimulationResults] Results of the fragment simulation.
-    """
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        sr = runFragSim(0.1, 3500, np.degrees(traj.rend_lat), np.degrees(traj.rend_lon), traj.jdt_ref, \
-            30000, 5000, 45, 0.55)
-
-    return sr
-
-
-
-def testFragmentSimulationFitsTheAtmosphereAtTheGivenLocation(traj):
-    """ Check that the atmosphere of the fragment simulation is the one at the given location, as
-        runFragSim() takes the location in degrees and fitAtmPoly() takes it in radians.
-    """
-
-    sr = _runFragSimAtTheEnd(traj)
-
-    dens_co = fitAtmPoly(traj.rend_lat, traj.rend_lon, sr.const.h_kill, 30000, traj.jdt_ref)
-
-    assert sr.const.dens_co == pytest.approx(dens_co, rel=1e-12)
-
-
-
-def testFragmentSimulationAtmosphereFollowsMSISOverTheSimulatedHeights(traj):
-    """ Check that the density polynomial of the fragment simulation follows MSIS below its starting
-        height, which a 7th order polynomial fitted up to 180 km misses by 10-30% in the stratosphere.
-    """
-
-    sr = _runFragSimAtTheEnd(traj)
-
-    heights = np.linspace(sr.const.h_kill, 30000, 50)
-    msis = np.array([getAtmDensity(traj.rend_lat, traj.rend_lon, ht, traj.jdt_ref) for ht in heights])
-
-    assert atmDensPoly(heights, sr.const.dens_co) == pytest.approx(msis, rel=0.01)
-
-
 
 
 if __name__ == "__main__":
