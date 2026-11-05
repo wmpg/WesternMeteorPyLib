@@ -143,3 +143,58 @@ def test_the_figure_says_when_the_clones_depart_from_the_paper():
     assert _modeLabel({'mode': 'adapted'}) == 'adapted mode'
     assert _modeLabel({'mode': 'shober2024', 'sigma': {'e': 0.02}}) == 'setup of Shober et al. 2024'
     assert _modeLabel({'mode': 'shober2024', 'sigma': {'q': 0.001}}).endswith('but drawing q')
+
+
+def test_the_top_of_a_panel_follows_the_clones_and_keeps_the_limit():
+
+    from wmpl.Utils.OrbitDynamicsPlot import _upperBound
+
+    stable = np.full((3, 11), 0.9)
+    assert _upperBound(stable, 2.5, 12.0) == pytest.approx(1.3*2.5)
+
+    scattered = stable.copy()
+    scattered[0, 5:] = 5.0
+    assert _upperBound(scattered, 2.5, 12.0) == pytest.approx(1.3*5.0)
+
+    # One clone far out, or one that left, does not scale the panel beyond its largest
+    scattered[1, 5:] = 40.0
+    scattered[2, 6:] = np.inf
+    assert _upperBound(scattered, 2.5, 12.0) == 12.0
+
+    assert _upperBound(np.full((2, 11), np.nan), 2.5, 12.0) == pytest.approx(1.3*2.5)
+
+
+class _Figure(object):
+    """ What the axes of a figure were set to, with the saving left out. """
+
+    def __init__(self, monkeypatch):
+
+        from matplotlib.figure import Figure
+
+        self.limits = None
+        figure = self
+
+        def savefig(fig, *args, **kwargs):
+            figure.limits = [ax.get_ylim() for ax in fig.axes]
+
+        monkeypatch.setattr(Figure, 'savefig', savefig)
+
+
+def test_an_aten_orbit_stays_inside_the_panel_of_the_semi_major_axis(monkeypatch):
+
+    figure = _Figure(monkeypatch)
+
+    plotJupiterFamilyDynamics(_result(np.full((3, 11), 0.5), np.full((3, 11), 0.8)), "unused.png")
+
+    assert figure.limits[1][0] < 0.8
+
+
+def test_a_stable_orbit_is_drawn_on_scales_that_show_it(monkeypatch):
+
+    figure = _Figure(monkeypatch)
+
+    plotJupiterFamilyDynamics(_result(np.full((3, 11), 0.9), np.full((3, 11), 2.4)), "unused.png")
+
+    assert figure.limits[0][1] == pytest.approx(1.3*2.5)
+    assert figure.limits[1] == pytest.approx((1.0, 1.3*7.37))
+

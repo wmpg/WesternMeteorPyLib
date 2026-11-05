@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.patheffects as patheffects
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from matplotlib.ticker import LogFormatter
 
 from wmpl.Utils.OrbitClassification import calcBinomialInterval, JFC_DYNAMICS_A_LIMIT, JFC_DYNAMICS_P_THRESHOLD, \
     JFC_DYNAMICS_Q_LIMIT
@@ -25,10 +26,10 @@ _GRID = '#e4e3df'
 _BAND = '#c9c8c2'
 _REACHED = '#eb6834'
 
-# Top of the perihelion panel and range of the semi-major axis panel (AU). Beyond them a clone is far past the
-#   limits anyway, and the panels would otherwise be scaled by the single most scattered clone
+# Most that the panels of the perihelion distance and of the semi-major axis reach up to (AU). Beyond them a clone is
+#   far past the limits anyway, and the panels would otherwise be scaled by the single most scattered clone
 _Q_TOP = 12.0
-_A_RANGE = (1.0, 200.0)
+_A_TOP = 200.0
 
 # Keeps a label readable over the marks it sits on
 _HALO = [patheffects.withStroke(linewidth=3, foreground=_SURFACE)]
@@ -60,6 +61,25 @@ def reachFractionOverTime(t, q, q_limit=JFC_DYNAMICS_Q_LIMIT, confidence=0.95):
     bounds = np.array([calcBinomialInterval(int(k), n_clones, confidence=confidence) for k in count])
 
     return count/n_clones, bounds[:, 0], bounds[:, 1]
+
+
+def _upperBound(x, limit, largest):
+    """ The top of a panel: enough for the clones and the limit, so that a stable orbit is not flattened against the
+        bottom of a scale made for scattered ones.
+
+    Arguments:
+        x: [ndarray] Values of the clones (AU), nan where a clone has no state and +inf after it left.
+        limit: [float] Limit drawn in the panel, which always stays in it, with room for its label (AU).
+        largest: [float] Most the panel reaches up to (AU).
+
+    Return:
+        [float] The top of the panel (AU).
+    """
+
+    finite = x[np.isfinite(x)]
+    highest = np.max(finite) if finite.size else limit
+
+    return min(largest, 1.3*max(highest, limit))
 
 
 def _panel(ax, elapsed, x, reached, limit, label, y_label, max_lines):
@@ -138,12 +158,20 @@ def plotJupiterFamilyDynamics(result, file_path, max_lines=40):
 
     _panel(ax_q, elapsed, q, reached, JFC_DYNAMICS_Q_LIMIT, "q = {:g} AU".format(JFC_DYNAMICS_Q_LIMIT),
         "Perihelion distance (AU)", max_lines)
-    ax_q.set_ylim(0.0, _Q_TOP)
+    ax_q.set_ylim(0.0, _upperBound(q, JFC_DYNAMICS_Q_LIMIT, _Q_TOP))
 
     _panel(ax_a, elapsed, a, reached, JFC_DYNAMICS_A_LIMIT, "a = {:g} AU".format(JFC_DYNAMICS_A_LIMIT),
         "Semi-major axis (AU)", max_lines)
     ax_a.set_yscale('log')
-    ax_a.set_ylim(*_A_RANGE)
+
+    # Plain numbers, also for the minor ticks labelled when the range is short: 2, 3, 4, not 2 x 10^0
+    ax_a.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+    ax_a.yaxis.set_minor_formatter(LogFormatter(labelOnlyBase=False))
+
+    # The bottom follows the clones too: the semi-major axis of an Aten orbit is below 1 AU
+    a_finite = a[np.isfinite(a)]
+    ax_a.set_ylim(min(1.0, 0.8*np.min(a_finite)) if a_finite.size else 1.0,
+        _upperBound(a, JFC_DYNAMICS_A_LIMIT, _A_TOP))
 
     p, low, high = reachFractionOverTime(t, q, confidence=s['confidence'])
 
@@ -170,7 +198,7 @@ def plotJupiterFamilyDynamics(result, file_path, max_lines=40):
         ax.set_facecolor(_SURFACE)
         ax.grid(True, color=_GRID, linewidth=0.6)
         ax.set_axisbelow(True)
-        ax.tick_params(colors=_INK_SECONDARY, labelsize=9, length=3)
+        ax.tick_params(which='both', colors=_INK_SECONDARY, labelsize=9, length=3)
         for side in ('top', 'right'):
             ax.spines[side].set_visible(False)
         for side in ('left', 'bottom'):
@@ -178,7 +206,7 @@ def plotJupiterFamilyDynamics(result, file_path, max_lines=40):
 
     title = "Jupiter-family dynamics: {:s}".format(result['dynamics_class'])
     shown = min(max_lines, int(np.count_nonzero(reached)))
-    subtitle = ("P = {:.1f}% [{:.1f}, {:.1f}]   f_q = {:.3f}   f_a = {:.3f}   {:d} clones, {:.0f} yr, {:s}".format(
+    subtitle = ("P = {:.1f}% [{:.1f}, {:.1f}]   f_q = {:.3f}   f_a = {:.3f}\n{:d} clones, {:.0f} yr, {:s}".format(
         100*result['p'], 100*result['p_low'], 100*result['p_high'], result['f_q'], result['f_a'],
         result['n_clones'], s['years'], _modeLabel(s)))
     if shown < np.count_nonzero(reached):
