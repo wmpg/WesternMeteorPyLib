@@ -9,6 +9,7 @@ import shutil
 import numpy as np
 import scipy.interpolate
 
+from wmpl.Utils.AtmosphereDensity import setAtmosphere
 from wmpl.Formats.EventUWO import StationData
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations
@@ -404,6 +405,9 @@ if __name__ == '__main__':
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Atmosphere model for any density the solver evaluates, also in its Monte Carlo processes
+    setAtmosphere(cml_args)
 
     #########################
 
