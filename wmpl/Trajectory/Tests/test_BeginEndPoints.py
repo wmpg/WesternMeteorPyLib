@@ -10,6 +10,8 @@ Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_BeginEndPoints.py -v
 """
 
+from __future__ import print_function, division, absolute_import
+
 import numpy as np
 
 import matplotlib
@@ -35,28 +37,38 @@ STATIONS = [
 ]
 
 
-def _solve():
-    """ Solve a gravity-dropped trajectory. Returns the solution and the times of its points. """
 
+def _solve():
+    """ Observe a noise-free trajectory with the gravity drop from the four stations and solve it.
+
+    Return:
+        (traj, times):
+            - traj: [Trajectory object] Solved trajectory.
+            - times: [ndarray] Times of the points of the trajectory (s).
+    """
+
+    # Beginning, speed and radiant of the meteor
     lat, lon, ht = np.radians(-43.20), np.radians(172.30), 92000.0
     duration, v_init, elevation = 4.0, 17500.0, 42.0
     begin = np.array(geo2Cartesian(lat, lon, ht, JDT_REF))
     ra, dec = altAz2RADec(np.radians(210.0), np.radians(elevation), JDT_REF, lat, lon)
     radiant_eci = np.array(raDec2ECI(ra, dec))
 
+    # Points along the straight line, dropped by gravity
     times = np.linspace(0, duration, N_POINTS)
     straight = begin - np.outer(v_init*times, radiant_eci)
     v0z = -v_init*np.sin(np.radians(elevation))
-    points = np.array([applyGravityDrop(point, t, np.linalg.norm(begin), 1.0, v0z)
+    points = np.array([applyGravityDrop(point, t, np.linalg.norm(begin), 1.0, v0z) \
         for point, t in zip(straight, times)])
 
     # The picks are kept as given: none is rejected on its residual
-    traj = Trajectory(JDT_REF, meastype=2, max_toffset=1.0, estimate_timing_vel=False, gravity_correction=True,
-        filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False,
-        verbose=False)
+    traj = Trajectory(JDT_REF, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
+        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
+        save_results=False, verbose=False)
 
     for station_id, s_lat, s_lon, ele in STATIONS:
 
+        # A sees the whole track, with its ends ignored, and the others a shorter stretch
         if station_id == "A":
             seen = np.arange(N_POINTS)
             ignore_list = np.zeros(N_POINTS, dtype=np.uint8)
@@ -66,6 +78,7 @@ def _solve():
             seen = np.arange(OTHERS_FIRST, OTHERS_LAST + 1)
             ignore_list = None
 
+        # Directions of the points from the station
         jds = JDT_REF + times[seen]/86400.0
 
         ra_list, dec_list = [], []
@@ -75,20 +88,20 @@ def _solve():
             ra_list.append(r)
             dec_list.append(d)
 
-        azim, elev = raDec2AltAz_vect(np.array(ra_list), np.array(dec_list), jds, np.radians(s_lat),
+        azim, elev = raDec2AltAz_vect(np.array(ra_list), np.array(dec_list), jds, np.radians(s_lat), \
             np.radians(s_lon))
 
-        traj.infillTrajectory(azim, elev, times[seen], np.radians(s_lat), np.radians(s_lon), ele,
+        traj.infillTrajectory(azim, elev, times[seen], np.radians(s_lat), np.radians(s_lon), ele, \
             station_id=station_id, ignore_list=ignore_list)
 
     return traj.run(), times
 
 
-def test_the_ends_come_from_the_points_used():
-    """ A's ignored points lie furthest along the track at both ends, and must not choose the station.
 
-    Choosing by all of A's points reported its first and last used ones instead: the beginning 0.26 s late
-    and 3.0 km low, the end 0.26 s early and 2.9 km high.
+def testTheEndsComeFromThePointsUsed():
+    """ Check that the ignored points of A, which lie furthest along the track at both ends, do not choose
+        the station. Choosing by all of the points of A reported its first and last used ones instead: the
+        beginning 0.26 s late and 3.0 km low, the end 0.26 s early and 2.9 km high.
     """
 
     traj, times = _solve()
@@ -102,11 +115,13 @@ def test_the_ends_come_from_the_points_used():
     assert traj.rend_ele in [obs.rend_ele for obs in others]
 
 
+
+
 if __name__ == "__main__":
 
-    traj, times = _solve()
-    print("begin {:.3f} s at {:.1f} m, end {:.3f} s at {:.1f} m".format((traj.rbeg_jd - JDT_REF)*86400,
-        traj.rbeg_ele, (traj.rend_jd - JDT_REF)*86400, traj.rend_ele))
-    for obs in traj.observations:
-        print("  {}: first used {:.3f} s at {:.1f} m, last used {:.3f} s at {:.1f} m".format(obs.station_id,
-            (obs.rbeg_jd - JDT_REF)*86400, obs.rbeg_ele, (obs.rend_jd - JDT_REF)*86400, obs.rend_ele))
+    # Run all tests
+    test_list = [testTheEndsComeFromThePointsUsed]
+
+    for test in test_list:
+        test()
+        print("PASS {:s}".format(test.__name__))
