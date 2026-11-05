@@ -216,27 +216,21 @@ def circPercentile(data, percentile, q0=None):
 
     if q0 is None:
 
-        # Find the 0/360 break on the angles wrapped to 0-360, so angles from -180 to 180 (e.g. longitudes)
-        #   are also taken, in double precision so the order of the samples is kept
-        flat = data.ravel()
-        wrapped = flat.astype(np.float64)%(2*np.pi)
+        # Wrap the angles to 0-360, so angles from -180 to 180 (e.g. longitudes) are also taken, in double
+        #   precision so the order of the samples is kept
+        data = data.astype(np.float64)%(2*np.pi)
 
         # Without a value for every sample (e.g. the anomalies of a hyperbolic orbit), the percentile is NaN
-        if np.any(np.isnan(wrapped)):
+        if np.any(np.isnan(data)):
             return np.nan
 
         # If the data is on the 0/360 discontinuity, adjust the 0th percentile
-        if np.abs(np.min(wrapped) - np.max(wrapped)) > np.pi:
-            candidates = wrapped > np.pi
+        if np.abs(np.min(data) - np.max(data)) > np.pi:
+            q0 = np.min(data[data > np.pi])
 
         # If the data is not on the 0/360 break
         else:
-            candidates = np.ones_like(wrapped, dtype=bool)
-
-        # Take the 0th percentile as the first sample along the circle of those wrapping to the smallest
-        #   angle, as given in the data so it is normalized to exactly 0
-        first = candidates & (wrapped == np.min(wrapped[candidates]))
-        q0 = np.min(flat[first])
+            q0 = np.min(data)
 
     # Normalize the data
     data = (data - q0) % (2 * np.pi)

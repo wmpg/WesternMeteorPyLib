@@ -55,6 +55,10 @@ def testCircPercentileOfAnglesFrom0To360():
     # A sample without a value (e.g. the anomaly of a hyperbolic orbit) gives NaN
     assert np.isnan(circPercentile([0.1, np.nan, 0.2], 50))
 
+    # The same angle given in different revolutions is the same sample
+    a = 11*2*np.pi + 0.1
+    assert np.isclose(circPercentile([a%(2*np.pi), a, a + 0.1], 50), 0.1)
+
     # The angles can be given in an array of any shape
     assert np.isclose(circPercentile([[0.4, 0.3], [0.2, 0.1]], 50), 0.25)
 
