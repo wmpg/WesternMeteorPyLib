@@ -61,8 +61,9 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
 
 
     # Fit the atmosphere density polynomial using NRLMSISE. The location is given in degrees, while
-    #   fitAtmPoly() takes it in radians. The simulation only descends from its starting height, and a 7th order
-    #   polynomial fitted up to 180 km misses the stratosphere by 10-30%, so it is fitted over those heights only
+    #   fitAtmPoly() takes it in radians. The simulation only descends from its starting height, and a 7th
+    #   order polynomial fitted up to 180 km misses the stratosphere by 10-30%, so it is fitted below the
+    #   starting height only
     const.dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), const.h_kill, ht_beg, jd)
 
     # Run the simulation
