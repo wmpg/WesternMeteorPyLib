@@ -1243,6 +1243,19 @@ def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=Fa
 
 
 
+# How many times to continue a line of sight minimization which ran out of function evaluations
+LOS_CONTINUE_RUNS = 3
+
+
+def stateVectorDiverged(new, old, limit=0.1):
+    """ Did the minimization take the state vector far from where it started? Measured on the vector: for each 
+        coordinate it would be true for any small move when that coordinate is near 0, and never when it is
+        negative, as the sign of the coordinate was kept.
+    """
+
+    return vectMag(new - old)/vectMag(old) > limit
+
+
 def moveStateVector(state_vect, radiant_eci, observations):
     """ Moves the state vector position along the radiant line until it is before any points which are
         projected on it. This is used to make sure that lengths and lags are properly calculated.
@@ -6320,6 +6333,22 @@ class Trajectory(object):
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, 
                 args=minimize_args, method="Nelder-Mead")
 
+        # Running out of function evaluations is not a failure of the line: continue from where it stopped, as
+        #   otherwise the solution is thrown away for the intersecting planes, which can be far worse. The state
+        #   vector goes back to the meteor first, as the cost does not change along the line, so the simplex can 
+        #   wander far along it (billions of metres were seen), and it cannot converge from there
+        for _ in range(LOS_CONTINUE_RUNS):
+
+            if minimize_solution.success:
+                break
+
+            restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], self.observations), 
+                vectNorm(minimize_solution.x[3:])]
+            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, 
+                method="Nelder-Mead")
+
+        unbounded_solution = minimize_solution
+
         # NOTE
         # Other minimization methods were tried as well, but all produce higher fit residuals than Nelder-Mead.
         # Tried:
@@ -6329,7 +6358,7 @@ class Trajectory(object):
 
 
         # If the minimization diverged, bound the solution to +/-10% of state vector
-        if np.max(np.abs(minimize_solution.x[:3] - self.state_vect)/self.state_vect) > 0.1:
+        if stateVectorDiverged(minimize_solution.x[:3], self.state_vect):
 
             print('WARNING! Unbounded state vector optimization failed!')
             print('Trying bounded minimization to +/-10% of state vector position.')
@@ -6348,6 +6377,10 @@ class Trajectory(object):
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
                 weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), 
                 bounds=bounds, method='SLSQP')
+
+            # The bounded solution is only taken if it is better
+            if unbounded_solution.success and (unbounded_solution.fun < minimize_solution.fun):
+                minimize_solution = unbounded_solution
 
 
         if self.verbose:
