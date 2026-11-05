@@ -1270,6 +1270,7 @@ def stateVectorDiverged(new, old, limit=0.1):
     return vectMag(new - old)/vectMag(old) > limit
 
 
+
 def moveStateVector(state_vect, radiant_eci, observations):
     """ Moves the state vector position along the radiant line until it is before any points which are
         projected on it. This is used to make sure that lengths and lags are properly calculated.
@@ -6390,16 +6391,23 @@ class Trajectory(object):
 
         # Perform the minimization of angle deviations. The gravity will only be compensated for after the
         #   initial estimate of timing differences
-        minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), 
+        minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), \
             self.gravity_factor, self.v0z)
-        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, 
+        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
             method="Nelder-Mead")
 
-        # Restart the minimization from its own solution if requested (trajectories pickled before this option
-        #   was added do not have it)
-        for _ in range(getattr(self, 'los_restarts', 0)):
-            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x,
+        # Get the number of restarts, which trajectories pickled before the option was added do not have
+        los_restarts = getattr(self, 'los_restarts', 0)
+
+        # Restart the minimization from its own solution if requested, and keep a converged solution when
+        #   its restart does not converge
+        for _ in range(los_restarts):
+
+            restarted_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
                 args=minimize_args, method="Nelder-Mead")
+
+            if restarted_solution.success or (not minimize_solution.success):
+                minimize_solution = restarted_solution
 
         # Continue a minimization which ran out of function evaluations from the beginning of the meteor on
         #   the line, as the cost does not change along the line and the simplex can end up billions of
@@ -6411,7 +6419,7 @@ class Trajectory(object):
 
             restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], \
                 self.observations), vectNorm(minimize_solution.x[3:])]
-            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, 
+            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, \
                 method="Nelder-Mead")
 
         unbounded_solution = minimize_solution
@@ -6445,8 +6453,9 @@ class Trajectory(object):
                 weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), 
                 bounds=bounds, method='SLSQP')
 
-            # Keep the unbounded solution if it is better than the bounded one
-            if unbounded_solution.success and (unbounded_solution.fun < minimize_solution.fun):
+            # Keep the unbounded solution if it converged and the bounded one did not converge or is worse
+            if unbounded_solution.success and ((not minimize_solution.success) or \
+                (unbounded_solution.fun < minimize_solution.fun)):
                 minimize_solution = unbounded_solution
 
 

@@ -22,22 +22,8 @@ import scipy.optimize
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import Trajectory, stateVectorDiverged
-from wmpl.Trajectory.Tests.SyntheticTrajectory import stationAzimAlt
-from wmpl.Utils.TrajConversions import altAz2RADec, geo2Cartesian, raDec2ECI
-
-
-JDT_REF = 2461070.9343128
-
-# Beginning of the meteor (deg, deg, m)
-BEGIN_LAT, BEGIN_LON, BEGIN_HT = -43.20, 172.30, 85000.0
-
-# (station_id, lat, lon, elevation) in degrees and metres
-STATIONS = [
-    ('A', -43.60, 172.12, 120.0),
-    ('B', -42.90, 173.20, 200.0),
-    ('C', -43.30, 171.30, 350.0),
-]
+from wmpl.Trajectory.Trajectory import stateVectorDiverged
+from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 
 
 
@@ -95,7 +81,7 @@ def _angle(a, b):
 
 
 def _solve(minimize, seed=20261105, **kwargs):
-    """ Solve a noisy straight trajectory seen from three stations, with scipy.optimize.minimize replaced.
+    """ Solve the straight meteor of the synthetic tests, with scipy.optimize.minimize replaced.
 
     Arguments:
         minimize: [function] Replacement of scipy.optimize.minimize.
@@ -110,26 +96,7 @@ def _solve(minimize, seed=20261105, **kwargs):
             - begin: [ndarray] ECI coordinates of the beginning of the meteor (m).
     """
 
-    rng = np.random.default_rng(seed)
-
-    # Points along the straight line, at 30 km/s
-    lat, lon = np.radians(BEGIN_LAT), np.radians(BEGIN_LON)
-    begin = np.array(geo2Cartesian(lat, lon, BEGIN_HT, JDT_REF))
-    ra, dec = altAz2RADec(np.radians(210.0), np.radians(55.0), JDT_REF, lat, lon)
-    times = np.linspace(0, 2.5, 40)
-    points = begin - np.outer(30000.0*times, np.array(raDec2ECI(ra, dec)))
-
-    traj = Trajectory(JDT_REF, meastype=2, estimate_timing_vel=False, gravity_correction=False, \
-        monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False, verbose=False, **kwargs)
-
-    # Directions of the points from each station, with 20 arcsec of noise
-    for station_id, s_lat, s_lon, ele in STATIONS:
-
-        azim, elev = stationAzimAlt(points, JDT_REF + times/86400.0, s_lat, s_lon, ele)
-
-        traj.infillTrajectory(azim + rng.normal(0, 1e-4, len(times)), \
-            elev + rng.normal(0, 1e-4, len(times)), times, np.radians(s_lat), np.radians(s_lon), ele, \
-            station_id=station_id)
+    traj, begin, _ = observeStraightMeteor(seed=seed, estimate_timing_vel=False, calc_orbit=False, **kwargs)
 
     with _replaced(scipy.optimize, 'minimize', minimize):
         traj = traj.run()
@@ -262,6 +229,37 @@ def testABoundedSolutionIsOnlyTakenIfItIsBetter():
 
 
 
+def testAFailedBoundedSolutionIsNotTaken():
+    """ Check that after a false alarm of the divergence check, a bounded solution which did not converge
+        is not taken, even with a lower cost than the line.
+    """
+
+    original = scipy.optimize.minimize
+    fitted = []
+
+    def failedBounded(fun, x0, args=(), **options):
+
+        # The bounded minimization stops at its iteration limit with a lower cost
+        if options.get('method') == 'SLSQP':
+            return SimpleNamespace(x=np.array(x0), fun=0.0, success=False, nit=100, message='Failed')
+
+        result = original(fun, x0, args=args, **options)
+
+        if _isLoSFit(fun, options):
+            fitted.append(result)
+
+        return result
+
+    # A false alarm of the divergence check
+    solver = sys.modules['wmpl.Trajectory.Trajectory']
+    with _replaced(solver, 'stateVectorDiverged', lambda *args, **kwargs: True):
+        traj, _ = _solve(failedBounded)
+
+    assert traj.los_mini_status
+    assert _angle(traj.radiant_eci_mini, fitted[-1].x[3:]) < 1e-6
+
+
+
 def _recordLoSFits(seed=20261019, **kwargs):
     """ Solve the trajectory and record every Nelder-Mead minimization of its line-of-sight fit.
 
@@ -313,6 +311,36 @@ def testEachRestartStartsFromThePreviousSolution():
 
 
 
+def testAFailedRestartDoesNotReplaceAConvergedSolution():
+    """ Check that a restart which runs out of function evaluations does not replace the converged solution
+        it was started from.
+    """
+
+    original = scipy.optimize.minimize
+    results = []
+
+    def limitedRestart(fun, x0, args=(), **options):
+
+        if not _isLoSFit(fun, options):
+            return original(fun, x0, args=args, **options)
+
+        # Only the restart is cut short
+        if len(results) == 1:
+            options = dict(options, options={'maxfev': 20})
+
+        results.append(original(fun, x0, args=args, **options))
+
+        return results[-1]
+
+    traj, _ = _solve(limitedRestart, los_restarts=1)
+
+    assert results[0].success
+    assert not results[1].success
+    assert traj.los_mini_status
+    assert _angle(traj.radiant_eci_mini, results[0].x[3:]) < 1e-6
+
+
+
 
 if __name__ == "__main__":
 
@@ -320,8 +348,9 @@ if __name__ == "__main__":
     test_list = [testASmallMoveIsNotADivergenceWhenACoordinateIsNearZero, \
         testALargeMoveIsADivergenceWhenACoordinateIsNegative, testALineWhichRanOutOfEvaluationsIsContinued, \
         testALineWhichWanderedOffAlongItselfIsContinuedFromTheMeteor, \
-        testABoundedSolutionIsOnlyTakenIfItIsBetter, testNoRestartByDefault, \
-        testEachRestartStartsFromThePreviousSolution]
+        testABoundedSolutionIsOnlyTakenIfItIsBetter, testAFailedBoundedSolutionIsNotTaken, \
+        testNoRestartByDefault, testEachRestartStartsFromThePreviousSolution, \
+        testAFailedRestartDoesNotReplaceAConvergedSolution]
 
     for test in test_list:
         test()
