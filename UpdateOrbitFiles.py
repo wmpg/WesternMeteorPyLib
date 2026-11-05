@@ -80,9 +80,9 @@ def updateOrbitFiles():
 
 
 # Columns of wmpl/share/Meteorites_with_Orbits.csv
-METEORITES_HEADER = u"# Ab.;Name;Type;Country;Date (UTC);Time (UTC);Time Zone;Mass (kg);a (AU);a error (AU);e;" \
-	u"e error (AU);i (\u00b0);i error (\u00b0);Arg. Peri. (\u00b0);Arg. Peri. Error (\u00b0);Asc. node (\u00b0);" \
-	u"Asc. node error (\u00b0);Ref."
+METEORITES_HEADER = u"# Ab.;Name;Type;Country;Date (UTC);Time (UTC);Time Zone;Mass (kg);a (AU);" \
+	u"a error (AU);e;e error (AU);i (\u00b0);i error (\u00b0);Arg. Peri. (\u00b0);" \
+	u"Arg. Peri. Error (\u00b0);Asc. node (\u00b0);Asc. node error (\u00b0);Ref."
 
 
 
@@ -102,15 +102,51 @@ class MeteoriteTableParser(HTMLParser):
 
 
 
+	def closeCell(self):
+		""" Add the cell which is being read to its row. """
+
+		if self.cell is not None:
+			self.row.append(re.sub(r'\s+', ' ', self.cell).strip())
+			self.cell = None
+
+
+
+	def closeRow(self):
+		""" Add the row which is being read to its table, with any cell left open. """
+
+		self.closeCell()
+
+		if self.row is not None:
+			self.rows.append(self.row)
+			self.row = None
+
+
+
+	def closeTable(self):
+		""" Add the table which is being read to the list of tables, with any row left open. """
+
+		self.closeRow()
+
+		if self.rows is not None:
+			self.tables.append(self.rows)
+			self.rows = None
+
+
+
 	def handle_starttag(self, tag, attrs):
 
+		# The end tags of cells and rows are optional in HTML, so a new cell or row also closes the
+		#   previous one
 		if tag == 'table':
+			self.closeTable()
 			self.rows = []
 
 		elif (tag == 'tr') and (self.rows is not None):
+			self.closeRow()
 			self.row = []
 
 		elif (tag in ('td', 'th')) and (self.row is not None):
+			self.closeCell()
 			self.cell = ""
 
 		# Line breaks inside a cell separate the value and its error
@@ -121,17 +157,14 @@ class MeteoriteTableParser(HTMLParser):
 
 	def handle_endtag(self, tag):
 
-		if (tag in ('td', 'th')) and (self.cell is not None):
-			self.row.append(re.sub(r'\s+', ' ', self.cell).strip())
-			self.cell = None
+		if tag in ('td', 'th'):
+			self.closeCell()
 
-		elif (tag == 'tr') and (self.row is not None):
-			self.rows.append(self.row)
-			self.row = None
+		elif tag == 'tr':
+			self.closeRow()
 
-		elif (tag == 'table') and (self.rows is not None):
-			self.tables.append(self.rows)
-			self.rows = None
+		elif tag == 'table':
+			self.closeTable()
 
 
 
@@ -155,6 +188,9 @@ def meteoriteTableRows(html_text):
 
 	parser = MeteoriteTableParser()
 	parser.feed(html_text)
+
+	# Keep a table which was not closed at the end of the page
+	parser.closeTable()
 
 	# The meteorite table is the one with the orbital elements in its header
 	for rows in parser.tables:
@@ -422,8 +458,8 @@ def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorite
 
 	# Find the columns by their header, so a reordering of the table does not break the update
 	header = [cell.lower() for cell in rows[0]]
-	cols = [tableColumn(header, key) for key in ('ab', 'name', 'type', 'loc', 'date', 'time', 'zone', 'mass', \
-		'a (au)', 'e', 'i (', 'arg', 'asc', 'ref')]
+	cols = [tableColumn(header, key) for key in ('ab', 'name', 'type', 'loc', 'date', 'time', 'zone', \
+		'mass', 'a (au)', 'e', 'i (', 'arg', 'asc', 'ref')]
 
 	if None in cols:
 		print("Unexpected table header {:s}, the existing file is kept.".format(repr(rows[0])))
@@ -518,8 +554,8 @@ def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorite
 		lines, added = addNewMeteorites(file_lines, lines)
 
 		if (not added) and (not updated):
-			print(" ... done! Nothing was added or updated among the {:d} meteorites of the list, the file is " \
-				"unchanged.".format(n_downloaded))
+			print(" ... done! Nothing was added or updated among the {:d} meteorites of the list, " \
+				"the file is unchanged.".format(n_downloaded))
 			return False
 
 		if added:
