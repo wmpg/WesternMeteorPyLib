@@ -802,6 +802,37 @@ def RMSD(x, weights=None):
     return np.sqrt(np.sum(weights * x**2) / np.sum(weights))
 
 
+
+def medianStddev(stddev_list, n_samples=100000):
+    """ Compute the standard deviation of the median of independent normally distributed values, by
+        sampling them. A fixed seed is used, so the result is repeatable and the global random state is not
+        changed.
+
+    Arguments:
+        stddev_list: [list] Standard deviations of the individual values. Values which are None or not
+            finite are taken as exact.
+
+    Keyword arguments:
+        n_samples: [int] Number of samples. 100000 by default.
+
+    Return:
+        [float] Standard deviation of the median.
+    """
+
+    # Take values without a valid standard deviation as exact
+    stddev_list = np.array([sd if ((sd is not None) and np.isfinite(sd)) else 0.0 for sd in stddev_list])
+
+    if len(stddev_list) == 0:
+        return 0.0
+
+    # Sample the values and compute the spread of their median
+    rng = np.random.RandomState(0)
+    samples = rng.normal(0, 1, (n_samples, len(stddev_list)))*stddev_list
+
+    return np.std(np.median(samples, axis=1))
+
+
+
 def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method="avg"):
     """Finds if points have similar sample values on the independent axis x (if they are within delta) and
         averages all y values.
