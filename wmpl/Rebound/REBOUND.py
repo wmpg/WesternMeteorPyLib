@@ -2064,25 +2064,26 @@ def _megnoReportLines(megno):
     return lines
 
 
-def integrationEpochs(jd_ref_utc, elapsed_days):
-    """ The start and end epochs of an integration in TDB, the time scale of the ephemeris and of the
-    integration, and in UTC, the scale of a trajectory's reference time (traj.jdt_ref).
 
-    The integration runs in TDB, so the end is the start in TDB plus the elapsed days; adding them to
-    the UTC reference time instead would leave the end ~69 s off (TDB - UTC in the 2020s).
+def integrationEpochs(jd_ref_utc, elapsed_days):
+    """ Compute the start and end epochs of an integration in TDB, the time scale of the ephemeris and
+        of the integration, and in UTC, the time scale of the trajectory reference time (traj.jdt_ref).
+        The end is the start in TDB plus the elapsed days, as adding them to the UTC time would put it
+        about 69 s off.
 
     Arguments:
-        jd_ref_utc: [float] Julian date of the start, in UTC.
-        elapsed_days: [float] Signed integration time in days (negative backward).
+        jd_ref_utc: [float] Julian date of the start in UTC.
+        elapsed_days: [float] Integration time (days), negative for a backward integration.
 
     Return:
-        [dict] "start_jd_utc", "start_jd_tdb", "final_jd_tdb", "final_jd_utc" and "start_utc"/"final_utc"
-            (ISO strings).
+        [dict] Julian dates "start_jd_utc", "start_jd_tdb", "final_jd_tdb" and "final_jd_utc", and the
+            UTC times as ISO strings, "start_utc" and "final_utc".
     """
 
-    # Imported here too, as the module imports astropy.time only together with REBOUND
+    # Import astropy here, as the module imports it only when REBOUND is found
     import astropy.time
 
+    # Convert the start to TDB, add the elapsed days and convert the end back to UTC
     start = astropy.time.Time(jd_ref_utc, format='jd', scale='utc')
     start_tdb = start.tdb.jd
     final = astropy.time.Time(start_tdb + elapsed_days, format='jd', scale='tdb').utc
@@ -2095,6 +2096,7 @@ def integrationEpochs(jd_ref_utc, elapsed_days):
         "start_utc": start.iso,
         "final_utc": final.iso,
     }
+
 
 
 def reboundSimulate(
@@ -2712,8 +2714,7 @@ if __name__ == "__main__":
     # Extract the final time in days
     final_sim_days = sim_outputs[-1][0]/(2*np.pi)*365.25
 
-    # The start and final epochs, in TDB (the scale of the integration) and in UTC (that of the
-    #   trajectory's reference time)
+    # Compute the start and final epochs in TDB, the time scale of the integration, and in UTC
     epochs = integrationEpochs(traj.jdt_ref, final_sim_days)
     final_epoch_jd = epochs["final_jd_tdb"]
 
