@@ -3546,6 +3546,39 @@ def integrateLuminosity(all_simulated_time, time_fps, luminosity_arr, dt, fps, P
     return new_luminosity_arr, new_abs_magnitude
 
 
+def photometricMassLumEffModel(time_arr, mag_arr, traj, lum_eff_type, P_0m):
+    """ Photometric mass with a velocity- and mass-dependent luminous efficiency model, evaluated along the
+        trajectory: at each photometric point, at the speed of the trajectory's Jacchia fit of the lag, with the mass
+        iterated to self-consistency by calcMass(). Without a usable Jacchia fit, at the average speed.
+
+    Arguments:
+        time_arr: [ndarray] Times of the magnitudes (s), in the trajectory's time.
+        mag_arr: [ndarray] Absolute magnitudes.
+        traj: [Trajectory] The trajectory, for its Jacchia fit and its initial and average speeds.
+        lum_eff_type: [int] Luminous efficiency model, 1 to 8 (see luminousEfficiency()).
+        P_0m: [float] Power of a zero-magnitude meteor (W).
+
+    Return:
+        (mass, vel_arr): The photometric mass (kg), and the speeds it was computed with (m/s): one per point, or
+            the average speed.
+    """
+
+    from wmpl.Trajectory.Trajectory import jacchiaVelocityFunc
+
+    time_arr, mag_arr = np.array(time_arr), np.array(mag_arr)
+    vel_arr = traj.orbit.v_avg
+
+    # The Jacchia fit is a smooth, monotonic deceleration curve, as calcMass() needs from a velocity array (point
+    #   speeds are too noisy). A failed fit leaves zeros, which give the initial speed
+    jacchia_fit = getattr(traj, "jacchia_fit", None)
+    if jacchia_fit is not None:
+        vel_jacchia = jacchiaVelocityFunc(time_arr, *jacchia_fit, traj.v_init)
+        if np.all(np.isfinite(vel_jacchia)) and np.all(vel_jacchia > 0):
+            vel_arr = vel_jacchia
+
+    return calcMass(time_arr, mag_arr, vel_arr, tau=int(lum_eff_type), P_0m=P_0m), vel_arr
+
+
 class ObservationData:
     """ Class to load the observation data and create an object.
 
@@ -4016,7 +4049,8 @@ class ObservationData:
                             except (IndexError, ValueError):
                                 continue
 
-                if not (lum_eff_type_val == 0 and lum_eff_type_fixed):
+                # Also when the constant model is fixed without a lum_eff line, which left it None
+                if (not (lum_eff_type_val == 0 and lum_eff_type_fixed)) or (luminous_efficiency is None):
                     luminous_efficiency = 0.7  # fallback default
 
             else:
@@ -4029,16 +4063,15 @@ class ObservationData:
             # Compute the photometric mass
             photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, tau=luminous_efficiency/100, P_0m=self.P_0m)
 
-            # run in case we have a different lum_eff_type than constant luminous efficiency to better estimate the correct mass range
-            if lum_eff_type_val is not None and not (lum_eff_type_val == 0 and lum_eff_type_fixed):
-                # Get the luminous efficiency
-                tau_lum_eff_type = luminousEfficiency(lum_eff_type_val, luminous_efficiency, self.v_init, photom_mass)
-                print("NOTE: Adjusting luminous efficiency for the given lum_eff_type new luminous efficiency =", tau_lum_eff_type)
-                if tau_lum_eff_type <= 0:
-                    print("WARNING: Computed non-physical luminous efficiency. Using constant value instead.")
-                else:
-                    # Recompute the photometric mass with the new luminous efficiency
-                    photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, tau=tau_lum_eff_type, P_0m=self.P_0m)
+            # run in case we have a different lum_eff_type than constant luminous efficiency to better estimate the correct mass range:
+            #   recompute the mass with the model along the trajectory, at the speed of each point and the mass it
+            #   gives, instead of a single luminous efficiency at the initial speed and the constant-efficiency mass
+            if (lum_eff_type_val is not None) and (lum_eff_type_val != 0):
+                photom_mass, vel_used = photometricMassLumEffModel(time_arr, mag_arr, traj, lum_eff_type_val, \
+                    self.P_0m)
+                print("NOTE: Recomputed the mass with the luminous efficiency model lum_eff_type = {:d}, at {:s}: "
+                    "{:.4e} kg".format(int(lum_eff_type_val), "the Jacchia speeds of the points" \
+                    if np.ndim(vel_used) else "the average speed", photom_mass))
 
             m_init_list.append(photom_mass)
 
