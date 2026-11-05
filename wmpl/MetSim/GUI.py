@@ -2283,17 +2283,21 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
 
         # Set a default filter which takes all observations
         mag_filter = np.ones(len(obs.model_ht), dtype=bool)
+        len_filter = np.ones(len(obs.model_ht), dtype=bool)
 
         if obs.absolute_magnitudes is not None:
 
             # Filter out observations with magnitude fainter than +9 or with NaN magnitudes
             mag_filter = (obs.absolute_magnitudes < 9) & (~np.isnan(obs.absolute_magnitudes))
 
+            # The lengths of the points without a magnitude are still plotted
+            len_filter = ~(obs.absolute_magnitudes >= 9)
+
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
 
         # Sample the simulated normalized length at observed times
-        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[mag_filter])
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[len_filter])
 
 
         # Select plot parameters for the current station
@@ -2332,33 +2336,33 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
             # sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[mag_filter]
 
             # Compute the observed lag using the simulated velocity
-            obs_lag = obs.state_vect_dist[mag_filter] - sim_vel_beg*obs.time_data[mag_filter]
+            obs_lag = obs.state_vect_dist[len_filter] - sim_vel_beg*obs.time_data[len_filter]
 
             # Plot the observed lag
-            ax_lenres.plot(obs_lag, obs.model_ht[mag_filter]/1000, **plot_params)
+            ax_lenres.plot(obs_lag, obs.model_ht[len_filter]/1000, **plot_params)
             
             # ax_lenres.plot(sim_lag, obs.model_ht[mag_filter]/1000, **plot_params_dict["sim"])
 
         else:
 
             # Compute the length residuals
-            len_residuals = obs.state_vect_dist[mag_filter] - sim_norm_len_sampled
+            len_residuals = obs.state_vect_dist[len_filter] - sim_norm_len_sampled
 
             # Demean the residuals
             len_residuals = len_residuals - np.median(len_residuals)
 
             # Plot the length residuals
-            ax_lenres.plot(len_residuals, obs.model_ht[mag_filter]/1000, **plot_params)
+            ax_lenres.plot(len_residuals, obs.model_ht[len_filter]/1000, **plot_params)
 
 
-        if len(obs.model_ht[mag_filter]):
+        if len(obs.model_ht[len_filter]):
             # Keep track of the observed height range
-            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
-            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
+            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[len_filter]))
+            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[len_filter]))
 
             # Keep track of the observed time range
-            time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
-            time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
+            time_obs_max = max(time_obs_max, np.max(obs.time_data[len_filter]))
+            time_obs_min = min(time_obs_min, np.min(obs.time_data[len_filter]))
 
 
     # Compute the magnitude residuals from the ECSV files
