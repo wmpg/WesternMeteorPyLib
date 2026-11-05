@@ -26,12 +26,20 @@ def testMedianStddev():
 
 
 def testCircPercentileOfAnglesFrom0To360():
-    """ Check the median of angles from 0 to 360 deg, also across the 0/360 break. """
+    """ Check the median of angles from 0 to 360 deg, also across the 0/360 break and with a given 0th
+        percentile.
+    """
 
+    # Angles away from the break
     assert np.isclose(circPercentile(np.radians([10.0, 20.0, 30.0, 40.0, 50.0]), 50), np.radians(30.0))
 
+    # Angles across the 0/360 break, with the median at 0
     median = circPercentile(np.radians([350.0, 355.0, 0.0, 5.0, 10.0]), 50)
     assert np.isclose(np.cos(median), 1.0)
+
+    # A given 0th percentile outside 0-360 is taken as the same angle, so the median is the middle value
+    data = np.array([82.0, 82.1, 82.2])
+    assert np.isclose(circPercentile(data, 50, q0=82.0), 82.1%(2*np.pi))
 
 
 
@@ -41,9 +49,11 @@ def testCircPercentileOfAnglesFromMinus180To180():
         on both sides of the date line).
     """
 
+    # Angles around 0
     data = np.radians([-20.0, -10.0, 0.0, 10.0, 20.0])
     assert np.isclose(circPercentile(data, 50), circPercentile(data%(2*np.pi), 50))
 
+    # Longitudes on both sides of the date line
     data = np.radians([179.8, 179.9, -179.9, -179.8])
     for percentile in [2.5, 50, 97.5]:
         assert np.isclose(circPercentile(data, percentile), circPercentile(data%(2*np.pi), percentile))
