@@ -153,6 +153,33 @@ class DragMeteor(object):
 
 
 
+def stationAzimAlt(eci_points, jds, lat, lon, ele):
+    """ Compute the directions of points on a trajectory as seen from a station.
+
+    Arguments:
+        eci_points: [ndarray] ECI coordinates of the points (m).
+        jds: [ndarray] Julian dates of the points.
+        lat: [float] Latitude of the station (deg).
+        lon: [float] Longitude of the station (deg).
+        ele: [float] Elevation of the station (m).
+
+    Return:
+        (azim, elev):
+            - azim: [ndarray] Azimuths of the points, +E of due N (rad).
+            - elev: [ndarray] Elevations of the points (rad).
+    """
+
+    ra_list, dec_list = [], []
+    for eci, jd in zip(eci_points, jds):
+        station_eci = np.array(geo2Cartesian(np.radians(lat), np.radians(lon), ele, jd))
+        ra, dec = eci2RaDec(eci - station_eci)
+        ra_list.append(ra)
+        dec_list.append(dec)
+
+    return raDec2AltAz_vect(np.array(ra_list), np.array(dec_list), jds, np.radians(lat), np.radians(lon))
+
+
+
 def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
     """ Observe the visible part of the synthetic meteor from three stations and make a trajectory object.
         The times are relative to the beginning of the visible part.
@@ -187,15 +214,7 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
         jds = JDT_REF + times/86400.0
 
         # Compute the direction of every point as seen from the station
-        ra_list, dec_list = [], []
-        for eci, jd in zip(meteor.eciAtTime(times), jds):
-            station_eci = np.array(geo2Cartesian(np.radians(lat), np.radians(lon), ele, jd))
-            ra, dec = eci2RaDec(eci - station_eci)
-            ra_list.append(ra)
-            dec_list.append(dec)
-
-        azim, elev = raDec2AltAz_vect(np.array(ra_list), np.array(dec_list), jds, np.radians(lat), \
-            np.radians(lon))
+        azim, elev = stationAzimAlt(meteor.eciAtTime(times), jds, lat, lon, ele)
 
         # Add noise to the measurements
         azim = azim + rng.normal(0, noise, len(azim))/np.cos(elev)

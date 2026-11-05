@@ -14,7 +14,8 @@ import matplotlib
 matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import Trajectory
-from wmpl.Utils.TrajConversions import altAz2RADec, eci2RaDec, geo2Cartesian, raDec2AltAz_vect, raDec2ECI
+from wmpl.Trajectory.Tests.SyntheticTrajectory import stationAzimAlt
+from wmpl.Utils.TrajConversions import altAz2RADec, geo2Cartesian, raDec2ECI
 
 
 # Reference Julian date of the meteor
@@ -74,15 +75,7 @@ def _simulateTrajectory(estimate_timing_vel, monte_carlo, seed=20261018):
         jds = JDT_REF + times/86400.0
 
         # Compute the direction of every point as seen from the station
-        ra_list, dec_list = [], []
-        for point, jd in zip(points, jds):
-            station = np.array(geo2Cartesian(np.radians(s_lat), np.radians(s_lon), ele, jd))
-            r, d = eci2RaDec(point - station)
-            ra_list.append(r)
-            dec_list.append(d)
-
-        azim, elev = raDec2AltAz_vect(np.array(ra_list), np.array(dec_list), jds, np.radians(s_lat), \
-            np.radians(s_lon))
+        azim, elev = stationAzimAlt(points, jds, s_lat, s_lon, ele)
 
         # Add noise to the measurements
         azim = azim + rng.normal(0, NOISE, N_POINTS)/np.cos(elev)
