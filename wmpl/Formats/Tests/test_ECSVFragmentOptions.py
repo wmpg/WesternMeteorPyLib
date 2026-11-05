@@ -119,7 +119,7 @@ def test_the_returned_trajectory_keeps_nothing_about_the_options(tmp_path, monke
     monkeypatch.setattr(generic, 'Trajectory', FakeTrajectory)
 
     meteor = SimpleNamespace(ra_data=[], dec_data=[], time_data=[], latitude=0.0, longitude=0.0, height=0.0,
-        station_id='XX0001', mag_data=[])
+        station_id='XX0001', mag_data=[], radec_per_point=False)
     traj = generic.solveTrajectoryGeneric(2461000.5, [meteor], str(tmp_path), solver='original', mc_runs=7)
 
     assert vars(traj) == {}
