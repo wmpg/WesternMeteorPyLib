@@ -2072,8 +2072,12 @@ def _integrateParticles(task):
     return {"outputs": outputs, "diagnostics": diagnostics}
 
 
-# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno)
-MEGNO_RESCALE_ABOVE = 1e20
+# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno). It
+#   is small on purpose. IAS15 keeps the round-off of its compensated summation (csx, csv) across steps, also
+#   for the variational particles, at the scale they had, so a rescale adds about this limit x 1e-16 to a unit
+#   vector. Measured jump of ln|delta| at a rescale: 5e-9 at 1e8, 2e-5 at 1e12, 0.6 at 1e16, and 8 at 1e20,
+#   which shortened the Lyapunov time by 20-25% over 21 orbits in 2000-4000 years.
+MEGNO_RESCALE_ABOVE = 1e8
 
 
 def computeMegno(task, seed=1):
@@ -2158,8 +2162,8 @@ def computeMegno(task, seed=1):
 
     # The deviation grows as exp(lambda t) on a chaotic orbit and would overflow past exp(709), so it
     #   is rescaled to unit length at the output times once it is large, and the logarithm of the
-    #   factor is kept here. The variational equations are linear, so this is exact (measured: ln|delta|
-    #   within 2e-12 of an unscaled run over 400 years).
+    #   factor is kept here. The variational equations are linear, so this does not change its growth,
+    #   up to the round-off that the integrator keeps at the old scale (see MEGNO_RESCALE_ABOVE).
     norm = {"offset": 0.0}
 
     def logDeviation():
@@ -2260,7 +2264,8 @@ LYAPUNOV_MIN_ORBITS = 10
 
 
 # The Lyapunov time counts as settled when its fit from the onset changes by less than this fraction over
-#   the last quarter of the growth phase
+#   the last half of the growth phase. The last quarter alone misses a slow drift: over 4000 years, 21 of 21
+#   Earth-crossing orbits passed that test while the median of their times still rose by 21% from 2000 years.
 LYAPUNOV_SETTLED_TOL = 0.2
 
 
@@ -2510,6 +2515,120 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
     return result
 
 
+# Clones whose MEGNO is also computed by reboundSimulate(compute_megno=True), when the run has clones. One
+#   orbit's Lyapunov time is one draw: measured on Winchcombe over 1000 years, the nominal orbit's 69 years is at
+#   the 86th percentile of its clones, whose median is 42. Past ~36 Lyapunov times (ln 1e16), round-off alone
+#   gives another orbit too. With 32 clones the median is good to 9% (18% with 8, 12% with 16). They cost a third
+#   of as many clones of the main integration with --gr gr (45 s against 126 s on 15 cores), less with gr_full.
+MEGNO_CLONES = 32
+
+
+# The median over the clones counts as settled when doubling the span changes it by less than this fraction. It
+#   is tighter than LYAPUNOV_SETTLED_TOL because a median over MEGNO_CLONES clones is far less noisy than one
+#   orbit: that change has a scatter of 4-9% with 32 clones, measured by bootstrap over 21 orbits.
+LYAPUNOV_CLONES_SETTLED_TOL = 0.1
+
+
+def _cloneLyapunov(task):
+    """ Verdict and Lyapunov time of one clone, over the whole run and over its first half. It is a
+    function of the module so that a worker process can run it.
+
+    Arguments:
+        task: [dict] An _integrateParticles task with the clone as its only particle.
+
+    Return:
+        [dict] {"status": the verdict of classifyMegno, "lyapunov_time_years": the time or None,
+        "half_run_lyapunov_time_years": the time from the first half of the outputs or None}. <Y> and
+        ln|delta| at a time do not depend on what follows, so the first half is what a run of half the
+        span would give.
+    """
+
+    megno = computeMegno(task)
+    times, y, a, ln_delta = megno["times_days"], megno["megno"], megno["a_au"], megno["ln_delta"]
+    verdict = classifyMegno(times, y, a, ln_delta=ln_delta)
+
+    half = len(times)//2
+    verdict_half = classifyMegno(times[:half], y[:half], a[:half], ln_delta=ln_delta[:half])
+
+    return {"status": verdict["status"], "lyapunov_time_years": verdict["lyapunov_time_years"],
+            "half_run_lyapunov_time_years": verdict_half["lyapunov_time_years"]}
+
+
+def summariseCloneLyapunov(results):
+    """ The Lyapunov time over a set of clones.
+
+    Arguments:
+        results: [list] One dict per clone, as _cloneLyapunov returns them.
+
+    Return:
+        [dict] {
+            "n_clones": [int] how many clones,
+            "status_counts": [dict] how many clones got each verdict,
+            "lyapunov_times_years": [list] the times of the clones that have one, sorted,
+            "lyapunov_time_median_years": [float] their median, or None if none has a time,
+            "lyapunov_time_p16_years", "lyapunov_time_p84_years": [float] their percentiles, or None,
+            "half_run_median_years": [float] the same median over the first half of the run, or None if
+                fewer than half of the clones have a time there,
+            "change_on_doubling": [float] how much the median changes from the first half of the run to
+                all of it, as a fraction of the latter, or None,
+        }
+    """
+
+    counts = {}
+    for r in results:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+
+    taus = sorted(float(r["lyapunov_time_years"]) for r in results if r["lyapunov_time_years"] is not None)
+    halves = [float(r["half_run_lyapunov_time_years"]) for r in results
+              if r["half_run_lyapunov_time_years"] is not None]
+
+    summary = {"n_clones": len(results), "status_counts": counts, "lyapunov_times_years": taus,
+               "lyapunov_time_median_years": None, "lyapunov_time_p16_years": None,
+               "lyapunov_time_p84_years": None, "half_run_median_years": None, "change_on_doubling": None}
+
+    if taus:
+        median = float(np.median(taus))
+        summary.update(lyapunov_time_median_years=median,
+                       lyapunov_time_p16_years=float(np.percentile(taus, 16)),
+                       lyapunov_time_p84_years=float(np.percentile(taus, 84)))
+
+        if 2*len(halves) >= len(results):
+            half_median = float(np.median(halves))
+            summary.update(half_run_median_years=half_median,
+                           change_on_doubling=abs(median - half_median)/median)
+
+    return summary
+
+
+def lyapunovOverClones(tasks, n_cpu=1):
+    """ The Lyapunov time over a set of clones, each integrated as computeMegno does.
+
+    Arguments:
+        tasks: [list] One _integrateParticles task per clone.
+
+    Keyword arguments:
+        n_cpu: [int] Worker processes to share them among. Default 1.
+
+    Return:
+        [dict] See summariseCloneLyapunov. A clone that fails is left out, with a warning.
+    """
+
+    n_cpu = max(1, min(n_cpu, len(tasks)))
+
+    if n_cpu == 1:
+        return summariseCloneLyapunov([_cloneLyapunov(t) for t in tasks])
+
+    results = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
+        for future in concurrent.futures.as_completed([executor.submit(_cloneLyapunov, t) for t in tasks]):
+            try:
+                results.append(future.result())
+            except Exception as e:
+                print("\nWarning: the MEGNO of a clone failed and was skipped: {:s}".format(str(e)))
+
+    return summariseCloneLyapunov(results)
+
+
 def _spanText(days):
     """ A time span in days as text, in years from a year up, e.g. "45 years" or "60 days". """
 
@@ -2709,6 +2828,17 @@ def plotMegno(megno, file_path=None):
         ax.plot(span_x, [tau, tau], color="C1", ls="--", lw=1.0, label="Lyapunov time {:.0f} years (the fit above)".format(tau))
 
         values = [x for x in tau_cum[shown] if np.isfinite(x)] + [tau] + [x for x in (sigma or []) if x is not None]
+
+        # The same time over the clones, where the nominal orbit is one draw
+        clones = megno.get("clones") or {}
+        if clones.get("lyapunov_time_median_years") is not None:
+            values += [clones["lyapunov_time_p16_years"], clones["lyapunov_time_p84_years"]]
+            ax.axhspan(clones["lyapunov_time_p16_years"], clones["lyapunov_time_p84_years"], color="C2", alpha=0.15,
+                       lw=0, label="16-84% of the clones")
+            ax.axhline(clones["lyapunov_time_median_years"], color="C2", ls="--", lw=1.0,
+                       label="median of {:d} clones: {:.0f} years".format(clones["n_clones"],
+                                                                          clones["lyapunov_time_median_years"]))
+
         ax.set_yscale("log")
         ax.set_ylim(0.7*min(values), 1.4*max(values))
         if sigma is not None:
@@ -2744,6 +2874,32 @@ def lyapunovSigmaText(tau, sigma):
         return " (-{:.0f}/+inf, 1 sigma: the rate is within 1 sigma of 0)".format(tau - sigma[0])
 
     return " (+{:.0f}/-{:.0f}, 1 sigma)".format(sigma[1] - tau, tau - sigma[0])
+
+
+def _cloneLyapunovReportLines(clones):
+    """ Human-readable lines describing a lyapunovOverClones result. """
+
+    lines = ["  The same over {:d} clones of the run:".format(clones["n_clones"])]
+    lines.append("    Verdicts: {:s}.".format(", ".join("{:d} {:s}".format(n, status.replace("_", " "))
+                                                       for status, n in sorted(clones["status_counts"].items()))))
+
+    median = clones["lyapunov_time_median_years"]
+    if median is None:
+        return lines
+
+    lines.append("    Lyapunov time: median {:.0f} years (16-84% of the clones: {:.0f}-{:.0f}), from the {:d} "
+                 "with a time.".format(median, clones["lyapunov_time_p16_years"], clones["lyapunov_time_p84_years"],
+                                       len(clones["lyapunov_times_years"])))
+    lines.append("    The nominal orbit is one draw among them, so this is the value to quote.")
+
+    change = clones["change_on_doubling"]
+    if change is not None:
+        lines.append("    From the first half of the run the median is {:.0f} years: it changes by {:.0f}% when the "
+                     "span doubles,".format(clones["half_run_median_years"], 100*change))
+        lines.append("    so {:s}".format("this is a value for this span, not yet a limit."
+                                          if change > LYAPUNOV_CLONES_SETTLED_TOL else "it has settled."))
+
+    return lines
 
 
 def _megnoReportLines(megno):
@@ -2816,22 +2972,25 @@ def _megnoReportLines(megno):
                     taus = [c["lyapunov_time_years"] for c in cumulative]
                     lines.append("  Fitted from the onset to the end of each quarter: {:s} years.".format(", ".join(
                         "no growth" if x is None else "{:.0f}".format(x) for x in taus)))
-                    if (taus[-1] is None) or (taus[-2] is None):
+                    if None in taus[-3:]:
                         lines.append("  It has not settled: integrate for longer to time it.")
                     else:
-                        change = abs(taus[-1] - taus[-2])/taus[-1]
+                        change = max(abs(taus[-1] - x) for x in taus[-3:-1])/taus[-1]
                         if change > LYAPUNOV_SETTLED_TOL:
-                            lines.append("  It still changes by {:.0f}% over the last quarter, so it has not "
-                                         "settled: integrate for longer.".format(100*change))
+                            lines.append("  It still changes by {:.0f}% over the last half of the growth phase, "
+                                         "so it has not settled: integrate for longer.".format(100*change))
                         else:
-                            lines.append("  It changes by {:.0f}% over the last quarter: settled.".format(
-                                100*change))
+                            lines.append("  It changes by {:.0f}% over the last half of the growth phase: "
+                                         "settled.".format(100*change))
             else:
                 lines.append("  Too few outputs in the growth phase to also fit it by quarters, so no range "
                              "is given.")
         else:
             lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
                          "half).".format(v["lyapunov_time_years"]))
+
+    if megno.get("clones"):
+        lines.extend(_cloneLyapunovReportLines(megno["clones"]))
 
     if megno.get("escaped"):
         lines.append("  The object left the simulation volume, so the MEGNO series is truncated.")
@@ -2903,7 +3062,9 @@ def reboundSimulate(
         compute_megno: [bool] If True, after the requested integration run a purely gravitational
             integration of the nominal solution only, over the same span, and store its MEGNO
             series and verdict (see computeMegno and classifyMegno) under "megno" in the nominal
-            solution's diagnostics. Requires return_diagnostics=True, which is the only way the
+            solution's diagnostics. A run with clones and enough orbits for a verdict also does it
+            for the first MEGNO_CLONES clones, under "clones" in that entry (see lyapunovOverClones).
+            Requires return_diagnostics=True, which is the only way the
             result is returned; it is skipped with a warning otherwise, since the extra integration
             is as expensive as the nominal run. Default False.
         lean_outputs: [bool] If True, return each run's outputs as numpy arrays of the output times
@@ -3184,6 +3345,13 @@ def reboundSimulate(
                                          ln_delta=megno["ln_delta"])
         diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
 
+        # The same over some clones, in a run that has them and that is long enough for a verdict
+        if state_vect_realizations and (MEGNO_CLONES > 0) and (megno["verdict"]["status"] != "too_short"):
+            clone_tasks = [_make_task([s], [n]) for s, n in zip(mc_states[:MEGNO_CLONES], mc_names[:MEGNO_CLONES])]
+            if show_progress:
+                print("Computing the MEGNO of {:d} clones on {:d} core(s)...".format(len(clone_tasks), n_cpu))
+            megno["clones"] = lyapunovOverClones(clone_tasks, n_cpu=n_cpu)
+
     if return_diagnostics:
         return outputs, outputs_mc, diagnostics
 
@@ -3281,7 +3449,9 @@ if __name__ == "__main__":
                         help="After the integration, integrate the nominal solution again with "
                         "Newtonian gravity only (IAS15) and compute its MEGNO chaos indicator, "
                         "reporting whether it converges to 2 (regular orbit) or keeps growing "
-                        "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly.")
+                        "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly. With "
+                        "clones (--mc), {:d} of them are integrated in the same way, sharing the cores, to give "
+                        "the Lyapunov time over the clones.".format(MEGNO_CLONES))
 
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
