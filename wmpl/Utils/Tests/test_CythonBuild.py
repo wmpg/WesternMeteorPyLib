@@ -1,22 +1,24 @@
 """ Tests that wmpl compiles its Cython modules with pyximport in a build directory of its own copy
 (wmpl.Utils.CythonBuild), not in the ~/.pyxbld shared by every copy on the machine.
 
-Run under pytest, or directly:
-
-    python -m wmpl.Utils.Tests.test_CythonBuild
+Run with pytest:
+    python -m pytest wmpl/Utils/Tests/test_CythonBuild.py -v
 """
 
 import os
 import sys
 import tempfile
 
-import wmpl.MetSim.MetSimErosion  # noqa: F401 (installs pyximport, as any wmpl module does)
+# Importing any wmpl module installs pyximport
+import wmpl.MetSim.MetSimErosion
 from wmpl.Utils.CythonBuild import pyximportBuildDir
 
 
-def test_build_dir_is_one_per_copy():
-    """ Two copies of wmpl get different build directories, a copy reached through a link the same one, and all
-        are under ~/.pyxbld. """
+
+def testBuildDirIsOnePerCopy():
+    """ Check that two copies of wmpl get different build directories, that a copy reached through a link
+        gets the same one, and that all are under ~/.pyxbld.
+    """
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
@@ -35,13 +37,15 @@ def test_build_dir_is_one_per_copy():
             assert os.path.dirname(build_dir) == os.path.join(os.path.expanduser("~"), ".pyxbld")
             assert os.path.basename(build_dir).startswith("wmpl_")
 
-    # This copy's is stable
+    # The directory of this copy does not change
     assert pyximportBuildDir() == pyximportBuildDir()
 
 
-def test_wmpl_installs_pyximport_with_the_build_dir_of_its_copy():
-    """ Importing wmpl installs pyximport before any of its modules does, so the only pyximport importer builds in
-        this copy's directory (pyximport keeps the build directory of its first installation). """
+
+def testWmplInstallsPyximportWithTheBuildDirOfItsCopy():
+    """ Check that importing wmpl installs pyximport before any of its modules does, so the only pyximport
+        importer builds in the directory of this copy.
+    """
 
     finders = [finder for finder in sys.meta_path if type(finder).__name__ == "PyxImportMetaFinder"]
 
@@ -49,7 +53,13 @@ def test_wmpl_installs_pyximport_with_the_build_dir_of_its_copy():
     assert finders[0].pyxbuild_dir == pyximportBuildDir()
 
 
+
+
 if __name__ == "__main__":
-    test_build_dir_is_one_per_copy()
-    test_wmpl_installs_pyximport_with_the_build_dir_of_its_copy()
-    print("All CythonBuild checks passed.")
+
+    # Run all tests
+    test_list = [testBuildDirIsOnePerCopy, testWmplInstallsPyximportWithTheBuildDirOfItsCopy]
+
+    for test in test_list:
+        test()
+        print("PASS {:s}".format(test.__name__))

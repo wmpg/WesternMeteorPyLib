@@ -19,7 +19,7 @@ import scipy.stats
 import scipy.integrate
 
 
-# Cython init, compiling in the build directory of this copy of wmpl (see wmpl.Utils.CythonBuild)
+# Cython init
 from wmpl.Utils.CythonBuild import installPyximport
 installPyximport()
 from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \

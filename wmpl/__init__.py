@@ -4,7 +4,7 @@
 import pkgutil
 import sys
 
-# Install pyximport before any submodule does, so that the Cython modules are compiled in the build directory of
+# Install pyximport before any submodule does, so the Cython modules are compiled in the build directory of
 #   this copy of wmpl (see wmpl.Utils.CythonBuild), not in one shared with other copies
 try:
     from wmpl.Utils.CythonBuild import installPyximport
