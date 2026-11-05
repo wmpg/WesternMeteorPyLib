@@ -30,6 +30,10 @@ class MeteorObservation(object):
         Keyword arguments:
             ff_name: [str] Name of the originating FF file.
 
+        Attributes:
+            radec_per_point: [bool] True when each R.A./Dec. was computed at its own point's time, as RMS
+                does, rather than all at jdt_ref, as CAMS does. False by default.
+
     """
     def __init__(self, jdt_ref, station_id, latitude, longitude, height, fps, ff_name=None):
 
@@ -52,6 +56,8 @@ class MeteorObservation(object):
         self.dec_data = []
         self.mag_data = []
         self.abs_mag_data = []
+
+        self.radec_per_point = False
 
 
 
@@ -272,9 +278,13 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
             if hasattr(meteor, "ff_name"):
                 comment = meteor.ff_name
 
+            radec_jd = None
+            if meteor.radec_per_point:
+                radec_jd = meteor.jdt_ref + meteor.time_data/86400.0
+
             traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
                 meteor.longitude, meteor.height, station_id=meteor.station_id, \
-                magnitudes=meteor.mag_data, comment=comment)
+                magnitudes=meteor.mag_data, comment=comment, radec_jd=radec_jd)
 
         elif solver.lower().startswith('gural'):
 
