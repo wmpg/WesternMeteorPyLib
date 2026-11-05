@@ -33,6 +33,9 @@ def testCircPercentileOfAnglesFrom0To360():
     # Angles away from the break
     assert np.isclose(circPercentile(np.radians([10.0, 20.0, 30.0, 40.0, 50.0]), 50), np.radians(30.0))
 
+    # Angles beyond 360 deg, with the median the middle value
+    assert np.isclose(circPercentile([70.0, 70.1, 70.2], 50), 70.1%(2*np.pi))
+
     # Angles across the 0/360 break, with the median at 0
     median = circPercentile(np.radians([350.0, 355.0, 0.0, 5.0, 10.0]), 50)
     assert np.isclose(np.cos(median), 1.0)
