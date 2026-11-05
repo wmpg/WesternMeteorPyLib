@@ -24,8 +24,8 @@ FPS = 15
 
 
 def ecsvFragments(ecsv_paths):
-    """ Find the additional fragments described in ECSV files, whose columns have a numeric suffix (e.g. ra1,
-        azimuth1) as in Appendix 4 of the GFE standard.
+    """ Find the additional fragments described in ECSV files, whose columns have a numeric suffix (e.g.
+        ra1, azimuth1) as in Appendix 4 of the GFE standard.
 
     Arguments:
         ecsv_paths: [list] List of paths to ECSV files.
@@ -41,11 +41,13 @@ def ecsvFragments(ecsv_paths):
             header = next((line for line in f if not line.startswith('#')), '')
 
         for name in header.split(','):
-            name = name.strip()
-            if name.startswith('azimuth') and name[len('azimuth'):].isdigit() and int(name[len('azimuth'):]):
-                fragments.add(int(name[len('azimuth'):]))
+
+            suffix = name.strip()[len('azimuth'):]
+            if name.strip().startswith('azimuth') and suffix.isdigit() and int(suffix):
+                fragments.add(int(suffix))
 
     return sorted(fragments)
+
 
 
 def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
@@ -117,9 +119,9 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
             # Determine the column indices from the header
             header = [name.strip() for name in data[0].tolist()]
 
-            # Suffix of the columns of the fragment, optional for the main one (e.g. azimuth or azimuth0). Skip
-            #   the files which do not describe it
-            suffix = next((sfx for sfx in ([str(fragment)] if fragment else ['', '0']) 
+            # Suffix of the columns of the fragment, optional for the main one (e.g. azimuth or azimuth0).
+            #   Skip the files which do not describe it
+            suffix = next((sfx for sfx in ([str(fragment)] if fragment else ['', '0']) \
                 if ('azimuth' + sfx) in header), None)
             if suffix is None:
                 continue
@@ -149,7 +151,7 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
                 data = data[np.char.lower(np.char.strip(data[:, header.index('trajectory_use')])) != 'false']
 
             if len(data) == 0:
-                print("The station {:s} has no points of fragment {:d}, skipping: {:s}".format(station_id, 
+                print("The station {:s} has no points of fragment {:d}, skipping: {:s}".format(station_id, \
                     fragment, ecsv_file))
                 continue
 
@@ -244,8 +246,16 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
 
 
 def solverStationIDs(meteors):
-    """ Station IDs the trajectory solver gives the observations added in this order: a station already added
-        gets the suffix _2, _3, ... (see Trajectory.infillTrajectory()). """
+    """ Compute the station IDs the trajectory solver gives the observations when they are added in the
+        given order. A station which was already added gets the suffix _2, _3, ... (see
+        Trajectory.infillTrajectory()).
+
+    Arguments:
+        meteors: [list] MeteorObservation objects, in the order they are given to the solver.
+
+    Return:
+        [list] Station IDs.
+    """
 
     station_ids = []
     counts = {}
@@ -253,25 +263,30 @@ def solverStationIDs(meteors):
 
         station_id = str(meteor.station_id)
         counts[station_id] = counts.get(station_id, 0) + 1
-        station_ids.append(station_id if (counts[station_id] == 1) else "{:s}_{:d}".format(station_id, 
-            counts[station_id]))
+
+        if counts[station_id] == 1:
+            station_ids.append(station_id)
+        else:
+            station_ids.append("{:s}_{:d}".format(station_id, counts[station_id]))
 
     return station_ids
 
 
+
 def appliedTimeOffsets(traj, input_meteors):
-    """ Time offset applied to every observation of a solved trajectory, as the shift of its times from the
-        input ones. It includes the offsets fixed in the input, and can differ by about a millisecond from the
-        reported timing offsets, which do not account for every iteration of the timing estimation.
+    """ Compute the time offset applied to every observation of a solved trajectory, as the shift of its
+        times from the input ones. It includes the offsets fixed in the input, and can differ by about a
+        millisecond from the reported timing offsets, which do not account for every iteration of the timing
+        estimation.
 
     Arguments:
-        traj: [Trajectory] Solved trajectory.
-        input_meteors: [list] MeteorObservation objects it was solved from, from loadECSVs(), in the order they
-            were given to the solver.
+        traj: [Trajectory object] Solved trajectory.
+        input_meteors: [list] MeteorObservation objects it was solved from, from loadECSVs(), in the order
+            they were given to the solver.
 
     Return:
-        [dict] Time offset (s) for the file (ecsv_file) of every input observation matched by a solved one: 
-            the station ID the solver gave it (see solverStationIDs()), the number of points and time steps.
+        [dict] {ecsv_file: time offset (s)} of every input observation matched by a solved one, by the
+            station ID the solver gave it (see solverStationIDs()), its number of points and its time steps.
     """
 
     solved = {str(obs.station_id): obs for obs in traj.observations}
@@ -282,24 +297,33 @@ def appliedTimeOffsets(traj, input_meteors):
         obs = solved.get(station_id)
         input_jd = meteor.jdt_ref + np.array(meteor.time_data)/86400
 
-        if (obs is not None) and (len(input_jd) == len(obs.JD_data)) \
-            and np.allclose((input_jd - input_jd[0])*86400, (obs.JD_data - obs.JD_data[0])*86400, atol=1e-3):
+        if obs is None:
+            continue
 
-            offsets[meteor.ecsv_file] = np.mean(obs.JD_data - input_jd)*86400
+        # Check that the solved observation has the same points
+        if len(input_jd) != len(obs.JD_data):
+            continue
+
+        if not np.allclose((input_jd - input_jd[0])*86400, (obs.JD_data - obs.JD_data[0])*86400, atol=1e-3):
+            continue
+
+        offsets[meteor.ecsv_file] = np.mean(obs.JD_data - input_jd)*86400
 
     return offsets
 
 
+
 def originalPicksTrajectory(traj):
-    """ The solution with the original picks of a trajectory solved with the Monte Carlo runs, for which the 
-        solver returns the best of the runs instead. It is loaded from the pickle saved with the results.
+    """ Load the solution with the original picks of a trajectory solved with the Monte Carlo runs, for
+        which the solver returns the best of the runs instead. It is loaded from the pickle saved with the
+        results.
 
     Arguments:
-        traj: [Trajectory] Solved trajectory, from solveTrajectoryGeneric().
+        traj: [Trajectory object] Solved trajectory, from solveTrajectoryGeneric().
 
     Return:
-        [Trajectory] The solution with the original picks, with the uncertainties of the Monte Carlo runs. The
-            given trajectory if it was solved without them, or if its results were not saved.
+        [Trajectory object] The solution with the original picks, with the uncertainties of the Monte Carlo
+            runs. The given trajectory if it was solved without them, or if its results were not saved.
     """
 
     if (traj.uncertainties is None) or (not traj.save_results):
@@ -312,20 +336,23 @@ def originalPicksTrajectory(traj):
     return loadPickle(*os.path.split(traj_path))
 
 
+
 def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=True, **kwargs):
     """ Solve the trajectories of the additional fragments described in ECSV files (see ecsvFragments()),
         after the main one and with the same solver options. Each one is saved in a fragment_k folder of the
         output directory of the main trajectory.
 
     Arguments:
-        traj: [Trajectory] Solved trajectory of the main fragment, from solveTrajectoryGeneric().
+        traj: [Trajectory object] Solved trajectory of the main fragment, from solveTrajectoryGeneric().
         ecsv_paths: [list] List of paths to ECSV files.
 
     Keyword arguments:
         solver: [str] Solver the main trajectory was solved with, only "original" is supported here.
-        reuse_timing: [bool] Fix the time offsets of the stations to the ones of the main trajectory (default),
-            those of its solution with the original picks, instead of estimating them again from the fewer
-            points of every fragment.
+            "original" by default.
+        reuse_timing: [bool] Fix the time offsets of the stations to the ones of the main trajectory, those
+            of its solution with the original picks, instead of estimating them again from the fewer points
+            of every fragment. Only used when the time offsets are estimated, as otherwise the fragments
+            take the fixed ones of the main trajectory anyway. True by default.
         **kwargs: Keyword arguments for the trajectory solver, those the main trajectory was solved with.
 
     Return:
@@ -339,6 +366,10 @@ def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=
 
     _, input_meteors = loadECSVs(ecsv_paths, no_prepare=True)
     main_offsets = appliedTimeOffsets(originalPicksTrajectory(traj), input_meteors)
+
+    # The time offsets are estimated unless the timing estimation was turned off, or given offsets
+    #   for every station (estimate_timing_vel is then False or a string)
+    estimate_timing = (kwargs.get('estimate_timing_vel', True) is True)
 
     fragment_trajs = []
     for fragment in ecsvFragments(ecsv_paths):
@@ -355,24 +386,24 @@ def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=
         jdt_ref, meteor_list = prepareObservations(meteor_list)
 
         frag_kwargs = dict(kwargs)
-        if reuse_timing:
+        if reuse_timing and estimate_timing:
 
             # Offsets of the main trajectory for the same files, under the station IDs the solver will use
             station_ids = solverStationIDs(meteor_list)
-            missing = [station_id for station_id, meteor in zip(station_ids, meteor_list) 
+            missing = [station_id for station_id, meteor in zip(station_ids, meteor_list) \
                 if meteor.ecsv_file not in main_offsets]
             if missing:
-                print("Stations not in the main trajectory, whose time offsets are estimated:", ", ".join(missing))
+                print("Stations not in the main trajectory, whose time offsets are estimated:", \
+                    ", ".join(missing))
 
-            # Fix the offsets of the stations in the main trajectory, which are then kept in the Monte Carlo runs
-            #   too. They are given as fixed times with the timing estimation on, so that the timing residuals 
-            #   the Monte Carlo runs are checked against are still computed
-            fixed = ["{:s}:{:.6f}".format(station_id, main_offsets[meteor.ecsv_file]) 
+            # Fix the offsets of the stations in the main trajectory, which are then kept in the Monte Carlo
+            #   runs too. They are given as fixed times with the timing estimation on, so that the timing
+            #   residuals the Monte Carlo runs are checked against are still computed
+            fixed = ["{:s}:{:.6f}".format(station_id, main_offsets[meteor.ecsv_file]) \
                 for station_id, meteor in zip(station_ids, meteor_list) if meteor.ecsv_file in main_offsets]
-            frag_kwargs['estimate_timing_vel'] = True
             frag_kwargs['fixed_times'] = ",".join(fixed) if fixed else None
 
-        frag_traj = solveTrajectoryGeneric(jdt_ref, meteor_list, 
+        frag_traj = solveTrajectoryGeneric(jdt_ref, meteor_list, \
             os.path.join(traj.output_dir, "fragment_{:d}".format(fragment)), solver=solver, **frag_kwargs)
 
         if frag_traj is None:
@@ -384,8 +415,9 @@ def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=
     return fragment_trajs
 
 
+
 def localMotionFit(t, along, window=0.3):
-    """ The distance travelled along a path at any time, from a local fit to its points. The deceleration of a
+    """ Fit the distance travelled along a path locally, to get it at any time. The deceleration of a
         meteor is not a parabola over the whole flight, and one would be off by tens of metres at the end.
 
     Arguments:
@@ -393,7 +425,8 @@ def localMotionFit(t, along, window=0.3):
         along: [ndarray] Distance along the path of every point (m).
 
     Keyword arguments:
-        window: [float] The fit uses the points within this time (s), or the 10 closest ones if there are fewer.
+        window: [float] The fit uses the points within this time (s), or the 10 closest ones if there are
+            fewer. 0.3 by default.
 
     Return:
         [function] Distance along the path at a given time.
@@ -410,24 +443,28 @@ def localMotionFit(t, along, window=0.3):
     return motion
 
 
+
 def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
-    """ Summarize how the trajectories of additional fragments differ from the main one, to judge at a glance
-        whether they are consistent with it.
+    """ Summarize how the trajectories of additional fragments differ from the main one, to judge at a
+        glance whether they are consistent with it.
 
     Arguments:
-        traj: [Trajectory] Solved trajectory of the main fragment, the solution with the original picks (see
-            originalPicksTrajectory()).
+        traj: [Trajectory object] Solved trajectory of the main fragment, the solution with the original
+            picks (see originalPicksTrajectory()).
         fragment_trajs: [list] (fragment, trajectory) pairs, from solveFragmentTrajectories().
 
     Keyword arguments:
-        reuse_timing: [bool] Whether the fragments took the time offsets of the main trajectory.
+        reuse_timing: [bool] Whether the fragments took the time offsets of the main trajectory. True by
+            default.
 
     Return:
         [str] The summary.
     """
 
     def radiantSigma(t):
-        """ 1-sigma of the geocentric radiant (rad) from the Monte Carlo runs, or None without them. """
+        """ Compute the 1 sigma of the geocentric radiant (rad) from the Monte Carlo runs, None without
+            them.
+        """
 
         un = t.uncertainties
         if (un is None) or (getattr(un, 'ra_g', None) is None) or (getattr(un, 'dec_g', None) is None):
@@ -435,22 +472,29 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
 
         return np.hypot(un.ra_g*np.cos(t.orbit.dec_g), un.dec_g)
 
-    def valueSigma(t, name):
-        """ 1-sigma of a value from the Monte Carlo runs, or None without them. """
 
-        return getattr(t.uncertainties, name, None) if (t.uncertainties is not None) else None
+    def valueSigma(t, name):
+        """ Get the 1 sigma of a value from the Monte Carlo runs, None without them. """
+
+        if t.uncertainties is None:
+            return None
+
+        return getattr(t.uncertainties, name, None)
+
 
     def sigmaStr(diff, sig1, sig2):
-        """ The difference in units of the combined 1-sigma, if both are known. """
+        """ Format the difference in units of the combined 1 sigma, if both are known. """
 
         if (sig1 is None) or (sig2 is None) or (np.hypot(sig1, sig2) == 0):
             return ""
 
         return " ({:.1f} sigma)".format(abs(diff)/np.hypot(sig1, sig2))
 
+
     def modelPoints(t):
-        """ ECI positions on the fitted path of trajectory t (with the gravity drop, if corrected), sorted by
-            time, with their Julian dates. """
+        """ Get the ECI positions on the fitted path of a trajectory (with the gravity drop, if corrected),
+            sorted by time, with their Julian dates.
+        """
 
         used = [obs for obs in t.observations if not obs.ignore_station]
         jd = np.concatenate([obs.JD_data[obs.ignore_list == 0] for obs in used])
@@ -459,15 +503,18 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
 
         return jd[order], eci[order]
 
+
     def interpolate(x, xp, fp):
-        """ Linear interpolation of fp(xp) at x, extrapolated linearly from the end points. """
+        """ Interpolate fp(xp) linearly at x, extrapolating linearly from the end points. """
 
         if (x < xp[0]) and (xp[1] > xp[0]):
             return fp[0] + (x - xp[0])*(fp[1] - fp[0])/(xp[1] - xp[0])
+
         if (x > xp[-1]) and (xp[-1] > xp[-2]):
             return fp[-1] + (x - xp[-1])*(fp[-1] - fp[-2])/(xp[-1] - xp[-2])
 
         return np.interp(x, xp, fp)
+
 
     # Distance travelled along the main path by each of its points
     main_jd, main_eci = modelPoints(traj)
@@ -476,36 +523,25 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
     along_order = np.argsort(main_along)
     main_motion = localMotionFit((main_jd - main_jd[0])*86400, main_along)
 
+
     def crossDistance(point):
-        """ Distance (m) of a point from the main path, as far along it as the point. """
+        """ Compute the distance (m) of a point from the main path, as far along it as the point. """
 
         along = np.dot(point - traj.state_vect_mini, direction)
 
         # Point of the main path as far along as the given one, with the gravity drop
-        main_point = np.array([interpolate(along, main_along[along_order], main_eci[along_order, i]) 
+        main_point = np.array([interpolate(along, main_along[along_order], main_eci[along_order, i]) \
             for i in range(3)])
         diff = point - main_point
 
         return vectMag(diff - np.dot(diff, direction)*direction)
 
+
     def stationsPoints(t):
+        """ Format the number of stations and points of a trajectory. """
+
         return "{:d} / {:d}".format(len(t.observations), sum(len(obs.time_data) for obs in t.observations))
 
-    def velocityMethod(t):
-        """ How the initial velocity of a solution was estimated when the drag and ablation fit was asked for, 
-            which starts at the first point of each solution, or None if it was not (the straight line). """
-
-        fit = getattr(t, 'v_init_drag_fit', None)
-        if fit is not None:
-            return "drag and ablation fit to {:d} points, {:.2f} to {:.2f} s, {:.2f} to {:.2f} km".format(
-                fit.n_points, fit.t_range[0], fit.t_range[1], fit.ht_range[1]/1000, fit.ht_range[0]/1000)
-
-        if getattr(t, 'v_init_drag', False):
-            reason = getattr(t, 'v_init_drag_rejection', None)
-            return "straight line, as the drag fit was not used{:s}".format(
-                "" if reason is None else ": " + reason)
-
-        return None
 
     out_str = "\n"
     out_str += "Additional fragments compared with the main fragment (fragment 0)\n"
@@ -515,9 +551,8 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
     if traj.uncertainties is None:
         out_str += "Without the Monte Carlo runs the differences cannot be compared with the uncertainties.\n"
     else:
-        out_str += "Solutions with the original picks, with the uncertainties (1 sigma) of the Monte Carlo runs.\n"
-    if velocityMethod(traj) is not None:
-        out_str += "Initial velocity of the main fragment from the {:s}\n".format(velocityMethod(traj))
+        out_str += "Solutions with the original picks, with the uncertainties (1 sigma) of the Monte Carlo " \
+            "runs.\n"
 
     if not fragment_trajs:
         out_str += "\nNone of the additional fragments could be solved.\n"
@@ -526,60 +561,58 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
 
         out_str += "\n"
         out_str += "Fragment {:d}\n".format(fragment)
-        out_str += "  Stations / points     : {:s} (main fragment: {:s})\n".format(stationsPoints(frag_traj), 
-            stationsPoints(traj))
+        out_str += "  Stations / points     : {:s} (main fragment: {:s})\n".format( \
+            stationsPoints(frag_traj), stationsPoints(traj))
 
         if (frag_traj.orbit is not None) and (traj.orbit is not None) and (frag_traj.orbit.ra_g is not None) \
             and (traj.orbit.ra_g is not None):
 
-            radiant_diff = angleBetweenSphericalCoords(traj.orbit.dec_g, traj.orbit.ra_g, frag_traj.orbit.dec_g, 
-                frag_traj.orbit.ra_g)
-            out_str += "  Geocentric radiant    : {:.3f} deg from the main one{:s}\n".format(np.degrees(radiant_diff), 
-                sigmaStr(radiant_diff, radiantSigma(traj), radiantSigma(frag_traj)))
+            radiant_diff = angleBetweenSphericalCoords(traj.orbit.dec_g, traj.orbit.ra_g, \
+                frag_traj.orbit.dec_g, frag_traj.orbit.ra_g)
+            out_str += "  Geocentric radiant    : {:.3f} deg from the main one{:s}\n".format( \
+                np.degrees(radiant_diff), sigmaStr(radiant_diff, radiantSigma(traj), radiantSigma(frag_traj)))
 
             v_g_diff = frag_traj.orbit.v_g - traj.orbit.v_g
-            out_str += "  Geocentric velocity   : {:.3f} km/s ({:+.3f} km/s{:s})\n".format(frag_traj.orbit.v_g/1000, 
-                v_g_diff/1000, sigmaStr(v_g_diff, valueSigma(traj, 'v_g'), valueSigma(frag_traj, 'v_g')))
-
-        # The initial velocity of every solution is the one at its first point, from the method it could use
-        frag_method = velocityMethod(frag_traj)
-        if (velocityMethod(traj) is not None) or (frag_method is not None):
-            out_str += "  Initial velocity from : the {:s}\n".format(frag_method or "straight line")
-            if hasattr(traj, 'v_init_drag_fit') and ((traj.v_init_drag_fit is None) 
-                != (getattr(frag_traj, 'v_init_drag_fit', None) is None)):
-                out_str += "  NOTE: not the method of the main fragment, so the velocities are not directly " \
-                    "comparable\n"
+            out_str += "  Geocentric velocity   : {:.3f} km/s ({:+.3f} km/s{:s})\n".format( \
+                frag_traj.orbit.v_g/1000, v_g_diff/1000, \
+                sigmaStr(v_g_diff, valueSigma(traj, 'v_g'), valueSigma(frag_traj, 'v_g')))
 
         v_init_diff = frag_traj.v_init - traj.v_init
-        out_str += "  Initial velocity      : {:.3f} km/s ({:+.3f} km/s{:s})\n".format(frag_traj.v_init/1000, 
-            v_init_diff/1000, sigmaStr(v_init_diff, valueSigma(traj, 'v_init'), valueSigma(frag_traj, 'v_init')))
+        out_str += "  Initial velocity      : {:.3f} km/s ({:+.3f} km/s{:s})\n".format( \
+            frag_traj.v_init/1000, v_init_diff/1000, \
+            sigmaStr(v_init_diff, valueSigma(traj, 'v_init'), valueSigma(frag_traj, 'v_init')))
 
-        out_str += "  Begin / end height    : {:.2f} / {:.2f} km (main fragment: {:.2f} / {:.2f} km)\n".format(
-            frag_traj.rbeg_ele/1000, frag_traj.rend_ele/1000, traj.rbeg_ele/1000, traj.rend_ele/1000)
+        out_str += "  Begin / end height    : {:.2f} / {:.2f} km (main fragment: {:.2f} / {:.2f} " \
+            "km)\n".format(frag_traj.rbeg_ele/1000, frag_traj.rend_ele/1000, traj.rbeg_ele/1000, \
+            traj.rend_ele/1000)
 
         frag_jd, frag_eci = modelPoints(frag_traj)
 
-        # How far ahead of the main fragment, fitted over the noise of the individual points. The fit is on the 
-        #   difference between the two, which is much smoother than the motion of either
+        # How far ahead of the main fragment, fitted over the noise of the individual points. The fit is on
+        #   the difference between the two, which is much smoother than the motion of either
         frag_t = (frag_jd - main_jd[0])*86400
-        ahead = np.dot(frag_eci - traj.state_vect_mini, direction) - np.array([main_motion(t) for t in frag_t])
+        ahead = np.dot(frag_eci - traj.state_vect_mini, direction) \
+            - np.array([main_motion(t) for t in frag_t])
         ahead_poly = np.polyfit(frag_t, ahead, min(2, len(frag_t) - 1))
 
-        out_str += "  Off the main path     : {:.0f} m at the fragment's first point, {:.0f} m at its last\n".format(
-            crossDistance(frag_eci[0]), crossDistance(frag_eci[-1]))
-        out_str += "  Ahead of the main one : {:+.0f} m at the fragment's first point, {:+.0f} m at its last " \
-            "(at the same time)\n".format(np.polyval(ahead_poly, frag_t[0]), np.polyval(ahead_poly, frag_t[-1]))
+        out_str += "  Off the main path     : {:.0f} m at the fragment's first point, {:.0f} m at its " \
+            "last\n".format(crossDistance(frag_eci[0]), crossDistance(frag_eci[-1]))
+        out_str += "  Ahead of the main one : {:+.0f} m at the fragment's first point, {:+.0f} m at its " \
+            "last (at the same time)\n".format(np.polyval(ahead_poly, frag_t[0]), \
+            np.polyval(ahead_poly, frag_t[-1]))
 
-        # Where the main fragment was not seen its motion is extrapolated, which is poor if it was slowing down
+        # Where the main fragment was not seen its motion is extrapolated, which is poor if it was slowing
+        #   down
         outside = max(frag_t[-1] - (main_jd[-1] - main_jd[0])*86400, -frag_t[0])
         if outside > 0.05:
             out_str += "  NOTE: the fragment is seen {:.2f} s outside the main one, for which that part is " \
                 "extrapolated\n".format(outside)
 
-        out_str += "  First seen            : {:+.3f} s from the main fragment\n".format(
+        out_str += "  First seen            : {:+.3f} s from the main fragment\n".format( \
             (frag_traj.rbeg_jd - traj.rbeg_jd)*86400)
 
     return out_str
+
 
 
 def saveECSV(dir_path, meteor_observations, 
@@ -755,11 +788,16 @@ if __name__ == "__main__":
         help="Write the observations to a MILIG input file and exit. The MILIG_PATH argument is the path to the output file.")
 
     arg_parser.add_argument('--fragments', \
-        help="After the main fragment, also solve the trajectories of the additional fragments in the ECSV files (columns with a numeric suffix, e.g. azimuth1, as in Appendix 4 of the GFE standard), with the same options, and print how they differ from the main one. Each one is saved in a fragment_k folder of the output directory.", \
+        help="After the main fragment, also solve the trajectories of the additional fragments in the ECSV " \
+            "files (columns with a numeric suffix, e.g. azimuth1, as in Appendix 4 of the GFE standard), " \
+            "with the same options, and print how they differ from the main one. Each one is saved in a " \
+            "fragment_k folder of the output directory.", \
         action="store_true")
 
     arg_parser.add_argument('--fragtimefit', \
-        help="With --fragments, estimate the time offsets of the stations for every fragment instead of taking the ones of the main trajectory, which are better constrained by its larger number of points.", \
+        help="With --fragments, estimate the time offsets of the stations for every fragment instead of " \
+            "taking the ones of the main trajectory, which are better constrained by its larger number of " \
+            "points.", \
         action="store_true")
 
     # Parse the command line arguments
@@ -878,5 +916,5 @@ if __name__ == "__main__":
         else:
             fragment_trajs = solveFragmentTrajectories(traj, ecsv_paths, solver=cml_args.solver,
                 reuse_timing=(not cml_args.fragtimefit), **solver_kwargs)
-            print(fragmentComparison(originalPicksTrajectory(traj), fragment_trajs, 
+            print(fragmentComparison(originalPicksTrajectory(traj), fragment_trajs, \
                 reuse_timing=(not cml_args.fragtimefit)))
