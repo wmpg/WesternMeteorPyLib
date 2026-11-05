@@ -221,6 +221,10 @@ def circPercentile(data, percentile, q0=None):
         flat = data.ravel()
         wrapped = flat.astype(np.float64)%(2*np.pi)
 
+        # Without a value for every sample (e.g. the anomalies of a hyperbolic orbit), the percentile is NaN
+        if np.any(np.isnan(wrapped)):
+            return np.nan
+
         # If the data is on the 0/360 discontinuity, adjust the 0th percentile
         if np.abs(np.min(wrapped) - np.max(wrapped)) > np.pi:
             candidates = wrapped > np.pi
