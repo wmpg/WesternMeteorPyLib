@@ -250,7 +250,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         raise ValueError("lum_eff_mass must be >= 0, or -1 for self-consistent iteration.")
 
     # Constant luminous efficiency (tau given directly as a ratio). A numpy integer (e.g. a code taken
-    # from an array) is a model code like a Python int, not a constant efficiency of 100*tau %
+    #   from an array) is a model code like a Python int, not a constant efficiency of 100*tau %
     if not isinstance(tau, str) and not isinstance(tau, (bool, int, np.integer)):
 
         # Constant velocity
@@ -275,7 +275,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         lum_eff_type = int(tau)
 
     # These models are calibrated for a zero-magnitude power of 1500 W (see the P_0m docstring note),
-    # so warn if a different value is used with them
+    #   so warn if a different value is used with them
     if (lum_eff_type in [1, 2, 3, 4, 6, 7, 8]) and (P_0m != 1500.0):
         warnings.warn("The chosen luminous efficiency model (lum_eff_type={:d}) is calibrated for "
             "a zero-magnitude power of P_0m = 1500 W, but P_0m = {:g} W was given. "
