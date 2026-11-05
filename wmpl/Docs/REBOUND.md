@@ -12,6 +12,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [What it reads](#what-it-reads)
 - [Command line reference](#command-line-reference)
 - [Choosing an integrator](#choosing-an-integrator)
+- [General relativity](#general-relativity)
 - [Radiation forces](#radiation-forces)
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
@@ -57,6 +58,13 @@ python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s
 
 **Both are needed.** `rebound` alone is not enough — the general relativity correction, the Earth's
 gravitational harmonics and the radiation forces all come from `reboundx`.
+
+**Use REBOUNDx ≥ 4.4.0.** The simulations run in the ecliptic J2000 frame, and the Earth's J2/J4 are
+made symmetric about its rotation pole of date (precessed from J2000, about 20″ per year) through the
+`Omega` spin-axis parameter that REBOUNDx added in 4.4.0, and so is the Sun's J2 about its IAU
+rotation pole. Older versions ignore it and make both symmetric about the ecliptic pole, 23.4° and
+7.25° off; the run then warns, and the report says so. The effect
+is a few m/s on the departure of a slow meteoroid (5.2 m/s for Winchcombe, at 14 km/s).
 
 **`--no-build-isolation` is not optional.** `reboundx` publishes no wheels, so `pip` always compiles
 it, by default against the newest `rebound` on PyPI rather than the one you installed. When the two
@@ -128,6 +136,8 @@ python -m wmpl.Rebound.REBOUND --help
 | `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. Mutually exclusive with `--radius`/`--density`. |
 | `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
 | `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
+| `--gr {gr_full,gr}` | General relativity. `gr_full` (default) is the post-Newtonian interaction between all pairs of bodies (EIH); `gr` is the Sun's post-Newtonian correction on every body (Anderson et al. 1975), 3.3× faster with the same results to ~1e-7 in a. See [General relativity](#general-relativity). |
+| `--no_sun_j2` | Leave out the Sun's J2. It is on by default (DE430's J2 = 2.11e-7, reference radius 696 000 km, about the Sun's IAU rotation pole). It keeps Mercury within 1 km of DE430 over 100 years (13 km without it); on meteoroids it is tiny, 0.02″ on the perihelion of a q = 0.14 AU orbit in 400 years. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
 | `--verbose` | Print the progress of the simulation. |
 
@@ -196,9 +206,35 @@ in the warning for that reason. Measured on a δ-Aquariid-like orbit (a = 2.6 AU
 
 For an orbit with perihelion inside ~0.1 AU use IAS15, or TRACE with `--dt 0.1`.
 
-REBOUNDx will warn that the `gr_full` general relativity correction is velocity-dependent when used
-with WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
+REBOUNDx will warn that the general relativity correction is velocity-dependent when used with
+WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
 the warning can be ignored here.
+
+---
+
+## General relativity
+
+By default (`--gr gr_full`) general relativity is the full post-Newtonian interaction between every
+pair of bodies (REBOUNDx `gr_full`, the EIH equations used by the JPL ephemerides), whose cost grows
+as the cube of the number of bodies and is most of the run time. `--gr gr` uses instead the
+post-Newtonian correction of the Sun's field, applied to every body (REBOUNDx `gr`, Anderson et al.
+1975). It gets the perihelion precessions and the mean motions right and ignores terms smaller by the
+planet-to-Sun mass ratio.
+
+Measured with the Sun's and the Earth's harmonics on, `gr` against `gr_full`:
+
+| | `gr` against `gr_full` | For scale: 1 m/s on the initial velocity |
+| :--- | ---: | ---: |
+| Example trajectory, 100 years back | 2 000 km, Δa = 6e-7 AU | 4 million km |
+| Phaethon-like orbit (q = 0.14 AU), 400 years | 0.1″ of the 40.6″ GR perihelion shift (0.26 %) | |
+| Winchcombe, 200 clones of 1 m/s, 100 years | same distributions of a, e, i (KS p = 1.00) | |
+| Planets against DE430, 100 years | Earth 9.3 instead of 4.5 km, Mercury 1.5 instead of 0.6 km | |
+| Run time | 3.2–3.6× faster (200 clones, 100 yr, 7 cores: 50 s instead of 164 s) | |
+
+The planets follow DE430 slightly better with `gr_full`, since DE430 was integrated with the EIH
+equations, and it is the model REBOUND.py has always used. `--gr gr` gives the same meteoroid orbits
+well inside their measurement uncertainty, so use it to speed up large Monte Carlo runs or long
+integrations.
 
 ---
 
@@ -504,6 +540,13 @@ print(diagnostics[traj.traj_id]["megno"]["verdict"]["status"])
 `compute_megno=True` needs `return_diagnostics=True`, since the diagnostics are the only place the
 result is returned.
 
+**Units.** Each output row is `[t, state_vect_hel, orbit, planet_dists]`, in REBOUND's units: G = 1,
+lengths in AU, masses in solar masses, so the time unit is sqrt(AU³/GM☉) = 58.13244 days
+(`DAYS_PER_SIM_TIME`; REBOUND calls it `yr2pi`, a Gaussian year over 2π). Convert times with
+`simTimeToDays(t)` and `daysToSimTime(days)`. Do not use 365.25/(2π): the Julian year is 1.9e-5
+shorter, which before this was fixed made the Sun 3.8e-5 too massive and moved the Earth ~700 000 km
+off the ephemeris in 10 years.
+
 Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 
 | Function | Purpose |
@@ -535,6 +578,9 @@ Use WSL2. Installing only `rebound` is not enough.
 
 **`The installed REBOUND (4.3.0) does not provide the TRACE integrator.`** TRACE was added in REBOUND
 4.4.0. Upgrade, or use `--integrator ias15`.
+
+**`REBOUNDx ... cannot orient the Earth's J2/J4 and the Sun's J2 along their rotation axes`.** REBOUNDx is older than
+4.4.0. Upgrade it with the `--force-reinstall` command in [Requirements](#requirements).
 
 **`--dt must be positive.`** A zero or negative step would silently collapse to a single step per
 output interval, so it is refused rather than accepted.
