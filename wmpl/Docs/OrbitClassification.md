@@ -12,6 +12,7 @@ transneptunian.
 - [One-parameter criteria](#one-parameter-criteria)
 - [Two-parameter cometary tests](#two-parameter-cometary-tests)
 - [The Tancredi scheme](#the-tancredi-scheme)
+- [Jupiter-family dynamics](#jupiter-family-dynamics)
 - [Supporting machinery](#supporting-machinery)
 - [Cost](#cost)
 - [Verification status](#verification-status)
@@ -153,6 +154,113 @@ reliable.
 
 ---
 
+## Jupiter-family dynamics
+
+The criteria above read one orbit. Shober et al. (2024, A&A 687, A181) asked instead how the orbit
+*behaves*: integrate clones of it 10 000 years back and count how many raise their perihelion above
+2.5 AU, as Jupiter-family comets do and asteroids on comet-like orbits rarely do. `--dynamics` runs
+this through [`wmpl.Rebound.REBOUND`](REBOUND.md), on a trajectory pickle or, further below, on published
+elements:
+
+```
+python -m wmpl.Utils.OrbitClassification traj.pickle --dynamics              # adapted mode
+python -m wmpl.Utils.OrbitClassification traj.pickle --dynamics shober2024   # the paper's setup
+```
+
+Give `--dynamics` after the pickle: it takes an optional mode, and would read the path as one.
+
+| | `adapted` (default) | `shober2024` |
+| :--- | :--- | :--- |
+| Clones | from the state-vector covariance of the Monte Carlo solution | a, e, i, node, peri drawn independently from their 1-sigma; without Monte Carlo, the values the paper assumed for MORP (0.01 AU, 0.001, 0.1°, 0.01°, 0.01°) |
+| How many | batches of 20 until the class is settled, at most 200 | 1000, all of them |
+| Start | the meteoroid's state in the atmosphere | each clone's orbit without the Earth's attraction, 3 Earth Hill radii out, at the geocentric speed it had there |
+| Forces | Sun, planets, Moon, the Sun's post-Newtonian correction (`--gr`), Sun J2, Earth J2/J4, radiation optional (`--beta`, `--radius`) | Sun, planets, Moon, Newtonian (Earth J2/J4 stay) |
+| Integrator | IAS15 (`--integrator`) | IAS15 |
+| Outputs | every 50 years | every 10 years |
+
+Both report the assumptions first, then f_q and f_a (the fractions of time beyond q = 2.5 AU and
+a = 7.37 AU, Fernández et al. 2014), the number of clones that reached q > 2.5 AU, split by whether a
+Jupiter encounter inside 1 Hill radius came first, and the fraction P with its Wilson interval.
+Two verdicts follow: the paper's rule (P > 0.5) and a class from the interval, which stays
+`undetermined` while the interval straddles 0.5. `--dynamics_save` writes all of it to JSON.
+
+Three choices are not in the paper:
+
+- **Batches** (adapted mode). Each batch is a look at P that could stop the run on a fluke, so
+  each uses the interval at 1 - 0.05/n_looks (Bonferroni over the possible looks).
+- **Clones that leave the 1000 AU volume** are told apart by their eccentricity after the epoch:
+  bound at their last output, they keep their orbit; bound and then hyperbolic, they were thrown out
+  and count as beyond every limit; hyperbolic throughout, they are left out and reported, also if the
+  run ends before they reach 1000 AU.
+- **Clones that fail to integrate** are in none of the counts and are reported, with `n_failed` in
+  the result. If a whole batch fails, or every clone of `shober2024`, the run stops with an error: that
+  says nothing about the orbit.
+- **The start of the shober2024 clones.** The elements are those of the orbit without the
+  Earth's attraction, placed where the meteoroid met the Earth. A clone started there would feel the
+  Earth a second time; one started at a distance d with the speed at infinity leaves it with v²
+  short by 2GM/d. In a Sun-and-Earth test on the Orionid example, that left a short by 0.014 AU from 3 Hill
+  radii; with the speed it had at d, by 2.7e-4 AU. The paper starts its clones at the beginning of
+  the fireball observation, and does not say how it treats the Earth's attraction there.
+
+**Cost.** With the setup of `shober2024`, 360 clones of 21P took a mean of 102 s each over 10 000
+years, on 10 cores of a machine that had other work. That makes about 30 CPU-hours for the 1000
+clones on such an orbit, and minutes for an orbit whose class settles in one batch.
+
+**From published elements.** `shober2024` also runs without a pickle, from the elements and the time of the
+fireball, here those of Table 2 of Madiedo et al. (2014):
+
+```
+python -m wmpl.Utils.OrbitClassification -a 4.3 -e 0.79 -i 7.1 -p 40.95 -n 203.945 --dynamics shober2024 \
+    --date "2013-04-13 21:43:55.4" --sigma_a 0.7 --sigma_e 0.04 --sigma_i 0.1 --sigma_node 1e-4 --sigma_peri 0.03
+```
+
+A list of elements does not say where on the orbit the meteoroid was, but a fireball is at the Earth, so the
+clones start at the node the Earth was at that moment (`wmpl.Utils.OrbitFromElements`). The report gives that
+node, its distance from the Earth and the geocentric speed there, to compare with the paper. A node more than
+0.05 AU from the Earth is refused, as the elements or the date are then wrong: published fireballs give 0.0004 to
+0.012 AU. `--max_node_miss` raises the limit. Without the five `--sigma` options, the clones take the
+uncertainties the paper assumed for MORP. The adapted mode needs a pickle, since it takes the clones from the
+full covariance.
+
+a and e are drawn independently, as the paper does, which spreads the perihelion of the clones far beyond its
+measured error when a is poorly known, since a and e are strongly correlated. `--sigma_q`, in place of
+`--sigma_e`, draws q and takes e = 1 - q/a. This departs from the setup of the paper, and the report says so. With
+a pickle solved with the Monte Carlo uncertainties, `--draw_q` does the same with the uncertainty of q it holds. A
+pickle without them has no such uncertainty, so it is refused. To measure a fireball with a Monte Carlo pickle, the
+adapted mode is still the better choice, since it draws from the full covariance.
+
+For the fireball of Trigo-Rodriguez et al. (2009), whose q is known to 0.0006 AU, a and e drawn independently spread
+the perihelion of the clones from 0.67 to 1.66 AU, and give P = 10.0% [6.6, 14.9]. Respecting q, two runs of 200 clones
+gave 4.0% [2.0, 7.7] (q held at its value) and 7.5% [4.6, 12.0] (`--sigma_q`), 5.8% [3.9, 8.5] together. The difference
+from the independent draws is about 1.8 sigma: it points to an inflated fraction, but this does not settle it.
+
+**Figure.** `--dynamics_plot FILE` saves a figure of the run, with the format given by the extension. Over the
+time before the fireball, it draws the perihelion distance and the semi-major axis of the clones, as the band and
+median of all of them, with up to 40 of those that reach q > 2.5 AU one by one, and the fraction that have reached
+it so far with its interval. That last panel shows what P alone does not: whether it has settled by the end of the
+integration. With `--dynamics_checkpoint`, a run already finished draws the figure again without integrating.
+
+**Checkpoint.** A run this long can be cut. `--dynamics_checkpoint FILE` saves each clone of `shober2024`,
+or each batch of the adapted mode, as soon as it ends:
+
+```
+python -m wmpl.Utils.OrbitClassification traj.pickle --dynamics shober2024 --dynamics_checkpoint run.pkl
+```
+
+Run the same command again to go on from there. The clones are the same, with the seed kept in the file if
+none is given, so the result does not depend on the interruption. A batch or a clone cut halfway starts
+again, and so does a clone that failed. A file from a run with other parameters, or one that is not a
+checkpoint, is refused and left as it is. The verdict settings (`confidence`, `encounter_hill`) are not
+part of the comparison, since they change nothing in the integration. The file takes about 60 kB per clone
+with the outputs of `shober2024`, and stays in place at the end: delete it once you have the result. It is
+a pickle, so read only your own.
+
+After Ctrl-C the run stops once the clones already handed to the processes have ended, which is up to a few
+clones' time. What they integrated meanwhile is not saved. If the process is killed outright, its workers
+end the clone they are on before exiting.
+
+---
+
 ## Supporting machinery
 
 These exist to serve the Tancredi scheme but are usable on their own.
@@ -208,6 +316,7 @@ resonances are ever needed.
 | The two-parameter cometary tests | **Verified** against the limits as published |
 | Tancredi class structure and the 3.05 limit | **Verified indirectly** — the primary paper (Icarus 234, 66) is paywalled and the author's own site no longer resolves, but a 2025 paper co-authored by Tancredi restates the class definitions and the 3.05 cut verbatim |
 | Tancredi Hill radii, table 1 resonances and widths, appendix A and B formulae | **Unverified** — the primary source could not be read. The implementation reproduces the tabulated resonance centres and widths to the printed precision, which is strong but indirect evidence |
+| Jupiter-family dynamics | **Not yet compared with the paper.** The metrics are tested on synthetic ensembles and both modes ran end to end with stand-in planets; the paper's Tables 1 and 2 need DE430 and its data |
 
 Related: [orbit dissimilarity criteria](OrbitSimilarity.md) and
 [choosing a threshold](DThresholds.md).

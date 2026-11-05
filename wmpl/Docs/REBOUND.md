@@ -346,7 +346,8 @@ which is recoverable, but passing it is less work than reading it back out of th
 ## Chaos: MEGNO
 
 `--compute_megno` runs a second, separate integration of the nominal solution over the same span, with
-Newtonian gravity only and always with IAS15, and computes the MEGNO chaos indicator.
+Newtonian gravity only and always with IAS15, and computes the MEGNO chaos indicator. In a run with clones
+it does the same for 32 of them, which give the Lyapunov time to quote (see [below](#over-the-clones)).
 
 MEGNO (Mean Exponential Growth factor of Nearby Orbits) follows how fast a small deviation from the
 orbit grows. Its running mean ⟨Y⟩ tends to **2** for a regular, quasi-periodic orbit, tends to **0**
@@ -373,21 +374,83 @@ The verdict is based on the final ⟨Y⟩ and its mean over the last quarter of 
 chaotic orbit, rather than to ⟨Y⟩, a double running average that lags the growth. The fit starts
 when ⟨Y⟩ rises above 2.5 for the last time: before that the deviation can stay flat or even shrink for
 a long time, e.g. on an Earth-crossing orbit until its first deep encounter, and including it biases
-the time high. Chaos driven by close encounters grows in steps, so the time is also fitted in four
-windows of the growth phase, and the report gives their spread as a range: quote the range, not only
-the central value. No time is given if the growth phase covers fewer than 10 orbital periods (or a
-tenth of the run), since the fit is not reliable there.
+the time high. Chaos driven by close encounters grows in steps, so the growth phase is also split
+into four consecutive windows of equal length, its quarters, and each is fitted on its own. The
+report lists every quarter with its time; a quarter in which ln|δ| does not grow (it can shrink for a
+while between encounters) is listed as "no growth".
 
-Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45):
+- **1σ.** The scatter of the quarters' growth rates gives the uncertainty of the time: their standard
+  deviation over √4 is the standard error of λ, and since the time is 1/λ its interval is asymmetric,
+  e.g. 69 (+175/−29) years, with no upper limit when λ is within 1σ of 0.
+- **Has it settled?** The time fitted from the onset to the end of each quarter (cumulative) shows
+  whether it has: the report warns when it still changes by more than 20% over the last half of the
+  growth phase, and then the run is too short to time the chaos well. The last quarter alone misses a
+  slow drift: over 4000 years, 21 of 21 Earth-crossing orbits passed that test while the median of their
+  times still rose by 21% from 2000 years.
 
-| Span | This fit (range) | ⟨Y⟩ over the second half (before) |
-| ---: | ---: | ---: |
-| 200 years | not given (4 periods of growth) | 17 years |
-| 400 years | 54 years (19–74) | 34 years |
-| 1000 years | 66 years (42–174) | 71 years |
+In the JSON the quarters are the verdict's `lyapunov_windows` (`start_years`, `end_years` and
+`lyapunov_time_years`, `null` where ln|δ| does not grow), the 1σ interval is
+`lyapunov_time_1sigma_years` (its upper end `null` when unbounded) and the cumulative fits are
+`lyapunov_cumulative`. In `rebound_megno_lyapunov.png` the middle panel draws ln|δ| with the growth
+phase, its fit and the fit of each quarter, labelled with its time, and the lower panel the time fitted
+from the onset to every later time: the fit of the middle panel stopped there, so its last point is the
+time of the whole fit. The ends of the quarters (the cumulative quarters) are marked with their times,
+the time and its 1σ band span the fitted growth phase only, and the start of the fit, where ⟨Y⟩ last crosses 2.5 in the upper panel, is one line across all three. No time is
+given if the growth phase covers
+fewer than 10 orbital periods (or a tenth of the run), since the fit is not reliable there. This
+Lyapunov time is of the nominal orbit alone, in its Newtonian re-integration; for how long the clones
+keep their order, see the [Predictability horizon](#predictability-horizon).
 
-The deviation is rescaled to unit length at the outputs once it is large, so that it never overflows;
-the variational equations are linear, so this changes nothing (measured to 2e-12 in ln|δ|).
+<a id="over-the-clones"></a>
+**Over the clones.** The Lyapunov time of one orbit is one draw. In a run with clones and with enough
+orbits for a verdict, `--compute_megno` also integrates the first 32 clones in the same way, sharing the
+cores. The report gives their verdicts and the median of their times with its 16–84% range, which is the
+value to quote. Measured on Winchcombe over 1000 years with 64 clones, the median is 42 years (16–84%:
+30–66), and the nominal orbit's 69 years is at the 86th percentile. With 32 clones the median is good to
+9%, against 12% with 16 and 18% with 8. The 32 clones cost a third of as many clones of the main
+integration with `--gr gr` (45 s against 126 s on 15 cores), and less with the default `gr_full`.
+
+**A rate over a finite time.** The Lyapunov exponent is the limit of this rate for t → ∞, and the
+report gives its value over the span of the run. The median over the first half of the run says how much
+it changes when the span doubles: within 10% it has settled, and otherwise it is a value for that span,
+not yet a limit (that change has a scatter of 4–9% with 32 clones). On Winchcombe it is 39 years from
+500 years and 46 from 1000. On a similar orbit with synthetic planets it keeps rising, at 20, 24, 28 and
+35 years from 500, 1000, 2000 and 4000 years, which is more than the polynomial term of the deviation
+explains (Tancredi et al. 2001, eq. 20).
+
+In the JSON this is `clones` inside `megno`: `n_clones`, `status_counts`, `lyapunov_times_years`,
+`lyapunov_time_median_years`, `lyapunov_time_p16_years`, `lyapunov_time_p84_years`,
+`half_run_median_years` and `change_on_doubling`. The lower panel of `rebound_megno_lyapunov.png` draws
+the median and the range next to the nominal orbit's time. The number of clones is the constant
+`MEGNO_CLONES`, which can be set to 0 from a script to skip them.
+
+**Why the deviation and not a second orbit.** The time comes from the variational equations, not from
+the distance to a shadow orbit. That two-particle method gives a false positive exponent on regular and
+quasi-regular orbits (Tancredi, Sánchez & Roig 2001, AJ 121, 1171). On Ceres around the Sun alone, a shadow
+at 10⁻⁴ of the state, renormalised every 1000 years, levels off at 5·10⁻⁴ per year, i.e. 2000 years, while
+`computeMegno` gives ⟨Y⟩ = 2.000 and `regular`. For Lyapunov times of tens of years both agree, to 0–2% as measured with a shadow particle.
+
+Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45), whose growth phase starts
+171 years back:
+
+| Span | This fit (1σ) | Each quarter, from the start of the growth phase | Fitted from the start to each quarter's end | ⟨Y⟩ over the second half (before) |
+| ---: | ---: | :--- | :--- | ---: |
+| 200 years | not given (4 periods of growth) | | | 17 years |
+| 400 years | 54 years (−29/+∞) | no growth, 19, 74, no growth | no growth, 26, 44, 54 | 34 years |
+| 1000 years | 66 years (+30/−16) | 44, 42, 125, 174 | 44, 58, 55, 66 | 71 years |
+
+The deviation is rescaled to unit length at the outputs once it exceeds 10⁸, so that it never overflows.
+The variational equations are linear, so this does not change its growth, except for the round-off that
+IAS15 keeps at the old scale in its compensated summation. That is why the limit is low: the jump of
+ln|δ| at a rescale is 5·10⁻⁹ at 10⁸, but 0.6 at 10¹⁶ and 8 at 10²⁰, which shortened the Lyapunov time by
+20–25% over 2000–4000 years.
+
+Round-off also limits how far the orbit itself can be followed. Past about 36 Lyapunov times (ln 10¹⁶),
+the integration follows an orbit like the one that started there, not that one. Even the seed of the
+initial deviation changes it, since IAS15's convergence test includes the variational particles. On an
+orbit with a Lyapunov time of about 20 years, five seeds gave the same time at 500 years, while their
+semi-major axes differed by 10⁻³ AU by 520–790 years and their times by 20–33 years at 1000 years. The
+same seed reproduces a run exactly.
 
 **MEGNO needs tens of orbital periods to settle**, so set `--days` accordingly. For an orbit with
 a = 3 AU (a period of about 5.2 years) that is at least 100 years, i.e. `--days 36525`. A run that is
@@ -480,8 +543,37 @@ For example, Winchcombe integrated 1000 years back with 200 clones (from a covar
     First close encounter of the clones: 100% had one; median 30 years (5-95%: 25 years to 43 years).
 ```
 
-The memory is lost exactly when the clones meet the Earth. The MEGNO of the nominal orbit of the same
-run is chaotic, with a Lyapunov time of ~67 years (range 24–104 over four windows).
+The memory is lost exactly when the clones meet the Earth. The MEGNO of the nominal orbit is chaotic,
+and so is that of 32 clones drawn from the same covariance:
+
+```
+  MEGNO of the nominal orbit (Newtonian gravity only, IAS15):
+    <Y> at the end: 10.526   mean over the last quarter: 10.598
+    span: 211 orbital periods
+    Converges to 2: NO. <Y> does not converge to 2 and keeps growing: the orbit is chaotic.
+    Lyapunov time ~ 69 years (+175/-29, 1 sigma), of the nominal orbit alone (for the clones,
+    see the predictability horizon). Fitted to the growth of ln|delta| from 32 to 1000 years back,
+    i.e. since <Y> last exceeded 2.5.
+    Encounter-driven chaos grows in steps, so the same fit in each quarter of that span gives:
+        32-274 years back: 24 years
+       274-516 years back: 104 years
+       516-758 years back: 48 years
+      758-1000 years back: no growth
+    The 1 sigma is the scatter of the quarters' growth rates over the square root of their number.
+    Fitted from the onset to the end of each quarter: 24, 53, 52, 69 years.
+    It still changes by 24% over the last half of the growth phase, so it has not settled: integrate for longer.
+    The same over 32 clones of the run:
+      Verdicts: 32 chaotic.
+      Lyapunov time: median 46 years (16-84% of the clones: 30-68), from the 32 with a time.
+      The nominal orbit is one draw among them, so this is the value to quote.
+      From the first half of the run the median is 39 years: it changes by 15% when the span doubles,
+      so this is a value for this span, not yet a limit.
+```
+
+Most of the growth comes in the first quarter, which holds the nominal orbit's deepest encounter with
+the Earth (0.13 Hill radii, 43 years back); over the last quarter its deviation even shrinks. The fit
+from the onset holds at 52–53 years over the middle quarters and ends at 69: close to settled, but not
+yet. The clones say that this orbit is on the slow side: their median is 46 years.
 
 ---
 
@@ -700,9 +792,14 @@ report ends with a MEGNO block:
     <Y> at the end: 0.512   mean over the last quarter: 0.498
     span: 91.2 orbital periods
     Converges to 2: NO (tends to 0). <Y> tends to 0 rather than 2: the deviation from the orbit
-    stays bounded, the signature of a stable periodic orbit (e.g. libration in a mean-motion
-    resonance). Regular, not chaotic.
+    stayed bounded over this span, as around a stable periodic orbit (e.g. libration in a
+    mean-motion resonance). An Earth-crossing orbit can also do this for a while before its first
+    deep encounter: this is about the nominal orbit over this span, not the clones (see the
+    predictability horizon).
 ```
+
+A chaotic orbit also gets a Lyapunov time, with the time fitted in each quarter of its growth phase
+(see [Predictability horizon](#predictability-horizon) for an example).
 
 If it says `too_short`, the message tells you how many years the run needs.
 

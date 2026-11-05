@@ -1547,6 +1547,12 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
 #   "none" leaves general relativity out, for comparison with purely Newtonian integrations.
 GR_MODELS = ("gr", "gr_full", "none")
 
+# Arrays of the lean output format (see _integrateParticles): the output times, in REBOUND time
+#   units as in the rows of the full format, and the osculating elements of the rows' orbit object.
+#   They are what an ensemble of thousands of clones needs: 60 bytes per output in memory, against
+#   1.5 kB for a full row with the state vector and the distance to each of ten bodies.
+LEAN_OUTPUT_KEYS = ("t", "a", "e", "inc", "Omega", "omega", "f")
+
 # Integrators that can be selected for the integration. IAS15 is adaptive and the default. WHFast
 # and TRACE use a fixed timestep (see FIXED_STEP_DEFAULT_DT_DAYS).
 INTEGRATORS = ("ias15", "whfast", "trace")
@@ -1751,11 +1757,16 @@ def _integrateParticles(task):
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
             compute_moid:    [bool] Optional. Compute the MOID with each of MOID_BODIES at every
                                  output ("moid_au" in the diagnostics). Default False.
+            lean_outputs:    [bool] Optional. Return each particle's outputs as one numpy array per
+                                 key of LEAN_OUTPUT_KEYS instead of one row per output. Default False.
 
     Return:
         [dict] {
             "outputs": {particle_name: [[time, state_vect_hel, orb_ns, planet_dists], ...]}, where
-                orb_ns is a picklable SimpleNamespace with attributes a, e, inc, Omega, omega, f,
+                orb_ns is a picklable SimpleNamespace with attributes a, e, inc, Omega, omega, f.
+                With lean_outputs, {particle_name: {key: array}} for the keys of LEAN_OUTPUT_KEYS
+                instead, with the same values. Either format stops at the last output a particle
+                reached, so a particle that hit a body or escaped has fewer outputs.
             "diagnostics": {particle_name: {
                 "min_dist_au":   {body: closest approach in AU (None if never tracked)},
                 "min_time_days": {body: time of closest approach in days},
@@ -1959,24 +1970,36 @@ def _integrateParticles(task):
     # minimum by a large fraction of that. The closest approach inside each step is therefore
     # refined on a Hermite interpolant of the relative motion (see hermiteClosestApproach). "prev"
     # holds the relative state of the previous step for each body, and "encounters" collects every
-    # refined local minimum that falls inside n_hill Hill radii, as (body, time, distance).
+    # refined local minimum that falls inside n_hill Hill radii, as (body index, time, distance).
+    # Everything per body is a list indexed like planet_names, because the heartbeat runs at every
+    # step and a dictionary lookup per body per step is a measurable part of its cost.
+    n_bodies = len(planet_names)
+    every_body = list(range(n_bodies))
+    luna_only = [bi for bi, bname in enumerate(planet_names) if bname == "Luna"]
+    thresholds = [_encounterThreshold(bname, n_hill) for bname in planet_names]
+
     track = {}
     for name in particle_names:
         track[name] = {
-            "min_dist": {b: np.inf for b in planet_names},
-            "min_time": {b: np.nan for b in planet_names},
+            "min_dist": [np.inf]*n_bodies,
+            "min_time": [np.nan]*n_bodies,
             "departed": False,
             "impact": None,
             "escaped": None,
-            "prev": {},
+            "prev": [None]*n_bodies,
             "encounters": [],
         }
 
     def heartbeat(sim_pointer):
 
         s = sim_pointer.contents
-        p = s.particles
         t_now = s.t
+
+        # Every position and velocity in one copy, as plain floats. Fetching a particle through
+        #   sim.particles[i] costs ~1.7 us, and this needed 12 of them at every step.
+        states = np.empty((s.N, 6))
+        s.serialize_particle_data(xyzvxvyvz=states)
+        states = states.tolist()
 
         for pname, pidx in particle_idx.items():
 
@@ -1984,59 +2007,67 @@ def _integrateParticles(task):
             if pidx >= s.N:
                 continue
 
-            o = p[pidx]
+            o = states[pidx]
             st = track[pname]
 
             # Distance to the Earth, used to decide whether the object has left its neighbourhood
-            pe = p[earth_i]
-            d_earth = ((o.x - pe.x)**2 + (o.y - pe.y)**2 + (o.z - pe.z)**2)**0.5
+            pe = states[earth_i]
+            d_earth = ((o[0] - pe[0])**2 + (o[1] - pe[1])**2 + (o[2] - pe[2])**2)**0.5
             if (not st["departed"]) and (d_earth > departure_radius):
                 st["departed"] = True
 
-            for bi, bname in enumerate(planet_names):
+            min_dist = st["min_dist"]
+            min_time = st["min_time"]
+            prevs = st["prev"]
 
-                # The Moon is tracked over the whole integration; every other body only after the
-                # object has left the Earth's neighbourhood, so the trivial initial departure from
-                # the Earth is not reported as an encounter.
-                if (bname != "Luna") and (not st["departed"]):
-                    continue
+            # The Moon is tracked over the whole integration; every other body only after the object
+            #   has left the Earth's neighbourhood, so the trivial initial departure from the Earth is
+            #   not reported as an encounter.
+            for bi in (every_body if st["departed"] else luna_only):
 
                 # Relative state as plain floats: this runs every step for every body, and building
                 # numpy arrays here would slow the whole integration down by ~10%
-                b = p[bi]
-                rel = (o.x - b.x, o.y - b.y, o.z - b.z, o.vx - b.vx, o.vy - b.vy, o.vz - b.vz)
+                b = states[bi]
+                rel = (o[0] - b[0], o[1] - b[1], o[2] - b[2], o[3] - b[3], o[4] - b[4], o[5] - b[5])
                 d = (rel[0]**2 + rel[1]**2 + rel[2]**2)**0.5
                 rv = rel[0]*rel[3] + rel[1]*rel[4] + rel[2]*rel[5]
 
-                if d < st["min_dist"][bname]:
-                    st["min_dist"][bname] = d
-                    st["min_time"][bname] = t_now
+                if d < min_dist[bi]:
+                    min_dist[bi] = d
+                    min_time[bi] = t_now
 
                 # The distance has a minimum inside the last step if the approach rate r.v changed
                 # sign from approaching to receding (h makes this hold in both time directions).
                 # Refine it on the Hermite interpolant of the step.
-                prev = st["prev"].get(bname)
+                prev = prevs[bi]
                 if prev is not None:
                     t_prev, rel_prev, rv_prev = prev
                     h = t_now - t_prev
                     if (h*rv_prev < 0) and (h*rv > 0):
                         rp, rn = np.array(rel_prev), np.array(rel)
                         d_h, t_h = hermiteClosestApproach(t_prev, rp[:3], rp[3:], t_now, rn[:3], rn[3:])
-                        if d_h < st["min_dist"][bname]:
-                            st["min_dist"][bname] = d_h
-                            st["min_time"][bname] = t_h
+                        if d_h < min_dist[bi]:
+                            min_dist[bi] = d_h
+                            min_time[bi] = t_h
 
                         # Every such passage inside the threshold is an encounter: n_hill Hill radii,
                         # or a fixed distance for the Sun, which has no Hill sphere
-                        if d_h < _encounterThreshold(bname, n_hill):
-                            st["encounters"].append((bname, t_h, d_h))
+                        if d_h < thresholds[bi]:
+                            st["encounters"].append((bi, t_h, d_h))
 
-                st["prev"][bname] = (t_now, rel, rv)
+                prevs[bi] = (t_now, rel, rv)
 
     # Keep the returned reference alive until the integration ends (see _setHeartbeat)
     heartbeat_ref = _setHeartbeat(sim, heartbeat)  # noqa: F841
 
-    outputs = {name: [] for name in particle_names}
+    lean_outputs = task.get("lean_outputs", False)
+    if lean_outputs:
+        outputs = {name: {key: [] for key in LEAN_OUTPUT_KEYS} for name in particle_names}
+    else:
+        outputs = {name: [] for name in particle_names}
+
+    # The body the elements are relative to, as in extractSimParams
+    ref_object = "Earth" if reference_frame == "geocentric" else "Sun"
 
     # Integrate the simulation and save the state vectors and orbital elements. These are not time
     # steps, but the times at which the simulation state is saved.
@@ -2139,6 +2170,23 @@ def _integrateParticles(task):
             except rb.ParticleNotFound:
                 continue
 
+            if lean_outputs:
+                orb_elem = ps[name].orbit(primary=ps[ref_object])
+                columns = outputs[name]
+                columns["t"].append(t_out)
+                columns["a"].append(orb_elem.a)
+                columns["e"].append(orb_elem.e)
+                columns["inc"].append(orb_elem.inc)
+                columns["Omega"].append(orb_elem.Omega)
+                columns["omega"].append(orb_elem.omega)
+                columns["f"].append(orb_elem.f)
+
+                if compute_moid:
+                    orb_hel = orb_elem if reference_frame == "heliocentric" else ps[name].orbit(primary=ps["Sun"])
+                    moid_object_rows[name].append((k_moid, _orbitTuple(orb_hel)))
+
+                continue
+
             state_vect_hel, orb_elem, planet_dists = extractSimParams(
                 ps, name, planet_names, reference_frame=reference_frame)
 
@@ -2172,13 +2220,13 @@ def _integrateParticles(task):
     for name in particle_names:
         st = track[name]
         diagnostics[name] = {
-            "min_dist_au": {b: (None if not np.isfinite(st["min_dist"][b]) else st["min_dist"][b])
-                            for b in planet_names},
-            "min_time_days": {b: (None if not np.isfinite(st["min_time"][b])
-                                  else time_sign*simTimeToDays(st["min_time"][b]))
-                              for b in planet_names},
-            "encounters": [_encounterRecord(b, d, time_sign*simTimeToDays(t))
-                           for b, t, d in st["encounters"]],
+            "min_dist_au": {b: (None if not np.isfinite(st["min_dist"][bi]) else st["min_dist"][bi])
+                            for bi, b in enumerate(planet_names)},
+            "min_time_days": {b: (None if not np.isfinite(st["min_time"][bi])
+                                  else time_sign*simTimeToDays(st["min_time"][bi]))
+                              for bi, b in enumerate(planet_names)},
+            "encounters": [_encounterRecord(planet_names[bi], d, time_sign*simTimeToDays(t))
+                           for bi, t, d in st["encounters"]],
             "moid_au": (_moidSeries(moid_planet_rows, moid_object_rows[name], moid_bodies)
                         if compute_moid else None),
             "departed": st["departed"],
@@ -2190,11 +2238,19 @@ def _integrateParticles(task):
                                      else time_sign*simTimeToDays(switch_time)),
         }
 
+    if lean_outputs:
+        outputs = {name: {key: np.array(values) for key, values in columns.items()}
+                   for name, columns in outputs.items()}
+
     return {"outputs": outputs, "diagnostics": diagnostics}
 
 
-# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno)
-MEGNO_RESCALE_ABOVE = 1e20
+# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno). It
+#   is small on purpose. IAS15 keeps the round-off of its compensated summation (csx, csv) across steps, also
+#   for the variational particles, at the scale they had, so a rescale adds about this limit x 1e-16 to a unit
+#   vector. Measured jump of ln|delta| at a rescale: 5e-9 at 1e8, 2e-5 at 1e12, 0.6 at 1e16, and 8 at 1e20,
+#   which shortened the Lyapunov time by 20-25% over 21 orbits in 2000-4000 years.
+MEGNO_RESCALE_ABOVE = 1e8
 
 
 def computeMegno(task, seed=1):
@@ -2279,8 +2335,8 @@ def computeMegno(task, seed=1):
 
     # The deviation grows as exp(lambda t) on a chaotic orbit and would overflow past exp(709), so it
     #   is rescaled to unit length at the output times once it is large, and the logarithm of the
-    #   factor is kept here. The variational equations are linear, so this is exact (measured: ln|delta|
-    #   within 2e-12 of an unscaled run over 400 years).
+    #   factor is kept here. The variational equations are linear, so this does not change its growth,
+    #   up to the round-off that the integrator keeps at the old scale (see MEGNO_RESCALE_ABOVE).
     norm = {"offset": 0.0}
 
     def logDeviation():
@@ -2380,6 +2436,38 @@ MEGNO_MIN_ORBITS = 20
 LYAPUNOV_MIN_ORBITS = 10
 
 
+# The Lyapunov time counts as settled when its fit from the onset changes by less than this fraction over
+#   the last half of the growth phase. The last quarter alone misses a slow drift: over 4000 years, 21 of 21
+#   Earth-crossing orbits passed that test while the median of their times still rose by 21% from 2000 years.
+LYAPUNOV_SETTLED_TOL = 0.2
+
+
+def cumulativeSlopes(t, y):
+    """ The slope of the least-squares line through the first k points of (t, y), for every k at once
+    (NaN for k < 2), from running sums. Used for the Lyapunov fit from the onset of the growth to every
+    later time, which shows whether the fitted time has settled.
+
+    Arguments:
+        t: [ndarray] Times, increasing.
+        y: [ndarray] Values at those times.
+
+    Return:
+        [ndarray] The slope over points 0..k, for each k.
+    """
+
+    # Times from the first one, so the sums stay small
+    t = np.asarray(t, dtype=float) - t[0]
+    y = np.asarray(y, dtype=float)
+    n = np.arange(1, len(t) + 1, dtype=float)
+    st, sy, stt, sty = np.cumsum(t), np.cumsum(y), np.cumsum(t*t), np.cumsum(t*y)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        slopes = (n*sty - st*sy)/(n*stt - st**2)
+    slopes[:2] = np.nan
+
+    return slopes
+
+
 def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
     """ Lyapunov time of a chaotic orbit from the growth of ln|delta| (see computeMegno).
 
@@ -2387,8 +2475,16 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
     exponential growth sets in: before it, the deviation can stay flat or even shrink for centuries
     (e.g. on an Earth-crossing orbit until its first deep encounter), and including that biases the
     time high. ln|delta| is fitted directly, rather than <Y>, which is a double running average and
-    lags the growth. Chaos driven by close encounters grows in steps, so the time is also fitted in
-    four windows of the growth phase, whose spread is returned as the range.
+    lags the growth. Chaos driven by close encounters grows in steps, so the growth phase is also
+    split into four consecutive windows of equal length (its quarters), each fitted on its own. The
+    spread of their times is returned as the range. A window in which ln|delta| does not grow (it can
+    shrink for a while between encounters) has no time and is left out of the range.
+
+    The 1 sigma of the time comes from the scatter of the windows' growth rates: their standard
+    deviation over the square root of their number is the standard error of the rate lambda, and
+    1/(lambda + sigma) to 1/(lambda - sigma) is the interval of the time, asymmetric since the time is
+    1/lambda (no upper limit when lambda - sigma <= 0). The fit from the onset to the end of each window
+    (cumulative) shows whether the time has settled: see LYAPUNOV_SETTLED_TOL.
 
     Arguments:
         t_years: [ndarray] Elapsed time of each output in years (positive).
@@ -2400,8 +2496,16 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
         [dict] or None if there is no growth phase to fit (shorter than a tenth of the run or than
         LYAPUNOV_MIN_ORBITS periods, or not growing): {
             "lyapunov_time_years": 1/lambda over the growth phase,
-            "lyapunov_time_range_years": [min, max] over the windows (None if too few points),
+            "lyapunov_time_range_years": [min, max] over the windows that grow (None if none does,
+                or if there are too few points for windows),
             "onset_years": start of the growth phase,
+            "windows": [list] one dict per window, {"start_years", "end_years",
+                "lyapunov_time_years" (None if ln|delta| does not grow in it)}, or None if there are
+                too few points (fewer than 40) for windows,
+            "lyapunov_time_1sigma_years": [low, high] 1 sigma interval of the time (high None when
+                unbounded), or None without windows,
+            "cumulative": [list] one dict per window, {"end_years", "lyapunov_time_years"} of the fit
+                from the onset to the end of that window, or None without windows,
         }
     """
 
@@ -2420,16 +2524,33 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
     if slope <= 0:
         return None
 
-    taus = []
+    # The outputs are evenly spaced, so equal numbers of points make windows of equal length
+    windows, rates, cumulative = [], [], []
     if len(t) >= 40:
+        cum_slopes = cumulativeSlopes(t, l)
         for w in np.array_split(np.arange(len(t)), 4):
             s_w = np.polyfit(t[w], l[w], 1)[0]
-            if s_w > 0:
-                taus.append(1.0/s_w)
+            rates.append(s_w)
+            windows.append({"start_years": float(t[w[0]]), "end_years": float(t[w[-1]]),
+                            "lyapunov_time_years": float(1.0/s_w) if s_w > 0 else None})
+            s_c = cum_slopes[w[-1]]
+            cumulative.append({"end_years": float(t[w[-1]]),
+                               "lyapunov_time_years": float(1.0/s_c) if s_c > 0 else None})
+
+    taus = [w["lyapunov_time_years"] for w in windows if w["lyapunov_time_years"] is not None]
+
+    # The standard error of the rate from the windows' scatter
+    sigma = None
+    if rates:
+        se = float(np.std(rates, ddof=1)/np.sqrt(len(rates)))
+        sigma = [float(1.0/(slope + se)), float(1.0/(slope - se)) if slope - se > 0 else None]
 
     return {"lyapunov_time_years": float(1.0/slope),
             "lyapunov_time_range_years": [float(min(taus)), float(max(taus))] if taus else None,
-            "onset_years": float(t[0])}
+            "onset_years": float(t[0]),
+            "windows": windows if windows else None,
+            "lyapunov_time_1sigma_years": sigma,
+            "cumulative": cumulative if cumulative else None}
 
 
 def classifyMegno(times_days, megno, a_au, ln_delta=None):
@@ -2463,7 +2584,13 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
             "lyapunov_time_years": for a chaotic orbit, 1/lambda (see ln_delta); otherwise None,
             "lyapunov_time_range_years": [min, max] of the time over windows of the growth phase,
                                or None,
+            "lyapunov_windows": the windows of the growth phase and the time fitted in each (see
+                               lyapunovFromDeviation), or None,
             "lyapunov_onset_years": start of the fitted growth phase, or None,
+            "lyapunov_time_1sigma_years": [low, high] 1 sigma interval of the time (high None when
+                               unbounded), or None,
+            "lyapunov_cumulative": the time fitted from the onset to the end of each window (see
+                               lyapunovFromDeviation), or None,
             "lyapunov_method":  "ln_delta" or "megno_second_half", or None,
             "message":       one-line explanation,
         }
@@ -2479,7 +2606,8 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
     result = {"status": None, "final": float(y[-1]) if len(y) else None,
               "last_quarter": float(np.mean(y[3*len(y)//4:])) if len(y) else None,
               "n_orbits": None, "lyapunov_time_years": None, "lyapunov_time_range_years": None,
-              "lyapunov_onset_years": None, "lyapunov_method": None}
+              "lyapunov_windows": None, "lyapunov_onset_years": None, "lyapunov_method": None,
+              "lyapunov_time_1sigma_years": None, "lyapunov_cumulative": None}
 
     # Not enough points for the last quarter to mean anything (or no points at all)
     if len(y) < 8:
@@ -2526,6 +2654,9 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
             if fit is not None:
                 result.update(lyapunov_time_years=fit["lyapunov_time_years"],
                               lyapunov_time_range_years=fit["lyapunov_time_range_years"],
+                              lyapunov_windows=fit["windows"],
+                              lyapunov_time_1sigma_years=fit["lyapunov_time_1sigma_years"],
+                              lyapunov_cumulative=fit["cumulative"],
                               lyapunov_onset_years=fit["onset_years"])
 
         # Otherwise from <Y> ~ (lambda/2) t over the second half
@@ -2555,6 +2686,120 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
                       "growing either; integrate for longer to decide.")
 
     return result
+
+
+# Clones whose MEGNO is also computed by reboundSimulate(compute_megno=True), when the run has clones. One
+#   orbit's Lyapunov time is one draw: measured on Winchcombe over 1000 years, the nominal orbit's 69 years is at
+#   the 86th percentile of its clones, whose median is 42. Past ~36 Lyapunov times (ln 1e16), round-off alone
+#   gives another orbit too. With 32 clones the median is good to 9% (18% with 8, 12% with 16). They cost a third
+#   of as many clones of the main integration with --gr gr (45 s against 126 s on 15 cores), less with gr_full.
+MEGNO_CLONES = 32
+
+
+# The median over the clones counts as settled when doubling the span changes it by less than this fraction. It
+#   is tighter than LYAPUNOV_SETTLED_TOL because a median over MEGNO_CLONES clones is far less noisy than one
+#   orbit: that change has a scatter of 4-9% with 32 clones, measured by bootstrap over 21 orbits.
+LYAPUNOV_CLONES_SETTLED_TOL = 0.1
+
+
+def _cloneLyapunov(task):
+    """ Verdict and Lyapunov time of one clone, over the whole run and over its first half. It is a
+    function of the module so that a worker process can run it.
+
+    Arguments:
+        task: [dict] An _integrateParticles task with the clone as its only particle.
+
+    Return:
+        [dict] {"status": the verdict of classifyMegno, "lyapunov_time_years": the time or None,
+        "half_run_lyapunov_time_years": the time from the first half of the outputs or None}. <Y> and
+        ln|delta| at a time do not depend on what follows, so the first half is what a run of half the
+        span would give.
+    """
+
+    megno = computeMegno(task)
+    times, y, a, ln_delta = megno["times_days"], megno["megno"], megno["a_au"], megno["ln_delta"]
+    verdict = classifyMegno(times, y, a, ln_delta=ln_delta)
+
+    half = len(times)//2
+    verdict_half = classifyMegno(times[:half], y[:half], a[:half], ln_delta=ln_delta[:half])
+
+    return {"status": verdict["status"], "lyapunov_time_years": verdict["lyapunov_time_years"],
+            "half_run_lyapunov_time_years": verdict_half["lyapunov_time_years"]}
+
+
+def summariseCloneLyapunov(results):
+    """ The Lyapunov time over a set of clones.
+
+    Arguments:
+        results: [list] One dict per clone, as _cloneLyapunov returns them.
+
+    Return:
+        [dict] {
+            "n_clones": [int] how many clones,
+            "status_counts": [dict] how many clones got each verdict,
+            "lyapunov_times_years": [list] the times of the clones that have one, sorted,
+            "lyapunov_time_median_years": [float] their median, or None if none has a time,
+            "lyapunov_time_p16_years", "lyapunov_time_p84_years": [float] their percentiles, or None,
+            "half_run_median_years": [float] the same median over the first half of the run, or None if
+                fewer than half of the clones have a time there,
+            "change_on_doubling": [float] how much the median changes from the first half of the run to
+                all of it, as a fraction of the latter, or None,
+        }
+    """
+
+    counts = {}
+    for r in results:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+
+    taus = sorted(float(r["lyapunov_time_years"]) for r in results if r["lyapunov_time_years"] is not None)
+    halves = [float(r["half_run_lyapunov_time_years"]) for r in results
+              if r["half_run_lyapunov_time_years"] is not None]
+
+    summary = {"n_clones": len(results), "status_counts": counts, "lyapunov_times_years": taus,
+               "lyapunov_time_median_years": None, "lyapunov_time_p16_years": None,
+               "lyapunov_time_p84_years": None, "half_run_median_years": None, "change_on_doubling": None}
+
+    if taus:
+        median = float(np.median(taus))
+        summary.update(lyapunov_time_median_years=median,
+                       lyapunov_time_p16_years=float(np.percentile(taus, 16)),
+                       lyapunov_time_p84_years=float(np.percentile(taus, 84)))
+
+        if 2*len(halves) >= len(results):
+            half_median = float(np.median(halves))
+            summary.update(half_run_median_years=half_median,
+                           change_on_doubling=abs(median - half_median)/median)
+
+    return summary
+
+
+def lyapunovOverClones(tasks, n_cpu=1):
+    """ The Lyapunov time over a set of clones, each integrated as computeMegno does.
+
+    Arguments:
+        tasks: [list] One _integrateParticles task per clone.
+
+    Keyword arguments:
+        n_cpu: [int] Worker processes to share them among. Default 1.
+
+    Return:
+        [dict] See summariseCloneLyapunov. A clone that fails is left out, with a warning.
+    """
+
+    n_cpu = max(1, min(n_cpu, len(tasks)))
+
+    if n_cpu == 1:
+        return summariseCloneLyapunov([_cloneLyapunov(t) for t in tasks])
+
+    results = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
+        for future in concurrent.futures.as_completed([executor.submit(_cloneLyapunov, t) for t in tasks]):
+            try:
+                results.append(future.result())
+            except Exception as e:
+                print("\nWarning: the MEGNO of a clone failed and was skipped: {:s}".format(str(e)))
+
+    return summariseCloneLyapunov(results)
 
 
 def _spanText(days):
@@ -2604,6 +2849,232 @@ def _predictabilityReportLines(horizon, span_days):
     return lines
 
 
+def plotMegno(megno, file_path=None):
+    """ Figure of the MEGNO of the nominal orbit (see computeMegno and classifyMegno): <Y> against
+    time and, when the series has ln|delta|, the deviation itself with the fit of the Lyapunov time
+    over its growth phase and over each quarter of it (see lyapunovFromDeviation), each labelled with
+    its time, as the report lists them.
+
+    Arguments:
+        megno: [dict] MEGNO result with its verdict, as reboundSimulate stores it.
+
+    Keyword arguments:
+        file_path: [str] Where to save the figure, or None not to save it.
+
+    Return:
+        (fig, axes): the figure and its axes, one or two.
+    """
+
+    v = megno["verdict"]
+    times_days = np.array(megno["times_days"], dtype=float)
+
+    # MEGNO only gets a verdict after tens of orbital periods, so the span is always long enough that
+    #   days make an unreadable axis
+    t = times_days/365.25
+    sign = -1.0 if (len(t) and t[-1] < 0) else 1.0
+
+    ln_delta = megno.get("ln_delta")
+    with_deviation = (ln_delta is not None) and (len(ln_delta) == len(t))
+
+    # With a Lyapunov fit, a third panel gives the time fitted from the onset to every later time
+    with_fit = with_deviation and (v.get("lyapunov_onset_years") is not None)
+
+    if with_fit:
+        fig, axes = plt.subplots(3, 1, figsize=(8, 9.5), sharex=True, gridspec_kw={"height_ratios": [1, 1.25, 0.9]})
+    elif with_deviation:
+        fig, axes = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+    else:
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        axes = [ax]
+
+    ax = axes[0]
+    ax.plot(t, megno["megno"], lw=1.2, label="<Y> (MEGNO)")
+    ax.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
+
+    # The limits of the verdicts (see classifyMegno): regular within MEGNO_REGULAR_TOL of 2, chaotic above
+    #   MEGNO_CHAOTIC_MIN, whose last crossing starts the Lyapunov fit of the panel below
+    ax.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0,
+               label="regular if it ends within {:g} of 2".format(MEGNO_REGULAR_TOL))
+    ax.axhline(MEGNO_CHAOTIC_MIN, color="C1", ls=":", lw=1.2,
+               label="chaotic above {:g}; the fit starts at the last crossing".format(MEGNO_CHAOTIC_MIN))
+    ax.set_ylabel("<Y>")
+    ax.set_title("{:s} of the nominal orbit (Newtonian gravity): {:s}".format(
+        "MEGNO and Lyapunov time" if with_deviation else "MEGNO", v["status"].replace("_", " ")))
+    ax.legend(fontsize=8)
+
+    if with_deviation:
+        ax = axes[1]
+        l = np.array(ln_delta, dtype=float)
+        ax.plot(t, l, color="k", lw=1.0, label="$\\ln|\\delta|$")
+
+        # Labels on the curve stay readable on a white ground
+        ground = dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.8)
+
+        if v.get("lyapunov_onset_years") is not None:
+            elapsed = np.abs(t)
+            onset = v["lyapunov_onset_years"]
+            ax.axvspan(sign*onset, t[-1], color="C1", alpha=0.08, lw=0, label="growth phase (fitted)")
+
+            def fitLine(lo, hi):
+                """ The straight fit of ln|delta| over elapsed times lo to hi, as (t, fitted). """
+                k = (elapsed >= lo - 1e-9) & (elapsed <= hi + 1e-9) & np.isfinite(l)
+                if k.sum() < 2:
+                    return None
+                coef = np.polyfit(elapsed[k], l[k], 1)
+                return t[k], np.polyval(coef, elapsed[k])
+
+            fitted = fitLine(onset, elapsed[-1])
+            if fitted is not None:
+                sigma_text = lyapunovSigmaText(v["lyapunov_time_years"], v.get("lyapunov_time_1sigma_years"))
+                ax.plot(*fitted, color="C1", lw=1.6, label="Lyapunov time {:.0f} years{:s}".format(
+                    v["lyapunov_time_years"], sigma_text.replace("1 sigma", "1$\\sigma$")))
+
+                # Where the time comes from: the fit rises by d_ln over d_t, and tau = d_t/d_ln, the time
+                #   in which |delta| grows by a factor e. Drawn as the triangle under the fit.
+                (x0, x1), (y0, y1) = (fitted[0][0], fitted[0][-1]), (fitted[1][0], fitted[1][-1])
+                d_t, d_ln = abs(x1 - x0), y1 - y0
+                if d_ln > 0:
+                    inward = 1 if x1 < x0 else -1
+                    ax.plot([x0, x1, x1], [y0, y0, y1], color="C1", lw=0.8, ls=":", zorder=1)
+                    ax.annotate("$\\Delta t$ = {:.0f} yr".format(d_t), (0.5*(x0 + x1), y0),
+                                textcoords="offset points", xytext=(0, -11), ha="center", fontsize=8,
+                                color="C1", gid="slope", bbox=ground)
+                    # Along the vertical leg, as the span is along the horizontal one
+                    ax.annotate("$\\Delta\\ln|\\delta|$ = {:.1f}".format(d_ln), (x1, 0.5*(y0 + y1)),
+                                textcoords="offset points", xytext=(3*inward, 0), rotation=90,
+                                ha="left" if inward > 0 else "right", va="center", fontsize=8, color="C1",
+                                gid="slope", bbox=ground)
+                    ax.annotate("$\\tau = \\Delta t\\,/\\,\\Delta\\ln|\\delta|$ = {:.0f}/{:.1f} = {:.0f} yr".format(
+                                d_t, d_ln, d_t/d_ln), (x1, y0), textcoords="offset points",
+                                xytext=(4*inward, 4), ha="left" if inward > 0 else "right", va="bottom",
+                                fontsize=8, color="C1", gid="slope", bbox=ground)
+
+            # Each quarter with its own fit and time, or "no growth"
+            for k, w in enumerate(v.get("lyapunov_windows") or []):
+                fitted = fitLine(w["start_years"], w["end_years"])
+                if fitted is None:
+                    continue
+                tau_w = w["lyapunov_time_years"]
+                ax.plot(*fitted, color="C3", lw=1.0, ls="--", label="each quarter" if k == 0 else None)
+                ax.annotate("no growth" if tau_w is None else "{:.0f} yr".format(tau_w),
+                            (np.mean(fitted[0]), np.max(fitted[1])), textcoords="offset points",
+                            xytext=(0, 6), ha="center", fontsize=8, color="C3", gid="quarter", bbox=ground)
+                if k > 0:
+                    ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
+
+        ax.set_ylabel("$\\ln|\\delta|$  (each unit: deviation $\\times$ 2.72)")
+        ax.legend(fontsize=8)
+
+    # The time fitted from the onset to every later time, from the end of the first quarter on (shorter
+    #   fits swing to thousands of years where the growth pauses): where it levels off, it has settled
+    if with_fit:
+        ax = axes[2]
+        tau, sigma = v["lyapunov_time_years"], v.get("lyapunov_time_1sigma_years")
+        on = np.where(elapsed >= onset - 1e-9)[0]
+        slopes = cumulativeSlopes(elapsed[on], l[on])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tau_cum = np.where(slopes > 0, 1.0/slopes, np.nan)
+        cumulative = v.get("lyapunov_cumulative") or []
+        if cumulative:
+            shown = elapsed[on] >= cumulative[0]["end_years"] - 1e-9
+        else:
+            period = np.nanmedian(np.array(megno["a_au"], dtype=float))**1.5
+            shown = (elapsed[on] - onset) >= LYAPUNOV_MIN_ORBITS*period
+        # The same growth phase and quarters as in the panel above
+        ax.axvspan(sign*onset, t[-1], color="C1", alpha=0.08, lw=0, label="growth phase (fitted)")
+        for w in (v.get("lyapunov_windows") or [])[1:]:
+            ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
+
+        ax.plot(t[on][shown], tau_cum[shown], color="C1", lw=1.0, label="cumulative fit, from the onset to t")
+
+        # The ends of the quarters with their times; the last one is the whole fit, the time above
+        ends = [(sign*c["end_years"], c["lyapunov_time_years"]) for c in cumulative
+                if c["lyapunov_time_years"] is not None]
+        if ends:
+            ax.plot(*zip(*ends), marker="o", ls="none", color="C3", markersize=5, label="cumulative quarters")
+            for k, (x, y) in enumerate(ends):
+                ax.annotate("{:.0f} yr{:s}".format(y, " (whole fit)" if k == len(ends) - 1 else ""), (x, y),
+                            textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8, color="C3",
+                            gid="cumulative", bbox=ground)
+        # The time and its 1 sigma hold over the fitted span only
+        span_x = [sign*onset, t[-1]]
+        ax.plot(span_x, [tau, tau], color="C1", ls="--", lw=1.0, label="Lyapunov time {:.0f} years (the fit above)".format(tau))
+
+        values = [x for x in tau_cum[shown] if np.isfinite(x)] + [tau] + [x for x in (sigma or []) if x is not None]
+
+        # The same time over the clones, where the nominal orbit is one draw
+        clones = megno.get("clones") or {}
+        if clones.get("lyapunov_time_median_years") is not None:
+            values += [clones["lyapunov_time_p16_years"], clones["lyapunov_time_p84_years"]]
+            ax.axhspan(clones["lyapunov_time_p16_years"], clones["lyapunov_time_p84_years"], color="C2", alpha=0.15,
+                       lw=0, label="16-84% of the clones")
+            ax.axhline(clones["lyapunov_time_median_years"], color="C2", ls="--", lw=1.0,
+                       label="median of {:d} clones: {:.0f} years".format(clones["n_clones"],
+                                                                          clones["lyapunov_time_median_years"]))
+
+        ax.set_yscale("log")
+        ax.set_ylim(0.7*min(values), 1.4*max(values))
+        if sigma is not None:
+            ax.fill_between(span_x, sigma[0], sigma[1] if sigma[1] is not None else ax.get_ylim()[1], color="C1",
+                            alpha=0.15, lw=0, label="1$\\sigma$")
+        ax.set_ylabel("Lyapunov time [years]")
+        ax.legend(fontsize=8)
+
+    # The start of the fit, where <Y> last crossed MEGNO_CHAOTIC_MIN, is the same time in every panel
+    if with_fit:
+        for k, ax in enumerate(axes):
+            ax.axvline(sign*onset, color="C1", ls="-.", lw=1.0, zorder=3,
+                       label="start of the fit ({:.0f} years {:s})".format(
+                           onset, "back" if sign < 0 else "after the start") if k == 0 else None)
+        axes[0].legend(fontsize=8)
+
+    axes[-1].set_xlabel("Time [years]")
+    fig.tight_layout()
+
+    if file_path is not None:
+        fig.savefig(file_path)
+
+    return fig, axes
+
+
+def lyapunovSigmaText(tau, sigma):
+    """ The 1 sigma of a Lyapunov time as text, e.g. " (+59/-14, 1 sigma)": asymmetric, since the time is
+    1/lambda and the sigma is that of lambda (see lyapunovFromDeviation). Empty without a sigma. """
+
+    if sigma is None:
+        return ""
+    if sigma[1] is None:
+        return " (-{:.0f}/+inf, 1 sigma: the rate is within 1 sigma of 0)".format(tau - sigma[0])
+
+    return " (+{:.0f}/-{:.0f}, 1 sigma)".format(sigma[1] - tau, tau - sigma[0])
+
+
+def _cloneLyapunovReportLines(clones):
+    """ Human-readable lines describing a lyapunovOverClones result. """
+
+    lines = ["  The same over {:d} clones of the run:".format(clones["n_clones"])]
+    lines.append("    Verdicts: {:s}.".format(", ".join("{:d} {:s}".format(n, status.replace("_", " "))
+                                                       for status, n in sorted(clones["status_counts"].items()))))
+
+    median = clones["lyapunov_time_median_years"]
+    if median is None:
+        return lines
+
+    lines.append("    Lyapunov time: median {:.0f} years (16-84% of the clones: {:.0f}-{:.0f}), from the {:d} "
+                 "with a time.".format(median, clones["lyapunov_time_p16_years"], clones["lyapunov_time_p84_years"],
+                                       len(clones["lyapunov_times_years"])))
+    lines.append("    The nominal orbit is one draw among them, so this is the value to quote.")
+
+    change = clones["change_on_doubling"]
+    if change is not None:
+        lines.append("    From the first half of the run the median is {:.0f} years: it changes by {:.0f}% when the "
+                     "span doubles,".format(clones["half_run_median_years"], 100*change))
+        lines.append("    so {:s}".format("this is a value for this span, not yet a limit."
+                                          if change > LYAPUNOV_CLONES_SETTLED_TOL else "it has settled."))
+
+    return lines
+
+
 def _megnoReportLines(megno):
     """ Human-readable lines describing a MEGNO result from reboundSimulate(compute_megno=True). """
 
@@ -2640,15 +3111,59 @@ def _megnoReportLines(megno):
     # Only set for a chaotic orbit with a positive fitted slope
     if v["lyapunov_time_years"] is not None:
         if v.get("lyapunov_method") == "ln_delta":
-            rng = v.get("lyapunov_time_range_years")
-            lines.append("  Lyapunov time ~ {:.0f} years{:s}.".format(v["lyapunov_time_years"],
-                         "" if rng is None else " (range {:.0f}-{:.0f} over four windows)".format(*rng)))
-            lines.append("  Fitted to the growth of ln|delta| since <Y> last exceeded {:.1f}, {:s} back.".format(
-                MEGNO_CHAOTIC_MIN, _spanText(365.25*v["lyapunov_onset_years"])))
-            lines.append("  Encounter-driven chaos grows in steps, so quote the range.")
+
+            # Times are counted from the start of the run, back from it in a backward run
+            when = "back" if megno["times_days"][-1] < 0 else "after the start"
+
+            # It describes the nominal orbit alone, in the re-integration above, and not the clones
+            lines.append("  Lyapunov time ~ {:.0f} years{:s}, of the nominal orbit alone (for the clones,".format(
+                v["lyapunov_time_years"], lyapunovSigmaText(v["lyapunov_time_years"],
+                                                            v.get("lyapunov_time_1sigma_years"))))
+            lines.append("  see the predictability horizon). Fitted to the growth of ln|delta| from {:.0f} to "
+                         "{:.0f} years {:s},".format(v["lyapunov_onset_years"], abs(megno["times_days"][-1])/365.25,
+                                                     when))
+            lines.append("  i.e. since <Y> last exceeded {:.1f}.".format(MEGNO_CHAOTIC_MIN))
+
+            # Each window of the growth phase with its own time, so that the range can be traced back
+            windows = v.get("lyapunov_windows")
+            if windows:
+                lines.append("  Encounter-driven chaos grows in steps, so the same fit in each quarter of "
+                             "that span gives:")
+                spans = ["{:.0f}-{:.0f} years {:s}".format(w["start_years"], w["end_years"], when)
+                         for w in windows]
+                width = max(len(s) for s in spans)
+                for s, w in zip(spans, windows):
+                    lines.append("    {:>{:d}s}: {:s}".format(s, width,
+                                 "no growth" if w["lyapunov_time_years"] is None
+                                 else "{:.0f} years".format(w["lyapunov_time_years"])))
+                lines.append("  The 1 sigma is the scatter of the quarters' growth rates over the square root of "
+                             "their number.")
+
+                # The fit from the onset to the end of each quarter, and whether it has settled
+                cumulative = v.get("lyapunov_cumulative")
+                if cumulative:
+                    taus = [c["lyapunov_time_years"] for c in cumulative]
+                    lines.append("  Fitted from the onset to the end of each quarter: {:s} years.".format(", ".join(
+                        "no growth" if x is None else "{:.0f}".format(x) for x in taus)))
+                    if None in taus[-3:]:
+                        lines.append("  It has not settled: integrate for longer to time it.")
+                    else:
+                        change = max(abs(taus[-1] - x) for x in taus[-3:-1])/taus[-1]
+                        if change > LYAPUNOV_SETTLED_TOL:
+                            lines.append("  It still changes by {:.0f}% over the last half of the growth phase, "
+                                         "so it has not settled: integrate for longer.".format(100*change))
+                        else:
+                            lines.append("  It changes by {:.0f}% over the last half of the growth phase: "
+                                         "settled.".format(100*change))
+            else:
+                lines.append("  Too few outputs in the growth phase to also fit it by quarters, so no range "
+                             "is given.")
         else:
             lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
                          "half).".format(v["lyapunov_time_years"]))
+
+    if megno.get("clones"):
+        lines.extend(_cloneLyapunovReportLines(megno["clones"]))
 
     if megno.get("escaped"):
         lines.append("  The object left the simulation volume, so the MEGNO series is truncated.")
@@ -2897,7 +3412,8 @@ def _heliocentricRecord(state_vect_hel, orb, jd_tdb):
 
 
 def integrateHeliocentricBodies(names, states_hel, jd_tdb, times, ephem_source="local",
-                                integrator="ias15", dt_days=None, planets=None, sun_j2=True, gr="gr_full"):
+                                integrator="ias15", dt_days=None, planets=None, sun_j2=True, gr="gr_full",
+                                lean_outputs=False):
     """ Integrate bodies given by their heliocentric states through the same simulation the meteoroid
     is integrated in by reboundSimulate (_integrateParticles): the Sun, the planets and the Moon, the
     Earth's J2 and J4, general relativity, and the close-encounter tracking.
@@ -2916,6 +3432,7 @@ def integrateHeliocentricBodies(names, states_hel, jd_tdb, times, ephem_source="
         planets: [tuple] Return of planetStatesAtEpoch at jd_tdb, if it has already been computed.
         sun_j2: [bool] Include the Sun's J2, as reboundSimulate. Default True.
         gr: [str] General relativity model, as reboundSimulate (see GR_MODELS). Default "gr_full".
+        lean_outputs: [bool] Return the outputs as arrays of elements, as reboundSimulate. Default False.
 
     Return:
         [dict] The return of _integrateParticles, with the bodies' heliocentric outputs.
@@ -2949,6 +3466,7 @@ def integrateHeliocentricBodies(names, states_hel, jd_tdb, times, ephem_source="
         "earth_spin_axis": earthSpinAxisEcliptic(jd_tdb) if harmonicsSpinAxisSupported() else None,
         "sun_j2": sun_j2,
         "gr": gr,
+        "lean_outputs": lean_outputs,
     }
 
     return _integrateParticles(task)
@@ -3722,7 +4240,8 @@ def reboundSimulate(
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, sun_j2=True, gr="gr_full", compute_moid=True, verbose=False):
+        dt_days=None, compute_megno=False, sun_j2=True, gr="gr_full", compute_moid=True, verbose=False,
+        lean_outputs=False, skip_nominal=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -3780,18 +4299,30 @@ def reboundSimulate(
         compute_megno: [bool] If True, after the requested integration run a purely gravitational
             integration of the nominal solution only, over the same span, and store its MEGNO
             series and verdict (see computeMegno and classifyMegno) under "megno" in the nominal
-            solution's diagnostics. Requires return_diagnostics=True, which is the only way the
+            solution's diagnostics. A run with clones and enough orbits for a verdict also does it
+            for the first MEGNO_CLONES clones, under "clones" in that entry (see lyapunovOverClones).
+            Requires return_diagnostics=True, which is the only way the
             result is returned; it is skipped with a warning otherwise, since the extra integration
             is as expensive as the nominal run. Default False.
         compute_moid: [bool] Compute the MOID with each of MOID_BODIES at every output, for the nominal
             solution and every clone ("moid_au" in their diagnostics, see wmpl.Utils.MOID). It costs
             ~40 microseconds per output and body, ~1 s per orbit with 3000 outputs: measured 4% of a
             300-year run, less for longer spans with the same outputs. Default True.
+        lean_outputs: [bool] If True, return each run's outputs as numpy arrays of the output times
+            and the osculating elements only (see LEAN_OUTPUT_KEYS), without the state vectors and
+            the distances to every body. With the ten bodies a full row takes 1.5 kB and a lean
+            output 60 bytes, so 1000 clones with 2000 outputs each need 3.1 GB in rows and 0.12 GB
+            in arrays. Default False.
         verbose: [bool] If True, print out the progress of the simulation.
+        skip_nominal: [bool] If True, integrate only the Monte Carlo realizations, which are the same
+            ones for the same random_seed, for a caller that has no use for the nominal solution:
+            it runs serially, before them, and takes as long as one of them on a whole core.
+            outputs is then None and the diagnostics have no entry for it. Not available with
+            compute_megno. Default False.
 
     Return:
         outputs: [list] List of outputs, each containing the time, state vector and orbital elements at that
-            time.
+            time. With lean_outputs, a dict {key: array} for the keys of LEAN_OUTPUT_KEYS instead.
         outputs_mc: [dict] {mc_name: outputs} for the Monte Carlo realizations.
         diagnostics: [dict] Only returned if return_diagnostics is True. Maps each particle name to
             its closest approaches ("min_dist_au", "min_time_days"), every close encounter
@@ -3813,6 +4344,10 @@ def reboundSimulate(
 
     if gr not in GR_MODELS:
         raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr), ", ".join(GR_MODELS)))
+
+    # The MEGNO belongs to the nominal orbit
+    if skip_nominal and compute_megno:
+        raise ValueError("compute_megno needs the nominal solution, which skip_nominal leaves out.")
 
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
@@ -3918,6 +4453,7 @@ def reboundSimulate(
             "sun_j2": sun_j2,
             "gr": gr,
             "compute_moid": compute_moid,
+            "lean_outputs": lean_outputs,
         }
 
     if verbose:
@@ -3927,9 +4463,12 @@ def reboundSimulate(
         print(f"Direction: {direction}")
 
     # Nominal solution, integrated in its own simulation (in the main process)
-    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
-    outputs = nominal_result["outputs"][obj_name]
-    diagnostics = dict(nominal_result["diagnostics"])
+    outputs = None
+    diagnostics = {}
+    if not skip_nominal:
+        nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
+        outputs = nominal_result["outputs"][obj_name]
+        diagnostics = dict(nominal_result["diagnostics"])
 
     # Monte Carlo realizations, each integrated in its own independent simulation, optionally across
     # multiple processes
@@ -4012,6 +4551,13 @@ def reboundSimulate(
         megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"],
                                          ln_delta=megno["ln_delta"])
         diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
+
+        # The same over some clones, in a run that has them and that is long enough for a verdict
+        if state_vect_realizations and (MEGNO_CLONES > 0) and (megno["verdict"]["status"] != "too_short"):
+            clone_tasks = [_make_task([s], [n]) for s, n in zip(mc_states[:MEGNO_CLONES], mc_names[:MEGNO_CLONES])]
+            if show_progress:
+                print("Computing the MEGNO of {:d} clones on {:d} core(s)...".format(len(clone_tasks), n_cpu))
+            megno["clones"] = lyapunovOverClones(clone_tasks, n_cpu=n_cpu)
 
     if return_diagnostics:
         return outputs, outputs_mc, diagnostics
@@ -4120,7 +4666,9 @@ if __name__ == "__main__":
                         help="After the integration, integrate the nominal solution again with "
                         "Newtonian gravity only (IAS15) and compute its MEGNO chaos indicator, "
                         "reporting whether it converges to 2 (regular orbit) or keeps growing "
-                        "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly.")
+                        "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly. With "
+                        "clones (--mc), {:d} of them are integrated in the same way, sharing the cores, to give "
+                        "the Lyapunov time over the clones.".format(MEGNO_CLONES))
 
     parser.add_argument("--parent_bodies", type=str, default=None, metavar="MATCHES_JSON",
                         help="Integrate the parent body candidates saved by wmpl.Utils.ParentBodySearch "
@@ -5034,23 +5582,8 @@ if __name__ == "__main__":
     # MEGNO evolution, in its own figure
     megno_png_path = None
     if (megno is not None) and megno["times_days"]:
-        megno_png_path = os.path.join(out_dir, "rebound_megno.png")
-        fig_m, ax_m = plt.subplots(figsize=(8, 4.5))
-
-        # MEGNO only gets a verdict after tens of orbital periods, so the span is always long
-        #   enough that days make an unreadable axis
-        megno_years = [t/365.25 for t in megno["times_days"]]
-
-        ax_m.plot(megno_years, megno["megno"], lw=1.2, label="<Y> (MEGNO)")
-        ax_m.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
-        ax_m.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0)
-        ax_m.set_xlabel("Time [years]")
-        ax_m.set_ylabel("<Y>")
-        ax_m.set_title("MEGNO of the nominal orbit (Newtonian gravity): {:s}".format(
-            megno["verdict"]["status"].replace("_", " ")))
-        ax_m.legend()
-        fig_m.tight_layout()
-        fig_m.savefig(megno_png_path)
+        megno_png_path = os.path.join(out_dir, "rebound_megno_lyapunov.png")
+        plotMegno(megno, file_path=megno_png_path)
 
     # Report the saved outputs
     ### Machine-readable results, so downstream analysis does not have to parse the text report ###
