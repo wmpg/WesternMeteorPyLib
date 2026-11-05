@@ -41,6 +41,7 @@ Individual functions are documented in their docstrings, and every module can be
 the larger tools live in [wmpl/Docs](wmpl/Docs):
 
  * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
+ * [Drag fit of the motion along a trajectory](wmpl/Docs/DragFit.md) - the drag model of the motion along a solved trajectory, sampling it by height or time for dark flight, and interpreting the ballistic coefficient
  * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
  * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
  * [Orbit dissimilarity criteria](wmpl/Docs/OrbitSimilarity.md) - measuring how similar two orbits are, which criterion to pick, and why their thresholds are not interchangeable
@@ -267,6 +268,8 @@ If you want to use the most recent lists of comets and asteroids, download these
  * [MPC Apollos](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Apollos.html)
  * [MPC Atens](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Atens.html)
 
+The list of meteorites with photographic orbits (```wmpl/share/Meteorites_with_Orbits.csv```) is not part of that update, as it holds manual corrections. To check it against [meteoriteorbits.info](https://www.meteoriteorbits.info/), run ```python UpdateOrbitFiles.py --meteorites```: all the new meteorites are added, and for the ones already in the file it shows how each differs from the list and asks whether to update it (default no). The existing file is also kept if the page cannot be read completely.
+
 
 ## Usage
 
@@ -302,6 +305,12 @@ lasun = sollon.jd2SolLonJPL(jd_now)
 
 print(math.degrees(lasun), ' deg')
 ```
+
+
+## Contributing
+
+New code has to follow the [WMPL coding standard](CODING_STANDARD.md), so that it reads like the code around it.
+Pull requests that do not follow it will be asked to change before they are merged.
 
 
 ## Citations
