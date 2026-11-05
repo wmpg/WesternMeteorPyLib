@@ -1248,10 +1248,23 @@ def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=Fa
 LOS_CONTINUE_RUNS = 3
 
 
+
 def stateVectorDiverged(new, old, limit=0.1):
-    """ Did the minimization take the state vector far from where it started? Measured on the vector: for each 
-        coordinate it would be true for any small move when that coordinate is near 0, and never when it is
-        negative, as the sign of the coordinate was kept.
+    """ Check if the minimization took the state vector far from where it started. The move is measured
+        relative to the magnitude of the state vector, because relative to each coordinate it is large for
+        any small move when the coordinate is near 0.
+
+    Arguments:
+        new: [ndarray] (x, y, z) ECI coordinates of the minimized state vector (meters).
+        old: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
+
+    Keyword arguments:
+        limit: [float] Largest move which is not a divergence, as a fraction of the magnitude of the initial
+            state vector. 0.1 by default.
+
+    Return:
+        [bool] True if the state vector diverged.
+
     """
 
     return vectMag(new - old)/vectMag(old) > limit
@@ -2570,14 +2583,12 @@ class Trajectory(object):
             mc_runs_max: [int] Maximum number of Monte Carlo runs. None by default, which will limit the runs
                 to 10x req_num.
             enable_OSM_plot: [bool] plot the ground track using OS maps as well as the default 
-            los_restarts: [int] Restart the Nelder-Mead minimization of the line-of-sight fit this many times
-                from its own solution. 0 by default. Only for when the last fraction of an arcsecond matters,
-                e.g. comparing solutions of the same event that differ by little; not advisable in general.
-                The parameters mix metres with the components of a unit vector, and the simplex can stall 
-                short of the minimum. On 24 noisy synthetic events (about 20 arcsec of noise), one restart 
-                brought the median stop from the minimum from 0.012-0.042 to 0.003-0.005 arcsec and the worst 
-                in the first pass from 3.3 to 1.2, but not the worst in the gravity pass (3.0 to 5.5), for 41-46%
-                more CPU time per solution and no change in the error against the truth, which the noise sets.
+            los_restarts: [int] Number of times the Nelder-Mead minimization of the line-of-sight fit is
+                restarted from its own solution. 0 by default. The fit mixes meters with the components of a
+                unit vector, so the simplex can stall short of the minimum by up to a few arcseconds. One
+                restart brings it closer, at about 40% more CPU time per solution, but it does not change the
+                error against the truth, which the noise sets. Only use it when the last fraction of an
+                arcsecond matters, e.g. when comparing solutions of the same event.
 
         """
 
@@ -2662,6 +2673,7 @@ class Trajectory(object):
         # Enable OSM plot if required
         self.enable_OSM_plot = enable_OSM_plot         
 
+        # Number of restarts of the line-of-sight minimization
         self.los_restarts = los_restarts
 
         # If True, pure geometric uncertainties will be computed and culling of solutions based on cost
@@ -6383,23 +6395,22 @@ class Trajectory(object):
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, 
             method="Nelder-Mead")
 
-        # Restart from the solution if asked (see los_restarts). Tighter tolerances instead do not help, at 30
-        #   times the cost
-        for _ in range(self.los_restarts):
-            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, 
+        # Restart the minimization from its own solution if requested (trajectories pickled before this option
+        #   was added do not have it)
+        for _ in range(getattr(self, 'los_restarts', 0)):
+            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x,
                 args=minimize_args, method="Nelder-Mead")
 
-        # Running out of function evaluations is not a failure of the line: continue from where it stopped, as
-        #   otherwise the solution is thrown away for the intersecting planes, which can be far worse. The state
-        #   vector goes back to the meteor first, as the cost does not change along the line, so the simplex can 
-        #   wander far along it (billions of metres were seen), and it cannot converge from there
+        # Continue a minimization which ran out of function evaluations from the beginning of the meteor on
+        #   the line, as the cost does not change along the line and the simplex can end up billions of
+        #   meters away from the meteor, where it does not converge
         for _ in range(LOS_CONTINUE_RUNS):
 
             if minimize_solution.success:
                 break
 
-            restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], self.observations), 
-                vectNorm(minimize_solution.x[3:])]
+            restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], \
+                self.observations), vectNorm(minimize_solution.x[3:])]
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, 
                 method="Nelder-Mead")
 
@@ -6434,7 +6445,7 @@ class Trajectory(object):
                 weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), 
                 bounds=bounds, method='SLSQP')
 
-            # The bounded solution is only taken if it is better
+            # Keep the unbounded solution if it is better than the bounded one
             if unbounded_solution.success and (unbounded_solution.fun < minimize_solution.fun):
                 minimize_solution = unbounded_solution
 
