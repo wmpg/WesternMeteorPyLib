@@ -15,10 +15,11 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import Trajectory, applyGravityDrop
-from wmpl.Utils.TrajConversions import altAz2RADec, eci2RaDec, geo2Cartesian, raDec2AltAz_vect, raDec2ECI
+from wmpl.Trajectory.Tests.SyntheticTrajectory import stationAzimAlt
+from wmpl.Utils.TrajConversions import altAz2RADec, geo2Cartesian, raDec2ECI
 
 
 JDT_REF = 2461070.9343128
@@ -30,10 +31,10 @@ OTHERS_FIRST, OTHERS_LAST = 3, 44
 
 # (station_id, lat, lon, elevation) in degrees and metres
 STATIONS = [
-    ("A", -42.565, 172.781, 310.0),
-    ("B", -42.995, 173.312, 95.0),
-    ("C", -43.804, 172.453, 640.0),
-    ("D", -42.995, 169.873, 1450.0),
+    ('A', -42.565, 172.781, 310.0),
+    ('B', -42.995, 173.312, 95.0),
+    ('C', -43.804, 172.453, 640.0),
+    ('D', -42.995, 169.873, 1450.0),
 ]
 
 
@@ -69,7 +70,7 @@ def _solve():
     for station_id, s_lat, s_lon, ele in STATIONS:
 
         # A sees the whole track, with its ends ignored, and the others a shorter stretch
-        if station_id == "A":
+        if station_id == 'A':
             seen = np.arange(N_POINTS)
             ignore_list = np.zeros(N_POINTS, dtype=np.uint8)
             ignore_list[:A_IGNORED] = 1
@@ -80,16 +81,7 @@ def _solve():
 
         # Directions of the points from the station
         jds = JDT_REF + times[seen]/86400.0
-
-        ra_list, dec_list = [], []
-        for point, jd in zip(points[seen], jds):
-            station = np.array(geo2Cartesian(np.radians(s_lat), np.radians(s_lon), ele, jd))
-            r, d = eci2RaDec(point - station)
-            ra_list.append(r)
-            dec_list.append(d)
-
-        azim, elev = raDec2AltAz_vect(np.array(ra_list), np.array(dec_list), jds, np.radians(s_lat), \
-            np.radians(s_lon))
+        azim, elev = stationAzimAlt(points[seen], jds, s_lat, s_lon, ele)
 
         traj.infillTrajectory(azim, elev, times[seen], np.radians(s_lat), np.radians(s_lon), ele, \
             station_id=station_id, ignore_list=ignore_list)
@@ -105,7 +97,7 @@ def testTheEndsComeFromThePointsUsed():
     """
 
     traj, times = _solve()
-    others = [obs for obs in traj.observations if obs.station_id != "A"]
+    others = [obs for obs in traj.observations if obs.station_id != 'A']
 
     assert np.isclose((traj.rbeg_jd - JDT_REF)*86400, times[OTHERS_FIRST], atol=1e-6)
     assert np.isclose((traj.rend_jd - JDT_REF)*86400, times[OTHERS_LAST], atol=1e-6)
