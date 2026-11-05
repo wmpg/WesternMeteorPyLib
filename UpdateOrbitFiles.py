@@ -100,6 +100,9 @@ class MeteoriteTableParser(HTMLParser):
 		self.row = None
 		self.cell = None
 
+		# Number of tables which are open, more than 1 inside a table nested in a cell
+		self.depth = 0
+
 
 
 	def closeCell(self):
@@ -135,17 +138,19 @@ class MeteoriteTableParser(HTMLParser):
 
 	def handle_starttag(self, tag, attrs):
 
+		# The text of a table nested in a cell is added to that cell
+		if tag == 'table':
+			self.depth += 1
+			if self.depth == 1:
+				self.rows = []
+
 		# The end tags of cells and rows are optional in HTML, so a new cell or row also closes the
 		#   previous one
-		if tag == 'table':
-			self.closeTable()
-			self.rows = []
-
-		elif (tag == 'tr') and (self.rows is not None):
+		elif (tag == 'tr') and (self.rows is not None) and (self.depth == 1):
 			self.closeRow()
 			self.row = []
 
-		elif (tag in ('td', 'th')) and (self.row is not None):
+		elif (tag in ('td', 'th')) and (self.row is not None) and (self.depth == 1):
 			self.closeCell()
 			self.cell = ""
 
@@ -157,14 +162,18 @@ class MeteoriteTableParser(HTMLParser):
 
 	def handle_endtag(self, tag):
 
-		if tag in ('td', 'th'):
+		if (tag in ('td', 'th')) and (self.depth == 1):
 			self.closeCell()
 
-		elif tag == 'tr':
+		elif (tag == 'tr') and (self.depth == 1):
 			self.closeRow()
 
+		# Only a closed table is kept, so a truncated page is not used
 		elif tag == 'table':
-			self.closeTable()
+			if self.depth == 1:
+				self.closeTable()
+
+			self.depth = max(self.depth - 1, 0)
 
 
 
@@ -176,7 +185,8 @@ class MeteoriteTableParser(HTMLParser):
 
 
 def meteoriteTableRows(html_text):
-	""" Extract the rows of the meteorite table from the HTML of meteoriteorbits.info.
+	""" Extract the rows of the meteorite table from the HTML of meteoriteorbits.info. A table which is not
+		closed, as in a truncated download, is not used.
 
 	Arguments:
 		html_text: [str] HTML of the page.
@@ -188,9 +198,6 @@ def meteoriteTableRows(html_text):
 
 	parser = MeteoriteTableParser()
 	parser.feed(html_text)
-
-	# Keep a table which was not closed at the end of the page
-	parser.closeTable()
 
 	# The meteorite table is the one with the orbital elements in its header
 	for rows in parser.tables:
