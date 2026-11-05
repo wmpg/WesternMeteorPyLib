@@ -13,6 +13,8 @@ import sys
 import json
 import time
 import warnings
+import functools
+import multiprocessing
 import concurrent.futures
 from types import SimpleNamespace
 
@@ -232,6 +234,175 @@ SUN_ENCOUNTER_AU = 0.1
 
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
+
+
+def formatTimeSpan(days, decimals=2):
+    """ Format a time span given in days in the unit that suits its length.
+
+    Spans of a Julian year or more lead with years and keep the days in parentheses, spans shorter
+    than a day add the hours, and everything in between is given in days. The days are always
+    printed, so the exact span stays readable at any scale. Years get at least one decimal, so that
+    e.g. 1288 days is not rounded to "4 years".
+
+    Arguments:
+        days: [float] Time span in days. Its sign is ignored: callers state the direction.
+
+    Keyword arguments:
+        decimals: [int] Decimal places of the days and hours, and of the years if not 0. Default 2.
+
+    Return:
+        [str] E.g. "36525.00 days" -> "100.00 years (36525.00 days)", "0.25 days" ->
+            "0.25 days (6.00 h)", "60.00 days" -> "60.00 days".
+    """
+
+    days = abs(days)
+
+    if days >= 365.25:
+        return "{:.{ny}f} years ({:.{n}f} days)".format(days/365.25, days, ny=max(decimals, 1),
+                                                         n=decimals)
+
+    if days < 1.0:
+        return "{:.{n}f} days ({:.{n}f} h)".format(days, 24*days, n=decimals)
+
+    return "{:.{n}f} days".format(days, n=decimals)
+
+
+def formatTimeStamp(days):
+    """ Format a signed epoch, in days from the start, compactly in the unit that suits its size.
+
+    Meant for tables of events, where the exact day is noise: years beyond a year, hours under a day,
+    days otherwise. The sign is kept, since it tells the direction of the integration.
+
+    Arguments:
+        days: [float] Time in days.
+
+    Return:
+        [str] E.g. -106537.37 -> "-291.7 yr", 45.3 -> "+45.3 d", -0.25 -> "-6.0 h", 0 -> "0 d".
+    """
+
+    if days == 0:
+        return "0 d"
+
+    sign = "-" if days < 0 else "+"
+    days = abs(days)
+
+    if days >= 365.25:
+        years = days/365.25
+        return "{:s}{:.{n}f} yr".format(sign, years, n=1 if years < 1000 else 0)
+
+    if days < 1.0:
+        return "{:s}{:.1f} h".format(sign, 24*days)
+
+    return "{:s}{:.1f} d".format(sign, days)
+
+
+# Kilometres in one AU, next to the function that uses it and not in the constants at the top, which is
+#   where other changes add theirs
+AU_KM = 149597870.7
+
+
+def formatDistance(dist_au):
+    """ Format a distance given in AU as AU plus km, both to 3 significant figures.
+
+    Close approaches span 1e-5 to 1e1 AU and the integrator does not justify more than 3 figures, so
+    the AU value keeps 3 significant digits and the km value is rounded the same way, in millions of
+    km (Mkm) from a million up.
+
+    Arguments:
+        dist_au: [float] Distance in AU.
+
+    Return:
+        [str] E.g. 0.018503 -> "0.0185 AU (2.77 Mkm)", 0.0024 -> "0.00244 AU (365,000 km)".
+    """
+
+    if dist_au <= 0:
+        return "0 AU (0 km)"
+
+    decimals = max(0, 2 - int(np.floor(np.log10(dist_au))))
+    dist_km = dist_au*AU_KM
+
+    if dist_km >= 1e9:
+        km_str = "{:,.0f} Mkm".format(float("{:.3g}".format(dist_km/1e6)))
+    elif dist_km >= 1e6:
+        km_str = "{:.3g} Mkm".format(dist_km/1e6)
+    else:
+        magnitude = 10**(int(np.floor(np.log10(max(dist_km, 1.0)))) - 2)
+        km_str = "{:,.0f} km".format(round(dist_km/magnitude)*magnitude)
+
+    return "{:.{n}f} AU ({:s})".format(dist_au, km_str, n=decimals)
+
+
+# Wall-clock interval between two live progress updates, in seconds. The integrations check it in
+#   their heartbeat, so the progress costs one clock read per step whatever the length of the run.
+PROGRESS_INTERVAL_S = 0.5
+
+
+def _storeProgress(store, key, t_days):
+    """ Progress callback for a worker process: record in a shared dict how far its integration has
+    gone, in days. It is a module-level function so that a functools.partial of it can be sent to the
+    worker.
+    """
+
+    store[key] = t_days
+
+
+def _durationText(seconds):
+    """ A wall-clock duration in seconds, minutes or hours, e.g. "45 s", "12 min", "2.5 h". """
+
+    if seconds < 100:
+        return "{:.0f} s".format(seconds)
+
+    if seconds < 6000:
+        return "{:.0f} min".format(seconds/60)
+
+    return "{:.1f} h".format(seconds/3600)
+
+
+class _ProgressLine(object):
+    """ One line of live progress, rewritten in place on a terminal.
+
+    Off a terminal it prints nothing, so log files are not filled with intermediate states.
+
+    Arguments:
+        enabled: [bool] Show the progress at all.
+    """
+
+    def __init__(self, enabled):
+
+        self.enabled = enabled and sys.stdout.isatty()
+        self.t_start = time.time()
+        self.width = 0
+
+    def show(self, text, fraction):
+        """ Rewrite the line with the given text, the percentage done and the time left.
+
+        Arguments:
+            text: [str] What has been integrated so far.
+            fraction: [float] Fraction of the work done, 0 to 1, used for the time left.
+        """
+
+        if not self.enabled:
+            return
+
+        fraction = min(max(fraction, 0.0), 1.0)
+        line = "  {:s}, {:.0f}%".format(text, 100*fraction)
+
+        # Time left, assuming the rest goes at the average rate so far
+        if fraction > 0:
+            elapsed = time.time() - self.t_start
+            line += ", ~{:s} left".format(_durationText(elapsed*(1 - fraction)/fraction))
+
+        # Pad with spaces to overwrite a longer previous line
+        line = line.ljust(self.width)
+        print("\r" + line, end="", flush=True)
+        self.width = len(line)
+
+    def end(self):
+        """ Erase the line, so whatever is printed next starts on a clean line. """
+
+        if self.enabled and self.width:
+            print("\r" + " "*self.width + "\r", end="", flush=True)
+            self.width = 0
 
 
 def _encounterThreshold(body, n_hill):
@@ -702,14 +873,14 @@ def formatSunPassageSummary(summary):
 
     Return:
         [str] E.g. "Sun      24 perihelion passages < 0.10 AU: q = 0.0441-0.0645 AU (9.5-13.9 R_Sun),
-            t = +3.1 to +99.6 d".
+            t = +3.1 d to +99.6 d".
     """
 
     return ("{:<8s} {:d} perihelion passages < {:.2f} AU: q = {:.4f}-{:.4f} AU ({:.1f}-{:.1f} R_Sun), "
-            "t = {:+.1f} to {:+.1f} d").format(
+            "t = {:s} to {:s}").format(
                 "Sun", summary["n"], SUN_ENCOUNTER_AU, summary["q_min_au"], summary["q_max_au"],
                 summary["q_min_au"]/SUN_RADIUS_AU, summary["q_max_au"]/SUN_RADIUS_AU,
-                summary["first_days"], summary["last_days"])
+                formatTimeStamp(summary["first_days"]), formatTimeStamp(summary["last_days"]))
 
 
 def whfastEncounterWarning(diagnostics, n_hill=3.0):
@@ -1347,7 +1518,7 @@ def _reverseVelocities(sim):
         p.vx, p.vy, p.vz = -p.vx, -p.vy, -p.vz
 
 
-def _integrateParticles(task):
+def _integrateParticles(task, progress=None):
     """ Build a REBOUND simulation from precomputed planet states and integrate one or more test
     particles through it, returning their per-timestep orbital elements and distances.
 
@@ -1375,6 +1546,11 @@ def _integrateParticles(task):
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
+
+    Keyword arguments:
+        progress: [callable] Optional. Called as progress(t_days) with the time integrated so far,
+            in days, at most once every PROGRESS_INTERVAL_S seconds of wall clock. It must be
+            picklable if the task is sent to a worker process (see _storeProgress). Default None.
 
     Return:
         [dict] {
@@ -1569,11 +1745,23 @@ def _integrateParticles(task):
             "encounters": [],
         }
 
+    # Wall-clock time of the next progress report. The first one waits a full interval, so a short
+    #   integration reports nothing.
+    next_progress = [time.time() + PROGRESS_INTERVAL_S]
+
     def heartbeat(sim_pointer):
 
         s = sim_pointer.contents
         p = s.particles
         t_now = s.t
+
+        # Live progress. A failing report (e.g. a closed terminal) must never stop the integration.
+        if (progress is not None) and (time.time() >= next_progress[0]):
+            next_progress[0] = time.time() + PROGRESS_INTERVAL_S
+            try:
+                progress(abs(t_now)/(2*np.pi)*365.25)
+            except Exception:
+                pass
 
         for pname, pidx in particle_idx.items():
 
@@ -1780,7 +1968,7 @@ def _integrateParticles(task):
     return {"outputs": outputs, "diagnostics": diagnostics}
 
 
-def computeMegno(task, seed=1):
+def computeMegno(task, seed=1, progress=None):
     """ MEGNO of the integrated object's orbit, from a purely gravitational integration.
 
     MEGNO (Mean Exponential Growth factor of Nearby Orbits, Cincotta & Simo 2000) follows how fast
@@ -1810,6 +1998,8 @@ def computeMegno(task, seed=1):
 
     Keyword arguments:
         seed: [int] Seed for the random initial deviation, for reproducibility. Default 1.
+        progress: [callable] Optional. Called as progress(t_days), as in _integrateParticles.
+            Default None.
 
     Return:
         [dict] {
@@ -1865,11 +2055,21 @@ def computeMegno(task, seed=1):
     # Running integrals: I = int s d(ln|delta|) and J = int Y ds
     acc = {"t": sim.t, "ln_d": logDeviation(), "I": 0.0, "J": 0.0, "Y": 0.0}
 
+    # Wall-clock time of the next progress report (see _integrateParticles)
+    next_progress = [time.time() + PROGRESS_INTERVAL_S]
+
     def heartbeat(sim_pointer):
 
         # Both integrals are accumulated with the midpoint rule over the integrator's own steps,
         #   which is why they are updated here rather than at the (far coarser) output times
         t_now = sim_pointer.contents.t
+
+        if (progress is not None) and (time.time() >= next_progress[0]):
+            next_progress[0] = time.time() + PROGRESS_INTERVAL_S
+            try:
+                progress(abs(t_now)/(2*np.pi)*365.25)
+            except Exception:
+                pass
         h = t_now - acc["t"]
 
         # REBOUND calls the heartbeat once before the first step is taken, and again whenever an
@@ -2101,7 +2301,10 @@ def reboundSimulate(
         n_cpu: [int] Number of parallel processes used to integrate the Monte Carlo realizations.
             If None (default), uses max(1, os.cpu_count() - 1). Each realization is integrated in
             its own independent simulation, so its adaptive timestep does not affect the others.
-        show_progress: [bool] If True (default), report Monte Carlo integration progress.
+        show_progress: [bool] If True (default), show the progress of the integrations live on a
+            terminal: the time integrated so far for the nominal orbit and the MEGNO, the share of
+            the Monte Carlo realizations done, and the time left. Off a terminal only the Monte
+            Carlo summary is printed.
         return_diagnostics: [bool] If True, also return the per-particle diagnostics dictionary
             (closest approaches and impacts measured during the integration). Default False,
             which preserves the two-value return signature.
@@ -2288,12 +2491,22 @@ def reboundSimulate(
 
     if verbose:
         print("Running simulation...")
-        print(f"Simulation time: {tsimend:.2f} years ({tsimend*365.25:.2f} days)")
+        print("Simulation time: {:s}".format(formatTimeSpan(sim_days)))
         print(f"Number of outputs: {n_outputs}")
         print(f"Direction: {direction}")
 
+    # Live progress of a single integration, as the time reached
+    def _spanProgress(line, label):
+        if not line.enabled:
+            return None
+        return lambda t_days: line.show("{:s}: {:s} integrated".format(
+            label, formatTimeSpan(t_days, decimals=0)), t_days/sim_days)
+
     # Nominal solution, integrated in its own simulation (in the main process)
-    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
+    progress_line = _ProgressLine(show_progress)
+    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]),
+                                         progress=_spanProgress(progress_line, "Nominal orbit"))
+    progress_line.end()
     outputs = nominal_result["outputs"][obj_name]
     diagnostics = dict(nominal_result["diagnostics"])
 
@@ -2316,49 +2529,81 @@ def reboundSimulate(
         tasks = [_make_task([s], [n]) for s, n in zip(mc_states, mc_names)]
 
         n_total = len(tasks)
-        is_tty = show_progress and sys.stdout.isatty()
-
-        # Live in-place progress bar on a terminal; stay quiet otherwise (avoids spamming log files)
-        def _report(done, t_start):
-            if is_tty:
-                elapsed = time.time() - t_start
-                print("\r  Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s)".format(
-                    done, n_total, elapsed), end="", flush=True)
 
         if show_progress:
             print("Integrating {:d} Monte Carlo realizations on {:d} core(s)...".format(n_total, n_cpu))
+
+        # Live in-place progress on a terminal: the realizations done, and the share of the whole
+        #   ensemble's span integrated so far, counting the realizations still running
+        progress_line = _ProgressLine(show_progress)
+
+        def _report(n_done, done_equiv):
+            progress_line.show("Monte Carlo: {:d}/{:d} realizations done".format(n_done, n_total),
+                               done_equiv/n_total)
 
         t_mc_start = time.time()
 
         if n_cpu == 1:
             results = []
-            for k, t in enumerate(tasks, start=1):
-                results.append(_integrateParticles(t))
-                _report(k, t_mc_start)
+            for k, t in enumerate(tasks):
+                progress = None
+                if progress_line.enabled:
+                    progress = (lambda t_days, k=k: _report(k, k + min(t_days/sim_days, 1.0)))
+                results.append(_integrateParticles(t, progress=progress))
+                _report(k + 1, k + 1)
 
         else:
-            results = [None]*n_total
-            with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
-                future_to_idx = {executor.submit(_integrateParticles, t): idx
-                                 for idx, t in enumerate(tasks)}
-                done = 0
-                for future in concurrent.futures.as_completed(future_to_idx):
-                    idx = future_to_idx[future]
-                    try:
-                        results[idx] = future.result()
-                    except Exception as e:
-                        print("\nWarning: Monte Carlo realization {:s} failed and was skipped: {:s}".format(
-                            mc_names[idx], str(e)))
-                        results[idx] = None
-                    done += 1
-                    _report(done, t_mc_start)
+
+            # The workers report how far they have got through a shared dict, which is only set up
+            #   when there is a terminal to show it on (the manager is an extra process)
+            manager = multiprocessing.Manager() if progress_line.enabled else None
+            shared = manager.dict() if manager is not None else None
+
+            try:
+                results = [None]*n_total
+                with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
+                    future_to_idx = {
+                        executor.submit(
+                            _integrateParticles, t,
+                            None if shared is None else functools.partial(_storeProgress, shared, idx)
+                        ): idx
+                        for idx, t in enumerate(tasks)}
+                    pending = set(future_to_idx)
+                    finished_idx = set()
+
+                    while pending:
+
+                        # Wake up at least every PROGRESS_INTERVAL_S to refresh the progress
+                        finished, pending = concurrent.futures.wait(
+                            pending, timeout=PROGRESS_INTERVAL_S,
+                            return_when=concurrent.futures.FIRST_COMPLETED)
+
+                        for future in finished:
+                            idx = future_to_idx[future]
+                            finished_idx.add(idx)
+                            try:
+                                results[idx] = future.result()
+                            except Exception as e:
+                                progress_line.end()
+                                print("Warning: Monte Carlo realization {:s} failed and was skipped: "
+                                      "{:s}".format(mc_names[idx], str(e)))
+                                results[idx] = None
+
+                        if progress_line.enabled:
+                            running = {k: v for k, v in shared.items() if k not in finished_idx}
+                            _report(len(finished_idx), len(finished_idx) + sum(
+                                min(v/sim_days, 1.0) for v in running.values()))
+
+            finally:
+                if manager is not None:
+                    manager.shutdown()
+
+        progress_line.end()
 
         n_ok = sum(1 for r in results if r)
         if show_progress:
-            # Finish the in-place line (newline) on a terminal, or print the single summary otherwise
-            prefix = "\r" if is_tty else "  "
-            print("{:s}Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s){:s}".format(
-                prefix, n_ok, n_total, time.time() - t_mc_start,
+            print("  Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s){:s}".format(
+                n_ok, n_total, time.time() - t_mc_start,
                 "" if n_ok == n_total else "  [{:d} failed]".format(n_total - n_ok)))
 
         for res in results:
@@ -2374,7 +2619,10 @@ def reboundSimulate(
     elif compute_megno:
         if show_progress:
             print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
-        megno = computeMegno(_make_task([state_vect_rot], [obj_name]))
+        progress_line = _ProgressLine(show_progress)
+        megno = computeMegno(_make_task([state_vect_rot], [obj_name]),
+                             progress=_spanProgress(progress_line, "MEGNO"))
+        progress_line.end()
         megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
         diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
 
@@ -2559,8 +2807,8 @@ if __name__ == "__main__":
     
     # State the integration span up front, so it is visible while the integration is running and
     # not only in the summary printed at the end
-    print("Integrating {:.2f} days {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
-        sim_days, direction, traj.jdt_ref,
+    print("Integrating {:s} {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
+        formatTimeSpan(sim_days), direction, traj.jdt_ref,
         astropy.time.Time(traj.jdt_ref, format='jd', scale='utc').iso))
 
     # Run the simulation for the given number of days from the epoch of the trajectory
@@ -2746,10 +2994,10 @@ if __name__ == "__main__":
     # short of the request (for example because the object impacted a body)
     achieved_days = abs(final_sim_days)
     if abs(achieved_days - sim_days) > 1e-6:
-        print("  Integration  : {:.2f} days {:s}  (requested {:.2f} days, stopped early)".format(
-            achieved_days, direction, sim_days))
+        print("  Integration  : {:s} {:s}  (requested {:s}, stopped early)".format(
+            formatTimeSpan(achieved_days), direction, formatTimeSpan(sim_days)))
     else:
-        print("  Integration  : {:.2f} days {:s}".format(achieved_days, direction))
+        print("  Integration  : {:s} {:s}".format(formatTimeSpan(achieved_days), direction))
 
     print("  Frame        : {:s}".format(reference_frame))
     print("  Forces       : {:s}".format(
@@ -2772,8 +3020,8 @@ if __name__ == "__main__":
     # If the object hit something, say so before anything else: the elements below are the state at
     # the last step before the impact, not a surviving orbit.
     if impact:
-        print("  *** IMPACT: the object hit {:s} after {:.4f} days ***".format(
-            impact["body"], abs(impact["time_days"])))
+        print("  *** IMPACT: the object hit {:s} after {:s} ***".format(
+            impact["body"], formatTimeSpan(impact["time_days"], decimals=4)))
         print("  The elements below are the last state before the impact, not a surviving orbit.")
         print("-" * 78)
 
@@ -2819,10 +3067,9 @@ if __name__ == "__main__":
             if enc["n_hill"] is None:
                 closeness = "{:.1f} R_Sun".format(enc["min_dist_au"]/SUN_RADIUS_AU)
             else:
-                closeness = "{:.2f} R_Hill, R_Hill = {:.6f} AU".format(enc["n_hill"], enc["hill_radius_au"])
-            print("    {:<8s} {:12.6f} AU ({:12.1f} km)  at t = {:+9.3f} d   ({:s})".format(
-                enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
-                enc["time_days"], closeness))
+                closeness = "{:.2f} R_Hill, R_Hill = {:s}".format(enc["n_hill"], formatDistance(enc["hill_radius_au"]))
+            print("    {:<8s} {:<26s} at t = {:>9s}   ({:s})".format(
+                enc["body"], formatDistance(enc["min_dist_au"]), formatTimeStamp(enc["time_days"]), closeness))
     else:
         print("  Close encounters ({:s}): none detected".format(encounter_criterion))
 
@@ -2833,8 +3080,9 @@ if __name__ == "__main__":
     # Ejection, if the object ran out of the simulation volume
     escaped = nominal_diag.get("escaped")
     if escaped:
-        print("  *** EJECTED: the object left the simulation volume after {:.4f} days "
-              "({:.1f} AU from the Sun) ***".format(abs(escaped["time_days"]), escaped["dist_au"]))
+        print("  *** EJECTED: the object left the simulation volume after {:s} "
+              "({:.1f} AU from the Sun) ***".format(
+                  formatTimeSpan(escaped["time_days"], decimals=4), escaped["dist_au"]))
 
     # What happened to the Monte Carlo clones, as a fraction of the whole ensemble
     if len(sim_outputs_mc):
@@ -2863,10 +3111,9 @@ if __name__ == "__main__":
             for body in sorted(clone_encounters, key=lambda b: -clone_encounters[b]["count"]):
                 entry = clone_encounters[body]
                 print("    {:<10s} {:5d}/{:<5d} ({:5.1f}%)   {:5d} encounter(s)   closest over all "
-                      "clones: {:.6f} AU ({:.0f} km)".format(
+                      "clones: {:s}".format(
                           body, entry["count"], n_clones, 100.0*entry["count"]/n_clones,
-                          entry["n_encounters"], entry["closest_au"],
-                          entry["closest_au"]*149597870.7))
+                          entry["n_encounters"], formatDistance(entry["closest_au"])))
         else:
             print("")
             print("  No clone had a close encounter ({:s}).".format(encounter_criterion))
@@ -2889,14 +3136,17 @@ if __name__ == "__main__":
             print("    {:d} realization(s) ended early and contributed only over their own span.".format(
                 lyap["n_truncated"]))
         if lyap["truncated_at_saturation"] and not lyap["saturated"]:
-            print("    Fitted over the first {:.0f} d of {:.0f} d, while the ensemble was still "
-                  "compact".format(lyap["fit_window_days"], lyap["total_span_days"]))
-            print("    (separation {:.3e} AU at the end of that window, {:d} samples).".format(
-                lyap["separation_fit_end_au"], lyap["n_samples_used"]))
+            print("    Fitted over the first {:s} of {:s},".format(
+                formatTimeSpan(lyap["fit_window_days"], decimals=0),
+                formatTimeSpan(lyap["total_span_days"], decimals=0)))
+            print("    while the ensemble was still compact (separation {:.3e} AU at the end".format(
+                lyap["separation_fit_end_au"]))
+            print("    of that window, {:d} samples).".format(lyap["n_samples_used"]))
         if lyap["growth"] == "exponential":
-            print("    Growth is exponential: Lyapunov time ~ {:.1f} d  "
+            print("    Growth is exponential: Lyapunov time ~ {:s}  "
                   "(lambda = {:.4f} /d, R2 = {:.3f})".format(
-                      lyap["lyapunov_time_days"], lyap["lambda_per_day"], lyap["r2_exponential"]))
+                      formatTimeSpan(lyap["lyapunov_time_days"], decimals=1), lyap["lambda_per_day"],
+                      lyap["r2_exponential"]))
             print("    The integration loses predictive value on timescales beyond this.")
         elif lyap["growth"] == "linear":
             print("    Growth is linear (regular motion, R2 = {:.3f}); no exponential divergence "
@@ -2917,12 +3167,13 @@ if __name__ == "__main__":
         # Semi-major-axis spread: the chaos indicator that is not corrupted by phase drift
         ed = lyap.get("element_divergence")
         if ed is not None:
-            print("    Spread in a over {:.0f} d: {:.3e} -> {:.3e} AU (x{:.2f})".format(
-                ed["span_days"], ed["sigma_a_start_au"], ed["sigma_a_end_au"],
-                ed["sigma_a_growth_factor"]))
+            print("    Spread in a over {:s}: {:.3e} -> {:.3e} AU (x{:.2f})".format(
+                formatTimeSpan(ed["span_days"], decimals=0), ed["sigma_a_start_au"],
+                ed["sigma_a_end_au"], ed["sigma_a_growth_factor"]))
             if ed["growth"] == "exponential":
-                print("    The spread in a grows exponentially: Lyapunov time ~ {:.1f} d "
-                      "(R2 = {:.3f}).".format(ed["lyapunov_time_days"], ed["r2_exponential"]))
+                print("    The spread in a grows exponentially: Lyapunov time ~ {:s} "
+                      "(R2 = {:.3f}).".format(formatTimeSpan(ed["lyapunov_time_days"], decimals=1),
+                                              ed["r2_exponential"]))
                 print("    This is the chaos estimate to trust; unlike the position separation it is")
                 print("    not corrupted by Keplerian phase drift.")
             elif ed["growth"] == "regular":
@@ -2950,14 +3201,14 @@ if __name__ == "__main__":
         # Save the nominal orbital elements and the errors
         # If the object hit something, state it at the very top of the report
         if impact:
-            f.write("*** IMPACT: the object hit {:s} after {:.4f} days. The elements below are the "
-                    "last\n".format(impact["body"], abs(impact["time_days"])))
+            f.write("*** IMPACT: the object hit {:s} after {:s}. The elements below are the "
+                    "last\n".format(impact["body"], formatTimeSpan(impact["time_days"], decimals=4)))
             f.write("*** state before the impact, not a surviving orbit.\n\n")
 
-        f.write("Orbital elements {:.2f} days {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
-            achieved_days, direction, traj.jdt_ref,
+        f.write("Orbital elements {:s} {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
+            formatTimeSpan(achieved_days), direction, traj.jdt_ref,
             "" if abs(achieved_days - sim_days) <= 1e-6
-            else " (requested {:.2f} days, stopped early)".format(sim_days)))
+            else " (requested {:s}, stopped early)".format(formatTimeSpan(sim_days))))
         f.write("a    = {:>10.6f}{:s} {:s}\n".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
         f.write("q    = {:>10.6f}{:s} {:s}\n".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a*dist_unit_multiplier, q_ci_str, q_units))
         f.write("e    = {:>10.6f}{:s}\n".format(sim_outputs[-1][2].e, e_ci_str))
@@ -2981,10 +3232,9 @@ if __name__ == "__main__":
                 if enc["n_hill"] is None:
                     closeness = "{:.1f} R_Sun".format(enc["min_dist_au"]/SUN_RADIUS_AU)
                 else:
-                    closeness = "R_Hill = {:.6f} AU ({:.2f} R_Hill)".format(enc["hill_radius_au"], enc["n_hill"])
-                f.write("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, {:s}\n".format(
-                    enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
-                    enc["time_days"], closeness))
+                    closeness = "R_Hill = {:s} ({:.2f} R_Hill)".format(formatDistance(enc["hill_radius_au"]), enc["n_hill"])
+                f.write("  {:<8s} min dist = {:<26s} at t = {:>9s}, {:s}\n".format(
+                    enc["body"], formatDistance(enc["min_dist_au"]), formatTimeStamp(enc["time_days"]), closeness))
         else:
             f.write("  None detected.\n")
 
@@ -3004,8 +3254,8 @@ if __name__ == "__main__":
             else:
                 hill = HILL_RADII_AU.get(body)
                 hill_str = "" if hill is None else "  ({:.2f} R_Hill)".format(d_min/hill)
-                f.write("  {:<8s} {:12.6f} AU ({:14.1f} km) at t = {:10.4f} d{:s}\n".format(
-                    body, d_min, d_min*149597870.7, t_min, hill_str))
+                f.write("  {:<8s} {:<26s} at t = {:>9s}{:s}\n".format(
+                    body, formatDistance(d_min), formatTimeStamp(t_min), hill_str))
 
         # Save what happened to the Monte Carlo clones
         if len(sim_outputs_mc):
@@ -3034,10 +3284,9 @@ if __name__ == "__main__":
                 for body in sorted(clone_encounters, key=lambda b: -clone_encounters[b]["count"]):
                     entry = clone_encounters[body]
                     f.write("  {:<10s} {:5d}/{:<5d} ({:5.1f}%)   {:5d} encounter(s)   closest over all "
-                            "clones {:.6f} AU ({:.1f} km)\n".format(
+                            "clones {:s}\n".format(
                                 body, entry["count"], n_clones, 100.0*entry["count"]/n_clones,
-                                entry["n_encounters"], entry["closest_au"],
-                                entry["closest_au"]*149597870.7))
+                                entry["n_encounters"], formatDistance(entry["closest_au"])))
             else:
                 f.write("\nNo clone had a close encounter ({:s}).\n".format(encounter_criterion))
 
@@ -3098,14 +3347,16 @@ if __name__ == "__main__":
                 f.write("  {:d} realization(s) ended early (e.g. impacted) and contributed only "
                         "over their own span.\n".format(lyap["n_truncated"]))
             if lyap["truncated_at_saturation"] and not lyap["saturated"]:
-                f.write("  Fitted over the first {:.1f} d of {:.1f} d, i.e. the leading window in "
-                        "which the\n".format(lyap["fit_window_days"], lyap["total_span_days"]))
-                f.write("  ensemble was still a compact cloud (separation {:.6e} AU at the end of "
-                        "that window).\n".format(lyap["separation_fit_end_au"]))
+                f.write("  Fitted over the first {:s} of {:s},\n".format(
+                    formatTimeSpan(lyap["fit_window_days"], decimals=1),
+                    formatTimeSpan(lyap["total_span_days"], decimals=1)))
+                f.write("  i.e. the leading window in which the ensemble was still a compact cloud\n")
+                f.write("  (separation {:.6e} AU at the end of that window).\n".format(
+                    lyap["separation_fit_end_au"]))
             if lyap["growth"] == "exponential":
                 f.write("  Growth is exponential: lambda = {:.6f} /day, "
-                        "Lyapunov time = {:.2f} days.\n".format(
-                            lyap["lambda_per_day"], lyap["lyapunov_time_days"]))
+                        "Lyapunov time = {:s}.\n".format(
+                            lyap["lambda_per_day"], formatTimeSpan(lyap["lyapunov_time_days"])))
                 f.write("  The integration loses predictive value beyond this timescale.\n")
             elif lyap["growth"] == "linear":
                 f.write("  Growth is linear, i.e. the motion is regular over this interval and no\n")
@@ -3126,16 +3377,16 @@ if __name__ == "__main__":
             # Semi-major-axis spread, which is not corrupted by Keplerian phase drift
             ed = lyap.get("element_divergence")
             if ed is not None:
-                f.write("\n  Spread in the semi-major axis over {:.1f} d: {:.6e} -> {:.6e} AU "
+                f.write("\n  Spread in the semi-major axis over {:s}: {:.6e} -> {:.6e} AU "
                         "(factor {:.3f})\n".format(
-                            ed["span_days"], ed["sigma_a_start_au"], ed["sigma_a_end_au"],
-                            ed["sigma_a_growth_factor"]))
+                            formatTimeSpan(ed["span_days"], decimals=1), ed["sigma_a_start_au"],
+                            ed["sigma_a_end_au"], ed["sigma_a_growth_factor"]))
                 f.write("  Fit quality: R2(exponential) = {:.4f}, R2(linear) = {:.4f}\n".format(
                     ed["r2_exponential"], ed["r2_linear"]))
                 if ed["growth"] == "exponential":
                     f.write("  The spread in a grows exponentially: lambda = {:.6e} /day, "
-                            "Lyapunov time = {:.2f} days.\n".format(
-                                ed["lambda_per_day"], ed["lyapunov_time_days"]))
+                            "Lyapunov time = {:s}.\n".format(
+                                ed["lambda_per_day"], formatTimeSpan(ed["lyapunov_time_days"])))
                     f.write("  This is the chaos estimate to prefer: unlike the position\n")
                     f.write("  separation it is not corrupted by Keplerian phase drift, which\n")
                     f.write("  smears the cloud along the orbit whether or not the motion is chaotic.\n")
