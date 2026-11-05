@@ -9,8 +9,7 @@ import numpy as np
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
-from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, equatorialCoordPrecession_vect, raDec2AltAz_vect, \
-    jd2LST
+from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST
 
 
 
@@ -200,9 +199,8 @@ def prepareObservations(meteor_list):
 
             jdt_ref_vect = np.zeros_like(meteor.ra_data) + jdt_ref
 
-            # Precess from J2000 to the epoch of date
-            ra_prec, dec_prec = equatorialCoordPrecession_vect(J2000_JD.days, jdt_ref_vect, meteor.ra_data, 
-                meteor.dec_data)
+            # Precess and nutate from J2000 to the epoch of date
+            ra_prec, dec_prec = equatorialCoordJ2000ToDate_vect(jdt_ref_vect, meteor.ra_data, meteor.dec_data)
 
             meteor.ra_data = ra_prec
             meteor.dec_data = dec_prec
