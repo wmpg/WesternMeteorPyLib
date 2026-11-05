@@ -12,6 +12,7 @@ they are not on a common scale, and most of them are not distances in the mathem
 - [Criteria on orbital elements](#criteria-on-orbital-elements)
 - [Criteria on geocentric quantities](#criteria-on-geocentric-quantities)
 - [Criteria for the Taurid Complex](#criteria-for-the-taurid-complex)
+- [Searching a catalogue of parent bodies](#searching-a-catalogue-of-parent-bodies)
 - [Pitfalls](#pitfalls)
 - [Worked examples](#worked-examples)
 - [Verification status](#verification-status)
@@ -40,6 +41,11 @@ to be far too permissive.
 
 Angles are in radians throughout. `q` is the perihelion distance in AU, `e` the eccentricity, `i`
 the inclination, `O` the longitude of the ascending node, `w` the argument of perihelion.
+
+Every criterion that takes orbital elements also takes numpy arrays, broadcast against each other,
+so one orbit can be compared with a whole catalogue in one call (see the worked example below).
+Scalars still return scalars. Of the criteria on the radiant, `calcDN`, `calcDR` and `calcDV` take
+scalars only.
 
 | Function | Inputs | Metric? | Published threshold | Source |
 | :--- | :--- | :--- | :--- | :--- |
@@ -165,6 +171,242 @@ not reproduce the paper's table 1.
 
 ---
 
+## Searching a catalogue of parent bodies
+
+**`wmpl.Utils.ParentBodySearch`** ranks the comets, asteroids and meteorites with orbits of the
+catalogues by similarity to an orbit. Any key of this module can be used there, the ones on the
+elements, the ones on the geocentric radiant (D_N, D_R, D_X) and the Vida D_V alike.
+
+```
+python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
+```
+
+- **Several criteria.** Give them to `-d` one after another, or as a list to `d_crit`. The bodies are
+  ranked by the **first** one, which is the one the top N is taken by, and the others are printed
+  beside it for the same bodies. With more than one criterion a bar plot, a panel per criterion
+  with the bodies in the ranking order, is saved by default beside the pickle (`--no_plot` to
+  skip it, `--plot_path` to place it).
+- **The radiant of a catalogue body.** A body has only its elements, so the criteria on the radiant
+  need one derived from them: `calcGeocentricFromElements` takes the points where the orbit comes
+  closest to the Earth's (a circle of 1 AU), one near each node, keeps those within 0.25 AU
+  (`RADIANT_MAX_DISTANCE`), and subtracts the Earth's velocity there. The 0.25 AU is set by the
+  known parents: the Orionid branch of 1P/Halley is 0.15 AU out and the November Taurid branch of
+  2P/Encke 0.19 AU, while the far points of Phaethon (0.36 AU) and Swift-Tuttle (0.71 AU) give no
+  shower. Taking the closest points rather than the crossings of 1 AU also covers parents that never
+  reach 1 AU: 8P/Tuttle (q = 1.03 AU, Ursids) and 21P/Giacobini-Zinner (q = 1.01 AU, Draconids). A
+  body whose orbit never comes within 0.25 AU of the Earth's has no
+  value (`n/a`), and it is left out if the criterion is the first. The orbit that is searched
+  for uses its measured radiant if it has one (a pickle, or `--ra --dec --sol --vg`) and the
+  derived one otherwise. For Phaethon the derived radiant is 1.6 deg and 0.4 km/s from the
+  Geminids.
+- **The Vida criterion** (`DVVIDA`), on the corrected heliocentric direction and speed, works the same
+  way: `calcHeliocentricFromElements` takes the heliocentric velocity at the same points, in the
+  convention of `correctedEclipticCoord`, which the tests check it against. The orbit searched for
+  uses `L_h`, `B_h`, `v_h` from the pickle, or the radiant given by hand converted with
+  `calcHeliocentricFromGeocentric`.
+- **Epoch.** The ranking uses the catalogue elements as they are, each at its own epoch. `--propagate`
+  does not change it. It brings the top N bodies to the reference epoch of the meteor with the
+  integrator of `wmpl.Rebound.REBOUND` (Sun, planets and Moon from DE430, the Earth's J2 and J4,
+  general relativity, no non-gravitational forces), and lists and saves their elements and
+  heliocentric state there (ecliptic J2000, AU and AU/day), to be used as the initial
+  conditions of a REBOUND integration. It also prints and saves every criterion again with the
+  propagated elements, beside the catalogue values, to show how much they move when both orbits
+  refer to the same epoch; the ranking stays the catalogue one. An asteroid is placed on its orbit
+  by its mean anomaly at the epoch. A comet is placed by its time of perihelion, which also covers
+  the parabolic and hyperbolic ones (more than half of the JPL list), with Kepler's equation in its
+  elliptic, parabolic or hyperbolic form. Meteorites have no epoch, and bodies outside the DE430 span
+  (1550 to 2650) cannot be propagated.
+  For a long-period comet the values at the meteor epoch need care: decades from perihelion it is
+  far out, where its heliocentric osculating elements follow the Sun's motion about the barycentre
+  (q of C/1893 N1 goes from 0.67 AU in the catalogue to 0.76 AU at the 2019 epoch of the example
+  Orionid), so a change there is not a change of its orbit around the Solar System.
+- **Saving.** `--save matches.csv` or `--save matches.json` writes the matches with the value of every
+  criterion that was given, in the order given, plus the propagated state with `--propagate`.
+- **Integrating the candidates.** The JSON can be given to `wmpl.Rebound.REBOUND --parent_bodies`,
+  which integrates the bodies alongside the meteoroid and its clones and follows the D criteria
+  between them over time. See [REBOUND, parent bodies](REBOUND.md#parent-bodies).
+- **Is a match more than chance? (`--chance_neo`)** A small D value means little on its own, because
+  NEOs are common in some parts of orbit space. `--chance_neo` takes every asteroid of the catalogue
+  and answers: given this meteoroid's orbit, how many NEOs at least as large (H no fainter) would lie
+  at least as close by chance, and what is the probability of at least one? That probability is the
+  p-value of the match. The test runs for every criterion on the orbital elements given to `-d`.
+
+  ```
+  python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH RHO2 --chance_neo
+  ```
+
+  For each criterion it prints two tables: the top N by the ranking criterion, as in the main table,
+  and the N most significant asteroids of the whole catalogue, ranked by p. A large asteroid at a
+  modest D can be far more significant than a small one at a tiny D, and only the second table shows
+  it.
+
+  - **The population.** The background is the debiased NEO population of
+    [Granvik et al. (2018)](https://doi.org/10.1016/j.icarus.2018.04.018): 802 000 synthetic NEOs
+    with 17 < H < 25, q < 1.3 AU and a < 4.2 AU, at the true numbers the model predicts. It is not
+    the known population and is not distributed with wmpl. The first use downloads it (28 MB) from
+    the authors' page into `wmpl/share`, or into `~/.cache/wmpl` if `share` cannot be written, and
+    checks its SHA-256. On a machine without network access, copy `Granvik+_2018_Icarus.dat.gz` into
+    either place. It is published under CC BY 4.0, so cite the paper.
+  - **The test.** The meteoroid's orbit is kept fixed and compared with every synthetic orbit, of which
+    k are at least as close as the candidate. Under the null hypothesis the candidate is one more
+    background orbit, so p1 = (k + 1)/(802 000 + 1) is exact, the usual Monte Carlo p-value, and it is
+    never 0. With N(H ≤ H_cand) the number of NEOs at least as large, λ = N(H ≤ H_cand)·p1 is the
+    number of such NEOs expected that close by chance, and p = 1 − e^−λ.
+    `wmpl.Utils.DebiasedNEOPopulation.chanceAssociation` exposes the test directly.
+  - **N(H ≤ H_cand)** adds the known NEOs with H ≤ 17 (the model has none that bright, and the known
+    population is nearly complete there) to the synthetic ones with 17 < H ≤ H_cand. The two join
+    without a step: at H = 17.5 the sum is 726, against 723 known NEOs.
+  - **Which p to quote.** `p` is right for a body named before the search, such as one proposed in a
+    paper. A body the search found, as the best of tens of thousands of every size, needs
+    `p_global`: the probability that some background NEO, of any size down to H = 25, reaches so low
+    a p by chance. With the background ranked by size and the orbit independent of size, it is
+    λ_global = Σ_n min(1, λ/n), about 14·λ for the 802 448 background NEOs. Measured on the synthetic
+    population itself over 200 Earth-crossing orbits, the true count is 0.6 to 1.0 times λ_global,
+    so it is conservative.
+  - **Reading it.** `sigma` is the two-sided Gaussian equivalent of `p_global`, the convention of
+    physics:
+
+    | sigma | p_global | one in | reading |
+    | ---: | ---: | ---: | :--- |
+    | < 2 | > 0.046 | fewer than 22 | consistent with chance |
+    | 2 | 0.046 | 22 | a hint, not conclusive |
+    | 3 | 0.0027 | 370 | evidence |
+    | 5 | 6×10⁻⁷ | 1.7 million | discovery |
+
+    A match reaching 2 or 3 sigma is flagged in the tables. Below 1 sigma the number measures
+    nothing and is printed `<1`. From 1 up it has one decimal, which is all it supports:
+    `p_global` is conservative by up to 1.6 times, which moves 3.5 sigma by 0.1.
+  - **Probabilities** are printed as plain decimals with 3 significant digits above 0.001 and in
+    scientific notation below it. What rounds to certainty is printed `>0.999`.
+  - **Limits.** When no synthetic orbit is as close as the body (`closer` = 0), the population cannot
+    resolve how unusual it is: p is at most, and sigma at least, the value shown, printed `<=` and
+    `>=`. With 802 000 orbits a body can reach about 3.5 sigma this way. Saved files carry it as
+    `is_limit`.
+  - **The summary.** The output closes with one for the criterion the bodies were ranked by: how many
+    bodies could be tested and how many could not (H > 25, or no H), the most significant body, a
+    verdict, how many of the closest bodies could not be tested, and the most significant body under
+    each other criterion as a check. The verdict is one of: no body is distinguishable from chance
+    (none reaches 2 sigma); a hint (some reach 2 sigma, none 3); or evidence (some reach 3 sigma),
+    listing them with their odds. With several criteria, choose one before looking: the smallest p
+    over several criteria is not itself a p-value.
+  - **Examples.** Phaethon against the Geminids: p_global at most 4.2×10⁻⁴ (1 in 2 400 or rarer), at
+    least 3.5 sigma with D_SH and with rho_2, a limit. Nothing else comes near 2 sigma. Winchcombe:
+    the most significant body is (433) Eros at D_SH = 0.51, with p = 0.16 and p_global = 0.91, so there
+    is no association to claim.
+  - **Why not random pairs.** Drawing pairs of synthetic NEOs until one is as close as the observed
+    pair, as earlier works do, treats the meteoroid as a typical NEO. It is not one: a meteoroid has
+    to hit the Earth, which favours the dense low-inclination Earth-crossing region. Measured with
+    D_SH, the fraction of the population within 0.1 of the Winchcombe orbit is 2.6 times the
+    random-pair fraction. For a Geminid-like orbit it is 0.06 times. Random pairs would therefore
+    overstate the significance of a typical fireball match by 2 to 3 times, and understate it 16
+    times in a sparse region.
+  - **Limits.** Without an absolute magnitude there is no p-value: this covers comets, meteorites,
+    and asteroids fainter than H = 25, which is most of the closest matches to a meteorite-dropping
+    fireball. A meteoroid outside q < 1.3 AU and a < 4.2 AU gets no p-value either, because the
+    model is empty there rather than unknown; near that edge the p-value is biased low. The orbital
+    distribution is taken as independent of H. The meteoroid's orbit is taken as exact. With
+    802 000 synthetic orbits, p1 is never below 1/802 001. The criteria on the radiant are skipped,
+    since a synthetic orbit has a radiant only where it comes close to the Earth's. The MOID is
+    accepted, but it measures crossing rather than similarity, and crossing orbits are common: 28 600
+    of the 802 000 synthetic orbits come within 0.009 AU of the Winchcombe orbit. It also takes
+    about half a minute against the population.
+  - **Saving.** Without `--save` the values are only printed. The only files written are the
+    population, downloaded once, and the bar plot that several criteria save by default.
+    `--save` adds `chance_neo_<criterion>_*` columns to the CSV and a `chance_neo` entry per match to
+    the JSON. The ranking by p goes into the JSON as `most_significant`, or into
+    `<name>_chance_neo.csv` beside the CSV.
+- **How often does an unrelated meteoroid share the orbit? (`--chance_meteoroid H`)** `--chance_neo`
+  asks whether the body is unusually close given how many NEOs there are. This asks the converse:
+  given the body, how often does a sporadic meteoroid, brought there by the dynamical evolution of
+  its source region and unrelated to the body, lie at least as close to it as this one? H is the
+  meteoroid's absolute magnitude in the scale of the model, 34.75 to 41.25, or its mass, which is
+  converted as the authors convert the fireballs: an ordinary chondrite of 3500 kg/m³ and albedo
+  0.147, whatever the meteoroid's type (1 kg is H = 38.14; 14 g to 108 kg are accepted).
+
+  ```
+  python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 38.0
+  python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH --chance_meteoroid 0.6kg
+  ```
+
+  From Python, `chanceMeteoroid` takes the trajectory (`traj=traj`) or the elements, and runs the
+  search itself if it is not given one; `wmpl.Utils.DebiasedMeteoroidPopulation.chanceAssociation`
+  exposes the test directly, and `massToH` converts a mass.
+
+  - **The background.** The near-Earth object model of
+    [Deam et al. (2026)](https://doi.org/10.3847/1538-3881/ae2fc5), fitted to 1202 sporadic fireballs
+    of the Global Fireball Observatory, 150 kg to 10 g, binned in (a, e, i, H) with six source regions
+    and a collisional lifetime of 3 Myr to H = 38.5 and 1 Myr past it. The first use downloads its
+    posterior samples and residence-time maps, 3.5 MB, from
+    [Zenodo](https://doi.org/10.5281/zenodo.17809512) into `wmpl/share`, or `~/.cache/wmpl`, and
+    checks their SHA-256. CC BY 4.0: cite the paper and the data. Each map is normalised over the
+    region the model was fitted on, e > 0.04 and i < 60°, as in the fit; the population is the mean
+    of the posterior.
+  - **Only impactors.** The model gives where the meteoroids are, and 34.5 to 42 % of them never
+    cross the Earth's orbit, but one that was observed is one that hit. Deam et al. divided each
+    fireball by its probability of impact to fit the model; here each orbit of the model is
+    multiplied by its rate of impact, that of Opik (1951) with the same gravitational focusing, and
+    given a node at 1 AU. Measured with D_SH at H = 38, the fraction within 0.1 of a low-inclination
+    Apollo orbit (q = 0.99 AU, e = 0.4, i = 0.5°) is 20 times that of the unweighted population, and
+    of one with q = 0.8 AU, e = 0.5 and i = 10° 4.2 times. Within a bin the orbital pole is taken
+    uniform, so that the density in i goes as sin i and cancels Opik's 1/sin i: with i uniform, as
+    the authors' sampler takes it, 60 to 68 % of the impacts would come from the lowest bin, i < 4°,
+    and depend on where 1/sin i is cut off.
+  - **The test.** The candidate is kept fixed and 10⁶ background impactors are compared with it:
+    p = (k + 1)/(N + 1), k the weight of those at least as close as the meteoroid. When fewer than 100
+    are, p is computed again from orbits drawn only in the bins that can hold one that close (for D_SH,
+    D_H and D_D), which resolves it far below 10⁻⁶: for a Geminid of 50 g, Phaethon has p = 2.2e-8. The
+    body's size plays no part, so comets are tested too. A body the search found needs a correction for
+    the M bodies searched, and `p_global` is twice the smaller of two: `p_bonf` = M p (Bonferroni),
+    which finds a body in a part of orbit space the background rarely reaches, and `p_closest`, how
+    often a background meteoroid has some body of the catalogue as close (2000 of them compared with
+    the whole catalogue), which finds a body very close to a meteoroid among the many asteroids at low
+    inclination. Against the 46 501 comets and near-Earth asteroids of the JPL and the MPC, Phaethon
+    has p_closest = 0.32 but p_bonf = 1.0e-3, so p_global = 2.0e-3 (3.1 sigma); Winchcombe's closest
+    body, 2016 EF195 at D_SH = 0.025, has p_bonf = 0.39 but p_closest = 0.035, so p_global = 0.069.
+    `sigma` is the Gaussian equivalent of p_global, as above. The whole takes 7 to 9 s with D_SH and
+    12 to 13 s with D_D.
+  - **Limits.** The model changes with H: over H = 35 to 41 the fraction near the two orbits above
+    is 0.86 to 1.10 and 0.57 to 1.06 times its value at H = 38, so H has to be given. The best fit
+    alone, which the authors' sampler draws from, would put 0.75 to 1.03 times as much background
+    there as the posterior mean. Opik's rate averages over the angles of the orbit, which Deam et al.
+    did not do for the fireballs. The Earth's orbit is taken circular. The model covers a < 4.2 AU and
+    i < 88°, and is fitted only to e > 0.04 and i < 60°. Only the criteria on the elements are
+    offered, and not the MOID, which would take 1.5 to 2.5 minutes a body. The global correction is on
+    the criterion, not on p. The meteoroid's orbit is taken as exact.
+  - **Saving.** `--save` adds `chance_meteoroid_<criterion>_*` columns to the CSV and a
+    `chance_meteoroid` entry per match to the JSON.
+- **Within the uncertainty of the orbit.** `--clones N` repeats the comparison for N clones of the
+  meteor's orbit, drawn from the covariance of a trajectory solved with the Monte Carlo uncertainties,
+  with the draws of `wmpl.Rebound.REBOUND`: `--clones N --seed S` here are the clones that
+  `REBOUND.py --mc N --seed S` integrates, at the epoch of the meteor, each turned into an orbit as the
+  solver computed the nominal one (`wmpl.Utils.OrbitClones`). Each clone is compared with its own
+  radiant, as the nominal orbit is.
+
+  ```
+  python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DD --clones 1000 --dmax 0.10 0.09
+  ```
+
+  For each match it gives the 95% interval of every criterion over the clones, the share of them under
+  the threshold given with `--dmax` (one per criterion, in the order of `-d`), how often the body is the
+  closest of the whole catalogue by the first criterion and its rank among all the bodies (median and
+  95%), and it names the bodies that are the closest for some clone.
+  - **What to quote.** The nominal values. A criterion is a distance between orbits, so noise moves it
+    away on average: the median over the clones lies above the nominal value and is no estimate of it.
+    The p-values of `--chance_neo` and `--chance_meteoroid` stay those of the nominal orbit.
+  - **When it matters.** For a well-measured fireball hardly at all: Novo Mesto (initial speed known to
+    14 m/s), 500 clones, keeps 2005 OX as the closest body in every clone, at D_SH 0.0785 [0.0781,
+    0.0790]; only a candidate right at a threshold moves, the second, 2008 DK5 (D_SH 0.0994), being
+    under 0.10 in 77% of the clones. With the covariance scaled by 10 (140 m/s, the radiant alike) that
+    share falls to 52%, and scaled by 30 (410 m/s) 2005 OX is the closest body in 71% of the clones
+    only, at D_SH 0.0785 [0.0732, 0.1242], their median 0.0854.
+  - **Cost.** The first criterion is computed against the whole catalogue for every clone: a few ms per
+    clone for a criterion on the elements, ~0.15 s for one on the radiant (after ~4 s to derive the
+    radiants of the catalogue once) and ~3 s for the MOID. The other criteria only against the matches.
+  - **Saving.** `--save` adds `clones_*` columns to the CSV and a `clones` entry per match to the JSON,
+    with a `clones` summary (seed, thresholds, closest bodies, spread of the clones' orbits).
+
+---
+
 ## Pitfalls
 
 **Thresholds do not transfer between criteria.** At a fixed sample size the D_D threshold is about
@@ -240,6 +482,27 @@ d_value = calcDVJopek(*(orbit1 + orbit2), w_h=w_h, w_e=w_e, w_E=w_energy)
 
 # Threshold at the 99% level for a smallest accepted group of 10
 print(d_value, "against", DV_THRESHOLDS[10])
+```
+
+**Comparing one orbit with a whole catalogue.** Pass the catalogue as arrays rather than looping
+over it: D_SH of one orbit against 802 000 takes 0.04 s this way and 7 s in a loop.
+
+```python
+import numpy as np
+from wmpl.Utils.Dcriteria import calcDSH
+
+rng = np.random.default_rng(1)
+n = 100000
+
+# A catalogue as one array per element, angles in radians
+q_cat = rng.uniform(0.1, 1.3, n)
+e_cat = rng.uniform(0.0, 0.9, n)
+i_cat, node_cat, peri_cat = rng.uniform(0, 0.5, n), rng.uniform(0, 2*np.pi, n), \
+    rng.uniform(0, 2*np.pi, n)
+
+d_sh = calcDSH(*orbit1, q_cat, e_cat, i_cat, node_cat, peri_cat)
+
+print(np.argsort(d_sh)[:10])   # the 10 closest entries
 ```
 
 ---

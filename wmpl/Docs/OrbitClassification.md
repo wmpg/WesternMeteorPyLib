@@ -3,15 +3,18 @@
 **`wmpl.Utils.OrbitClassification`** answers a different question from the
 [dissimilarity criteria](OrbitSimilarity.md): not "are these two orbits related?" but "what kind of
 orbit is this one?" — asteroidal or cometary, Jupiter family or Halley type, Centaur or
-transneptunian.
+transneptunian, the meteoroid orbital class of Borovička et al. (2005), and for a near-Earth orbit,
+Atira, Aten, Apollo or Amor.
 
 ## Table of Contents
 
 - [Quick start](#quick-start)
 - [The Tisserand parameter](#the-tisserand-parameter)
+- [Orbital classes](#orbital-classes)
 - [One-parameter criteria](#one-parameter-criteria)
 - [Two-parameter cometary tests](#two-parameter-cometary-tests)
 - [The Tancredi scheme](#the-tancredi-scheme)
+- [Within the uncertainty of the orbit](#within-the-uncertainty-of-the-orbit)
 - [Supporting machinery](#supporting-machinery)
 - [Cost](#cost)
 - [Verification status](#verification-status)
@@ -59,11 +62,135 @@ comparison against `nan` is False, so test for it rather than relying on a chain
 
 **There is a second implementation in the repository.**
 `wmpl.Rebound.REBOUND.tisserandParameterJupiter` computes the same quantity for scalars, returns
-`None` instead of `nan` for an unbound orbit, and is what the REBOUND report prints. Its companion
-`tisserandClass` gives three classes split at T = 3. Use whichever suits, but do not mix their
+`None` instead of `nan` for an unbound orbit, and is what the REBOUND report prints; the report's
+orbital class comes from `classifyBorovicka`, below. Use whichever suits, but do not mix their
 outputs: they use slightly different values for Jupiter's semi-major axis (5.204267 AU against the
 5.20336 AU of Tancredi's tables), which shifts T_J by about 1e-4 — far below any class boundary, but
 enough to make two numbers disagree in the fourth decimal.
+
+---
+
+## Orbital classes
+
+Class labels and flags that need only the **perihelion distance, eccentricity and inclination**,
+which is what a trajectory solution gives directly. They take `q` rather than `a` because the
+perihelion distance exists for every orbit, a parabolic one included, where the semi-major axis does
+not. All accept scalars or numpy arrays; a scalar gives a plain `str`.
+
+```python
+import numpy as np
+from wmpl.Utils.OrbitClassification import (classifyNEO, isArjuna, classifyBorovicka,
+    isEarthCrossing, isProgrograde)
+
+q, e, i = 0.97, 0.03, np.radians(1.5)
+
+classifyNEO(q, e)            # 'Apollo'
+isArjuna(q, e, i)            # True
+classifyBorovicka(q, e, i)   # 'asteroidal-chondritic'
+isEarthCrossing(q, e)        # True
+```
+
+`python -m wmpl.Utils.OrbitClassification` prints all of them for an orbit, with `--quiet` giving
+`KEY VALUE` lines.
+
+### Near-Earth classes: `classifyNEO(q, e)`
+
+| Class | Criterion |
+| :--- | :--- |
+| Atira | a < 1 AU and Q < 0.983 AU: entirely inside the Earth's orbit |
+| Aten | a < 1 AU and Q ≥ 0.983 AU |
+| Apollo | a ≥ 1 AU and q < 1.017 AU |
+| Amor | a ≥ 1 AU and 1.017 ≤ q < 1.3 AU |
+| non-NEO | a ≥ 1 AU and q ≥ 1.3 AU |
+
+0.983 and 1.017 AU are the Earth's perihelion and aphelion distances. An orbit at exactly a = 1 AU
+goes with the larger orbits so that no semi-major axis falls between the classes. An unbound orbit
+(`e >= 1`) returns `'unbound'`: these are classes of bound asteroid orbits, and a hyperbolic
+meteoroid has none.
+
+### Arjuna: `isArjuna(q, e, i)`
+
+Arjuna is **not** a fifth class beside the four above, because its members are also Atens, Apollos
+or Amors. It is a subset picked out by Earth-like elements, so it is a flag to read alongside
+`classifyNEO`. An orbit is in the Arjuna domain if
+
+> 0.985 < a < 1.013 AU, e < 0.1, i < 8.56°
+
+with strict comparisons, as in de la Fuente Marcos & de la Fuente Marcos (2015, Astron. Nachr. 336,
+5, section 2.1). The paper gives these as *approximate*, derived from the short-term dynamics of four
+objects, and the real criterion is episodes of 1:1 resonance with the Earth. Falling inside the box
+makes an orbit a candidate, not a confirmed member.
+
+### Meteoroid orbital classes: `classifyBorovicka(q, e, i, ecliptic_shower=False)`
+
+The five orbital classes of Borovička et al. (2005), the scheme commonly used in meteor studies
+(Borovička et al. 2005; Kikwaya et al. 2011; Vojáček et al. 2019), with the limits as Vojáček et al.
+(2019, section 3.3) give them:
+
+| Class | Criterion |
+| :--- | :--- |
+| `'sun-approaching'` | q < 0.2 AU |
+| `'ecliptic-shower'` | member of an ecliptic shower, such as the Taurids |
+| `'halley-type'` | T_J < 2, or 2 < T_J < 3 and i > 45° |
+| `'jupiter-family'` | 2 < T_J < 3, i < 45° and Q > 4.5 AU |
+| `'asteroidal-chondritic'` | T_J > 3, or Q < 4.5 AU |
+
+The Sun-approaching limit is where the meteoroids lose their sodium: almost all of those inside
+q = 0.2 AU are Na-free or Na-poor (Vojáček et al. 2019, section 3.3.2).
+
+**The definitions overlap, so the classes are tested in the order of the table and the first that
+holds is taken.**
+
+- An orbit with q < 0.2 AU is Sun-approaching whatever its other elements, as fig. 4 of Vojáček et
+  al. (2019) draws it. 3200 Phaethon (T_J = 4.51) and 96P/Machholz (T_J = 1.95) are both
+  Sun-approaching.
+- An orbit with T_J < 3 and i > 45° that stays inside Q = 4.5 AU fits both the Halley-type and the
+  asteroidal-chondritic definitions. The published list does not say which wins; the order makes it
+  Halley type.
+
+**The ecliptic-shower class is not a function of the elements.** Its members, the Taurids and other
+showers with orbits near the boundary between the asteroids and the Jupiter-family comets, are
+defined by membership of the shower, which has to come from a shower association: pass
+`ecliptic_shower=True`, or a boolean array. Without it a Taurid orbit (q = 0.34 AU, e = 0.85,
+i = 5.4°, so T_J = 2.99 and Q = 4.19 AU) is asteroidal-chondritic. The command line has no shower
+association and never gives this class.
+
+The published limits are strict inequalities, which leaves the limits themselves unassigned. Here
+T_J = 2 and i = 45° do not make an orbit Halley type, and T_J = 3 and Q = 4.5 AU do not make it
+asteroidal-chondritic. T_J is computed from `q` and `e` so that it stays finite for an unbound orbit,
+which has no aphelion and so is never asteroidal-chondritic by Q.
+
+**The asteroidal limit of T_J = 3 differs from `classifyTancrediComet`**, which puts it at 3.05, so
+an orbit with T_J between 3 and 3.05 — 2P/Encke at 3.0253 — is `'asteroidal-chondritic'` here and
+`'jupiter family'` there. Encke's aphelion of 4.09 AU also puts it inside the asteroidal limit here.
+
+References:
+
+- Borovička, J., Koten, P., Spurný, P., Boček, J., Štork, R. (2005). A survey of meteor spectra and
+  orbits: evidence for three populations of Na-free meteoroids. *Icarus* 174, 15–30.
+- Kikwaya, J.-B., Campbell-Brown, M., Brown, P. G. (2011). Bulk density of small meteoroids.
+  *A&A* 530, A113.
+- Vojáček, V., Borovička, J., Koten, P., Spurný, P., Štork, R. (2019). Properties of small
+  meteoroids studied by meteor video observations. *A&A* 621, A68.
+- Subasinghe, D., Campbell-Brown, M. (2018). Luminous efficiency estimates of meteors II.
+  Application to Canadian Automated Meteor Observatory meteor events. *AJ*,
+  doi:10.3847/1538-3881/aaa3e0. Table 3 gives the same limits.
+
+### Flags
+
+| Function | True when |
+| :--- | :--- |
+| `isSunApproaching(q, q_limit=0.2)` | q < 0.2 AU, the Sun-approaching class of Borovička et al. (2005) |
+| `isProgrograde(i)` | i < 90° |
+| `isRetrograde(i)` | i > 90° |
+| `isEarthCrossing(q, e)` | q ≤ 1 AU ≤ Q |
+
+An orbit at exactly 90° is neither prograde nor retrograde.
+
+`isEarthCrossing` tests the **heliocentric distance range only**: the orbit passes through the
+distances at which the Earth moves, with the Earth's orbit taken as a circle of 1 AU. It does not
+say the two orbits intersect in space, which depends on their orientation — use `calcMOID` for that.
+An unbound orbit has no aphelion and crosses if its perihelion is inside 1 AU.
 
 ---
 
@@ -153,13 +280,37 @@ reliable.
 
 ---
 
+## Within the uncertainty of the orbit
+
+A class near one of its limits (T_J near 3, q near 0.2 AU, a near 1 AU, Q near 4.5 AU) can depend on
+the measurement. The command line classifies clones of the orbit too:
+
+```
+python -m wmpl.Utils.OrbitClassification traj.pickle --clones 1000 --seed 1
+```
+
+The clones are drawn from the covariance of the trajectory's state vector, so the pickle has to be
+solved with the Monte Carlo uncertainties, with the draws of `wmpl.Rebound.REBOUND`: `--clones N --seed
+S` here are the clones that `REBOUND.py --mc N --seed S` integrates, at the epoch of the meteor. Each is
+turned into an orbit as the solver computed the nominal one (`wmpl.Utils.OrbitClones`). Beside the
+nominal values it prints the 95% interval of every parameter over the clones and the share of the clones
+in each class, an unbound clone being a class of its own; `--quiet` adds `KEY_CLONES_95 lo hi` and
+`KEY_CLONES class: share, ...` lines. A clone costs about 5 ms. The values to quote stay the nominal
+ones.
+
+For a well-measured fireball nothing moves: Novo Mesto (initial speed known to 14 m/s) is an Apollo on
+an asteroidal-chondritic orbit in all 500 clones, T_J 4.405 [4.389, 4.421]. `classifyOrbit` and
+`cloneClasses` in `wmpl.Utils.OrbitClones` do the same from Python.
+
+---
+
 ## Supporting machinery
 
 These exist to serve the Tancredi scheme but are usable on their own.
 
 | Function | What it does |
 | :--- | :--- |
-| `calcMOID(a1, e1, i1, O1, w1, a2, e2, i2, O2, w2)` | Minimum orbital intersection distance between two orbits, in AU |
+| `calcMOID(a1, e1, i1, O1, w1, a2, e2, i2, O2, w2)` | Minimum orbital intersection distance between two orbits, in AU. It is `wmpl.Utils.MOID.calcMOID`, vectorised: the elements can be arrays |
 | `calcGiantPlanetMOIDs(a, e, i, node, peri)` | The MOID with each giant planet, in that planet's Hill radii |
 | `calcHillRadius(a_planet, mass_ratio)` | Hill radius of a planet, circular-orbit form |
 | `calcResonanceSemiMajorAxis(p, p_plus_q)` | Centre of a mean-motion resonance |
@@ -184,10 +335,15 @@ Three things to watch:
 
 Most of this module is arithmetic, but the MOID is not.
 
-`calcMOID` minimises the separation over two eccentric anomalies with Powell's method, restarted
-from four points because the surface has several local minima. `calcGiantPlanetMOIDs` calls it four
-times, once per giant planet. Classifying a large asteroid catalogue this way is a real computation,
-not a lookup — budget for it, or supply MOIDs computed in bulk elsewhere.
+`calcMOID` is `wmpl.Utils.MOID.calcMOID`: a scan of one orbit, the closest point of the other for each
+sample, and a two-dimensional Newton refinement of the deepest minima, vectorised over any number of
+orbit pairs at ~30-40 µs per pair (see the module for the method and its validation).
+`calcGiantPlanetMOIDs` calls it once per giant planet.
+
+It replaced the implementation of Tancredi (2014, appendix A): Powell's method restarted from four
+points, ~20 ms per pair. That one is kept as `wmpl.Utils.MOID.calcMOIDTancredi` for comparison. Both
+agree for an orbit against a planet, but for two eccentric orbits Powell's method can stop at a local
+minimum (in 1 of 80 random pairs, 0.0260 AU instead of 0.0206 AU).
 
 The Laplace coefficients are evaluated by quadrature rather than from a truncated series, so they
 stay exact as the semi-major axis ratio approaches 1. They are cached, since only a handful of
@@ -201,6 +357,10 @@ resonances are ever needed.
 | :--- | :--- |
 | Tisserand parameter, Kresák K and P, aphelion, orbital energy | **Verified** — standard definitions, and the Encke and Phaethon values reproduce published figures |
 | The two-parameter cometary tests | **Verified** against the limits as published |
+| Atira, Aten, Apollo, Amor limits | **Verified** against the standard definitions (Earth's perihelion 0.983 and aphelion 1.017 AU, q < 1.3 AU for near-Earth) and one known object of each class |
+| Arjuna limits | **Verified** against the text of de la Fuente Marcos & de la Fuente Marcos (2015), section 2.1. The paper calls them approximate |
+| Borovička et al. (2005) classes | **Verified indirectly** — the 2005 paper (Icarus 174, 15) is paywalled and Kikwaya et al. (2011) could not be read, but Vojáček et al. (2019, section 3.3), co-authored by Borovička, give the five classes and their limits, and table 3 of Subasinghe & Campbell-Brown (2018) gives the same. Fig. 4 of Vojáček et al. (2019) puts q < 0.2 AU first; the rest of the order of the overlapping classes follows the published list. Checked against one known body of each class and the two Halley-type iron meteoroids of Vojáček et al. (2019, table 1) |
+| Flags | **Verified** — direct definitions |
 | Tancredi class structure and the 3.05 limit | **Verified indirectly** — the primary paper (Icarus 234, 66) is paywalled and the author's own site no longer resolves, but a 2025 paper co-authored by Tancredi restates the class definitions and the 3.05 cut verbatim |
 | Tancredi Hill radii, table 1 resonances and widths, appendix A and B formulae | **Unverified** — the primary source could not be read. The implementation reproduces the tabulated resonance centres and widths to the printed precision, which is strong but indirect evidence |
 

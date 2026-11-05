@@ -3,9 +3,14 @@
 These criteria take one orbit and return a dynamical class, rather than comparing two orbits, so
 they are kept apart from the dissimilarity criteria in wmpl.Utils.Dcriteria.
 
-All functions take angles in radians. The single-parameter criteria and the two-parameter
-cometary tests accept scalars or numpy arrays; the Tancredi (2014) classifiers return a label and
-take scalars only.
+All functions take angles in radians. The single-parameter criteria, the two-parameter cometary
+tests and the near-Earth and meteoroid orbital classes accept scalars or numpy arrays; the Tancredi
+(2014) classifiers return a label and take scalars only.
+
+The command line classifies the orbit of a trajectory pickle or one given by hand. With --clones N
+[--seed S] it also classifies N clones of the orbit, drawn from the covariance of a trajectory solved
+with the Monte Carlo uncertainties as wmpl.Rebound.REBOUND draws them, and gives the 95% interval of
+every parameter and the share of the clones in each class (see wmpl.Utils.OrbitClones).
 """
 
 from __future__ import print_function, division, absolute_import
@@ -15,6 +20,7 @@ import scipy.integrate
 import scipy.optimize
 
 # Re-exported so that a caller can keep importing them from here
+from wmpl.Utils.MOID import calcMOID  # noqa: F401 (also part of this module's interface)
 from wmpl.Utils.OrbitConstants import (GAUSS_K, GAUSS_K_SQUARED, A_JUPITER, A_SATURN, A_URANUS,
     A_NEPTUNE)
 
@@ -35,6 +41,45 @@ JW_ENERGY_LIMIT = -5.28e-5   # orbital energy -k^2/(2a) [AU^2/day^2]
 #   which is the Tisserand parameter divided by a_J and so carries units of 1/AU. Multiplying by
 #   a_J puts the limit in the units calcTisserand returns, and recovers the familiar cut at 3
 JW_TISSERAND_LIMIT = 0.58*A_JUPITER
+
+
+
+# Heliocentric distance of the Earth's orbit [AU], used to decide whether an orbit crosses it
+A_EARTH = 1.0
+
+# Perihelion and aphelion distance of the Earth [AU], which bound the near-Earth classes. An orbit
+#   that stays inside the Earth's perihelion never reaches it, so it is an Atira; one that stays
+#   outside the aphelion is never reached by it, so it is an Apollo or Amor only if it comes closer
+#   than the aphelion.
+EARTH_PERIHELION = 0.983
+EARTH_APHELION = 1.017
+
+# Perihelion distance below which an object is near-Earth [AU]
+NEO_Q_LIMIT = 1.3
+
+# Orbital element limits of the Arjuna orbital domain, de la Fuente Marcos & de la Fuente Marcos
+#   (2015), AN 336, 5, section 2.1: 0.985 < a < 1.013 AU, e < 0.1 and i < 8.56 deg. The paper
+#   gives them as approximate, and derives them from the short-term dynamics of four objects.
+ARJUNA_A_MIN = 0.985     # [AU]
+ARJUNA_A_MAX = 1.013     # [AU]
+ARJUNA_E_MAX = 0.1
+ARJUNA_INCL_MAX = np.radians(8.56)   # [rad]
+
+# Limits of the meteoroid orbital classes of Borovicka et al. (2005), Icarus 174, 15, as restated
+#   by Vojacek et al. (2019), A&A 621, A68, sect. 3.3. Tisserand parameter with respect to Jupiter
+TISSERAND_ASTEROIDAL_LIMIT = 3.0
+TISSERAND_HALLEY_LIMIT = 2.0
+
+# Inclination above which an orbit with 2 < T_J < 3 is Halley type rather than Jupiter family [rad]
+HALLEY_INCL_LIMIT = np.radians(45.0)
+
+# Aphelion distance inside which an orbit is asteroidal-chondritic, and beyond which a
+#   Jupiter-family orbit has to reach [AU]
+ASTEROIDAL_APHELION_LIMIT = 4.5
+
+# Perihelion distance below which an orbit is Sun-approaching [AU], the first class of the same
+#   scheme. Almost all meteoroids inside it are Na-free or Na-poor (Vojacek et al. 2019, 3.3.2)
+SUN_APPROACHING_Q_LIMIT = 0.2
 
 
 
@@ -311,6 +356,270 @@ def isCometaryEi(a, e, i):
     return (calcOrbitalEnergy(a) > JW_ENERGY_LIMIT) | (np.asarray(i) > JW_INCL_LIMIT)
 
 
+def _asLabel(conditions, labels, default):
+    """ Pick a label for each element from the first condition that holds, and return a plain str
+        for scalar input.
+
+    Arguments:
+        conditions: [list] boolean arrays or scalars, in order of priority
+        labels: [list] label for each condition
+        default: [str] label where no condition holds
+
+    Return:
+        [str or ndarray] the label, or an array of labels
+    """
+
+    result = np.select(conditions, labels, default=default)
+
+    return str(result) if np.ndim(result) == 0 else result
+
+
+def classifyNEO(q, e):
+    """ Classify an orbit into the near-Earth asteroid classes Atira, Aten, Apollo and Amor.
+
+        The classes are defined by where the orbit lies relative to the Earth's perihelion
+        (0.983 AU) and aphelion (1.017 AU):
+
+            Atira:  a < 1 AU and Q < 0.983 AU, entirely inside the Earth's orbit
+            Aten:   a < 1 AU and Q >= 0.983 AU, Earth-crossing with a period under a year
+            Apollo: a >= 1 AU and q < 1.017 AU, Earth-crossing with a period over a year
+            Amor:   a >= 1 AU and 1.017 <= q < 1.3 AU, approaching but not crossing the Earth's orbit
+
+        An orbit with a >= 1 AU and q >= 1.3 AU is not near-Earth. An orbit exactly at a = 1 AU is
+        assigned with the larger orbits, so that no semi-major axis falls between the classes.
+
+        Arjuna is not a class of this scheme, as its members are also Atens, Apollos or Amors. See
+        isArjuna.
+
+        An unbound orbit (e >= 1) is labelled 'unbound': the classes describe bound orbits, and
+        they are defined for asteroids, so a hyperbolic meteoroid orbit has no class here.
+
+        The perihelion distance is taken rather than the semi-major axis because it is defined for
+        every orbit, parabolic ones included.
+
+        Reference: the definitions used by the JPL Center for Near Earth Object Studies.
+
+    Arguments:
+        q: [float] perihelion distance of the orbit (AU)
+        e: [float] num. eccentricity of the orbit
+
+    Return:
+        [str] one of 'Atira', 'Aten', 'Apollo', 'Amor', 'non-NEO' or 'unbound'. A numpy array of
+            these if the input is an array.
+    """
+
+    q, e = np.asarray(q, dtype=float), np.asarray(e, dtype=float)
+
+    bound = e < 1.0
+
+    # Evaluated only where bound: for e >= 1 the semi-major axis is infinite or negative
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a = q/(1.0 - e)
+        aphelion = a*(1.0 + e)
+
+    return _asLabel([~bound, bound & (a < A_EARTH) & (aphelion < EARTH_PERIHELION),
+                     bound & (a < A_EARTH),
+                     bound & (q < EARTH_APHELION),
+                     bound & (q < NEO_Q_LIMIT)],
+                    ['unbound', 'Atira', 'Aten', 'Apollo', 'Amor'], 'non-NEO')
+
+
+def isArjuna(q, e, i):
+    """ Test whether an orbit lies in the Arjuna orbital domain.
+
+        Arjuna asteroids are near-Earth objects on Earth-like orbits, with a period close to a year
+        and low eccentricity and inclination, which spend episodes in the 1:1 resonance with the
+        Earth. They are not a separate class from Atira, Aten, Apollo and Amor but a subset
+        selected by the orbital elements, so this is a flag to be read alongside classifyNEO.
+
+        The limits are the approximate volume of orbital element space the discoverers give, not a
+        test for resonance, so an orbit inside it is a candidate rather than a confirmed member.
+        The comparisons are strict, as in the paper.
+
+        Reference: de la Fuente Marcos & de la Fuente Marcos (2015), Astron. Nachr. 336, 5,
+        section 2.1, doi:10.1002/asna.2014121332
+
+    Arguments:
+        q: [float] perihelion distance of the orbit (AU)
+        e: [float] num. eccentricity of the orbit
+        i: [float] inclination of the orbit (rad)
+
+    Return:
+        [bool] True if the orbit is in the Arjuna orbital domain
+    """
+
+    q, e, i = np.asarray(q, dtype=float), np.asarray(e, dtype=float), np.asarray(i, dtype=float)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a = q/(1.0 - e)
+
+    return (e < 1.0) & (a > ARJUNA_A_MIN) & (a < ARJUNA_A_MAX) & (e < ARJUNA_E_MAX) \
+        & (i < ARJUNA_INCL_MAX)
+
+
+def _tisserandFromPerihelion(q, e, i, a_planet=A_JUPITER):
+    """ Tisserand parameter written in the perihelion distance, which stays finite for e >= 1.
+
+        Equal to calcTisserand for a bound orbit. For a parabolic or hyperbolic one it is the
+        continuation through a = infinity, where the first term turns negative with the sign of a.
+
+    Arguments:
+        q: [float] perihelion distance of the orbit (AU)
+        e: [float] num. eccentricity of the orbit
+        i: [float] inclination of the orbit (rad)
+
+    Keyword arguments:
+        a_planet: [float] semi-major axis of the perturbing planet (AU). Default Jupiter.
+
+    Return:
+        [float] Tisserand parameter
+    """
+
+    return a_planet*(1.0 - e)/q + 2*np.cos(i)*np.sqrt(q*(1.0 + e)/a_planet)
+
+
+def classifyBorovicka(q, e, i, ecliptic_shower=False):
+    """ Classify a meteoroid orbit into the five orbital classes of Borovicka et al. (2005), the
+        scheme commonly used in meteor studies (Borovicka et al. 2005, Icarus 174, 15; Kikwaya et
+        al. 2011, A&A 530, A113; Vojacek et al. 2019, A&A 621, A68). As Vojacek et al. (2019) give
+        it in sect. 3.3:
+
+            q < 0.2 AU                                  sun-approaching
+            member of an ecliptic shower                ecliptic-shower
+            T_J < 2, or 2 < T_J < 3 and i > 45 deg      halley-type
+            2 < T_J < 3, i < 45 deg and Q > 4.5 AU      jupiter-family
+            T_J > 3, or Q < 4.5 AU                      asteroidal-chondritic
+
+        The definitions overlap, so the classes are tested in this order and the first that holds
+        is taken. An orbit with q < 0.2 AU is Sun-approaching whatever its other elements, as in
+        fig. 4 of Vojacek et al. (2019). The order also decides one case the list leaves open: an
+        orbit with T_J < 3 and i > 45 deg that stays inside Q = 4.5 AU fits both the Halley-type and
+        the asteroidal-chondritic definitions, and is Halley type here.
+
+        The ecliptic showers, such as the Taurids, have orbits close to the boundary between the
+        asteroids and the Jupiter-family comets, and the class is given by membership of the shower,
+        not by the elements. The caller has to supply it from a shower association.
+
+        The published limits are strict inequalities and leave the limits themselves unassigned.
+        Here T_J = 2 and i = 45 deg do not make an orbit Halley type, and T_J = 3 and Q = 4.5 AU do
+        not make it asteroidal-chondritic.
+
+        The Tisserand parameter is computed from q and e, so it stays finite for an unbound orbit,
+        which has no aphelion and is therefore never asteroidal-chondritic by its aphelion distance.
+
+        The asteroidal limit of T_J = 3 differs from the 3.05 of the Tancredi (2014) scheme of
+        classifyTancrediComet, so an orbit with T_J between 3 and 3.05, such as comet 2P/Encke, is
+        asteroidal-chondritic here and Jupiter family there.
+
+    Arguments:
+        q: [float] perihelion distance of the orbit (AU)
+        e: [float] num. eccentricity of the orbit
+        i: [float] inclination of the orbit (rad)
+
+    Keyword arguments:
+        ecliptic_shower: [bool] True if the meteoroid belongs to an ecliptic shower. Default False.
+
+    Return:
+        [str] one of 'sun-approaching', 'ecliptic-shower', 'halley-type', 'jupiter-family' or
+            'asteroidal-chondritic'. A numpy array of these if the input is an array.
+    """
+
+    q, e, i = np.asarray(q, dtype=float), np.asarray(e, dtype=float), np.asarray(i, dtype=float)
+
+    tisserand = _tisserandFromPerihelion(q, e, i)
+
+    # An unbound orbit has no aphelion, and is not allowed to reach the division below
+    with np.errstate(divide='ignore', invalid='ignore'):
+        aphelion = np.where(e < 1.0, q*(1.0 + e)/(1.0 - e), np.inf)
+
+    # Each test sees only the orbits the ones before it left, so the Jupiter-family test needs no
+    #   lower limit on T_J and no limit on the inclination
+    return _asLabel([q < SUN_APPROACHING_Q_LIMIT,
+                     np.asarray(ecliptic_shower, dtype=bool),
+                     (tisserand < TISSERAND_HALLEY_LIMIT)
+                        | ((tisserand <= TISSERAND_ASTEROIDAL_LIMIT) & (i > HALLEY_INCL_LIMIT)),
+                     (tisserand <= TISSERAND_ASTEROIDAL_LIMIT)
+                        & (aphelion >= ASTEROIDAL_APHELION_LIMIT)],
+                    ['sun-approaching', 'ecliptic-shower', 'halley-type', 'jupiter-family'],
+                    'asteroidal-chondritic')
+
+
+def isSunApproaching(q, q_limit=SUN_APPROACHING_Q_LIMIT):
+    """ Test whether an orbit passes close to the Sun.
+
+        The default limit is the Sun-approaching class of Borovicka et al. (2005), the first test
+        of classifyBorovicka.
+
+    Arguments:
+        q: [float] perihelion distance of the orbit (AU)
+
+    Keyword arguments:
+        q_limit: [float] perihelion distance below which an orbit is Sun-approaching (AU).
+            Default 0.2.
+
+    Return:
+        [bool] True if q < q_limit
+    """
+
+    return np.asarray(q) < q_limit
+
+
+def isProgrograde(i):
+    """ Test whether an orbit is prograde, moving around the Sun in the sense of the planets.
+
+        An orbit at exactly 90 deg is neither prograde nor retrograde.
+
+    Arguments:
+        i: [float] inclination of the orbit (rad)
+
+    Return:
+        [bool] True if i < 90 deg
+    """
+
+    return np.asarray(i) < np.pi/2
+
+
+def isRetrograde(i):
+    """ Test whether an orbit is retrograde, moving around the Sun against the sense of the planets.
+
+        An orbit at exactly 90 deg is neither prograde nor retrograde.
+
+    Arguments:
+        i: [float] inclination of the orbit (rad)
+
+    Return:
+        [bool] True if i > 90 deg
+    """
+
+    return np.asarray(i) > np.pi/2
+
+
+def isEarthCrossing(q, e):
+    """ Test whether an orbit crosses the heliocentric distance of the Earth's orbit.
+
+        This is a test on the perihelion and aphelion distance alone, q <= 1 AU <= Q. It says the
+        orbit passes through the range of distances in which the Earth moves, not that the two
+        orbits intersect in space, which depends on their orientation. For that, use calcMOID. The
+        Earth's own orbit is taken to be a circle of 1 AU.
+
+        An unbound orbit has no aphelion, so it crosses if its perihelion is inside 1 AU.
+
+    Arguments:
+        q: [float] perihelion distance of the orbit (AU)
+        e: [float] num. eccentricity of the orbit
+
+    Return:
+        [bool] True if the orbit has q <= 1 AU <= Q
+    """
+
+    q, e = np.asarray(q, dtype=float), np.asarray(e, dtype=float)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        aphelion = np.where(e < 1.0, q*(1.0 + e)/(1.0 - e), np.inf)
+
+    return (q <= A_EARTH) & (aphelion >= A_EARTH)
+
+
 def calcHillRadius(a_planet, mass_ratio):
     """ Calculate the Hill radius of a planet.
 
@@ -520,97 +829,6 @@ def classifyTancrediAsteroid(a, e, i, moid_jupiter_hill, moid_giants_min_hill):
         reaches = False
 
     return 'aco jupiter family' if reaches else 'asteroid'
-
-
-def _orbitPosition(ecc_anomaly, a, e, i, node, peri):
-    """ Heliocentric position of a point on an orbit, given its eccentric anomaly.
-
-    Arguments:
-        ecc_anomaly: [float] eccentric anomaly (rad)
-        a: [float] semi-major axis (AU)
-        e: [float] num. eccentricity
-        i: [float] inclination (rad)
-        node: [float] longitude of ascending node (rad)
-        peri: [float] argument of perihelion (rad)
-
-    Return:
-        [ndarray] position vector (AU)
-    """
-
-    # Position in the orbital plane, with the origin at the focus and x towards perihelion
-    x = a*(np.cos(ecc_anomaly) - e)
-    y = a*np.sqrt(1.0 - e**2)*np.sin(ecc_anomaly)
-
-    cos_w, sin_w = np.cos(peri), np.sin(peri)
-    cos_i, sin_i = np.cos(i), np.sin(i)
-    cos_O, sin_O = np.cos(node), np.sin(node)
-
-    # Rotate by the argument of perihelion, then by the inclination and the node, i.e. the
-    #   standard 3-1-3 Euler sequence written out
-    x_peri = x*cos_w - y*sin_w
-    y_peri = x*sin_w + y*cos_w
-
-    return np.array([x_peri*cos_O - y_peri*cos_i*sin_O, x_peri*sin_O + y_peri*cos_i*cos_O,
-        y_peri*sin_i])
-
-
-def calcMOID(a1, e1, i1, O1, w1, a2, e2, i2, O2, w2):
-    """ Calculate the minimum orbital intersection distance between two orbits.
-
-        Note the element order: this function takes the semi-major axis first, where every
-        dissimilarity criterion in wmpl.Utils.Dcriteria takes the perihelion distance. The two
-        signatures are otherwise the same shape, so a q passed here is silently accepted.
-
-        The distance between a point on each orbit is minimised over the two eccentric anomalies.
-        That surface has more than one local minimum, so the search is repeated from the three
-        further starting points the paper prescribes and the smallest of the four results is taken.
-
-        Reference: Tancredi (2014), Icarus 234, 66, appendix A, doi:10.1016/j.icarus.2014.02.013.
-
-    Arguments:
-        a1: [float] semi-major axis of the first orbit (AU)
-        e1: [float] num. eccentricity of the first orbit
-        i1: [float] inclination of the first orbit (rad)
-        O1: [float] longitude of ascending node of the first orbit (rad)
-        w1: [float] argument of perihelion of the first orbit (rad)
-        a2: [float] semi-major axis of the second orbit (AU)
-        e2: [float] num. eccentricity of the second orbit
-        i2: [float] inclination of the second orbit (rad)
-        O2: [float] longitude of ascending node of the second orbit (rad)
-        w2: [float] argument of perihelion of the second orbit (rad)
-
-    Return:
-        [float] minimum orbital intersection distance (AU)
-    """
-
-    orbit1 = (a1, e1, i1, O1, w1)
-    orbit2 = (a2, e2, i2, O2, w2)
-
-    def separation(anomalies):
-        return float(np.linalg.norm(_orbitPosition(anomalies[0], *orbit1)
-            - _orbitPosition(anomalies[1], *orbit2)))
-
-    def refine(start):
-
-        # The tolerances are well below the AU-scale distances being compared, so the result is
-        #   limited by which basin the search lands in rather than by how finely it converges
-        found = np.atleast_1d(scipy.optimize.fmin_powell(separation, np.asarray(start, dtype=float),
-            disp=False, xtol=1e-10, ftol=1e-12))
-        return found, separation(found)
-
-    # Powell converges to whichever local minimum it starts nearest, and the separation surface
-    #   has several. The paper restarts from three points reflected about the first result, which
-    #   between them reach the other basins: the opposite side of both orbits, the opposite side of
-    #   the second only, and the two reflections combined.
-    first, smallest = refine((0.0, 0.0))
-
-    for start in ((first[0] + np.pi, first[1] + np.pi), (first[0], 2*np.pi - first[1]),
-                  (first[0] + np.pi, np.pi - first[1])):
-
-        _, distance = refine(start)
-        smallest = min(smallest, distance)
-
-    return smallest
 
 
 def calcGiantPlanetMOIDs(a, e, i, node, peri):
@@ -899,6 +1117,16 @@ if __name__ == "__main__":
     output.add_argument('--quiet', '-Q', action='store_true', \
         help="Print one 'KEY VALUE' line per quantity and nothing else, for scripted use.")
 
+    uncertainty = arg_parser.add_argument_group('within the uncertainty of the orbit',
+        "Classify clones of the orbit too, drawn from the covariance of a trajectory pickle solved with "
+        "the Monte Carlo uncertainties, with the draws of wmpl.Rebound.REBOUND (--clones N --seed S here "
+        "are the clones of its --mc N --seed S). See wmpl.Utils.OrbitClones.")
+    uncertainty.add_argument('--clones', metavar='N', type=int, \
+        help="Classify N clones, and give the 95%% interval of every parameter and the share of the "
+             "clones in each class.")
+    uncertainty.add_argument('--seed', metavar='S', type=int, \
+        help="Seed of the clones, to draw the same ones again. Drawn and printed if not given.")
+
     cml_args = arg_parser.parse_args()
 
 
@@ -917,9 +1145,12 @@ if __name__ == "__main__":
 
 
     # Assemble the orbit, either from a trajectory pickle or from the elements given by hand
+    traj = None
+
     if cml_args.traj_path is not None:
 
-        orbit = loadPickle(*os.path.split(cml_args.traj_path)).orbit
+        traj = loadPickle(*os.path.split(cml_args.traj_path))
+        orbit = traj.orbit
         q, e, incl, node, peri = orbit.q, orbit.e, orbit.i, orbit.node, orbit.peri
 
     else:
@@ -955,6 +1186,22 @@ if __name__ == "__main__":
     a = q/(1.0 - e)
 
     verbose = not cml_args.quiet
+
+    if (cml_args.clones is None) and (cml_args.seed is not None):
+        reportError("--seed goes with --clones.")
+
+    if cml_args.clones is not None:
+
+        if traj is None:
+            reportError("--clones needs a trajectory pickle solved with the Monte Carlo uncertainties: "
+                "the clones are drawn from its covariance.")
+
+        if (getattr(traj, 'uncertainties', None) is None) or (getattr(traj, 'state_vect_cov', None) is None):
+            reportError("--clones: the trajectory has no Monte Carlo uncertainties (traj.state_vect_cov), "
+                "so it has no clones. Solve it again with the Monte Carlo uncertainties.")
+
+        if cml_args.clones < 2:
+            reportError("--clones needs at least 2 clones.")
 
 
     if verbose:
@@ -995,6 +1242,31 @@ if __name__ == "__main__":
     for key, label, value, fmt in parameters:
         print(("  {:<30s} " + fmt).format(label, value) if verbose \
             else "{:s} {:s}".format(key, fmt.format(value).strip()))
+
+
+    ### ORBITAL CLASS
+
+    if verbose:
+        print()
+        print("Orbital class")
+        print("-------------")
+
+    # The direction of an orbit at exactly 90 deg is neither
+    direction = "prograde" if isProgrograde(incl) else ("retrograde" if isRetrograde(incl) \
+        else "polar")
+
+    for key, label, value in (
+            ('NEO_CLASS', "near-Earth class", classifyNEO(q, e)),
+            ('ARJUNA', "Arjuna orbital domain", "yes" if bool(isArjuna(q, e, incl)) else "no"),
+            ('BOROVICKA_CLASS', "Borovicka et al. (2005) class", classifyBorovicka(q, e, incl)),
+            ('DIRECTION', "direction", direction),
+            ('EARTH_CROSSING', "Earth crossing", "yes" if bool(isEarthCrossing(q, e)) else "no"),
+            ('SUN_APPROACHING', "Sun approaching (q < {:.1f} AU)".format(SUN_APPROACHING_Q_LIMIT),
+                "yes" if bool(isSunApproaching(q)) else "no"),
+            ):
+
+        print("  {:<30s} {:>26s}".format(label, value) if verbose \
+            else "{:s} {:s}".format(key, value))
 
 
     ### TWO-PARAMETER COMETARY CLASSIFICATION
@@ -1048,3 +1320,25 @@ if __name__ == "__main__":
         print("The Tancredi classification of an asteroid was skipped: it needs the distances to")
         print("the giant planets, and so the node and the argument of perihelion, from a")
         print("trajectory pickle or from the --node and --peri arguments.")
+
+
+    ### WITHIN THE UNCERTAINTY OF THE ORBIT
+
+    if cml_args.clones is not None:
+
+        from wmpl.Utils.OrbitClones import (cloneOrbits, cloneHeaderLines, cloneClasses, classifyOrbit,
+            formatCloneClasses)
+
+        clones = cloneOrbits(traj, cml_args.clones, random_seed=cml_args.seed)
+        summary = cloneClasses(clones)
+        nominal = classifyOrbit(q, e, incl, node, peri)
+
+        if verbose:
+            print()
+            print("Within the uncertainty of the orbit")
+            print("-----------------------------------")
+            print("\n".join("  " + line for line in cloneHeaderLines(clones)))
+            print()
+
+        print("\n".join(("  " + line) if verbose and line else line
+            for line in formatCloneClasses(summary, nominal, quiet=not verbose)))
