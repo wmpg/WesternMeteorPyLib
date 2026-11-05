@@ -504,6 +504,13 @@ print(diagnostics[traj.traj_id]["megno"]["verdict"]["status"])
 `compute_megno=True` needs `return_diagnostics=True`, since the diagnostics are the only place the
 result is returned.
 
+**Units.** Each output row is `[t, state_vect_hel, orbit, planet_dists]`, in REBOUND's units: G = 1,
+lengths in AU, masses in solar masses, so the time unit is sqrt(AU³/GM☉) = 58.13244 days
+(`DAYS_PER_SIM_TIME`; REBOUND calls it `yr2pi`, a Gaussian year over 2π). Convert times with
+`simTimeToDays(t)` and `daysToSimTime(days)`. Do not use 365.25/(2π): the Julian year is 1.9e-5
+shorter, which before this was fixed made the Sun 3.8e-5 too massive and moved the Earth ~700 000 km
+off the ephemeris in 10 years.
+
 Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 
 | Function | Purpose |
