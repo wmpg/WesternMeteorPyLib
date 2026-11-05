@@ -271,14 +271,36 @@ def testOneSigmaOfTheTimeComesFromTheQuartersRates(reb):
 
 def testReportSaysWhetherTheTimeHasSettled(reb):
     """ A steady exponential settles; the stepped growth, whose fit from the onset still moves over the
-    last quarter, does not. """
+    last half of the growth phase, does not. """
 
     t = np.linspace(0.5, 1000.0, 2000)
     steady = np.where(t > 200.0, (t - 200.0)/40.0, 0.0)
     megno = np.where(t > 200.0, 10.0, 2.0)
     text = "\n".join(_report(reb, t, steady, megno, sign=-1))
     assert "Fitted from the onset to the end of each quarter: 40, 40, 40, 40 years." in text
-    assert "It changes by 0% over the last quarter: settled." in text
+    assert "It changes by 0% over the last half of the growth phase: settled." in text
 
     text = "\n".join(_report(reb, *_steppedGrowth(), sign=-1))
     assert "so it has not settled: integrate for longer." in text
+
+
+def testSettledLooksOverTheLastHalfOfTheGrowthPhase(reb):
+    """ A slow drift moves little over the last quarter, but more over the last half: the fit from the onset
+    must have held since the middle of the growth phase. """
+
+    t = np.linspace(0.5, 1000.0, 2000)
+    megno = np.where(t > 200.0, 10.0, 2.0)
+
+    # Fast in the first half of the growth phase, then slower: the cumulative fit drifts upwards
+    grown = t - 200.0
+    rate = np.where(grown <= 400.0, 1/30.0, 1/50.0)
+    ln_delta = np.where(t > 200.0, np.cumsum(rate*np.gradient(t)*(t > 200.0)), 0.0)
+
+    fit = reb.lyapunovFromDeviation(t, ln_delta, megno, 1.0)
+    taus = [c["lyapunov_time_years"] for c in fit["cumulative"]]
+
+    assert abs(taus[-1] - taus[-2])/taus[-1] < reb.LYAPUNOV_SETTLED_TOL
+    assert abs(taus[-1] - taus[-3])/taus[-1] > reb.LYAPUNOV_SETTLED_TOL
+
+    text = "\n".join(_report(reb, t, ln_delta, megno, sign=-1))
+    assert "over the last half of the growth phase, so it has not settled" in text
