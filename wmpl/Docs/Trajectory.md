@@ -83,18 +83,6 @@ own first point, so the velocity of a fragment is the one at its first point, an
 leaves out the fragments that appear below it, which keep the straight line. The comparison says which method
 every solution used.
 
-A fragment seen with enough points (4 or more) from only one station cannot be solved, as one station gives a
-plane and not a line. Its points are projected on the main trajectory at the times of their frames, corrected
-by the time offset of the station, as the flares are, and reported in the terminal and at the end of the saved
-report: the height and time of every point, how far off the main path it is and how fast it moves away from it,
-and how far ahead of the main fragment it is at the same time. This assumes that the fragment is on the main
-path, which one station cannot test. Only the part of a separation across the line of sight is seen, so the
-distances off the path and the speeds are lower limits. The rest moves the point along the line of sight, which
-the report gives as the error of the height, and of how far ahead it is, per 100 m off the path. The uncertainties
-come from the Monte Carlo runs of the main trajectory, with the scatter of the points of the fragment as their
-noise, and do not include a separation from the main path. A fragment whose only station is not in the main
-trajectory is skipped, as the time offset of that station is unknown.
-
 ## The trajectory pickle
 
 A successful run writes `<event>_trajectory.pickle` (plus plots and a text report) into the output
