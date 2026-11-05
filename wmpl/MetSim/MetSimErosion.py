@@ -1553,11 +1553,30 @@ def energyReceivedBeforeErosion(const, lam=1.0):
 
 if __name__ == "__main__":
 
+    import argparse
+
     import matplotlib.pyplot as plt
 
 
-    from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+    from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
     from wmpl.Utils.TrajConversions import date2JD
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Run the ablation simulation using the meteoroid parameters hardcoded in this file.")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
+
+    #########################
 
 
     # Show wake

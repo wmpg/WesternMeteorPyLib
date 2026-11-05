@@ -7,6 +7,7 @@ import time
 import numpy as np
 
 from wmpl.Trajectory.Trajectory import Trajectory
+from wmpl.Utils.AtmosphereDensity import addAtmosphereArguments
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, equatorialCoordPrecession_vect, raDec2AltAz_vect, \
@@ -458,5 +459,8 @@ def addSolverOptions(arg_parser, skip_velpart=False):
 
     arg_parser.add_argument('-o', '--enableOSM', 
         help="Enable OSM based groung plots. Internet connection required.", action="store_true")
+
+    # Atmosphere model for any density the solver evaluates; setAtmosphere() applies it after parsing
+    addAtmosphereArguments(arg_parser)
 
     return arg_parser

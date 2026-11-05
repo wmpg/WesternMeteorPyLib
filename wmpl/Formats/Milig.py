@@ -8,6 +8,7 @@ import argparse
 
 import numpy as np
 
+from wmpl.Utils.AtmosphereDensity import setAtmosphere
 from wmpl.Formats.GenericFunctions import addSolverOptions, writeMiligInputFileMeteorObservation
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
@@ -362,6 +363,9 @@ if __name__ == '__main__':
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Atmosphere model for any density the solver evaluates, also in its Monte Carlo processes
+    setAtmosphere(cml_args)
 
     ############################
     
