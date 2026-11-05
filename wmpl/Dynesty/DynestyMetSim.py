@@ -158,7 +158,8 @@ def buildGlobalTimeAxis(
     lag_key="lag",           # optional in data
     v_init=None,             # if given, recompute lag = length - v_init*time
     min_overlap_pts=8,
-    offset_tol=2e-3,):
+    offset_tol=2e-3,
+    mag_key=None,):
     """ Align station clocks to the station that starts at the highest altitude.
 
     If length exists, also align length and re-zero it at the same global start.
@@ -176,6 +177,8 @@ def buildGlobalTimeAxis(
         v_init: [float] Initial velocity. If provided, lag is recomputed. None by default.
         min_overlap_pts: [int] Minimum number of overlapping points required for alignment. 8 by default.
         offset_tol: [float] Offset tolerance for time alignment. 2e-3 by default.
+        mag_key: [str] Key for magnitude data. Of the points with the same time, the ones with a magnitude are
+            kept before the ones without (NaN). None by default, in which case any of them may be kept.
 
     Return:
         out: [dict] Updated data dictionary with aligned time (and optionally length/lag).
@@ -282,6 +285,10 @@ def buildGlobalTimeAxis(
 
     # Finally sort by time (required for integration)
     idx = np.argsort(out[time_key])
+
+    # Put the points without a magnitude after the others with the same time, so they are the duplicates
+    if (mag_key is not None) and (mag_key in out) and np.any(np.isnan(out[mag_key].astype(float))):
+        idx = np.lexsort((np.isnan(out[mag_key].astype(float)), out[time_key]))
     out = {k: np.asarray(v)[idx] for k, v in out.items()}
 
     # Drop duplicate times
@@ -3852,7 +3859,8 @@ class ObservationData:
             offset_tol_use=0.2*(1/self.fps_lum)
         else:
             offset_tol_use=0.2*(1/80.0)
-        lum_data, lum_aligned = buildGlobalTimeAxis(lum_data,offset_tol=offset_tol_use)
+        lum_data, lum_aligned = buildGlobalTimeAxis(lum_data,offset_tol=offset_tol_use, \
+            mag_key='absolute_magnitudes')
         if lum_aligned:
             print('Luminosity data aligned to global time axis.')
 
