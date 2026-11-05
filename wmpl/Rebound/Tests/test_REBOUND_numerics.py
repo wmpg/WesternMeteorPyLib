@@ -4,7 +4,9 @@ These cover the parts that are pure numerics and need no integration, so they ru
 or REBOUNDx installed, plus the Hill-radius table's internal consistency.
 """
 
+import io
 import os
+import sys
 import importlib.util
 from types import SimpleNamespace
 
@@ -568,3 +570,68 @@ def testMoonEncounterIsGeometricallyReachableOnlyNearEarth(reb):
     earth_radius_au = 6371.0/149597870.7
 
     assert (moon_perigee_au - earth_radius_au) > 3.0*reb.HILL_RADII_AU["Luna"]
+
+
+def testTimeSpanUsesTheUnitThatSuitsItsLength(reb):
+    """ Spans of a year or more lead with years, spans under a day add hours, and the days are
+    always printed. The sign is ignored, since the direction is stated separately.
+    """
+
+    assert reb.formatTimeSpan(60) == "60.00 days"
+    assert reb.formatTimeSpan(-60) == "60.00 days"
+    assert reb.formatTimeSpan(36525) == "100.00 years (36525.00 days)"
+    assert reb.formatTimeSpan(-365.25) == "1.00 years (365.25 days)"
+    assert reb.formatTimeSpan(0.25) == "0.25 days (6.00 h)"
+    assert reb.formatTimeSpan(0.0123, decimals=4) == "0.0123 days (0.2952 h)"
+
+    # Years keep a decimal even when the days have none, so 1288 d does not read as "4 years"
+    assert reb.formatTimeSpan(1288.3, decimals=0) == "3.5 years (1288 days)"
+
+
+class _Terminal(io.StringIO):
+    """ A stdout stand-in that claims to be a terminal. """
+
+    def isatty(self):
+        return True
+
+
+def testDurationTextScalesItsUnit(reb):
+
+    assert reb._durationText(42) == "42 s"
+    assert reb._durationText(720) == "12 min"
+    assert reb._durationText(9000) == "2.5 h"
+
+
+def testProgressLineIsSilentOffATerminal(reb, monkeypatch):
+    """ Log files must not fill up with intermediate progress states. """
+
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+
+    line = reb._ProgressLine(True)
+    line.show("Nominal orbit: 10 days integrated", 0.5)
+    line.end()
+
+    assert not line.enabled
+    assert out.getvalue() == ""
+
+
+def testProgressLineRewritesItselfInPlace(reb, monkeypatch):
+    """ Each update overwrites the previous one, a shorter line is padded so nothing of the longer
+    one is left behind, and end() erases the line. """
+
+    out = _Terminal()
+    monkeypatch.setattr(sys, "stdout", out)
+
+    line = reb._ProgressLine(True)
+    line.show("Nominal orbit: 12.3 years (4493 days) integrated", 0.25)
+    line.show("MEGNO: 1 days integrated", 0.0)
+    first, second = out.getvalue().split("\r")[1:]
+
+    assert first.startswith("  Nominal orbit: 12.3 years (4493 days) integrated, 25%, ~")
+    assert first.endswith(" left")
+    assert second.rstrip() == "  MEGNO: 1 days integrated, 0%"
+    assert len(second) == len(first)
+
+    line.end()
+    assert out.getvalue().endswith("\r" + " "*len(second) + "\r")
