@@ -19,12 +19,15 @@ import contextlib
 
 import numpy as np
 import pytest
+import scipy.optimize
 
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo
+from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo, jd2LST, latLonAlt2ECEF, ecef2ENU
+from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity
 from wmpl.Utils.Math import lineFunc
+from wmpl.Utils.DynamicMassFit import groundSpeed, computeFragEndParams, interpolateHtVsTimeLen
 
 
 # A solved trajectory shipped with the repository (2019-10-23, four stations, gravity correction on)
@@ -145,6 +148,64 @@ def testPointOnTrajectoryStartsAtTheStateVectorAndDropsPerpendicularly(traj):
     assert abs(np.dot(drop, traj.radiant_eci_mini)) < 1e-6
     assert 0.1 < np.linalg.norm(drop) < 10.0, "a ~0.3 s flight drops by a fraction of a metre to metres"
     assert np.dot(drop, on_line) < 0, "the drop points towards the Earth"
+
+
+### Speeds relative to the ground ###
+
+def testGroundSpeedRemovesTheEarthRotationFromTheSolverSpeeds(traj):
+    """ The solver's point speeds are measured in the ECI frame. The speeds of its model points in a frame fixed
+        to the ground, by finite differences after rotating them with the Earth, are the ground speeds. """
+
+    for obs in traj.observations:
+        t = obs.time_data
+        eci = np.asarray(obs.model_eci)
+        gst = np.radians([jd2LST(traj.jdt_ref + ti/86400, 0)[0] for ti in t])
+        ecef = np.column_stack([np.cos(gst)*eci[:, 0] + np.sin(gst)*eci[:, 1], \
+            -np.sin(gst)*eci[:, 0] + np.cos(gst)*eci[:, 1], eci[:, 2]])
+
+        v_eci = np.linalg.norm(np.diff(eci, axis=0), axis=1)/np.diff(t)
+        v_ground = np.linalg.norm(np.diff(ecef, axis=0), axis=1)/np.diff(t)
+
+        assert groundSpeed(traj, eci[1:], v_eci) == pytest.approx(v_ground, rel=1e-4)
+        assert np.max(np.abs(v_eci - v_ground)) > 40, "the rotation is a sizeable part of the speed"
+
+
+def _ecef(lat, lon, ele_msl):
+    """ ECEF position (m) of a point given by geodetic latitude and longitude (radians) and height above the
+        sea level (m), independent of the ECI frame. """
+
+    return np.array(latLonAlt2ECEF(lat, lon, mslToWGS84Height(lat, lon, ele_msl)))
+
+
+def testEndOfAblationMovesWithTheGround(traj):
+    """ The simulated length is relative to the ground, so seen from the ground the final point is that length
+        away from the evaluation point along the ground-fixed direction of motion, with no sideways shift. The
+        gravity drop is vertical and across the track only. Placing the length along the ECI line instead
+        misses the rotation of the ground over the simulated time, here over a kilometre. """
+
+    height = 100000.0
+    with contextlib.redirect_stdout(io.StringIO()):
+        sr, _, lat, lon, ele, _, _ = computeFragEndParams(traj, 1.0, 3500, height, 20000.0, 0.55)
+
+    # The evaluation point, as computeFragEndParams() finds it
+    ht_vs_time_interp, _ = interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False)
+    meas_time = ht_vs_time_interp(height)
+    meas_len = scipy.optimize.brentq(lambda l: cartesian2Geo(traj.jdt_ref + meas_time/86400, \
+        *pointOnTrajectory(traj, l, meas_time))[2] - height, 0, np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
+    eval_eci = pointOnTrajectory(traj, meas_len, meas_time)
+    eval_jd = traj.jdt_ref + meas_time/86400
+    eval_lat, eval_lon, _ = cartesian2Geo(eval_jd, *eval_eci)
+
+    # The ground-fixed direction of motion at the evaluation point
+    azim, elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, eval_eci, eval_jd, eval_lat, eval_lon)
+    motion = -np.array([np.sin(azim)*np.cos(elev), np.cos(azim)*np.cos(elev), np.sin(elev)])
+    across = np.array([np.cos(azim), -np.sin(azim), 0.0])
+
+    displacement = np.array(ecef2ENU(eval_lat, eval_lon, *(_ecef(np.radians(lat), np.radians(lon), 1000*ele) \
+        - _ecef(eval_lat, eval_lon, height))))
+
+    assert np.dot(displacement, motion) == pytest.approx(sr.frag_main.length, abs=2.0)
+    assert np.dot(displacement, across) == pytest.approx(0.0, abs=2.0)
 
 
 ### The velocity fit ###
