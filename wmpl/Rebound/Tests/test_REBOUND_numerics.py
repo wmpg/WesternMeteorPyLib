@@ -41,8 +41,8 @@ def _series(n_samples, sep_func, a_func=None, day_step=1.0, helio_r=1.0):
     that bounds the fit window compares the ensemble spread against that distance.
     """
 
-    year = 2*np.pi
-    times = [k*day_step/365.25*year for k in range(n_samples)]
+    days_per_unit = np.sqrt(149597870700.0**3/1.3271244004193938e20)/86400.0
+    times = [k*day_step/days_per_unit for k in range(n_samples)]
 
     nominal = [_mkrow(t, helio_r) for t in times]
 
@@ -233,6 +233,7 @@ def testMegnoGrowingLinearlyIsChaoticWithLyapunovTime(reb):
 
     assert v["status"] == "chaotic"
     assert v["lyapunov_time_years"] == pytest.approx(lyapunov_time, rel=1e-6)
+    assert v["lyapunov_method"] == "megno_second_half"
 
 
 def testMegnoTendingToZeroIsPeriodic(reb):
@@ -568,3 +569,171 @@ def testMoonEncounterIsGeometricallyReachableOnlyNearEarth(reb):
     earth_radius_au = 6371.0/149597870.7
 
     assert (moon_perigee_au - earth_radius_au) > 3.0*reb.HILL_RADII_AU["Luna"]
+
+
+
+### Lyapunov time from ln|delta| ###
+
+
+def _megnoFromLnDelta(t_years, ln_delta):
+    """ <Y> from ln|delta| with the integrals of computeMegno (midpoint rule), starting at t = 0. """
+
+    t = np.concatenate([[0.0], t_years])
+    l = np.concatenate([[ln_delta[0]], ln_delta])
+    I = np.concatenate([[0.0], np.cumsum(0.5*(t[1:] + t[:-1])*np.diff(l))])
+    Y = np.where(t > 0, 2*I/np.where(t > 0, t, 1), 0.0)
+    J = np.concatenate([[0.0], np.cumsum(0.5*(Y[1:] + Y[:-1])*np.diff(t))])
+
+    return (J/np.where(t > 0, t, 1))[1:]
+
+
+def _lnDeltaSeries(reb, ln_func, years=1000.0, a_au=1.0, n=2000):
+    """ Times (days), <Y>, a and ln|delta| for a given ln|delta|(t in years). """
+
+    t_years = np.linspace(years/n, years, n)
+    ln_delta = np.array([ln_func(t) for t in t_years])
+
+    return list(t_years*365.25), list(_megnoFromLnDelta(t_years, ln_delta)), [a_au]*n, list(ln_delta)
+
+
+def testLyapunovTimeComesFromTheGrowthOfLnDelta(reb):
+    """ A deviation that grows like a regular one (ln t) and then exponentially from 300 years on: the
+    Lyapunov time is that of the exponential phase, in every window of it. """
+
+    tau = 40.0
+    times, megno, a, ln_delta = _lnDeltaSeries(
+        reb, lambda t: np.log(min(t, 300.0)) + (max(t - 300.0, 0.0)/tau))
+
+    v = reb.classifyMegno(times, megno, a, ln_delta=ln_delta)
+
+    assert v["status"] == "chaotic"
+    assert v["lyapunov_method"] == "ln_delta"
+    assert v["lyapunov_time_years"] == pytest.approx(tau, rel=0.02)
+    assert v["lyapunov_time_range_years"][0] == pytest.approx(tau, rel=0.05)
+    assert v["lyapunov_time_range_years"][1] == pytest.approx(tau, rel=0.05)
+    assert v["lyapunov_onset_years"] > 300.0
+
+
+def testRegularDeviationGrowthIsRegular(reb):
+    """ ln|delta| growing as ln t (a regular orbit) gives <Y> -> 2 and no Lyapunov time. """
+
+    v = reb.classifyMegno(*_lnDeltaSeries(reb, lambda t: np.log(t))[:3],
+                          ln_delta=_lnDeltaSeries(reb, lambda t: np.log(t))[3])
+
+    assert v["status"] == "regular"
+    assert v["lyapunov_time_years"] is None
+
+
+def testNoLyapunovTimeFromAShortGrowthPhase(reb):
+    """ Exponential growth over fewer than LYAPUNOV_MIN_ORBITS periods is not timed. """
+
+    t = np.linspace(1.0, 1000.0, 2000)
+    period = 11.9
+    ln_delta = np.log(t) + np.maximum(t - 1000.0 + 0.5*reb.LYAPUNOV_MIN_ORBITS*period, 0.0)/5.0
+    megno = 2.0 + np.maximum(t - 900.0, 0.0)
+
+    assert reb.lyapunovFromDeviation(t, ln_delta, megno, period) is None
+
+    # Over enough periods it is timed
+    ln_delta = np.log(t) + np.maximum(t - 500.0, 0.0)/5.0
+    fit = reb.lyapunovFromDeviation(t, ln_delta, 2.0 + np.maximum(t - 500.0, 0.0), period)
+    assert fit["lyapunov_time_years"] == pytest.approx(5.0, rel=0.01)
+
+
+### Predictability horizon from the clones ###
+
+
+def _cloneOutputs(n_clones=40, n_out=200, scramble_at=None, seed=0, e_scramble_at=None):
+    """ Nominal and clone outputs whose a (and e) keep the order of their start until scramble_at,
+    and are shuffled among the clones after it. Time step 1 year (backward). """
+
+    rng = np.random.default_rng(seed)
+    day = 365.25
+    times = [-k*day for k in range(n_out)]
+
+    def rows(a, e):
+        out = []
+        for k, t in enumerate(times):
+            orbit = SimpleNamespace(a=a[k], e=e[k], inc=0.1 + 0.001*a[k], Omega=0.0, omega=0.0, f=0.0)
+            out.append([t*2*np.pi/365.25, None, orbit, {"Earth": 0.0 if k == 0 else 1.0}])
+        return out
+
+    a0 = 2.0 + 0.01*rng.normal(size=n_clones)
+    e0 = 0.6 + 0.001*rng.normal(size=n_clones)
+    a = np.tile(a0, (n_out, 1)) + 1e-5*rng.normal(size=(n_out, n_clones))
+    e = np.tile(e0, (n_out, 1))
+    if scramble_at is not None:
+        for k in range(scramble_at, n_out):
+            a[k] = rng.permutation(a0)
+    if e_scramble_at is not None:
+        for k in range(e_scramble_at, n_out):
+            e[k] = rng.permutation(e0)
+
+    nominal = rows(np.full(n_out, 2.0), np.full(n_out, 0.6))
+    clones = {"obj_MC_{:d}".format(j): rows(a[:, j], e[:, j]) for j in range(n_clones)}
+
+    return nominal, clones
+
+
+def testHorizonIsWhereTheClonesLoseTheOrderOfTheirStart(reb):
+
+    nominal, clones = _cloneOutputs(scramble_at=60, e_scramble_at=120)
+
+    h = reb.predictabilityHorizon(nominal, clones)
+
+    assert h["n_clones"] == 40
+    assert abs(h["elements"]["a"]["horizon_days"])/365.25 == pytest.approx(59, abs=1)
+    assert abs(h["elements"]["e"]["horizon_days"])/365.25 == pytest.approx(119, abs=1)
+
+    # The horizon of the run is the earliest one
+    assert abs(h["horizon_days"])/365.25 == pytest.approx(59, abs=1)
+    assert abs(h["elements"]["a"]["rank_corr_end"]) < 0.5
+
+    lines = reb._predictabilityReportLines(h, 199*365.25)
+    assert any("Beyond ~59 years" in line for line in lines)
+
+
+def testHorizonNotReachedOnAShortRun(reb):
+    """ The default run, 60 days: the clones keep their order, so there is no horizon. """
+
+    nominal, clones = _cloneOutputs(n_out=60)
+
+    h = reb.predictabilityHorizon(nominal, clones)
+
+    assert h["horizon_days"] is None
+    assert all(el["horizon_days"] is None for el in h["elements"].values())
+    assert h["elements"]["a"]["rank_corr_end"] > 0.99
+
+    lines = reb._predictabilityReportLines(h, 60.0)
+    assert any("Not reached within the 60 days" in line for line in lines)
+
+
+def testHorizonNeedsEnoughClonesOverTheWholeSpan(reb):
+
+    nominal, clones = _cloneOutputs(n_clones=reb.PREDICTABILITY_MIN_CLONES - 1)
+    assert reb.predictabilityHorizon(nominal, clones) is None
+
+    # Clones that ended early (impacted) are left out
+    nominal, clones = _cloneOutputs(n_clones=reb.PREDICTABILITY_MIN_CLONES + 2)
+    for name in list(clones)[:3]:
+        clones[name] = clones[name][:50]
+    assert reb.predictabilityHorizon(nominal, clones) is None
+
+
+def testHorizonReportsTheFirstEncounters(reb):
+    """ The time of each clone's first close encounter, without the Sun passages. """
+
+    nominal, clones = _cloneOutputs(n_clones=20)
+    diag = {}
+    for j, name in enumerate(clones):
+        encounters = [{"body": "Sun", "time_days": -1.0}]
+        if j < 10:
+            encounters += [{"body": "Earth", "time_days": -365.25*(10 + j)},
+                           {"body": "Luna", "time_days": -365.25*(100 + j)}]
+        diag[name] = {"encounters": encounters}
+
+    fe = reb.predictabilityHorizon(nominal, clones, clone_diag=diag)["first_encounter_days"]
+
+    assert fe["fraction"] == pytest.approx(0.5)
+    assert fe["p50"]/365.25 == pytest.approx(14.5, abs=0.01)
+    assert fe["p05"]/365.25 >= 10.0
