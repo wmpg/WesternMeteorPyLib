@@ -26,13 +26,23 @@ def testBuildDirIsOnePerCopy():
         copy_b = os.path.join(tmp_dir, "b", "wmpl")
         os.makedirs(copy_a)
         os.makedirs(copy_b)
-        link_a = os.path.join(tmp_dir, "link_a")
-        os.symlink(os.path.join(tmp_dir, "a"), link_a)
 
         dir_a, dir_b = pyximportBuildDir(copy_a), pyximportBuildDir(copy_b)
 
         assert dir_a != dir_b
-        assert pyximportBuildDir(os.path.join(link_a, "wmpl")) == dir_a
+
+        # Check the link only where links can be made, which on Windows needs extra privileges
+        link_a = os.path.join(tmp_dir, "link_a")
+        try:
+            os.symlink(os.path.join(tmp_dir, "a"), link_a)
+            link_made = True
+
+        except (OSError, NotImplementedError):
+            link_made = False
+
+        if link_made:
+            assert pyximportBuildDir(os.path.join(link_a, "wmpl")) == dir_a
+
         for build_dir in (dir_a, dir_b):
             assert os.path.dirname(build_dir) == os.path.join(os.path.expanduser("~"), ".pyxbld")
             assert os.path.basename(build_dir).startswith("wmpl_")
