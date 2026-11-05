@@ -41,8 +41,8 @@ def _series(n_samples, sep_func, a_func=None, day_step=1.0, helio_r=1.0):
     that bounds the fit window compares the ensemble spread against that distance.
     """
 
-    year = 2*np.pi
-    times = [k*day_step/365.25*year for k in range(n_samples)]
+    days_per_unit = np.sqrt(149597870700.0**3/1.3271244004193938e20)/86400.0
+    times = [k*day_step/days_per_unit for k in range(n_samples)]
 
     nominal = [_mkrow(t, helio_r) for t in times]
 
