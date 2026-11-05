@@ -48,6 +48,13 @@ def testCircPercentileOfAnglesFrom0To360():
     # A tiny negative angle with a given 0th percentile of 0 stays at the end of the ordering
     assert np.isclose(circPercentile([-1e-16, 0.1, 0.2], 50, q0=0), 0.2)
 
+    # Tiny negative angles which wrap to the same value keep their order along the circle
+    for data in ([-1e-16, -2e-16, 0.1], [-2e-16, -1e-16, 0.1]):
+        assert np.isclose(np.cos(circPercentile(data, 50)), 1.0)
+
+    # The angles can be given in an array of any shape
+    assert np.isclose(circPercentile([[0.4, 0.3], [0.2, 0.1]], 50), 0.25)
+
 
 
 def testCircPercentileOfAnglesFromMinus180To180():
