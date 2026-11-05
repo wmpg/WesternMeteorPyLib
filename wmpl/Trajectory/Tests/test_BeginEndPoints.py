@@ -62,7 +62,7 @@ def _solve():
     points = np.array([applyGravityDrop(point, t, np.linalg.norm(begin), 1.0, v0z) \
         for point, t in zip(straight, times)])
 
-    # The picks are kept as given: none is rejected on its residual
+    # Keep all picks as given, without rejecting any on its residual
     traj = Trajectory(JDT_REF, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
         gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
         save_results=False, verbose=False)
