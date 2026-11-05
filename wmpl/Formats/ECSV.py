@@ -992,7 +992,8 @@ def oneStationSolution(traj, meteor, input_meteors, time_diffs=None, **noise_kwa
             the plane of the path and the line of sight). Also the first and last values of straight and 
             quadratic fits over the noise of the points: 
             off_first, off_last, off_rate (m/s), ahead_first and ahead_last; and off_noise, the scatter of the 
-            points about the fit (m), los_noise, the same as an angle (rad), and station_id.
+            points about the fit (m), los_noise, the same as an angle (rad), outside (the time the fragment is 
+            seen outside the main fragment, s), and station_id.
     """
 
     projected = projectFlares(traj, [meteor], input_meteors, time_diffs=time_diffs, **noise_kwargs)
@@ -1017,23 +1018,17 @@ def oneStationSolution(traj, meteor, input_meteors, time_diffs=None, **noise_kwa
     off_residuals = off - np.polyval(off_poly, t)
 
     # Distance along the path of the main fragment at the time of every point, with its points at their times in 
-    #   this solution, by a local fit: its deceleration is not a parabola over the whole flight
+    #   this solution
     used = [obs for obs in traj.observations if not obs.ignore_station]
     main_t = np.concatenate([(obs.JD_data[obs.ignore_list == 0] - jd[0])*86400 
         + (time_diffs or {}).get(str(obs.station_id), 0.0) for obs in used])
     main_along = np.dot(np.concatenate([obs.model_eci[obs.ignore_list == 0] for obs in used]) 
         - traj.state_vect_mini, direction)
 
-    def mainAlong(time):
-
-        near = np.abs(main_t - time) <= 0.3
-        if np.sum(near) < 10:
-            near = np.argsort(np.abs(main_t - time))[:10]
-
-        return np.polyval(np.polyfit(main_t[near], main_along[near], 2), time)
+    main_motion = localMotionFit(main_t, main_along)
 
     # The fit is on the difference with the main fragment, which is much smoother than the motion of either
-    ahead = np.dot(eci - traj.state_vect_mini, direction) - np.array([mainAlong(time) for time in t])
+    ahead = np.dot(eci - traj.state_vect_mini, direction) - np.array([main_motion(time) for time in t])
     ahead_fit = np.polyval(np.polyfit(t, ahead, min(2, len(t) - 1)), t)
 
     # A fragment off the path by a distance in the plane of the path and the line of sight is on the same line of 
@@ -1049,6 +1044,7 @@ def oneStationSolution(traj, meteor, input_meteors, time_diffs=None, **noise_kwa
         'ahead_per_m': 1/np.tan(los_path_angle), 
         'off_first': np.polyval(off_poly, t[0]), 'off_last': np.polyval(off_poly, t[-1]), 'off_rate': off_poly[0], 
         'ahead_first': ahead_fit[0], 'ahead_last': ahead_fit[-1], 'off_noise': np.std(off_residuals, ddof=2), 
+        'outside': max(t[-1] - np.max(main_t), np.min(main_t) - t[0]), 
         'los_noise': np.std(off_residuals/np.linalg.norm(eci - stat, axis=1), ddof=2)}
 
 
@@ -1181,6 +1177,9 @@ def oneStationFragmentReport(fragments, traj, ref_stations=None):
             "                          time), as if on the main path\n".format(
             valueStr(frag['ahead_first'], std(frag, 'ahead_first'), "{:+.0f}"),
             valueStr(frag['ahead_last'], std(frag, 'ahead_last'), "{:+.0f}"))
+        if frag['outside'] > 0.05:
+            out_str += "  NOTE: the fragment is seen {:.2f} s outside the main one, for which that part is " \
+                "extrapolated\n".format(frag['outside'])
         out_str += "  If 100 m off the path : in the plane of the path and the line of sight, which is not seen, the\n" \
             "                          heights are off by {:.0f} m at the fragment's first point and {:.0f} m at its\n" \
             "                          last, and how far ahead it is by {:.0f} and {:.0f} m\n".format(

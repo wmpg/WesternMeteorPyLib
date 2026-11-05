@@ -293,6 +293,11 @@ def test_the_report_with_and_without_the_monte_carlo_runs(tmp_path):
     assert "reference station XX0002" in report
     assert "Without the Monte Carlo runs" in report
     assert "+/-" not in report
+    assert "extrapolated" not in report
+
+    # Seen after the last point of the main fragment
+    report = oneStationFragmentReport([dict(fragments[0], outside=0.4)], traj)
+    assert "seen 0.40 s outside the main one" in report
 
     fragments = oneStationFragments(traj, paths, mc_trajs=monteCarloRuns(traj))
     frag = fragments[0]
