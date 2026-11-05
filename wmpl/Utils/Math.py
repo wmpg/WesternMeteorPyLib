@@ -200,7 +200,7 @@ def circPercentile(data, percentile, q0=None):
     Source: https://github.com/circstat/pycircstat/blob/53d2efdf54c394fd9ecff8d47eaae165c1458fb0/pycircstat/descriptive.py#L375
 
     Arguments:
-        data: [array-like] Angles in radians.
+        data: [array-like] Angles in radians, in any range (e.g. 0 to 2 pi or -pi to pi).
         percentile: [float] Percentile in the [0, 100] range.
 
     Keyword arguments:
@@ -215,6 +215,15 @@ def circPercentile(data, percentile, q0=None):
     data = np.array(data)
 
     if q0 is None:
+
+        # Wrap the angles to 0-360, so angles from -180 to 180 (e.g. longitudes) are also taken, in double
+        #   precision so the order of the samples is kept
+        data = data.astype(np.float64)%(2*np.pi)
+
+        # Without a value for every sample (e.g. the anomalies of a hyperbolic orbit), the percentile is NaN
+        if np.any(np.isnan(data)):
+            return np.nan
+
         # If the data is on the 0/360 discontinuity, adjust the 0th percentile
         if np.abs(np.min(data) - np.max(data)) > np.pi:
             q0 = np.min(data[data > np.pi])
