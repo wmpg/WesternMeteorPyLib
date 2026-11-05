@@ -13,6 +13,7 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 import scipy.integrate
 import scipy.optimize
+import scipy.special
 
 # Re-exported so that a caller can keep importing them from here
 from wmpl.Utils.OrbitConstants import (GAUSS_K, GAUSS_K_SQUARED, A_JUPITER, A_SATURN, A_URANUS,
@@ -857,6 +858,304 @@ def calcResonanceWidth(p, p_plus_q, e, mass_ratio=MASS_RATIO_JUPITER, a_planet=A
             - 2.0/(9*j2*e)*strength
 
     return relative_width*(float(p)/p_plus_q)**(2.0/3.0)*a_planet
+
+
+
+
+# Perihelion and semi-major axis limits of the Jupiter-family dynamics metrics [AU]. A Jupiter-family
+#   comet spends most of its time beyond either, because close encounters with Jupiter keep lifting
+#   its perihelion, while an asteroid on a comet-like orbit rarely reaches them. Shober et al. (2024),
+#   sec. 2.4.1, after Fernandez et al. (2014)
+JFC_DYNAMICS_Q_LIMIT = 2.5
+JFC_DYNAMICS_A_LIMIT = 7.37
+
+# Fraction of the clones of an object reaching JFC_DYNAMICS_Q_LIMIT above which the object is taken to
+#   move like a Jupiter-family comet. Over 90% of 661 known JFCs exceed it over 10 kyr, against ~10% of
+#   the fireballs on Jupiter-family orbits, Shober et al. (2024), sec. 3.3.1
+JFC_DYNAMICS_P_THRESHOLD = 0.5
+
+
+def calcKozaiEnergy(e, i):
+    """ Calculate the Kozai energy H = sqrt(1 - e^2) cos(i) of an orbit.
+
+        H is the z-component of the orbital angular momentum in units of sqrt(G*M_sun*a), which the
+        secular perturbations of an axisymmetric potential conserve. Below about 0.7 the perihelion
+        distance and the argument of perihelion of a Jupiter-family orbit cycle together under the
+        Kozai mechanism (Fernandez et al. 2014), which can lift the perihelion without any close
+        encounter. Its square is the C1 of calcDB in wmpl.Utils.Dcriteria.
+
+        Reference: Shober et al. (2024), A&A 687, A181, sec. 3.3.3,
+        doi:10.1051/0004-6361/202449635.
+
+    Arguments:
+        e: [float] num. eccentricity of the orbit
+        i: [float] inclination of the orbit (rad)
+
+    Return:
+        [float] H, negative for a retrograde orbit. nan for an unbound orbit (e > 1).
+    """
+
+    return np.sqrt(1.0 - e**2)*np.cos(i)
+
+
+def _ensembleArrays(t, *series):
+    """ Check the output times and per-clone series of an integrated ensemble and shape them.
+
+    Arguments:
+        t: [ndarray] output times (yr), shape (n_times,)
+        *series: [ndarray] one or more per-clone series, each of shape (n_clones, n_times), or
+            (n_times,) for a single clone
+
+    Return:
+        (elapsed, arrays):
+            elapsed: [ndarray] time elapsed since the epoch at each output (yr), which does not
+                depend on whether the integration ran forward or backward
+            arrays: [list] the series as 2D float arrays
+    """
+
+    t = np.asarray(t, dtype=float)
+
+    if t.ndim != 1:
+        raise ValueError("The output times have to be a 1D array, got shape {}.".format(t.shape))
+
+    # Integration order is the order of the outputs only if they move away from the epoch
+    elapsed = np.abs(t)
+    if np.any(np.diff(elapsed) < 0):
+        raise ValueError("The output times have to move away from the epoch monotonically.")
+
+    arrays = []
+    for s in series:
+
+        s = np.atleast_2d(np.asarray(s, dtype=float))
+
+        if s.shape[1] != len(t):
+            raise ValueError("A series has {:d} samples per clone for {:d} output times.".format(
+                s.shape[1], len(t)))
+
+        arrays.append(s)
+
+    return elapsed, arrays
+
+
+def calcExcursionFractions(t, q, a, q_limit=JFC_DYNAMICS_Q_LIMIT, a_limit=JFC_DYNAMICS_A_LIMIT):
+    """ Calculate the fractions of time an ensemble of clones spends with its perihelion distance and
+        its semi-major axis beyond the Jupiter-family limits, the f_q and f_a indices.
+
+        f_q = sum_j dt_j/sum_j T_j, where dt_j is the time clone j spends with q > q_limit and T_j the
+        time over which it was integrated, and likewise f_a with a > a_limit. With every clone
+        integrated over the same span T this is eq. 1 and 2 of Shober et al. (2024), which divide by
+        N*T. A clone that ends early, by hitting a body, contributes only the time it was followed,
+        so its missing time is neither counted as beyond the limit nor as within it.
+
+        Each output is held until the next one, so the times are exact for a series that changes only
+        at the outputs, and otherwise off by at most one output interval per crossing of a limit. A
+        clone that ends between two outputs is likewise taken as followed until the second. The first
+        output is the state the integration starts from, not a result of it, so the first interval
+        takes the state of the second output instead: a clone started beyond a limit that leaves it
+        at once would otherwise count one interval beyond it, which is 0.5% of the time with 200
+        outputs and more the shorter the run.
+
+        Reference: Fernandez et al. (2014), Icarus 238, 1; Shober et al. (2024), A&A 687, A181,
+        sec. 2.4.1, doi:10.1051/0004-6361/202449635.
+
+    Arguments:
+        t: [ndarray] output times (yr), shape (n_times,), negative for a backward integration
+        q: [ndarray] perihelion distance (AU), shape (n_clones, n_times). nan where a clone has no
+            state (after it ended), +inf after it left the solar system.
+        a: [ndarray] semi-major axis (AU), same shape and conventions as q. A negative value, which is
+            what an unbound orbit has, counts as beyond the limit.
+
+    Keyword arguments:
+        q_limit: [float] perihelion limit (AU). Default JFC_DYNAMICS_Q_LIMIT.
+        a_limit: [float] semi-major axis limit (AU). Default JFC_DYNAMICS_A_LIMIT.
+
+    Return:
+        (f_q, f_a): [tuple of float] the two fractions, nan if no clone has any time with a state
+    """
+
+    elapsed, (q, a) = _ensembleArrays(t, q, a)
+
+    # An unbound orbit has no semi-major axis to compare, and it is leaving: beyond any limit
+    a = np.where(a < 0, np.inf, a)
+
+    # Each interval between two outputs takes the state of its first output, but for the first
+    #   interval, which takes the state of the first output after the start
+    dt = np.diff(elapsed)
+
+    def _fraction(x, limit):
+
+        x = np.column_stack((x[:, 1], x[:, 1:-1]))
+        has_state = ~np.isnan(x)
+
+        total = np.sum(dt*has_state)
+        if total == 0:
+            return np.nan
+
+        return np.sum(dt*(x > limit))/total
+
+    return _fraction(q, q_limit), _fraction(a, a_limit)
+
+
+def countPerihelionReach(q, q_limit=JFC_DYNAMICS_Q_LIMIT):
+    """ Count the clones whose perihelion distance exceeds a limit at least once.
+
+        This is the metric Shober et al. (2024) classify by, the percentage of clones reaching
+        q > 2.5 AU at least once over the integration, which replaced counting close encounters with
+        Jupiter by eye: the two correlate with a Pearson coefficient of 0.86.
+
+        Reference: Shober et al. (2024), A&A 687, A181, secs 2.4.1 and 3.3.1,
+        doi:10.1051/0004-6361/202449635.
+
+    Arguments:
+        q: [ndarray] perihelion distance (AU), shape (n_clones, n_times). nan where a clone has no
+            state, +inf after it left the solar system.
+
+    Keyword arguments:
+        q_limit: [float] perihelion limit (AU). Default JFC_DYNAMICS_Q_LIMIT.
+
+    Return:
+        (n_reached, n_clones): [tuple of int] clones that exceeded the limit, and clones with at least
+            one state, the only ones that carry any information
+    """
+
+    q = np.atleast_2d(np.asarray(q, dtype=float))
+
+    has_state = np.any(~np.isnan(q), axis=1)
+    reached = np.any(q > q_limit, axis=1)
+
+    return int(np.count_nonzero(reached & has_state)), int(np.count_nonzero(has_state))
+
+
+def splitPerihelionReachByEncounter(t, q, encounter_times, q_limit=JFC_DYNAMICS_Q_LIMIT):
+    """ Split the clones that reach a perihelion limit by whether a close encounter came first.
+
+        The Kozai mechanism can lift the perihelion past the limit with no encounter at all, which
+        counts a stable orbit as Jupiter-family (Shober et al. 2024, fig. 7). A clone is counted as
+        lifted by an encounter if one of the given encounters happened no later than the first output
+        beyond the limit, in the order of the integration; the crossing itself happened somewhere in
+        the interval before that output.
+
+    Arguments:
+        t: [ndarray] output times (yr), shape (n_times,), negative for a backward integration
+        q: [ndarray] perihelion distance (AU), shape (n_clones, n_times)
+        encounter_times: [list] for each clone, the times (yr, on the same scale as t) of the
+            encounters that count. The caller chooses them, by body and by depth.
+
+    Keyword arguments:
+        q_limit: [float] perihelion limit (AU). Default JFC_DYNAMICS_Q_LIMIT.
+
+    Return:
+        (n_with, n_without): [tuple of int] clones that reached the limit after an encounter, and
+            clones that reached it without one. Together they are the n_reached of
+            countPerihelionReach.
+    """
+
+    elapsed, (q,) = _ensembleArrays(t, q)
+
+    if len(encounter_times) != q.shape[0]:
+        raise ValueError("{:d} lists of encounter times were given for {:d} clones.".format(
+            len(encounter_times), q.shape[0]))
+
+    n_with = 0
+    n_without = 0
+
+    for q_clone, times in zip(q, encounter_times):
+
+        beyond = np.flatnonzero(q_clone > q_limit)
+        if beyond.size == 0:
+            continue
+
+        if np.any(np.abs(np.asarray(times, dtype=float)) <= elapsed[beyond[0]]):
+            n_with += 1
+        else:
+            n_without += 1
+
+    return n_with, n_without
+
+
+def calcBinomialInterval(k, n, confidence=0.95):
+    """ Calculate the Wilson score interval of a binomial proportion.
+
+        Unlike the normal approximation, it stays inside [0, 1] and keeps a finite width at k = 0 and
+        k = n, which is where the fraction of clones of a clearly stable or clearly chaotic orbit
+        falls.
+
+        Reference: Wilson (1927), J. Am. Stat. Assoc. 22, 209.
+
+    Arguments:
+        k: [int] number of successes
+        n: [int] number of trials, positive
+
+    Keyword arguments:
+        confidence: [float] two-sided confidence level. Default 0.95.
+
+    Return:
+        (low, high): [tuple of float] bounds of the interval
+    """
+
+    if n <= 0:
+        raise ValueError("The interval needs at least one trial, got n = {}.".format(n))
+
+    z = scipy.special.ndtri(0.5 + confidence/2.0)
+    p = float(k)/n
+
+    denominator = 1.0 + z**2/n
+    centre = (p + z**2/(2.0*n))/denominator
+    half_width = z*np.sqrt(p*(1.0 - p)/n + z**2/(4.0*n**2))/denominator
+
+    # At k = 0 and k = n the bound is exactly 0 or 1, but the subtraction of two nearly equal terms
+    #   leaves a few ulp of rounding in its place
+    low = 0.0 if k == 0 else centre - half_width
+    high = 1.0 if k == n else centre + half_width
+
+    return low, high
+
+
+def classifyPerihelionReach(n_reached, n_clones, threshold=JFC_DYNAMICS_P_THRESHOLD,
+    confidence=0.95):
+    """ Classify the dynamics of an object from the fraction of its clones that reached the
+        Jupiter-family perihelion limit.
+
+        Two verdicts are given. The first is the rule of Shober et al. (2024), the fraction above the
+        threshold, kept so that a result can be compared with theirs. The second takes the number of
+        clones into account: the object is Jupiter-family only if the whole confidence interval of the
+        fraction lies above the threshold, not Jupiter-family if it lies below, and undetermined if it
+        contains the threshold, in which case more clones can settle it.
+
+        Reference: Shober et al. (2024), A&A 687, A181, sec. 3.3.1,
+        doi:10.1051/0004-6361/202449635.
+
+    Arguments:
+        n_reached: [int] clones that reached the limit, from countPerihelionReach
+        n_clones: [int] clones with a state, from countPerihelionReach
+
+    Keyword arguments:
+        threshold: [float] fraction of clones that separates the classes. Default
+            JFC_DYNAMICS_P_THRESHOLD.
+        confidence: [float] confidence level of the interval. Default 0.95.
+
+    Return:
+        [dict] with
+            p: [float] fraction of clones that reached the limit
+            p_low, p_high: [float] its Wilson interval (see calcBinomialInterval)
+            jupiter_family_shober: [bool] p > threshold
+            dynamics_class: [str] 'jupiter family', 'not jupiter family' or 'undetermined'
+    """
+
+    p_low, p_high = calcBinomialInterval(n_reached, n_clones, confidence=confidence)
+    p = float(n_reached)/n_clones
+
+    if p_low > threshold:
+        dynamics_class = 'jupiter family'
+
+    elif p_high < threshold:
+        dynamics_class = 'not jupiter family'
+
+    else:
+        dynamics_class = 'undetermined'
+
+    return {'p': p, 'p_low': p_low, 'p_high': p_high, 'jupiter_family_shober': p > threshold,
+        'dynamics_class': dynamics_class}
 
 
 if __name__ == "__main__":
