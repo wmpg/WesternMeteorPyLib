@@ -213,11 +213,11 @@ def circPercentile(data, percentile, q0=None):
     """
 
     # Wrap the angles to 0-360, so angles from -180 to 180 (e.g. longitudes) are also taken
-    data = np.array(data)%(2*np.pi)
+    data = np.array(data, dtype=np.float64)%(2*np.pi)
 
     # Wrap a given 0th percentile in the same way, so the data equal to it stay at 0
     if q0 is not None:
-        q0 = q0%(2*np.pi)
+        q0 = np.float64(q0)%(2*np.pi)
 
     if q0 is None:
         # If the data is on the 0/360 discontinuity, adjust the 0th percentile

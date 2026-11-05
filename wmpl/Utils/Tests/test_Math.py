@@ -38,8 +38,9 @@ def testCircPercentileOfAnglesFrom0To360():
     assert np.isclose(np.cos(median), 1.0)
 
     # A given 0th percentile outside 0-360 is taken as the same angle, so the median is the middle value
-    data = np.array([82.0, 82.1, 82.2])
-    assert np.isclose(circPercentile(data, 50, q0=82.0), 82.1%(2*np.pi))
+    for dtype in (np.float64, np.float32):
+        data = np.array([82.0, 82.1, 82.2], dtype=dtype)
+        assert np.isclose(circPercentile(data, 50, q0=82.0), 82.1%(2*np.pi), atol=1e-5)
 
 
 
