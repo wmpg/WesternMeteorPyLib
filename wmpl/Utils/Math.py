@@ -212,7 +212,8 @@ def circPercentile(data, percentile, q0=None):
 
     """
 
-    data = np.array(data)
+    # Angles in the -180 to 180 range are also taken, like the eccentric anomaly of an orbit
+    data = np.array(data)%(2*np.pi)
 
     if q0 is None:
         # If the data is on the 0/360 discontinuity, adjust the 0th percentile
