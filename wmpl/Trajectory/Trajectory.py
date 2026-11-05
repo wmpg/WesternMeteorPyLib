@@ -48,7 +48,8 @@ except ImportError:
 import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
-    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval
+    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval, \
+    medianStddev
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
@@ -1573,26 +1574,29 @@ def calcMCUncertainties(traj_list, traj_best):
     un.vz_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[2] for traj in traj_list], un.ci)
 
 
-    # Beginning/ending points
+    # Beginning/ending points. The errors in meters use the meridian (M) and the prime vertical (N) radii of
+    #   curvature at the height of the point
     N_beg = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rbeg_lat)**2)
+    M_beg = N_beg*(1.0 - EARTH.E**2)/(1.0 - (EARTH.E**2)*np.sin(traj_best.rbeg_lat)**2)
     un.rbeg_lon = scipy.stats.circstd([traj.rbeg_lon for traj in traj_list])
     un.rbeg_lon_ci = confidenceInterval([traj.rbeg_lon for traj in traj_list], un.ci, angle=True)
-    un.rbeg_lon_m = np.sin(un.rbeg_lon)*np.cos(traj_best.rbeg_lat)*N_beg
+    un.rbeg_lon_m = np.sin(un.rbeg_lon)*np.cos(traj_best.rbeg_lat)*(N_beg + traj_best.rbeg_ele_wgs84)
     un.rbeg_lat = np.std([traj.rbeg_lat for traj in traj_list])
     un.rbeg_lat_ci = confidenceInterval([traj.rbeg_lat for traj in traj_list], un.ci)
-    un.rbeg_lat_m = np.sin(un.rbeg_lat)*N_beg
+    un.rbeg_lat_m = np.sin(un.rbeg_lat)*(M_beg + traj_best.rbeg_ele_wgs84)
     un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
     un.rbeg_ele_ci = confidenceInterval([traj.rbeg_ele for traj in traj_list], un.ci)
     un.rbeg_ele_wgs84 = np.std([traj.rbeg_ele_wgs84 for traj in traj_list])
     un.rbeg_ele_wgs84_ci = confidenceInterval([traj.rbeg_ele_wgs84 for traj in traj_list], un.ci)
 
     N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rend_lat)**2)
+    M_end = N_end*(1.0 - EARTH.E**2)/(1.0 - (EARTH.E**2)*np.sin(traj_best.rend_lat)**2)
     un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
     un.rend_lon_ci = confidenceInterval([traj.rend_lon for traj in traj_list], un.ci, angle=True)
-    un.rend_lon_m = np.sin(un.rend_lon)*np.cos(traj_best.rend_lat)*N_end
+    un.rend_lon_m = np.sin(un.rend_lon)*np.cos(traj_best.rend_lat)*(N_end + traj_best.rend_ele_wgs84)
     un.rend_lat = np.std([traj.rend_lat for traj in traj_list])
     un.rend_lat_ci = confidenceInterval([traj.rend_lat for traj in traj_list], un.ci)
-    un.rend_lat_m = np.sin(un.rend_lat)*N_end
+    un.rend_lat_m = np.sin(un.rend_lat)*(M_end + traj_best.rend_ele_wgs84)
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
     un.rend_ele_ci = confidenceInterval([traj.rend_ele for traj in traj_list], un.ci)
     un.rend_ele_wgs84 = np.std([traj.rend_ele_wgs84 for traj in traj_list])
@@ -1600,12 +1604,13 @@ def calcMCUncertainties(traj_list, traj_best):
 
     # Lowest point
     N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.htmin_lat)**2)
+    M_end = N_end*(1.0 - EARTH.E**2)/(1.0 - (EARTH.E**2)*np.sin(traj_best.htmin_lat)**2)
     un.htmin_lon = scipy.stats.circstd([traj.htmin_lon for traj in traj_list])
     un.htmin_lon_ci = confidenceInterval([traj.htmin_lon for traj in traj_list], un.ci, angle=True)
-    un.htmin_lon_m = np.sin(un.htmin_lon)*np.cos(traj_best.htmin_lat)*N_end
+    un.htmin_lon_m = np.sin(un.htmin_lon)*np.cos(traj_best.htmin_lat)*(N_end + traj_best.htmin_ele_wgs84)
     un.htmin_lat = np.std([traj.htmin_lat for traj in traj_list])
     un.htmin_lat_ci = confidenceInterval([traj.htmin_lat for traj in traj_list], un.ci)
-    un.htmin_lat_m = np.sin(un.htmin_lat)*N_end
+    un.htmin_lat_m = np.sin(un.htmin_lat)*(M_end + traj_best.htmin_ele_wgs84)
     un.htmin_ele = np.std([traj.htmin_ele for traj in traj_list])
     un.htmin_ele_ci = confidenceInterval([traj.htmin_ele for traj in traj_list], un.ci)
     un.htmin_ele_wgs84 = np.std([traj.htmin_ele_wgs84 for traj in traj_list])
@@ -1824,6 +1829,40 @@ def calcCovMatrices(mc_traj_list):
 
 
 
+def sampleMCVelocities(traj_list):
+    """ Sample the initial velocity of every trajectory within the standard deviation of its direct fit,
+        and recompute the orbit. Used for the Monte Carlo uncertainties when the timing is not estimated, as
+        the noise is only added to the angles and it does not change the velocity.
+
+    Arguments:
+        traj_list: [list] A list of Trajectory objects.
+
+    Return:
+        [list] A list of copies of the Trajectory objects, with sampled velocities and orbits.
+    """
+
+    traj_list_sampled = []
+
+    for traj in traj_list:
+
+        traj_sampled = copy.copy(traj)
+
+        # Sample the initial velocity
+        if traj.v_init_stddev:
+            traj_sampled.v_init = traj.v_init + np.random.normal(0, traj.v_init_stddev)
+
+        # Recompute the orbit with the sampled velocity
+        traj_sampled.orbit = calcOrbit(traj.radiant_eci_mini, traj_sampled.v_init, traj.v_avg, \
+            traj.state_vect_mini, traj.rbeg_jd, stations_fixed=(not traj.orbit_los_success), \
+            reference_init=traj.orbit_los_success, v_init_stddev_direct=traj.v_init_stddev)
+
+        traj_list_sampled.append(traj_sampled)
+
+
+    return traj_list_sampled
+
+
+
 def trajNoiseGenerator(traj, noise_sigma):
     """ Given a base trajectory object and the observation uncertainly, this generator will generate
         new trajectory objects with noise-added obsevations. 
@@ -1917,10 +1956,12 @@ def trajNoiseGenerator(traj, noise_sigma):
             
         # Do not show plots or perform additional optimizations
         traj_mc.verbose = False
-        traj_mc.estimate_timing_vel = True
         traj_mc.filter_picks = False
         traj_mc.show_plots = False
         traj_mc.save_results = False
+
+        # Estimate the timing only if it was estimated in the original solution
+        traj_mc.estimate_timing_vel = traj.estimate_timing_vel
 
         # Return the modified trajectory object
         yield [counter, traj_mc, traj.observations]
@@ -2082,6 +2123,10 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Assign geometric uncertainty flag, if it was changed
     traj_best.geometric_uncert = geometric_uncert
+
+    # Without timing estimation the noise does not change the velocity, so sample it within its uncertainty
+    if not traj.estimate_timing_vel:
+        mc_results = sampleMCVelocities(mc_results)
 
     print('Computing uncertainties...')
 
@@ -3248,15 +3293,17 @@ class Trajectory(object):
                 quart_length = obs.length[:init_part_size]
                 quart_time = obs.time_data[:init_part_size]
 
-                # Fit a line to the data, estimate the velocity
+                # Fit a line to the data, estimate the velocity and its standard deviation
                 try:
-                    obs.lag_line, _ = scipy.optimize.curve_fit(lineFunc, quart_time, quart_length)
+                    obs.lag_line, lag_line_cov = scipy.optimize.curve_fit(lineFunc, quart_time, quart_length)
+                    obs.v_init_stddev = np.sqrt(lag_line_cov[0, 0])
 
                 # Handle this error:
                 # RuntimeError: Optimal parameters not found: gtol=0.000000 is too small, func(x) is orthogonal to the columns of
                 #   the Jacobian to machine precision.
                 except RuntimeError:
                     obs.lag_line = [0, 0]
+                    obs.v_init_stddev = None
 
                 # Calculate lag
                 obs.lag = obs.length - lineFunc(obs.time_data, *obs.lag_line)
@@ -3360,7 +3407,15 @@ class Trajectory(object):
         time_diffs = np.zeros(len(observations))
 
         if not estimate_timing_vel:
-            return True, np.zeros(2), v_init, 0, time_diffs, observations
+
+            # Compute the timing residual with the given clocks (fixed offsets are already applied)
+            fixed_time_dict = {str(obs.station_id): 0.0 for obs in observations}
+            self.timing_res = timingResiduals(np.zeros(1), observations, fixed_time_dict, weights=weights)
+
+            # Compute the standard deviation of the median velocity from the fits of individual stations
+            vel_stddev = medianStddev([obs.v_init_stddev for obs in observations if obs.v_init is not None])
+
+            return True, np.zeros(2), v_init, vel_stddev, time_diffs, observations
 
         # Run timing offset estimation if it needs to be done
         if estimate_timing_vel:
