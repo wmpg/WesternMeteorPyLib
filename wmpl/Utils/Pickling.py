@@ -5,6 +5,7 @@ from __future__ import print_function, absolute_import
 import io
 import os
 import sys
+import uuid
 import pickle
 
 
@@ -16,6 +17,10 @@ def savePickle(obj, dir_path, file_name):
     """ Dump the given object into a file using Python 'pickling'. The file can be loaded into Python
         ('unpickled') afterwards for further use.
 
+        The object is written to a temporary file which is then moved onto the target name, so a
+        reader watching for the file never sees a partially written one. This matters for the
+        correlator, where one process writes trajectories that another polls for.
+
     Arguments:
     	obj: [object] Object which will be pickled.
         dir_path: [str] Path of the directory where the pickle file will be stored.
@@ -25,8 +30,17 @@ def savePickle(obj, dir_path, file_name):
 
     mkdirP(dir_path)
 
-    with open(os.path.join(dir_path, file_name), 'wb') as f:
+    # The temporary name must not contain ".pickle", because the correlator globs for "*.pickle*" to
+    #   find work, and it must be unique, so that two processes writing the same file name do not
+    #   share a temporary file. It carries no extension at all.
+    tmp_path = os.path.join(dir_path, "_tmp_" + uuid.uuid4().hex)
+
+    with open(tmp_path, 'wb') as f:
         pickle.dump(obj, f, protocol=2)
+
+    # os.replace is atomic on POSIX and Windows alike, and overwrites the target without a separate
+    #   remove, which would otherwise leave a window where the file does not exist at all
+    os.replace(tmp_path, os.path.join(dir_path, file_name))
 
 
 
@@ -95,6 +109,11 @@ def loadPickle(dir_path, file_name):
         # If v0z is missing, add it
         if not hasattr(p, 'v0z'):
             p.v0z = 0.0
+
+        # If the L-BFGS-B station cutoff is missing, add its default. Trajectories pickled before the
+        #   cutoff became a parameter do not carry it, and estimateTimingAndVelocity reads it.
+        if not hasattr(p, 'l_bfgs_b_cutoff'):
+            p.l_bfgs_b_cutoff = 5
 
     return p
 
