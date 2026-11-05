@@ -338,7 +338,7 @@ def originalPicksTrajectory(traj):
     return loadPickle(*os.path.split(traj_path))
 
 
-def solveFragmentTrajectories(traj, ecsv_paths, reuse_timing=True):
+def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=True, **kwargs):
     """ Solve the trajectories of the additional fragments described in ECSV files (see ecsvFragments()),
         after the main one and with the same solver options. Each one is saved in a fragment_k folder of the
         output directory of the main trajectory.
@@ -348,21 +348,16 @@ def solveFragmentTrajectories(traj, ecsv_paths, reuse_timing=True):
         ecsv_paths: [list] List of paths to ECSV files.
 
     Keyword arguments:
+        solver: [str] Solver the main trajectory was solved with, only "original" is supported here.
         reuse_timing: [bool] Fix the time offsets of the stations to the ones of the main trajectory (default),
-            those of its solution with the original picks, instead of estimating them again from the fewer 
+            those of its solution with the original picks, instead of estimating them again from the fewer
             points of every fragment.
+        **kwargs: Keyword arguments for the trajectory solver, those the main trajectory was solved with.
 
     Return:
-        [list] (fragment, trajectory) of every fragment solved, with the solution with the original picks 
+        [list] (fragment, trajectory) of every fragment solved, with the solution with the original picks
             (see originalPicksTrajectory()).
     """
-
-    if not hasattr(traj, 'solver_kwargs'):
-        print("The options the main trajectory was solved with are unknown, so the fragments cannot be solved.")
-        return []
-
-    kwargs = dict(traj.solver_kwargs)
-    solver = kwargs.pop('solver')
 
     if solver != 'original':
         print("The trajectories of additional fragments can only be solved with the original solver.")
@@ -1209,8 +1204,8 @@ if __name__ == "__main__":
     ### ###
 
 
-    # Solve the trajectory
-    traj = solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver=cml_args.solver, \
+    # Options of the trajectory solver, the same for the main fragment and the additional ones
+    solver_kwargs = dict(
         max_toffset=max_toffset, monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
         geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
         gravity_factor=cml_args.gfact,
@@ -1219,6 +1214,9 @@ if __name__ == "__main__":
         show_jacchia=cml_args.jacchia,
         estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
         fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, enable_OSM_plot=cml_args.enableOSM)
+
+    # Solve the trajectory
+    traj = solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver=cml_args.solver, **solver_kwargs)
 
 
     # Report the times and heights of the points flagged as flares, if any, also in the saved report
@@ -1249,6 +1247,7 @@ if __name__ == "__main__":
             print("There are no additional fragments in the ECSV files.")
 
         else:
-            fragment_trajs = solveFragmentTrajectories(traj, ecsv_paths, reuse_timing=(not cml_args.fragtimefit))
+            fragment_trajs = solveFragmentTrajectories(traj, ecsv_paths, solver=cml_args.solver,
+                reuse_timing=(not cml_args.fragtimefit), **solver_kwargs)
             print(fragmentComparison(originalPicksTrajectory(traj), fragment_trajs, 
                 reuse_timing=(not cml_args.fragtimefit)))
