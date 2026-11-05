@@ -20,6 +20,8 @@ import numpy as np
 import scipy
 import scipy.stats
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 from jplephem.spk import SPK
 
@@ -54,6 +56,8 @@ from wmpl.Utils.TrajConversions import (
     raDec2ECI
 )
 from wmpl.Utils.Math import rotateVector
+from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize, PLANET_EDGE_COLOR, PLANET_EDGE_WIDTH
+from wmpl.Utils.MOID import calcMOID
 from wmpl.Utils.Earth import calcTrueObliquity
 
 
@@ -155,6 +159,73 @@ def _setHeartbeat(sim, func):
         return heartbeat_ref
 
 
+def harmonicsSpinAxisSupported():
+    """ Whether the installed REBOUNDx orients gravitational_harmonics along each body's spin axis.
+
+    REBOUNDx 4.4.0 added the "Omega" particle parameter, whose direction is the axis of symmetry of
+    the body's J2 and J4. Earlier versions always use the z axis of the simulation, which here is the
+    ecliptic pole, 23.4 degrees away from the Earth's.
+
+    Return:
+        [bool]
+    """
+
+    try:
+        version = tuple(int(v) for v in re.findall(r"\d+", reboundx.__version__)[:2])
+    except (AttributeError, NameError, ValueError):
+        return False
+
+    return version >= (4, 4)
+
+
+def sunSpinAxisEcliptic():
+    """ Unit vector along the Sun's rotation pole (SUN_POLE_RA_DEC_DEG), in the ecliptic J2000 frame
+    of the simulations. It is the axis of symmetry of the Sun's J2.
+
+    Return:
+        [list] [x, y, z] unit vector.
+    """
+
+    ra, dec = np.radians(SUN_POLE_RA_DEC_DEG)
+    pole = np.array([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (as ephemBodyStateRebound)
+    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    return [float(v) for v in pole/np.linalg.norm(pole)]
+
+
+def earthSpinAxisEcliptic(jd_tdb):
+    """ Unit vector along the Earth's mean rotation pole of date, in the ecliptic J2000 frame of the
+    simulations. It is the axis of symmetry of the Earth's J2 and J4.
+
+    The precession matrix from J2000 to the date is R3(-z) R2(theta) R3(-zeta), so the pole of date
+    is, in J2000 equatorial coordinates, (sin(theta) cos(zeta), -sin(theta) sin(zeta), cos(theta)),
+    with the IAU 1976 angles used by equatorialCoordPrecession (Meeus, Astronomical Algorithms, p.
+    134). Nutation (< 10 arcsec) is left out. From J2000 the pole moves by ~20 arcsec per year.
+
+    Arguments:
+        jd_tdb: [float] Julian date (TDB) of the epoch.
+
+    Return:
+        [list] [x, y, z] unit vector.
+    """
+
+    # Julian centuries from J2000
+    t = (jd_tdb - J2000_JD.days)/36525.0
+
+    zeta = np.radians((2306.2181*t + 0.30188*t**2 + 0.017998*t**3)/3600)
+    theta = np.radians((2004.3109*t - 0.42665*t**2 - 0.041833*t**3)/3600)
+
+    # J2000 equatorial coordinates of the pole of date
+    pole = np.array([np.sin(theta)*np.cos(zeta), -np.sin(theta)*np.sin(zeta), np.cos(theta)])
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (as ephemBodyStateRebound)
+    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    return [float(v) for v in pole/np.linalg.norm(pole)]
+
+
 def checkReboundxUsable():
     """ Raise a clear error if the installed REBOUNDx cannot attach to a REBOUND simulation.
 
@@ -222,6 +293,9 @@ HILL_RADII_AU = {
     "Neptune": 0.776641,  # a = 30.103658 AU
 }
 
+# Order of the bodies in the figure legends, from the Sun out
+PLANET_ORDER = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"]
+
 # The Sun has no Hill sphere, so a close approach to it is flagged by distance instead: a perihelion
 # passage closer than this is listed with the other close encounters. 0.1 AU is where the thermal
 # processing of meteoroids is established: Na is thermally desorbed at q < 0.1 AU (Kasuga et al.
@@ -230,8 +304,52 @@ HILL_RADII_AU = {
 # Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU.
 SUN_ENCOUNTER_AU = 0.1
 
+# The close-approach panel of the figure leaves out a body the object never came within this many of
+#   its Hill radii of: it never mattered (Mercury, seen from an Earth-crossing orbit, stays hundreds of
+#   Hill radii away)
+APPROACH_MAX_HILL = 100.0
+
+# Bodies the MOID is computed with (see wmpl.Utils.MOID). The Moon orbits the Earth, so a heliocentric
+#   MOID with it means nothing; the Earth's stands for both.
+MOID_BODIES = ("Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune")
+
+# Percentiles of the clones' MOID kept at each output
+MOID_PERCENTILES = (2.5, 16, 50, 84, 97.5)
+
+# Bottom of the close-approach panel, in Hill radii: where two orbits cross the MOID dives towards zero
+MOID_PLOT_MIN_HILL = 1e-3
+
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
+
+# The Sun's oblateness, as in DE430 (header constants J2SUN and ASUN, its reference radius; DE440 has
+#   J2SUN = 2.196e-7). Its axis of symmetry is the Sun's rotation pole, IAU WGCCRE: RA = 286.13 deg,
+#   Dec = 63.87 deg (J2000), 7.25 deg from the ecliptic pole.
+SUN_J2 = 2.1106088532726840e-07
+SUN_J2_RADIUS_AU = 696000.0/149597870.7
+SUN_POLE_RA_DEC_DEG = (286.13, 63.87)
+
+# Time unit of the simulations. They use G = 1 with lengths in AU and masses in solar masses, so the
+#   time unit is the one in which GM_Sun = 1 AU^3: sqrt(AU^3/GM_Sun) = 58.13244 days, a Gaussian year
+#   (365.25690 d) over 2 pi. REBOUND calls it "yr2pi" and uses it for the bodies added from JPL
+#   Horizons, and REBOUNDx's speed of light is expressed in it. The Julian year over 2 pi (58.13134 d)
+#   is 1.9e-5 shorter: used with G = 1 it makes the Sun 3.8e-5 too massive and every mean motion 7.6e-5
+#   too fast, and the Earth drifts ~700 000 km away from DE430 in 10 years.
+GM_SUN_SI = 1.3271244004193938e20  # m^3/s^2, as in rebound.units (DE430: 1.32712440041e20)
+AU_M = 149597870700.0
+DAYS_PER_SIM_TIME = np.sqrt(AU_M**3/GM_SUN_SI)/86400.0
+
+
+def daysToSimTime(days):
+    """ Convert a time in days to REBOUND simulation time units (see DAYS_PER_SIM_TIME). """
+
+    return days/DAYS_PER_SIM_TIME
+
+
+def simTimeToDays(t):
+    """ Convert a time in REBOUND simulation units to days (see DAYS_PER_SIM_TIME). """
+
+    return t*DAYS_PER_SIM_TIME
 
 
 def _encounterThreshold(body, n_hill):
@@ -285,7 +403,8 @@ def reboundBodyMassSolar(naif_id):
 
     The mass is computed as the ratio GM_body/GM_Sun, which equals the mass in solar masses and
     is exactly the value REBOUND assigns to bodies added via Horizons (up to the Sun's own mass
-    being 1.0 in the G=1, AU, solar-mass, year/2pi unit system used by the simulation).
+    being 1.0 in the G=1, AU, solar-mass unit system used by the simulation, whose time unit is
+    DAYS_PER_SIM_TIME).
 
     Arguments:
         naif_id: [int] NAIF ID of the body (e.g. 5 for the Jupiter system barycentre).
@@ -310,8 +429,9 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
     ephemeris, reproducing the state that REBOUND's JPL Horizons query would add.
 
     The returned state is barycentric (Solar System barycentre origin) in the ecliptic J2000
-    frame, with positions in AU and velocities in AU/(year/2pi) - i.e. the units of a default
-    REBOUND simulation (G=1, length AU, mass solar masses, time year/2pi).
+    frame, with positions in AU and velocities in AU per time unit - i.e. the units of a default
+    REBOUND simulation (G=1, length AU, mass solar masses, time unit DAYS_PER_SIM_TIME days, which
+    REBOUND calls yr2pi).
 
     Arguments:
         body: [str] Body name, a key of _EPHEM_NAIF_PATHS (e.g. "Jupiter", "Earth", "Luna").
@@ -319,7 +439,7 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
         jpl_ephem_data: [SPK] An opened jplephem SPK kernel (SPK.open(config.jpl_ephem_file)).
 
     Return:
-        state: [list] [x, y, z, vx, vy, vz] in AU and AU/(year/2pi).
+        state: [list] [x, y, z, vx, vy, vz] in AU and AU per time unit.
         mass: [float] Body mass in solar masses.
     """
 
@@ -341,9 +461,9 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
     pos_km = rotateVector(pos_km, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
     vel_kmday = rotateVector(vel_kmday, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
 
-    # Convert to REBOUND units: km -> AU, km/day -> AU/(year/2pi)
+    # Convert to REBOUND units: km -> AU, km/day -> AU per time unit
     pos_au = pos_km/aukm
-    vel_reb = vel_kmday/aukm*(365.25/(2*np.pi))
+    vel_reb = vel_kmday/aukm*DAYS_PER_SIM_TIME
 
     state = list(pos_au) + list(vel_reb)
     mass = reboundBodyMassSolar(_EPHEM_MASS_NAIF[body])
@@ -473,7 +593,7 @@ def detectCloseEncounters(sim_outputs, n_hill=3.0):
             encounters.append({
                 "body": body,
                 "min_dist_au": min_dist,
-                "time_days": sim_outputs[min_index][0]/(2*np.pi)*365.25,
+                "time_days": simTimeToDays(sim_outputs[min_index][0]),
                 "hill_radius_au": hill_radius,
                 "n_hill": min_dist/hill_radius,
                 "index": min_index,
@@ -768,6 +888,117 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
                 n_encounters, n_hill, SUN_ENCOUNTER_AU))
 
 
+# Rank correlation below which the clones no longer keep the order of their initial conditions
+PREDICTABILITY_RANK_THRESHOLD = 0.5
+
+# Fewest clones that run the whole span for a predictability horizon to be given
+PREDICTABILITY_MIN_CLONES = 10
+
+
+def predictabilityHorizon(sim_outputs, sim_outputs_mc, clone_diag=None, n_hill=3.0,
+                          threshold=PREDICTABILITY_RANK_THRESHOLD):
+    """ How far the integration keeps the memory of the measured initial conditions, from the clones.
+
+    The clones are drawn from the measurement uncertainty. While the dynamics is predictable, a clone
+    that starts with a larger semi-major axis than another keeps it: the rank correlation (Spearman)
+    of the clones' elements with their values just after the departure from the Earth stays near 1.
+    Close encounters scramble that order, and once the correlation has dropped below the threshold
+    the individual trajectory is no longer set by the measurement: only the distribution of the
+    clones means something, not the nominal orbit. Unlike the MEGNO of the nominal orbit, this is a
+    property of the whole ensemble, and it needs no extra integration.
+
+    Arguments:
+        sim_outputs: [list] Outputs of the nominal solution (see reboundSimulate).
+        sim_outputs_mc: [dict] {name: outputs} of the clones.
+
+    Keyword arguments:
+        clone_diag: [dict] {name: diagnostics} of the clones, for the time of their first close
+            encounter. Default None.
+        n_hill: [float] Earth Hill radii that define the departure (see findEarthDepartureIndex).
+        threshold: [float] Rank correlation that marks the horizon. Default
+            PREDICTABILITY_RANK_THRESHOLD.
+
+    Return:
+        [dict] or None with fewer than PREDICTABILITY_MIN_CLONES clones over the whole span: {
+            "n_clones":           clones used (those that ran the whole span),
+            "threshold":          the rank correlation of the horizon,
+            "reference_days":     time of the reference output, just after the departure,
+            "elements":           {"a"/"e"/"i": {"horizon_days": last time with a correlation at
+                                  or above the threshold before it stays below (None if never
+                                  below), "rank_corr_end": correlation at the end}},
+            "horizon_days":       earliest horizon of the three, or None if none is reached,
+            "time_days":          [list] output times, "rank_corr": {element: [list]} the series,
+            "first_encounter_days": {"fraction": share of clones with a close encounter (Sun
+                                  passages left out), "p05"/"p25"/"p50"/"p75"/"p95": percentiles of
+                                  the time of their first one} or None without clone_diag,
+        }
+    """
+
+    n_out = len(sim_outputs)
+    full = [rows for rows in sim_outputs_mc.values() if len(rows) == n_out]
+    if (len(full) < PREDICTABILITY_MIN_CLONES) or (n_out < 3):
+        return None
+
+    # Reference: the first output after the departure from the Earth, before which the osculating
+    #   elements still carry the Earth's pull
+    k_ref = findEarthDepartureIndex(sim_outputs, n_hill=n_hill)
+    if k_ref is None:
+        k_ref = 1
+    k_ref = min(k_ref, n_out - 2)
+
+    time_days = np.array([simTimeToDays(row[0]) for row in sim_outputs])
+
+    getters = {"a": lambda o: o.a, "e": lambda o: o.e, "i": lambda o: o.inc}
+    elements, series = {}, {}
+    for key, get in getters.items():
+
+        x = np.array([[get(row[2]) for row in rows] for rows in full])
+
+        # Spearman correlation of every column with the reference one, as the Pearson correlation of
+        #   the ranks
+        r = scipy.stats.rankdata(x, axis=0)
+        r -= r.mean(axis=0)
+        norm = np.sqrt((r**2).sum(axis=0))
+        if norm[k_ref] == 0:
+            continue
+        with np.errstate(invalid="ignore", divide="ignore"):
+            rho = (r*r[:, [k_ref]]).sum(axis=0)/(norm*norm[k_ref])
+        rho[:k_ref] = np.nan
+
+        # The horizon is the last time the correlation is still at or above the threshold, so a
+        #   brief dip that recovers does not count
+        above = np.where(rho[k_ref:] >= threshold)[0] + k_ref
+        last_above = above[-1] if len(above) else k_ref
+        horizon = float(time_days[last_above]) if last_above < n_out - 1 else None
+
+        elements[key] = {"horizon_days": horizon, "rank_corr_end": float(rho[-1])}
+        series[key] = [None if not np.isfinite(v) else float(v) for v in rho]
+
+    reached = [abs(v["horizon_days"]) for v in elements.values() if v["horizon_days"] is not None]
+    horizon_days = None
+    if reached:
+        horizon_days = float(min(reached))*(1 if time_days[-1] >= 0 else -1)
+
+    # When the clones had their first close encounter, which is what scrambles their order
+    first_encounter = None
+    if clone_diag is not None:
+        firsts = []
+        for name in sim_outputs_mc:
+            times = [abs(e["time_days"]) for e in clone_diag.get(name, {}).get("encounters", [])
+                     if e.get("body") != "Sun"]
+            if times:
+                firsts.append(min(times))
+        first_encounter = {"fraction": len(firsts)/len(sim_outputs_mc)}
+        if firsts:
+            first_encounter.update({"p{:02d}".format(q): float(np.percentile(firsts, q))
+                                    for q in (5, 25, 50, 75, 95)})
+
+    return {"n_clones": len(full), "threshold": threshold,
+            "reference_days": float(time_days[k_ref]), "elements": elements,
+            "horizon_days": horizon_days, "time_days": [float(t) for t in time_days],
+            "rank_corr": series, "first_encounter_days": first_encounter}
+
+
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
     """ Estimate the trajectory divergence timescale from the Monte Carlo ensemble.
 
@@ -862,7 +1093,7 @@ def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
         return None
 
     delta = np.sqrt(sq_sum[:last]/counts[:last])
-    t_days = np.array([abs(sim_outputs[i][0] - sim_outputs[0][0])/(2*np.pi)*365.25
+    t_days = np.array([simTimeToDays(abs(sim_outputs[i][0] - sim_outputs[0][0]))
                        for i in range(last)])
 
     # Heliocentric distance of the nominal solution at each sample
@@ -1102,7 +1333,8 @@ def tisserandClass(t_j):
 def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
                          earth_state=None):
     """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to
-    Solar System barycentric coordinates. The units are changed to AU and AU/year.
+    Solar System barycentric coordinates. The units are changed to AU and AU per REBOUND time unit
+    (DAYS_PER_SIM_TIME days).
 
     Arguments:
         state_vect: [list] Position and velocity components in ECI coordinates (epoch of date) in m and m/s,
@@ -1117,12 +1349,13 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
         jpl_ephem_data: [SPK] An opened jplephem SPK kernel. If None and ephem_source is "local",
             the kernel is opened from config.jpl_ephem_file.
         earth_state: [list] Precomputed Earth barycentric state [x, y, z, vx, vy, vz] in REBOUND units
-            (AU, AU/(year/2pi)), ecliptic J2000, at the epoch jd. If given, it is used directly and
+            (AU, AU per time unit), ecliptic J2000, at the epoch jd. If given, it is used directly and
             ephem_source/jpl_ephem_data are ignored - this avoids re-querying the Earth's position,
             which is identical across Monte Carlo realizations sharing the same epoch.
 
     Return:
-        [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg.
+        [list] Position and velocity components in barycentric coordinates in AU and AU per time
+            unit, eg.
             [x, y, z, vx, vy, vz]
     """
 
@@ -1140,7 +1373,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
         log(f"Reference Julian date (TDB): {jd}")
 
-    # Get the Earth's barycentric state (AU, AU/(year/2pi), ecliptic J2000) used to shift the
+    # Get the Earth's barycentric state (AU, AU per time unit, ecliptic J2000) used to shift the
     # meteoroid from geocentric to barycentric coordinates. The Earth state at a given epoch is
     # identical for all Monte Carlo realizations, so it can be precomputed once and passed in.
     if earth_state is not None:
@@ -1229,19 +1462,19 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
     if len(log_file_path):
         log(f"Velocity vector in ecliptic ECI, J2000: {vel_vec_rot}")
 
-    # Convert the state vector to AU and AU/year
+    # Convert the state vector to AU and AU per time unit
     state_vect_rot = np.concatenate((pos_vec_rot, vel_vec_rot))
     state_vect_rot = [x/aum for x in state_vect_rot]
-    state_vect_rot[3] *= 60*60*24*365.25/(2*np.pi)
-    state_vect_rot[4] *= 60*60*24*365.25/(2*np.pi)
-    state_vect_rot[5] *= 60*60*24*365.25/(2*np.pi)
+    state_vect_rot[3] *= 86400*DAYS_PER_SIM_TIME
+    state_vect_rot[4] *= 86400*DAYS_PER_SIM_TIME
+    state_vect_rot[5] *= 86400*DAYS_PER_SIM_TIME
 
     if len(log_file_path):
         log(
-            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
+            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU per REBOUND time unit): {state_vect_rot}"
         )
         log(
-            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU/year where year = 2pi): {earth_state}"
+            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU per REBOUND time unit): {earth_state}"
         )
 
     # Add the Earth's position and velocity to the meteoroid's position and velocity
@@ -1254,7 +1487,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
     if len(log_file_path):
         log(
-            f"Meteor state vector in barycentric, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
+            f"Meteor state vector in barycentric, J2000 (AU, AU per REBOUND time unit): {state_vect_rot}"
         )
         log_file.close()
 
@@ -1307,6 +1540,12 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
     return state_vect_hel, orb_elem, planet_dists
 
 
+# General relativity models (REBOUNDx effects). "gr" (Anderson et al. 1975) is the post-Newtonian
+#   correction from the dominant body, the Sun, applied to every body: it gets the perihelion
+#   precession and the mean motions right. "gr_full" (Newhall et al. 1983, the EIH equations) is the
+#   interaction between every pair of bodies; its cost grows as the cube of the number of bodies.
+GR_MODELS = ("gr", "gr_full")
+
 # Integrators that can be selected for the integration. IAS15 is adaptive and the default. WHFast
 # and TRACE use a fixed timestep (see FIXED_STEP_DEFAULT_DT_DAYS).
 INTEGRATORS = ("ias15", "whfast", "trace")
@@ -1347,6 +1586,130 @@ def _reverseVelocities(sim):
         p.vx, p.vy, p.vz = -p.vx, -p.vy, -p.vz
 
 
+def _orbitTuple(orbit):
+    """ (a, e, inc, Omega, omega) of a REBOUND orbit, radians. """
+
+    return (orbit.a, orbit.e, orbit.inc, orbit.Omega, orbit.omega)
+
+
+def _moidSeries(planet_rows, object_rows, bodies):
+    """ MOID of one particle with each body at each of its outputs.
+
+    Arguments:
+        planet_rows: [list] Per output, the (a, e, inc, Omega, omega) of each body, in the order of bodies.
+        object_rows: [list] Per output of the particle, (output index, its (a, e, inc, Omega, omega)).
+        bodies: [list] Body names.
+
+    Return:
+        [dict] {body: ndarray of the MOID in AU at each output, NaN where an orbit is not elliptical}.
+            Arrays rather than lists: a 1000-clone run with 7000 outputs keeps 56 million values, 450 MB
+            as float64 against ~1.8 GB as Python floats.
+    """
+
+    if not object_rows:
+        return {b: np.zeros(0) for b in bodies}
+
+    k = np.array([row[0] for row in object_rows])
+    obj = np.array([row[1] for row in object_rows])              # (n, 5)
+    planets = np.array(planet_rows)[k]                            # (n, n_bodies, 5)
+
+    moid = calcMOID(*[obj[:, None, j] for j in range(5)], *[planets[:, :, j] for j in range(5)])
+
+    return {b: np.ascontiguousarray(moid[:, i]) for i, b in enumerate(bodies)}
+
+
+def _moidAsArray(values):
+    """ A MOID series as a float array, NaN where it is missing (None), from an array or a list. """
+
+    if isinstance(values, np.ndarray):
+        return values.astype(float, copy=False)
+
+    return np.array([np.nan if x is None else x for x in values], dtype=float)
+
+
+def moidSummary(nominal_diag, clone_diag, percentiles=MOID_PERCENTILES):
+    """ The MOID of the nominal solution with each body at each output, and the percentiles of the
+    clones' MOID at the same outputs.
+
+    Arguments:
+        nominal_diag: [dict] Diagnostics of the nominal solution (see reboundSimulate).
+        clone_diag: [dict] {clone name: diagnostics}, possibly empty. The series can be arrays (as the
+            integration returns them) or lists with None for the missing values.
+
+    Keyword arguments:
+        percentiles: [tuple] Percentiles of the clones kept. Default MOID_PERCENTILES.
+
+    Return:
+        [dict or None] None if the MOID was not computed. Otherwise
+            {"bodies": [names], "nominal_au": {body: [MOID per output]}, "percentiles": [...],
+             "clones_au": {body: [[MOID at each output] per percentile]} or None without clones,
+             "n_clones": number of clones}. Missing values are None. A clone that ended early (an
+            impact) counts only over its own outputs.
+    """
+
+    nominal = (nominal_diag or {}).get("moid_au")
+    if not nominal:
+        return None
+
+    bodies = list(nominal)
+    n = max(len(v) for v in nominal.values())
+    clones = [d["moid_au"] for d in (clone_diag or {}).values() if d.get("moid_au")]
+
+    # The nominal's series as lists with None for the missing values, ready for the JSON file
+    nominal = {b: [float(x) if np.isfinite(x) else None for x in _moidAsArray(nominal[b])] for b in bodies}
+
+    clones_au = None
+    if clones:
+        clones_au = {}
+        for body in bodies:
+            stack = np.full((len(clones), n), np.nan)
+            for j, c in enumerate(clones):
+                v = _moidAsArray(c.get(body, []))[:n]
+                stack[j, :len(v)] = v
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                p = np.nanpercentile(stack, percentiles, axis=0)
+            clones_au[body] = [[float(x) if np.isfinite(x) else None for x in row] for row in p]
+
+    return {"bodies": bodies, "nominal_au": nominal, "percentiles": list(percentiles),
+            "clones_au": clones_au, "n_clones": len(clones)}
+
+
+def _moidReportLines(moid, t_days, n_hill, k_dep=0):
+    """ Human-readable lines summarising a moidSummary result: per body, the nominal's smallest MOID
+    after the departure from the Earth and when, and the fraction of clones within n_hill Hill radii at
+    the end. Bodies that never come within APPROACH_MAX_HILL Hill radii are left out. """
+
+    lines = ["MOID with the planets (nominal solution after the departure from the Earth{:s}):".format(
+        "; clones at the end of the run" if moid["clones_au"] else "")]
+    t_days = np.asarray(t_days, dtype=float)
+
+    for body in moid["bodies"]:
+        hill = HILL_RADII_AU[body]
+        v = np.array([np.nan if x is None else x for x in moid["nominal_au"][body]], dtype=float)
+        v[:k_dep] = np.nan
+        if (not np.any(np.isfinite(v))) or (np.nanmin(v)/hill > APPROACH_MAX_HILL):
+            continue
+        k = int(np.nanargmin(v))
+        t_min = t_days[min(k, len(t_days) - 1)]
+        line = "  {:<8s} min {:s} AU ({:.2g} Hill radii) at t = {:s}{:s}".format(
+            body, "{:.5f}".format(v[k]) if v[k] >= 1e-4 else "{:.1e}".format(v[k]), v[k]/hill,
+            "-" if t_min < 0 else "", _spanText(t_min))
+
+        clones = (moid["clones_au"] or {}).get(body)
+        if clones is not None:
+            # Fraction of clones within n_hill Hill radii at the end, from the percentiles: the largest
+            #   percentile still inside the threshold
+            last = [row[-1] for row in clones]
+            inside = [p for p, x in zip(moid["percentiles"], last) if (x is not None) and (x < n_hill*hill)]
+            line += "; clones within {:g} Hill radii at the end: {:s}".format(
+                n_hill, "> {:g}%".format(max(inside)) if inside else "< {:g}%".format(moid["percentiles"][0]))
+
+        lines.append(line)
+
+    return lines
+
+
 def _integrateParticles(task):
     """ Build a REBOUND simulation from precomputed planet states and integrate one or more test
     particles through it, returning their per-timestep orbital elements and distances.
@@ -1360,7 +1723,7 @@ def _integrateParticles(task):
         task: [dict] A picklable task description with the keys:
             planet_names:    [list] Massive-body names, in add order.
             planet_states:   [list] Per-planet [x, y, z, vx, vy, vz] in REBOUND units (AU,
-                                 AU/(year/2pi)), barycentric ecliptic J2000.
+                                 AU per time unit), barycentric ecliptic J2000.
             planet_masses:   [list] Per-planet mass in solar masses.
             particle_states: [list] Per-particle barycentric [x, y, z, vx, vy, vz] (REBOUND units).
             particle_names:  [list] Per-particle names (parallel to particle_states).
@@ -1373,8 +1736,19 @@ def _integrateParticles(task):
                                  radii used for impact detection (Sun 695700 km, Earth 6371 km,
                                  Moon 1737.4 km).
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
+            gr:              [str]  Optional. General relativity: "gr_full" (default), the
+                                 post-Newtonian interaction between all pairs of bodies, or "gr",
+                                 the correction of the Sun's field on every body (see GR_MODELS).
+            sun_j2:          [bool] Optional. Include the Sun's J2 (SUN_J2), symmetric about its
+                                 rotation axis (sunSpinAxisEcliptic). Default True.
+            earth_spin_axis: [list] Optional. Direction of the Earth's rotation axis in the
+                                 simulation frame, the axis of symmetry of its J2 and J4 (see
+                                 earthSpinAxisEcliptic). Needs REBOUNDx >= 4.4.0. None (default)
+                                 leaves REBOUNDx's default, the z axis (the ecliptic pole).
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
+            compute_moid:    [bool] Optional. Compute the MOID with each of MOID_BODIES at every
+                                 output ("moid_au" in the diagnostics). Default False.
 
     Return:
         [dict] {
@@ -1387,6 +1761,8 @@ def _integrateParticles(task):
                                  per local minimum of an object-body distance inside n_hill Hill
                                  radii (inside SUN_ENCOUNTER_AU for the Sun), in the format of
                                  encountersFromMinDistances,
+                "moid_au":       with compute_moid, {body: MOID in AU at each output of the
+                                 particle, None where its orbit is not elliptical}; None without it,
                 "departed":      [bool] whether the object left the Earth's neighbourhood,
                 "impact":        None, or {"body", "time_days", "dist_au"} if the object hit a body,
             }},
@@ -1409,6 +1785,14 @@ def _integrateParticles(task):
 
     n_hill = task.get("n_hill", 3.0)
 
+    # MOID with the planets at every output, from the heliocentric osculating orbits of the object and
+    #   the planets read at the output: the planets' rows are shared by all the particles, and each
+    #   particle's rows carry the index of their output
+    compute_moid = task.get("compute_moid", False)
+    moid_bodies = [b for b in MOID_BODIES if b in planet_names]
+    moid_planet_rows = []
+    moid_object_rows = {name: [] for name in particle_names}
+
     # Integrator. The object starts at the Earth's surface, a deep close encounter that the
     # fixed-step integrators do not handle: WHFast cannot resolve it at all, and TRACE resolves the
     # encounter but applies the Earth's J2/J4 force (REBOUNDx gravitational_harmonics) without
@@ -1428,15 +1812,15 @@ def _integrateParticles(task):
         if dt_days <= 0:
             raise ValueError("The timestep must be positive, got {:g} d.".format(dt_days))
 
-        # REBOUND time units (G = 1, AU, M_sun), where one year is 2*pi
-        dt_fixed = dt_days*2*np.pi/365.25
+        # REBOUND time units (G = 1, AU, M_sun)
+        dt_fixed = daysToSimTime(dt_days)
 
     switch_time = None
 
     # TRACE mishandles close encounters when the timestep is negative (a REBOUND bug, present in
     # 4.6.0 and 5.1.1: a flyby integrated backward comes out ~10% off in a, forward it matches IAS15
     # to 1e-7). A backward TRACE run is therefore integrated forward in time with every velocity
-    # reversed. This is exact for gravity, GR (gr_full, quadratic in the velocities) and the Earth's
+    # reversed. This is exact for gravity, GR (gr and gr_full, quadratic in the velocities) and the Earth's
     # harmonics, which are time-reversal symmetric. Poynting-Robertson drag is not, and is handled
     # where the radiation force is set up.
     reverse_time = (integrator == "trace") and (direction == "backward")
@@ -1491,19 +1875,35 @@ def _integrateParticles(task):
     if reverse_time:
         _reverseVelocities(sim)
 
-    # Add the gravitational harmonics of the Earth
+    # Add the gravitational harmonics of the Earth, symmetric about its rotation axis. The simulation
+    #   frame is the ecliptic, so the axis has to be given: REBOUNDx would otherwise use the z axis,
+    #   the ecliptic pole, 23.4 deg from the Earth's (5 m/s on the departure of a 14 km/s meteoroid).
     gh = rebx.load_force("gravitational_harmonics")
     rebx.add_force(gh)
     ps["Earth"].params["J2"] = J2
     ps["Earth"].params["J4"] = J4
     ps["Earth"].params["R_eq"] = RE_eq
+    earth_spin_axis = task.get("earth_spin_axis")
+    if earth_spin_axis is not None:
+        ps["Earth"].params["Omega"] = rb.Vec3d(*earth_spin_axis)
+
+    # The Sun's J2, about its rotation axis (7.25 deg from the ecliptic pole, which an old REBOUNDx
+    #   uses instead). It acts on the planets as well as on the object.
+    if task.get("sun_j2", True):
+        ps["Sun"].params["J2"] = SUN_J2
+        ps["Sun"].params["R_eq"] = SUN_J2_RADIUS_AU
+        if harmonicsSpinAxisSupported():
+            ps["Sun"].params["Omega"] = rb.Vec3d(*sunSpinAxisEcliptic())
     # Assign the body radii used for impact detection
     for bname, brad in body_radii.items():
         if bname in planet_names:
             ps[bname].r = brad
 
-    # gr_full is the general relativity correction for all bodies
-    gr = rebx.load_force("gr_full")
+    # General relativity (see GR_MODELS). "gr" takes the first particle, the Sun, as the only source.
+    gr_model = task.get("gr", "gr_full")
+    if gr_model not in GR_MODELS:
+        raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr_model), ", ".join(GR_MODELS)))
+    gr = rebx.load_force(gr_model)
     rebx.add_force(gr)
     gr.params["c"] = rbxConstants.C
 
@@ -1676,7 +2076,7 @@ def _integrateParticles(task):
         except rb.Collision:
 
             # Identify which body was hit (the test particles have no radius of their own)
-            t_impact = time_sign*sim.t/(2*np.pi)*365.25
+            t_impact = time_sign*simTimeToDays(sim.t)
             hit_particle = False
             for pname, pidx in particle_idx.items():
                 if pidx >= sim.N:
@@ -1708,7 +2108,7 @@ def _integrateParticles(task):
 
             # The object was thrown out of the simulation volume (unbound or ejected). Record it and
             # stop, since integrating a runaway particle only gets more expensive.
-            t_esc = time_sign*sim.t/(2*np.pi)*365.25
+            t_esc = time_sign*simTimeToDays(sim.t)
             for pname, pidx in particle_idx.items():
                 if pidx >= sim.N:
                     continue
@@ -1723,6 +2123,10 @@ def _integrateParticles(task):
         # Read the outputs with the true velocities
         if reverse_time:
             _reverseVelocities(sim)
+
+        if compute_moid:
+            k_moid = len(moid_planet_rows)
+            moid_planet_rows.append([_orbitTuple(ps[b].orbit(primary=ps["Sun"])) for b in moid_bodies])
 
         for name in particle_names:
 
@@ -1741,6 +2145,10 @@ def _integrateParticles(task):
                 Omega=orb_elem.Omega, omega=orb_elem.omega, f=orb_elem.f)
 
             outputs[name].append([t_out, state_vect_hel, orb_ns, planet_dists])
+
+            if compute_moid:
+                orb_hel = orb_elem if reference_frame == "heliocentric" else ps[name].orbit(primary=ps["Sun"])
+                moid_object_rows[name].append((k_moid, _orbitTuple(orb_hel)))
 
         if reverse_time:
             _reverseVelocities(sim)
@@ -1764,20 +2172,26 @@ def _integrateParticles(task):
             "min_dist_au": {b: (None if not np.isfinite(st["min_dist"][b]) else st["min_dist"][b])
                             for b in planet_names},
             "min_time_days": {b: (None if not np.isfinite(st["min_time"][b])
-                                  else time_sign*st["min_time"][b]/(2*np.pi)*365.25)
+                                  else time_sign*simTimeToDays(st["min_time"][b]))
                               for b in planet_names},
-            "encounters": [_encounterRecord(b, d, time_sign*t/(2*np.pi)*365.25)
+            "encounters": [_encounterRecord(b, d, time_sign*simTimeToDays(t))
                            for b, t, d in st["encounters"]],
+            "moid_au": (_moidSeries(moid_planet_rows, moid_object_rows[name], moid_bodies)
+                        if compute_moid else None),
             "departed": st["departed"],
             "impact": st["impact"],
             "escaped": st["escaped"],
             "energy_rel_drift": energy_drift,
             "integrator": integrator,
             "fixed_step_from_days": (None if switch_time is None
-                                     else time_sign*switch_time/(2*np.pi)*365.25),
+                                     else time_sign*simTimeToDays(switch_time)),
         }
 
     return {"outputs": outputs, "diagnostics": diagnostics}
+
+
+# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno)
+MEGNO_RESCALE_ABOVE = 1e20
 
 
 def computeMegno(task, seed=1):
@@ -1816,6 +2230,10 @@ def computeMegno(task, seed=1):
             "times_days":   [list] output times in days (as in the task),
             "megno":        [list] <Y> at each output time,
             "a_au":         [list] heliocentric osculating semi-major axis at each output time,
+            "ln_delta":     [list] ln|delta| of the deviation at each output time, from ln|delta| = 0
+                            at the start; its slope is the Lyapunov exponent (see classifyMegno),
+            "departure_days": [float] first output time at which the object is beyond n_hill (task,
+                            default 3) Earth Hill radii, or None if it never is (or there is no Earth),
             "escaped":      [bool] whether the object left the simulation volume (series truncated),
         }
     """
@@ -1856,11 +2274,17 @@ def computeMegno(task, seed=1):
     vp = var.particles[0]
     vp.x, vp.y, vp.z, vp.vx, vp.vy, vp.vz = dev/np.linalg.norm(dev)
 
+    # The deviation grows as exp(lambda t) on a chaotic orbit and would overflow past exp(709), so it
+    #   is rescaled to unit length at the output times once it is large, and the logarithm of the
+    #   factor is kept here. The variational equations are linear, so this is exact (measured: ln|delta|
+    #   within 2e-12 of an unscaled run over 400 years).
+    norm = {"offset": 0.0}
+
     def logDeviation():
         """ ln|delta| of the variational particle, over the full 6D phase space. """
 
         p = var.particles[0]
-        return 0.5*np.log(p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)
+        return norm["offset"] + 0.5*np.log(p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)
 
     # Running integrals: I = int s d(ln|delta|) and J = int Y ds
     acc = {"t": sim.t, "ln_d": logDeviation(), "I": 0.0, "J": 0.0, "Y": 0.0}
@@ -1886,8 +2310,14 @@ def computeMegno(task, seed=1):
     # Keep the returned reference alive until the integration ends (see _setHeartbeat)
     heartbeat_ref = _setHeartbeat(sim, heartbeat)  # noqa: F841
 
-    times_days, megno, a_au = [], [], []
+    times_days, megno, a_au, ln_delta = [], [], [], []
     escaped = False
+
+    # The departure from the Earth's neighbourhood, where the deviation grows by orders of magnitude
+    #   during the initial close passage, which is not the orbit's own chaos
+    earth_i = task["planet_names"].index("Earth") if "Earth" in task["planet_names"] else None
+    departure_radius = task.get("n_hill", 3.0)*HILL_RADII_AU["Earth"]
+    departure_days = None
 
     # Sample <Y> at the same output times as the main integration
     for t_out in task["times"]:
@@ -1905,13 +2335,27 @@ def computeMegno(task, seed=1):
         if t_out == 0:
             continue
 
-        times_days.append(t_out/(2*np.pi)*365.25)
+        times_days.append(simTimeToDays(t_out))
         megno.append(acc["J"]/acc["t"])
+        ln_delta.append(logDeviation())
 
         # Heliocentric osculating semi-major axis, used to count the orbital periods covered
         a_au.append(sim.particles[obj_i].orbit(primary=sim.particles[0]).a)
 
-    return {"times_days": times_days, "megno": megno, "a_au": a_au, "escaped": escaped}
+        if (departure_days is None) and (earth_i is not None):
+            o, e = sim.particles[obj_i], sim.particles[earth_i]
+            if ((o.x - e.x)**2 + (o.y - e.y)**2 + (o.z - e.z)**2)**0.5 > departure_radius:
+                departure_days = times_days[-1]
+
+        # Rescale a large deviation to unit length (see norm)
+        p = var.particles[0]
+        size = (p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)**0.5
+        if size > MEGNO_RESCALE_ABOVE:
+            p.x, p.y, p.z, p.vx, p.vy, p.vz = p.x/size, p.y/size, p.z/size, p.vx/size, p.vy/size, p.vz/size
+            norm["offset"] += np.log(size)
+
+    return {"times_days": times_days, "megno": megno, "a_au": a_au, "ln_delta": ln_delta,
+            "departure_days": departure_days, "escaped": escaped}
 
 
 # MEGNO verdict thresholds. A regular orbit's <Y> settles within ~0.05 of 2 after tens of orbits
@@ -1927,7 +2371,65 @@ MEGNO_PERIODIC_MAX = 1.0
 MEGNO_MIN_ORBITS = 20
 
 
-def classifyMegno(times_days, megno, a_au):
+# Fewest orbital periods of exponential growth from which a Lyapunov time is given. Measured on an orbit
+#   with its aphelion near Jupiter: from 4 periods of growth the fit gave 229 years, from 33 and 74
+#   periods 54 and 66 years.
+LYAPUNOV_MIN_ORBITS = 10
+
+
+def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
+    """ Lyapunov time of a chaotic orbit from the growth of ln|delta| (see computeMegno).
+
+    The fit starts when <Y> rises above MEGNO_CHAOTIC_MIN for the last time, i.e. when the
+    exponential growth sets in: before it, the deviation can stay flat or even shrink for centuries
+    (e.g. on an Earth-crossing orbit until its first deep encounter), and including that biases the
+    time high. ln|delta| is fitted directly, rather than <Y>, which is a double running average and
+    lags the growth. Chaos driven by close encounters grows in steps, so the time is also fitted in
+    four windows of the growth phase, whose spread is returned as the range.
+
+    Arguments:
+        t_years: [ndarray] Elapsed time of each output in years (positive).
+        ln_delta: [ndarray] ln|delta| at each output.
+        megno: [ndarray] <Y> at each output.
+        period_years: [float] Orbital period in years.
+
+    Return:
+        [dict] or None if there is no growth phase to fit (shorter than a tenth of the run or than
+        LYAPUNOV_MIN_ORBITS periods, or not growing): {
+            "lyapunov_time_years": 1/lambda over the growth phase,
+            "lyapunov_time_range_years": [min, max] over the windows (None if too few points),
+            "onset_years": start of the growth phase,
+        }
+    """
+
+    below = np.where(megno <= MEGNO_CHAOTIC_MIN)[0]
+    k0 = (below[-1] + 1) if len(below) else 0
+
+    # At least a tenth of the run and LYAPUNOV_MIN_ORBITS periods, and enough points for a fit
+    if k0 >= len(t_years) - 10:
+        return None
+    span = t_years[-1] - t_years[k0]
+    if (span < 0.1*t_years[-1]) or (span < LYAPUNOV_MIN_ORBITS*period_years):
+        return None
+
+    t, l = t_years[k0:], ln_delta[k0:]
+    slope = np.polyfit(t, l, 1)[0]
+    if slope <= 0:
+        return None
+
+    taus = []
+    if len(t) >= 40:
+        for w in np.array_split(np.arange(len(t)), 4):
+            s_w = np.polyfit(t[w], l[w], 1)[0]
+            if s_w > 0:
+                taus.append(1.0/s_w)
+
+    return {"lyapunov_time_years": float(1.0/slope),
+            "lyapunov_time_range_years": [float(min(taus)), float(max(taus))] if taus else None,
+            "onset_years": float(t[0])}
+
+
+def classifyMegno(times_days, megno, a_au, ln_delta=None):
     """ Decide whether a MEGNO series has converged to 2 (regular orbit), is growing (chaotic), or
     is not conclusive.
 
@@ -1943,6 +2445,11 @@ def classifyMegno(times_days, megno, a_au):
         megno: [list] <Y> at each output time.
         a_au: [list] Heliocentric semi-major axis at each output time.
 
+    Keyword arguments:
+        ln_delta: [list] ln|delta| at each output time (see computeMegno). If given, the Lyapunov
+            time of a chaotic orbit comes from its growth (lyapunovFromDeviation); otherwise from the
+            slope of <Y> over the second half of the run. Default None.
+
     Return:
         [dict] {
             "status":        "regular", "chaotic", "periodic", "not_converged", "too_short" or
@@ -1950,8 +2457,11 @@ def classifyMegno(times_days, megno, a_au):
             "final":         final <Y>,
             "last_quarter":  mean <Y> over the last quarter of the run,
             "n_orbits":      number of orbital periods spanned (median a), or None if unbound,
-            "lyapunov_time_years": for a chaotic orbit, 1/lambda from <Y> ~ (lambda/2) t fitted over
-                               the second half of the run; otherwise None,
+            "lyapunov_time_years": for a chaotic orbit, 1/lambda (see ln_delta); otherwise None,
+            "lyapunov_time_range_years": [min, max] of the time over windows of the growth phase,
+                               or None,
+            "lyapunov_onset_years": start of the fitted growth phase, or None,
+            "lyapunov_method":  "ln_delta" or "megno_second_half", or None,
             "message":       one-line explanation,
         }
     """
@@ -1965,7 +2475,8 @@ def classifyMegno(times_days, megno, a_au):
     #   run: a series that is still drifting will disagree between the two
     result = {"status": None, "final": float(y[-1]) if len(y) else None,
               "last_quarter": float(np.mean(y[3*len(y)//4:])) if len(y) else None,
-              "n_orbits": None, "lyapunov_time_years": None}
+              "n_orbits": None, "lyapunov_time_years": None, "lyapunov_time_range_years": None,
+              "lyapunov_onset_years": None, "lyapunov_method": None}
 
     # Not enough points for the last quarter to mean anything (or no points at all)
     if len(y) < 8:
@@ -1989,7 +2500,7 @@ def classifyMegno(times_days, megno, a_au):
 
     # <Y> needs many orbits to settle, so a short run gets no verdict at all rather than a wrong one
     if n_orbits < MEGNO_MIN_ORBITS:
-        result.update(status="too_short", message="The run covers only {:.1f} orbital periods; MEGNO "
+        result.update(status="too_short", message="The run covers only {:.3g} orbital periods; MEGNO "
                       "needs at least {:d} to settle. Integrate for at least {:.0f} years.".format(
                           n_orbits, MEGNO_MIN_ORBITS, MEGNO_MIN_ORBITS*a_med**1.5))
         return result
@@ -2003,12 +2514,26 @@ def classifyMegno(times_days, megno, a_au):
     #   Lyapunov exponent from the slope. Only the second half is fitted, since the early part
     #   still carries the transient from the object's departure from the Earth.
     elif (final > MEGNO_CHAOTIC_MIN) and (last_quarter > MEGNO_CHAOTIC_MIN):
-        half = len(y)//2
-        slope = np.polyfit(t_years[half:], y[half:], 1)[0]
 
-        # A negative slope would give a meaningless negative time, so it is left unreported
-        if slope > 0:
-            result["lyapunov_time_years"] = float(1.0/(2*slope))
+        # From the growth of ln|delta| when it is available (see lyapunovFromDeviation). If its growth
+        #   phase is too short no time is given, rather than one from <Y>, which is no better there.
+        if (ln_delta is not None) and (len(ln_delta) == len(y)):
+            fit = lyapunovFromDeviation(t_years, np.array(ln_delta, dtype=float), y, a_med**1.5)
+            result["lyapunov_method"] = "ln_delta"
+            if fit is not None:
+                result.update(lyapunov_time_years=fit["lyapunov_time_years"],
+                              lyapunov_time_range_years=fit["lyapunov_time_range_years"],
+                              lyapunov_onset_years=fit["onset_years"])
+
+        # Otherwise from <Y> ~ (lambda/2) t over the second half
+        else:
+            half = len(y)//2
+            slope = np.polyfit(t_years[half:], y[half:], 1)[0]
+
+            # A negative slope would give a meaningless negative time, so it is left unreported
+            if slope > 0:
+                result.update(lyapunov_time_years=float(1.0/(2*slope)),
+                              lyapunov_method="megno_second_half")
 
         result.update(status="chaotic", message="<Y> does not converge to 2 and keeps growing: the "
                       "orbit is chaotic.")
@@ -2016,8 +2541,10 @@ def classifyMegno(times_days, megno, a_au):
     # Tending to 0 instead of 2: the deviation stays bounded, which is regular motion too
     elif (final < MEGNO_PERIODIC_MAX) and (last_quarter < MEGNO_PERIODIC_MAX):
         result.update(status="periodic", message="<Y> tends to 0 rather than 2: the deviation from "
-                      "the orbit stays bounded, the signature of a stable periodic orbit (e.g. "
-                      "libration in a mean-motion resonance). Regular, not chaotic.")
+                      "the orbit stayed bounded over this span, as around a stable periodic orbit (e.g. "
+                      "libration in a mean-motion resonance). An Earth-crossing orbit can also do this "
+                      "for a while before its first deep encounter: this is about the nominal orbit "
+                      "over this span, not the clones (see the predictability horizon).")
 
     # Between the thresholds, or the two statistics disagree: the run is simply too short to tell
     else:
@@ -2025,6 +2552,53 @@ def classifyMegno(times_days, megno, a_au):
                       "growing either; integrate for longer to decide.")
 
     return result
+
+
+def _spanText(days):
+    """ A time span in days as text, in years from a year up, e.g. "45 years" or "60 days". """
+
+    days = abs(days)
+    if days >= 365.25:
+        return "{:.0f} years".format(days/365.25)
+
+    return "{:.0f} days".format(days)
+
+
+def _predictabilityReportLines(horizon, span_days):
+    """ Human-readable lines describing a predictabilityHorizon result. """
+
+    lines = ["Predictability horizon (from {:d} Monte Carlo clones):".format(horizon["n_clones"])]
+
+    names = {"a": "a", "e": "e", "i": "i"}
+    parts = []
+    for key, el in horizon["elements"].items():
+        if el["horizon_days"] is None:
+            parts.append("{:s} beyond the span".format(names[key]))
+        else:
+            parts.append("{:s} {:s}".format(names[key], _spanText(el["horizon_days"])))
+    lines.append("  The clones keep the order of their initial {:s} (rank correlation >= {:.1f}) "
+                 "for:".format(", ".join(names[k] for k in horizon["elements"]), horizon["threshold"]))
+    lines.append("    " + "; ".join(parts))
+
+    if horizon["horizon_days"] is None:
+        lines.append("  Not reached within the {:s} integrated: the individual trajectory is still set by "
+                     "the measurement.".format(_spanText(span_days)))
+    else:
+        lines.append("  Beyond ~{:s} the individual trajectory is no longer set by the measurement: use "
+                     "the".format(_spanText(horizon["horizon_days"])))
+        lines.append("  distribution of the clones, not the nominal orbit.")
+
+    fe = horizon.get("first_encounter_days")
+    if fe is not None:
+        if fe.get("p50") is not None:
+            lines.append("  First close encounter of the clones: {:.0f}% had one; median {:s} "
+                         "(5-95%: {:s} to {:s}).".format(100*fe["fraction"],
+                             _spanText(fe["p50"]), _spanText(fe["p05"]),
+                             _spanText(fe["p95"])))
+        else:
+            lines.append("  No clone had a close encounter.")
+
+    return lines
 
 
 def _megnoReportLines(megno):
@@ -2043,7 +2617,7 @@ def _megnoReportLines(megno):
 
     # Not available for an unbound orbit, where there is no orbital period to count
     if v["n_orbits"] is not None:
-        lines.append("  span: {:.1f} orbital periods".format(v["n_orbits"]))
+        lines.append("  span: {:.3g} orbital periods".format(v["n_orbits"]))
 
     # The statuses with no entry here ("too_short" and "unbound") are the ones with no verdict
     converges = {"regular": "YES", "chaotic": "NO", "periodic": "NO (tends to 0)",
@@ -2053,10 +2627,25 @@ def _megnoReportLines(megno):
     else:
         lines.append("  No verdict: {:s}".format(v["message"]))
 
+    # A chaotic orbit whose exponential growth is still too short to time
+    if (v["status"] == "chaotic") and (v["lyapunov_time_years"] is None) \
+            and (v.get("lyapunov_method") == "ln_delta"):
+        lines.append("  Lyapunov time not determined: the exponential growth of ln|delta| covers fewer than "
+                     "{:d}".format(LYAPUNOV_MIN_ORBITS))
+        lines.append("  orbital periods (or a tenth of the run). Integrate for longer to time it.")
+
     # Only set for a chaotic orbit with a positive fitted slope
     if v["lyapunov_time_years"] is not None:
-        lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
-                     "half).".format(v["lyapunov_time_years"]))
+        if v.get("lyapunov_method") == "ln_delta":
+            rng = v.get("lyapunov_time_range_years")
+            lines.append("  Lyapunov time ~ {:.0f} years{:s}.".format(v["lyapunov_time_years"],
+                         "" if rng is None else " (range {:.0f}-{:.0f} over four windows)".format(*rng)))
+            lines.append("  Fitted to the growth of ln|delta| since <Y> last exceeded {:.1f}, {:s} back.".format(
+                MEGNO_CHAOTIC_MIN, _spanText(365.25*v["lyapunov_onset_years"])))
+            lines.append("  Encounter-driven chaos grows in steps, so quote the range.")
+        else:
+            lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
+                         "half).".format(v["lyapunov_time_years"]))
 
     if megno.get("escaped"):
         lines.append("  The object left the simulation volume, so the MEGNO series is truncated.")
@@ -2064,12 +2653,417 @@ def _megnoReportLines(megno):
     return lines
 
 
+# With more clones than this, the figure shows their percentile bands instead of every clone
+PLOT_BANDS_MIN_CLONES = 20
+
+# Clones drawn individually on top of the bands, to show how single trajectories behave
+PLOT_SAMPLE_CLONES = 10
+
+
+def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, dist_unit_multiplier=1.0,
+                      length_units="AU", horizon=None, n_hill=3.0, clone_encounters=None, closest_au=None,
+                      closest_time_days=None, moid=None):
+    """ Figure of the evolution of the orbit: the nominal solution and the Monte Carlo clones.
+
+    Panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, the close approaches to
+    every body in units of its Hill radius, and the predictability horizon (see
+    predictabilityHorizon), or the heliocentric distance without clones.
+
+    The approaches panel shows the nominal's encounters as discs drawn as their bodies (see
+    wmpl.Utils.PlanetStyle), the clones' encounters as faint dots, the MOID with each body that comes
+    within APPROACH_MAX_HILL Hill radii (a line for the nominal, and the clones' 1 sigma band, their
+    16-84% percentiles, around it), and, for a body with none of these, its
+    closest approach as a ring if within APPROACH_MAX_HILL. The Sun has no Hill sphere: its
+    distance is scaled so that its SUN_ENCOUNTER_AU gate falls on the n_hill line of the others. The
+    distance to the Earth at the outputs is drawn too in runs shorter than two years, where it shows
+    the departure; in longer runs the output sampling misses the approaches.
+
+    With PLOT_BANDS_MIN_CLONES clones or more, the clones are shown as the 2.5-97.5% and 16-84%
+    bands and the median at each time, with PLOT_SAMPLE_CLONES of them drawn individually; with fewer,
+    every clone is drawn. The angles are unwrapped along the nominal solution and each clone is drawn
+    as its difference from it, so that crossing 0/360 deg does not draw vertical lines. The vertical
+    axes cover the run from the departure from the Earth, before which the osculating heliocentric
+    elements carry the Earth's pull. The time is in years for spans of two years or more.
+
+    Arguments:
+        sim_outputs: [list] Outputs of the nominal solution (see reboundSimulate).
+        sim_outputs_mc: [dict] {name: outputs} of the clones, possibly empty.
+        encounters: [list] Close encounters of the nominal solution (see encountersFromMinDistances).
+
+    Keyword arguments:
+        file_path: [str] Where to save the figure, or None not to save it.
+        dist_unit_multiplier: [float] Factor from AU to the length unit of a and q. Default 1.
+        length_units: [str] Name of that unit. Default "AU".
+        horizon: [dict] Return of predictabilityHorizon, or None.
+        n_hill: [float] Earth Hill radii of the departure and of the encounter threshold. Default 3.
+        clone_encounters: [dict] {clone name: encounters of that clone}, or None.
+        closest_au: [dict] {body: closest approach of the nominal solution in AU}, or None.
+        closest_time_days: [dict] {body: time of that closest approach in days}, or None.
+        moid: [dict] Return of moidSummary, or None.
+
+    Return:
+        (fig, axes): the figure and a dict of its axes by panel name.
+    """
+
+    t_days = np.array([simTimeToDays(row[0]) for row in sim_outputs])
+    in_years = abs(t_days[-1] - t_days[0]) >= 2*365.25
+    t_scale = 365.25 if in_years else 1.0
+    t = t_days/t_scale
+    t_label = "Time [years]" if in_years else "Time [days]"
+    n = len(t)
+
+    k_dep = findEarthDepartureIndex(sim_outputs, n_hill=n_hill)
+    k_dep = 0 if k_dep is None else k_dep
+
+    def series(rows):
+        """ The plotted quantities of one run, padded with NaN to the nominal length. """
+
+        out = {key: np.full(n, np.nan) for key in ("a", "e", "q", "i", "node", "peri", "varpi", "earth", "sun")}
+        for k, row in enumerate(rows[:n]):
+            orb = row[2]
+            out["a"][k] = orb.a*dist_unit_multiplier
+            out["e"][k] = orb.e
+            out["q"][k] = orb.a*(1 - orb.e)*dist_unit_multiplier
+            out["i"][k] = np.degrees(orb.inc)
+            out["node"][k] = np.degrees(orb.Omega)
+            out["peri"][k] = np.degrees(orb.omega)
+            out["varpi"][k] = np.degrees(orb.Omega + orb.omega) % 360.0
+            out["earth"][k] = row[3].get("Earth", np.nan)
+            out["sun"][k] = row[3].get("Sun", np.nan)
+        return out
+
+    nominal = series(sim_outputs)
+    clones = [series(rows) for rows in sim_outputs_mc.values()]
+
+    # Before the departure the osculating heliocentric elements carry the Earth's pull, and would draw
+    #   a misleading jump at the start: they are left out of the element panels
+    element_keys = ("a", "e", "q", "i", "node", "peri", "varpi")
+    for run in [nominal] + clones:
+        for key in element_keys:
+            run[key][:k_dep] = np.nan
+
+    # Angles: unwrap the nominal solution, and draw each clone as its (wrapped) difference from it
+    angles = ("node", "peri", "varpi")
+    for key in angles:
+        nom = nominal[key]
+        ok = np.isfinite(nom)
+        unwrapped = nom.copy()
+        unwrapped[ok] = np.degrees(np.unwrap(np.radians(nom[ok])))
+
+        # Start the unwrapped series within 0-360 deg
+        if ok.any():
+            unwrapped -= 360.0*np.floor(unwrapped[ok][0]/360.0)
+        for c in clones:
+            with np.errstate(invalid="ignore"):
+                c[key] = unwrapped + ((c[key] - nom + 180.0) % 360.0 - 180.0)
+        nominal[key] = unwrapped
+
+    fig, axs = plt.subplots(3, 3, figsize=(15, 11), sharex=True)
+    names = [["a", "e", "q"], ["i", "node", "peri"], ["varpi", "encounters", "predictability"]]
+    axes = {name: axs[r, c] for r, row in enumerate(names) for c, name in enumerate(row)}
+    labels = {"a": "a [{:s}]".format(length_units), "e": "e", "q": "q [{:s}]".format(length_units),
+              "i": "i [deg]", "node": "node [deg]", "peri": "argument of perihelion [deg]",
+              "varpi": "longitude of perihelion [deg]"}
+
+    use_bands = len(clones) >= PLOT_BANDS_MIN_CLONES
+    if use_bands:
+        sample = clones[::max(1, len(clones)//PLOT_SAMPLE_CLONES)][:PLOT_SAMPLE_CLONES]
+    else:
+        sample = clones
+
+    for key, label in labels.items():
+
+        ax = axes[key]
+        limits = [nominal[key][k_dep:]]
+
+        if use_bands:
+            stack = np.array([c[key] for c in clones])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                p = np.nanpercentile(stack, [2.5, 16, 50, 84, 97.5], axis=0)
+            ax.fill_between(t, p[0], p[4], color="C0", alpha=0.18, lw=0,
+                            label="clones 2.5-97.5%" if key == "a" else None)
+            ax.fill_between(t, p[1], p[3], color="C0", alpha=0.35, lw=0,
+                            label="clones 16-84%" if key == "a" else None)
+            ax.plot(t, p[2], color="C0", lw=1.0, ls="--", label="clones median" if key == "a" else None)
+            limits += [p[0][k_dep:], p[4][k_dep:]]
+
+        for j, c in enumerate(sample):
+            ax.plot(t, c[key], color="0.35", lw=0.4, alpha=0.6,
+                    label=("{:d} sample clones".format(len(sample)) if use_bands else "clones")
+                    if (key == "a" and j == 0) else None)
+            if not use_bands:
+                limits.append(c[key][k_dep:])
+
+        ax.plot(t, nominal[key], color="k", lw=1.4, label="nominal" if key == "a" else None)
+        ax.set_ylabel(label)
+
+        # Scale to the run from the departure, not to the osculating elements still inside the
+        #   Earth's neighbourhood
+        values = np.concatenate([v[np.isfinite(v)] for v in limits]) if limits else np.array([])
+        if len(values):
+            lo, hi = values.min(), values.max()
+            pad = 0.05*(hi - lo) if hi > lo else max(abs(hi)*1e-6, 1e-12)
+            ax.set_ylim(lo - pad, hi + pad)
+
+    # Close approaches to every body in units of its Hill radius, so that one line is the encounter
+    #   threshold for all of them, on a log scale
+    ax = axes["encounters"]
+
+    def hillUnits(body, dist_au):
+        """ Distance in Hill radii of the body; for the Sun, scaled so its gate is at n_hill. """
+        if body == "Sun":
+            return n_hill*dist_au/SUN_ENCOUNTER_AU
+        return dist_au/HILL_RADII_AU[body]
+
+    def plotted(body):
+        return (body == "Sun") or (body in HILL_RADII_AU)
+
+    drawn = set()
+
+    # In a short run the distance to the Earth at the outputs shows the departure; in a long one the
+    #   output sampling misses the approaches, which the encounters below give exactly
+    if not in_years:
+        earth = nominal["earth"]
+        ax.plot(t, np.where(earth > 0, earth, np.nan)/HILL_RADII_AU["Earth"], color="0.55", lw=0.6,
+                zorder=1)
+
+    ax.axhline(n_hill, color="0.3", ls=":", lw=1, zorder=1)
+
+    # Encounters of the clones, faint, below everything else
+    clone_points = {}
+    for encs in (clone_encounters or {}).values():
+        for enc in encs:
+            if plotted(enc["body"]):
+                clone_points.setdefault(enc["body"], []).append(
+                    (enc["time_days"]/t_scale, hillUnits(enc["body"], enc["min_dist_au"])))
+    for body, pts in clone_points.items():
+        pts = np.array(pts)
+        ax.plot(pts[:, 0], pts[:, 1], marker="o", ls="none", color=planetColor(body), markersize=2.5,
+                markeredgewidth=0, alpha=0.3, zorder=2, gid="clone_encounter:{:s}".format(body))
+        drawn.add(body)
+
+    # MOID with each body, in Hill radii: the nominal's as a line, and the clones' 1 sigma band (16-84%)
+    #   for every body with a line, however thin: for a planet the clones never come near, their MOID
+    #   spreads little and the band is about as wide as the line. Before the departure the heliocentric
+    #   orbit carries the Earth's pull, as for the elements. Bodies that never come within
+    #   APPROACH_MAX_HILL Hill radii are left out.
+    moid_lines, moid_bands = set(), set()
+    if moid is not None:
+
+        def moidArray(values):
+            v = np.full(n, np.nan)
+            vals = np.array([np.nan if x is None else x for x in values[:n]], dtype=float)
+            v[:len(vals)] = vals
+            v[:k_dep] = np.nan
+            return v
+
+        for body in moid["bodies"]:
+            if body not in HILL_RADII_AU:
+                continue
+            hill = HILL_RADII_AU[body]
+            nom = moidArray(moid["nominal_au"][body])/hill
+            clones_p = (moid["clones_au"] or {}).get(body)
+            lo = hi = None
+            if clones_p is not None:
+                pct = list(moid["percentiles"])
+                lo, hi = moidArray(clones_p[pct.index(16)])/hill, moidArray(clones_p[pct.index(84)])/hill
+
+            series = [x for x in (nom, lo) if (x is not None) and np.any(np.isfinite(x))]
+            if (not series) or (np.nanmin(np.concatenate(series)) > APPROACH_MAX_HILL):
+                continue
+
+            if (lo is not None) and np.any(np.isfinite(lo)):
+                ax.fill_between(t, lo, hi, color=planetColor(body), alpha=0.2, lw=0, zorder=1,
+                                gid="moid_band:{:s}".format(body))
+                moid_bands.add(body)
+            ax.plot(t, nom, color=planetColor(body), lw=0.9, zorder=3, gid="moid:{:s}".format(body))
+            moid_lines.add(body)
+            drawn.add(body)
+
+    # The nominal's encounters, drawn as their bodies: colour and a size that grows with the radius
+    #   (see wmpl.Utils.PlanetStyle, shared with the solver's orbit plots). Smaller bodies go on top,
+    #   so the Moon stays visible next to the Earth.
+    nominal_encountered = set()
+    for enc in encounters:
+        body = enc["body"]
+        if not plotted(body):
+            continue
+        size = planetMarkerSize(body)
+        ax.plot(enc["time_days"]/t_scale, hillUnits(body, enc["min_dist_au"]), marker="o",
+                color=planetColor(body), markersize=size, markeredgecolor=PLANET_EDGE_COLOR,
+                markeredgewidth=PLANET_EDGE_WIDTH, ls="none", zorder=5 + 1.0/size,
+                gid="encounter:{:s}".format(body))
+        drawn.add(body)
+        nominal_encountered.add(body)
+
+    # A body with none of the above gets its closest approach of the run as a ring, if it is within
+    #   APPROACH_MAX_HILL Hill radii: further out the body never mattered. The Sun's closest approach
+    #   is the perihelion, which the q panel shows already.
+    rings = set()
+    for body, dist in (closest_au or {}).items():
+        t_min = (closest_time_days or {}).get(body)
+        if (body == "Sun") or (body not in HILL_RADII_AU) or (body in drawn) or (dist is None) or (t_min is None):
+            continue
+        if hillUnits(body, dist) > APPROACH_MAX_HILL:
+            continue
+        ax.plot(t_min/t_scale, hillUnits(body, dist), marker="o", ls="none", markersize=6,
+                markerfacecolor="none", markeredgecolor=planetColor(body), markeredgewidth=1.2, zorder=4,
+                gid="closest:{:s}".format(body))
+        drawn.add(body)
+        rings.add(body)
+
+    ax.set_yscale("log")
+    ax.set_ylabel("distance [Hill radii]")
+
+    # Where the orbits cross the MOID dives towards zero; a thousandth of a Hill radius is deep enough
+    y_lo, y_hi = ax.get_ylim()
+    ax.set_ylim(max(y_lo, MOID_PLOT_MIN_HILL), y_hi)
+
+    # The legend: one entry per body in its colour, then one per kind of marker, in black (grey would
+    #   read as Mercury or the Moon)
+    approach_handles = [Line2D([], [], marker="o", ls="none", color=planetColor(b), markersize=6,
+                               markeredgecolor=PLANET_EDGE_COLOR, markeredgewidth=PLANET_EDGE_WIDTH,
+                               label="Moon" if b == "Luna" else b)
+                        for b in PLANET_ORDER if b in drawn]
+    if not in_years:
+        approach_handles.append(Line2D([], [], color="0.55", lw=0.6, label="distance to the Earth"))
+    approach_handles.append(Line2D([], [], color="0.3", ls=":", lw=1, label="{:g} Hill radii".format(n_hill)))
+    if nominal_encountered:
+        approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=7,
+                                       label="encounter (nominal)"))
+    if clone_points:
+        approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=2.5,
+                                       markeredgewidth=0, alpha=0.5, label="encounter (clones)"))
+    if moid_lines:
+        approach_handles.append(Line2D([], [], color="k", lw=0.9, label="MOID (nominal)"))
+    if moid_bands:
+        approach_handles.append(Patch(facecolor="k", alpha=0.2, lw=0, label="MOID 1$\\sigma$ (clones)"))
+    if rings:
+        approach_handles.append(Line2D([], [], marker="o", ls="none", markersize=6, markerfacecolor="none",
+                                       markeredgecolor="k", markeredgewidth=1.2, label="never closer"))
+
+    # Predictability: rank correlation of the clones with their start, and the horizon
+    ax = axes["predictability"]
+    if horizon is not None:
+        t_h = np.array(horizon["time_days"])/t_scale
+        for key, color in (("a", "C0"), ("e", "C1"), ("i", "C2")):
+            rho = horizon["rank_corr"].get(key)
+            if rho is not None:
+                ax.plot(t_h, [np.nan if v is None else v for v in rho], color=color, lw=1, label=key)
+        ax.axhline(horizon["threshold"], color="0.5", ls=":", lw=1)
+        fe = horizon.get("first_encounter_days")
+        if fe is not None and fe.get("p05") is not None:
+            sign = 1.0 if t_days[-1] >= t_days[0] else -1.0
+            ax.axvspan(sign*fe["p05"]/t_scale, sign*fe["p95"]/t_scale, color="red", alpha=0.08,
+                       label="first encounters (5-95%)")
+        ax.set_ylim(-0.3, 1.05)
+        ax.set_ylabel("rank correlation with the start")
+    else:
+        ax.plot(t, nominal["sun"], color="k", lw=0.8, label="nominal")
+        ax.set_ylabel("heliocentric distance [AU]")
+
+    # The departure and the predictability horizon on every panel
+    for ax in axs.flatten():
+        if k_dep > 0:
+            ax.axvline(t[k_dep], color="0.6", ls=":", lw=0.8)
+        if (horizon is not None) and (horizon.get("horizon_days") is not None):
+            ax.axvline(horizon["horizon_days"]/t_scale, color="red", ls="--", lw=0.9,
+                       label="predictability horizon ({:s})".format(_spanText(horizon["horizon_days"]))
+                       if ax is axes["predictability"] else None)
+        if ax in axs[-1]:
+            ax.set_xlabel(t_label)
+        if ax.get_yscale() == "linear":
+            ax.ticklabel_format(axis="y", useOffset=False, style="plain")
+
+    ax_min, ax_max = min(t[0], t[-1]), max(t[0], t[-1])
+    axs[0, 0].set_xlim(ax_min, ax_max)
+
+    for ax in axs.flatten():
+        if ax is axes["encounters"]:
+            ax.legend(handles=approach_handles, fontsize=6.5, ncol=2, loc="best")
+            continue
+        handles, lab = ax.get_legend_handles_labels()
+        if lab:
+            ax.legend(fontsize=7, loc="best")
+
+    fig.tight_layout()
+
+    if file_path is not None:
+        fig.savefig(file_path, dpi=150)
+
+    return fig, axes
+
+
+# Length unit of the orbital elements of a run: the heliocentric elements are in AU and the geocentric ones in
+#   km. It applies only to a and q: the distances between bodies are always in AU
+def lengthUnitOfFrame(reference_frame):
+    """ Name of the length unit of a and q in a reference frame, and its factor from AU. """
+
+    if reference_frame == "geocentric":
+        return "km", 149597870.7
+
+    return "AU", 1.0
+
+
+def replotReboundFromResults(results, file_path=None, use_moid=True):
+    """ Redraw the figure of a run from its results file (rebound_simulation_results.json), without
+    integrating again.
+
+    The figure is the one the run drew (see plotReboundOrbits), from what the file holds: the elements and the
+    distances to the Earth and the Sun of the nominal solution and of every clone, the encounters, the
+    closest approaches, the predictability horizon and the MOID.
+
+    Arguments:
+        results: [dict] The results file, as json.load reads it.
+
+    Keyword arguments:
+        file_path: [str] Where to save the figure, or None not to save it.
+        use_moid: [bool] Draw the MOID if the file has it. False leaves it out, and the bodies it
+            would have covered get their "never closer" ring again, as in a run with --no_moid.
+            Default True.
+
+    Return:
+        (fig, axes): see plotReboundOrbits.
+    """
+
+    run = results["run"]
+    length_units, dist_unit_multiplier = lengthUnitOfFrame(run.get("reference_frame", "heliocentric"))
+    sim_time_per_day = daysToSimTime(1.0)
+
+    def rows(series, bodies=None):
+        """ The outputs of one run in the format of _integrateParticles (without the state vector,
+        which the figure does not use), keeping only the distances to the given bodies. """
+
+        distances = series["body_distances_au"]
+        bodies = list(distances) if bodies is None else [b for b in bodies if b in distances]
+        inc, node, peri, f = (np.radians(series[k]) for k in ("incl_deg", "node_deg", "peri_deg", "f_deg"))
+
+        return [[series["time_days"][k]*sim_time_per_day, None,
+                 SimpleNamespace(a=series["a_au"][k], e=series["e"][k], inc=inc[k], Omega=node[k],
+                                 omega=peri[k], f=f[k]),
+                 {b: distances[b][k] for b in bodies}] for k in range(len(series["time_days"]))]
+
+    nominal = rows(results["nominal"])
+
+    # The figure uses only the Earth's distance of the clones, and the file is large
+    clones = {name: rows(series, ["Earth"]) for name, series in (results.get("monte_carlo") or {}).items()}
+
+    return plotReboundOrbits(
+        nominal, clones, results.get("encounters") or [], file_path=file_path,
+        dist_unit_multiplier=dist_unit_multiplier, length_units=length_units,
+        horizon=results.get("predictability"), n_hill=run.get("n_hill_threshold", 3.0),
+        clone_encounters=results.get("clone_encounters"), closest_au=results.get("closest_approaches_au"),
+        closest_time_days=results.get("closest_approach_times_days"),
+        moid=results.get("moid") if use_moid else None)
+
+
 def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, verbose=False):
+        dt_days=None, compute_megno=False, sun_j2=True, gr="gr_full", compute_moid=True, verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -2117,12 +3111,22 @@ def reboundSimulate(
             and accurate to machine precision; the other two use a fixed timestep.
         dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
             FIXED_STEP_DEFAULT_DT_DAYS. Ignored by IAS15.
+        gr: [str] General relativity model, "gr_full" (default; the post-Newtonian interaction between
+            all pairs of bodies) or "gr" (the Sun's post-Newtonian correction on every body, 3.3 times
+            faster, with the same results to ~1e-7 in a). See GR_MODELS.
+        sun_j2: [bool] Include the Sun's J2 (SUN_J2, about its rotation axis). Default True. It moves
+            Mercury's perihelion by 0.03 arcsec per century, and a meteoroid's in proportion to
+            (R_Sun/q)^2, so it matters most for small perihelia.
         compute_megno: [bool] If True, after the requested integration run a purely gravitational
             integration of the nominal solution only, over the same span, and store its MEGNO
             series and verdict (see computeMegno and classifyMegno) under "megno" in the nominal
             solution's diagnostics. Requires return_diagnostics=True, which is the only way the
             result is returned; it is skipped with a warning otherwise, since the extra integration
             is as expensive as the nominal run. Default False.
+        compute_moid: [bool] Compute the MOID with each of MOID_BODIES at every output, for the nominal
+            solution and every clone ("moid_au" in their diagnostics, see wmpl.Utils.MOID). It costs
+            ~40 microseconds per output and body, ~1 s per orbit with 3000 outputs: measured 4% of a
+            300-year run, less for longer spans with the same outputs. Default True.
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
@@ -2146,6 +3150,9 @@ def reboundSimulate(
 
     # Fail early, before any ephemeris work, if the integrator is not available
     checkIntegratorAvailable(integrator)
+
+    if gr not in GR_MODELS:
+        raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr), ", ".join(GR_MODELS)))
 
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
@@ -2195,19 +3202,29 @@ def reboundSimulate(
         
 
 
-    # Simulation end time in years and the length of one year in units where G=1
+    # Simulation end time in years, for the printout
     tsimend = sim_days/365.25
-    year = 2.0*np.pi
 
     # Convert from UTC to TDB
     time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
+    # Axis of the Earth's J2 and J4: its rotation pole at the epoch. Older REBOUNDx versions cannot
+    #   orient them and use the ecliptic pole instead.
+    earth_spin_axis = None
+    if harmonicsSpinAxisSupported():
+        earth_spin_axis = earthSpinAxisEcliptic(time_tdb)
+    else:
+        warnings.warn("REBOUNDx {:s} cannot orient the Earth's J2/J4 and the Sun's J2 along their "
+                      "rotation axes (this needs REBOUNDx >= 4.4.0), so they are symmetric about the "
+                      "ecliptic pole, 23.4 and 7.25 deg off. Upgrade REBOUNDx to fix it.".format(
+                          getattr(reboundx, "__version__", "?")), RuntimeWarning)
+
     # Set up the output time array (not integration steps, but the times at which state is saved)
     if direction == "forward":
-        times = np.linspace(0, year*tsimend, n_outputs)
+        times = np.linspace(0, daysToSimTime(sim_days), n_outputs)
     else:
-        times = np.linspace(0, -year*tsimend, n_outputs)
+        times = np.linspace(0, -daysToSimTime(sim_days), n_outputs)
 
     # Add the Sun and the planets
     planet_names = [
@@ -2258,7 +3275,7 @@ def reboundSimulate(
     earth_state_ref = planet_states[planet_names.index("Earth")]
 
     # To start the meteoroid in the right spot, feed in the barycentric position (AU) and velocity
-    # (AU/year divided by 2pi)
+    # (AU per time unit)
     state_vect_rot = convertToBarycentric(state_vect, time_tdb, earth_state=earth_state_ref)
 
     if verbose:
@@ -2284,6 +3301,10 @@ def reboundSimulate(
             "beta": beta,
             "integrator": integrator,
             "dt_days": dt_days,
+            "earth_spin_axis": earth_spin_axis,
+            "sun_j2": sun_j2,
+            "gr": gr,
+            "compute_moid": compute_moid,
         }
 
     if verbose:
@@ -2375,7 +3396,8 @@ def reboundSimulate(
         if show_progress:
             print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
         megno = computeMegno(_make_task([state_vect_rot], [obj_name]))
-        megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
+        megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"],
+                                         ln_delta=megno["ln_delta"])
         diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
 
     if return_diagnostics:
@@ -2403,7 +3425,17 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run REBOUND simulation for a given trajectory pickle file. The simulation is run 60 days backwards by default.")
 
-    parser.add_argument("pickle_path", type=str, help="Path to the pickle file with the trajectory data.")
+    parser.add_argument("pickle_path", type=str, nargs="?", default=None,
+                        help="Path to the pickle file with the trajectory data. Not needed with --replot.")
+
+    parser.add_argument("--replot", type=str, default=None, metavar="RESULTS_JSON",
+                        help="Do not integrate: redraw the figure of an earlier run from its results file "
+                        "(rebound_simulation_results.json), in ~30 s for a 3 GB file. It saves the figure next "
+                        "to the file, as rebound_simulation.png or, with --no_moid, rebound_simulation_no_moid.png, "
+                        "or where --out says. The report and the JSON are left as they are.")
+
+    parser.add_argument("--out", type=str, default=None, metavar="FIGURE_PNG",
+                        help="With --replot, where to save the figure.")
 
     parser.add_argument("--days", type=float, help="Run the simulation for the given number of days.", default=60)
 
@@ -2453,12 +3485,22 @@ if __name__ == "__main__":
                         "or trace (hybrid, fixed step; resolves close encounters; needs REBOUND >= "
                         "4.4). With whfast and trace, IAS15 integrates the object's departure from "
                         "the Earth and they take over at the first output after it. REBOUNDx may "
-                        "warn that GR (gr_full) is velocity-dependent with whfast; its measured "
-                        "effect on the orbit was below 1e-8 in a over 100 years.")
+                        "warn that GR is velocity-dependent with whfast; its measured effect on the "
+                        "orbit was below 1e-8 in a over 100 years.")
 
     parser.add_argument("--dt", type=float, default=None,
                         help="Timestep in days for whfast and trace. Default: {:g} d. Ignored by "
                         "ias15.".format(FIXED_STEP_DEFAULT_DT_DAYS["whfast"]))
+
+    parser.add_argument("--gr", type=str.lower, default="gr_full", choices=GR_MODELS,
+                        help="General relativity: gr_full (default), the post-Newtonian interaction "
+                        "between all pairs of bodies, or gr, the Sun's post-Newtonian correction on "
+                        "every body. gr is 3.3 times faster and changes the orbits by ~1e-7 in a over "
+                        "100 years; use it for large Monte Carlo runs.")
+
+    parser.add_argument("--no_sun_j2", action="store_true",
+                        help="Leave out the Sun's J2 (on by default: J2 = {:.4e}, about the Sun's rotation "
+                        "axis). It matters most for small perihelion distances.".format(SUN_J2))
 
     parser.add_argument("--compute_megno", action="store_true",
                         help="After the integration, integrate the nominal solution again with "
@@ -2466,9 +3508,38 @@ if __name__ == "__main__":
                         "reporting whether it converges to 2 (regular orbit) or keeps growing "
                         "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly.")
 
+    parser.add_argument("--no_moid", action="store_true",
+                        help="Do not compute the MOID (minimum orbit intersection distance) with the planets "
+                        "at every output, which is drawn in the figure and saved to the JSON by default. With "
+                        "--replot, leave the MOID out of the figure.")
+
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
+
+    # Redraw the figure of an earlier run from its results file, without integrating
+    if args.replot is not None:
+
+        t_replot = time.time()
+        print("Reading {:s} ...".format(args.replot))
+        with open(args.replot) as jf:
+            results = json.load(jf)
+        print("  read in {:.0f} s".format(time.time() - t_replot))
+
+        out_path = args.out
+        if out_path is None:
+            out_path = os.path.join(os.path.dirname(os.path.abspath(args.replot)),
+                                    "rebound_simulation_no_moid.png" if args.no_moid else "rebound_simulation.png")
+
+        if (not args.no_moid) and (results.get("moid") is None):
+            print("  The file has no MOID (a run before it was computed, or with --no_moid): the figure is drawn without it.")
+
+        replotReboundFromResults(results, file_path=out_path, use_moid=not args.no_moid)
+        print("  Saved plot   : {:s}".format(out_path))
+        sys.exit(0)
+
+    if args.pickle_path is None:
+        parser.error("the pickle_path argument is required, except with --replot.")
 
     # Extract the number of days from the arguments and the simulation direction. --forward may be
     # given on its own (use --days) or with its own number of days.
@@ -2546,13 +3617,8 @@ if __name__ == "__main__":
     # distances and the divergence figures are always reported in AU (with km given alongside where
     # it helps), because they are distances between bodies rather than orbit sizes and so do not
     # depend on the frame the elements are expressed in.
-    a_units = "AU"
-    q_units = "AU"
-    dist_unit_multiplier = 1.0  # Default is AU
-    if reference_frame == "geocentric":
-        a_units = "km"
-        q_units = "km"
-        dist_unit_multiplier = 149597870.7  # Convert AU to km
+    a_units, dist_unit_multiplier = lengthUnitOfFrame(reference_frame)
+    q_units = a_units
 
     ### ###
 
@@ -2571,7 +3637,8 @@ if __name__ == "__main__":
         reference_frame=reference_frame,
         ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
         random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
-        compute_megno=args.compute_megno, verbose=args.verbose
+        compute_megno=args.compute_megno, sun_j2=not args.no_sun_j2, gr=args.gr,
+        compute_moid=not args.no_moid, verbose=args.verbose
         )
     sim_wall = time.time() - t_run_start
 
@@ -2677,7 +3744,7 @@ if __name__ == "__main__":
     ### Compute the epoch of the final simulation
 
     # Extract the final time in days
-    final_sim_days = sim_outputs[-1][0]/(2*np.pi)*365.25
+    final_sim_days = simTimeToDays(sim_outputs[-1][0])
 
     # Compute the final epoch
     final_epoch_jd = traj.jdt_ref + final_sim_days
@@ -2694,6 +3761,10 @@ if __name__ == "__main__":
     # Every encounter is listed, including repeated ones with the same body, in the order they
     # happened during the integration (for a backward integration, the latest epoch first).
     nominal_diag = sim_diagnostics.get(traj.traj_id, {})
+
+    # MOID of the nominal solution and percentiles of the clones' (see moidSummary)
+    moid = moidSummary(nominal_diag, clone_diag)
+    moid_k_dep = findEarthDepartureIndex(sim_outputs, n_hill=n_hill) or 0
     encounters = sorted(nominal_diag.get("encounters", []), key=lambda e: abs(e["time_days"]))
 
 
@@ -2721,6 +3792,9 @@ if __name__ == "__main__":
 
     # Estimate the divergence/Lyapunov timescale from the Monte Carlo ensemble (free when MC is run)
     lyap = estimateLyapunovFromMC(sim_outputs, sim_outputs_mc)
+
+    # How long the clones keep the memory of the measured initial conditions
+    horizon = predictabilityHorizon(sim_outputs, sim_outputs_mc, clone_diag=clone_diag, n_hill=n_hill)
 
     # List of bodies for which the distance is tracked (planet_dists dict keys)
     dist_bodies = list(sim_outputs[0][3].keys())
@@ -2752,9 +3826,12 @@ if __name__ == "__main__":
         print("  Integration  : {:.2f} days {:s}".format(achieved_days, direction))
 
     print("  Frame        : {:s}".format(reference_frame))
-    print("  Forces       : {:s}".format(
-        "gravity + GR + Earth J2/J4" if beta is None
-        else "gravity + GR + Earth J2/J4 + radiation (beta = {:.3e})".format(beta)))
+    j2_axis = "" if harmonicsSpinAxisSupported() else " (about the ecliptic pole: REBOUNDx < 4.4.0)"
+    forces_str = "gravity + GR ({:s}) + {:s}Earth J2/J4{:s}".format(
+        "Sun" if args.gr == "gr" else "all bodies", "" if args.no_sun_j2 else "Sun J2 + ", j2_axis)
+    if beta is not None:
+        forces_str += " + radiation (beta = {:.3e})".format(beta)
+    print("  Forces       : {:s}".format(forces_str))
     print("  Start epoch  : {:.6f} JD (TDB)".format(traj.jdt_ref))
     print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, time_utc.iso))
     if len(sim_outputs_mc):
@@ -2934,6 +4011,17 @@ if __name__ == "__main__":
                       "(R2_exp = {:.3f}, R2_lin = {:.3f}).".format(
                           ed["r2_exponential"], ed["r2_linear"]))
 
+    if horizon is not None:
+        print("-" * 78)
+        for line in _predictabilityReportLines(horizon, achieved_days):
+            print("  " + line)
+
+    if moid is not None:
+        print("-" * 78)
+        for line in _moidReportLines(moid, [simTimeToDays(row[0]) for row in sim_outputs], n_hill,
+                                     k_dep=moid_k_dep):
+            print("  " + line)
+
     if megno is not None:
         print("-" * 78)
         for line in _megnoReportLines(megno):
@@ -3071,6 +4159,13 @@ if __name__ == "__main__":
         if whfast_warning:
             f.write("\n{:s}\n".format(whfast_warning))
 
+        if horizon is not None:
+            f.write("\n" + "\n".join(_predictabilityReportLines(horizon, achieved_days)) + "\n")
+
+        if moid is not None:
+            f.write("\n" + "\n".join(_moidReportLines(moid, [simTimeToDays(row[0]) for row in sim_outputs],
+                                                         n_hill, k_dep=moid_k_dep)) + "\n")
+
         if megno is not None:
             f.write("\n" + "\n".join(_megnoReportLines(megno)) + "\n")
 
@@ -3155,7 +4250,7 @@ if __name__ == "__main__":
             dist_str = "".join(", {:s} = {:10.6f}".format(body, output[3][body]) for body in dist_bodies)
 
             # Save the orbital elements and distances at the given time
-            f.write(f"t = {output[0]/(2*np.pi)*365.25:.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}{dist_str}\n")
+            f.write(f"t = {simTimeToDays(output[0]):.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}{dist_str}\n")
 
         # If the MC was run, save orbital elements of individual MC runs
         if len(sim_outputs_mc):
@@ -3170,188 +4265,13 @@ if __name__ == "__main__":
                 f.write("node = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].Omega)))
                 f.write("f    = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].f)))
 
-    # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
-    fig, axs = plt.subplots(3, 3, figsize=(14, 10), sharex=True)
-
-    # Time in days
-    t = [x[0]/(2*np.pi)*365.25 for x in sim_outputs]
-
-    a = [x[2].a*dist_unit_multiplier for x in sim_outputs]
-    e = [x[2].e for x in sim_outputs]
-    incl = [x[2].inc for x in sim_outputs]
-    Omega = [x[2].Omega for x in sim_outputs]
-    omega = [x[2].omega for x in sim_outputs]
-    f = [x[2].f for x in sim_outputs]
-
-    # Distance from the planets
-    planet_dists = [x[3] for x in sim_outputs]
-    earth_dist = [x["Earth"] for x in planet_dists]
-
-    # Find the time when the object exits the Earth's Hill sphere
-    earth_hill = HILL_RADII_AU["Earth"] # AU
-    exit_index = None
-    for i, dist in enumerate(earth_dist):
-        if dist > earth_hill:
-            exit_index = i
-            break
-
-    axs[0, 0].plot(t, a)
-    axs[0, 1].plot(t, e)
-    axs[1, 0].plot(t, np.degrees(incl))
-    axs[1, 1].plot(t, np.degrees(Omega))
-    axs[2, 0].plot(t, np.degrees(omega))
-    axs[2, 1].plot(t, np.degrees(f))
-
-    # Create filtered arrays for the exit from the Earth's Hill sphere
-    if exit_index is not None:
-        t_exit = t[exit_index:]
-        a_exit = a[exit_index:]
-        e_exit = e[exit_index:]
-        incl_exit = incl[exit_index:]
-        Omega_exit = Omega[exit_index:]
-        omega_exit = omega[exit_index:]
-        f_exit = f[exit_index:]
-
-        # Adjust Y axis limits for the exit from the Earth
-        axs[0, 0].set_ylim(ymin=min(a_exit), ymax=max(a_exit))
-        axs[0, 1].set_ylim(ymin=min(e_exit), ymax=max(e_exit))
-        axs[1, 0].set_ylim(ymin=min(np.degrees(incl_exit)), ymax=max(np.degrees(incl_exit)))
-        axs[1, 1].set_ylim(ymin=min(np.degrees(Omega_exit)), ymax=max(np.degrees(Omega_exit)))
-        axs[2, 0].set_ylim(ymin=min(np.degrees(omega_exit)), ymax=max(np.degrees(omega_exit)))
-        axs[2, 1].set_ylim(ymin=min(np.degrees(f_exit)), ymax=max(np.degrees(f_exit)))
-                           
-
-
-    # Plot the distance from the Earth
-    axs[0, 2].plot(t, np.array(earth_dist)*dist_unit_multiplier)
-
-    # Mark the exit from the Earth's Hill sphere
-    if exit_index is not None:
-        axs[0, 2].axvline(t[exit_index], color="red", linestyle="--", label="Exit from Earth's Hill sphere")
-
-        # Set the X axis limit so the maximum time is at the exit from the Earth's Hill sphere
-        axs[0, 2].set_xlim(xmax=t[exit_index])
-
-
-
-    # Plot the distance from the Sun + inner planets
-    inner_planets = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars"]
-    for planet in inner_planets:
-        planet_dist = [x[3][planet] for x in sim_outputs]
-        axs[1, 2].plot(t, planet_dist, label=planet)
-
-    axs[1, 2].set_ylabel("Distance [AU]")
-    axs[1, 2].legend()
-
-    # Plot the distance from the outer planets
-    outer_planets = ["Jupiter", "Saturn", "Uranus", "Neptune"]
-    for planet in outer_planets:
-        planet_dist = [x[3][planet] for x in sim_outputs]
-        axs[2, 2].plot(t, planet_dist, label=planet)
-
-    axs[2, 2].set_ylabel("Distance [AU]")
-
-    # Start the outer-planet distance axis at zero, so the distances are read against the Sun
-    axs[2, 2].set_ylim(ymin=0)
-
-    axs[2, 2].legend()
-
-
-    # Mark the detected close encounters at the point of closest approach on the distance subplots.
-    # Every passage gets a star, but only the deepest one per body is named: an object in resonance
-    #   with a planet meets it over and over, and one text label per passage makes the panel
-    #   unreadable.
-    labeled_axes = set()
-    deepest_per_body = {}
-    for enc in encounters:
-        best = deepest_per_body.get(enc["body"])
-        if (best is None) or (enc["min_dist_au"] < best["min_dist_au"]):
-            deepest_per_body[enc["body"]] = enc
-
-    for enc in encounters:
-        body = enc["body"]
-        t_enc = enc["time_days"]
-        d_enc = enc["min_dist_au"]
-        name_it = (deepest_per_body[body] is enc)
-
-        # Determine which distance subplot(s) show this body
-        marks = []
-        if body in inner_planets:
-            marks.append((axs[1, 2], d_enc))
-        if body in outer_planets:
-            marks.append((axs[2, 2], d_enc))
-        if body == "Earth":
-            # The Earth-distance subplot is scaled by the reference-frame unit multiplier
-            marks.append((axs[0, 2], d_enc*dist_unit_multiplier))
-
-        for ax, d_plot in marks:
-
-            # Only add the legend label once per axis
-            label = "Close encounter" if ax not in labeled_axes else None
-            labeled_axes.add(ax)
-
-            ax.plot(t_enc, d_plot, marker="*", color="red", markersize=14, linestyle="none",
-                    zorder=5, label=label)
-
-            if name_it:
-                ax.annotate(body, (t_enc, d_plot), textcoords="offset points", xytext=(5, 5),
-                            color="red", fontsize=8)
-
-
-    # Set the axis labels
-    for ax in axs.flatten():
-
-        ax.set_xlabel("Time [days]")
-
-        # Disable offset and scientific notation
-        ax.ticklabel_format(useOffset=False, style='plain')
-
-
-    # Plot the MC realizations (all in thin alpha=0.5 lines)
-    for mc_name in sim_outputs_mc:
-
-        # Each realization gets its own time axis: a realization truncated early (for example by an
-        # impact) is shorter than the nominal solution, and plotting it against the nominal time
-        # axis would raise a dimension-mismatch error.
-        t_mc = [x[0]/(2*np.pi)*365.25 for x in sim_outputs_mc[mc_name]]
-
-        a_mc = [x[2].a*dist_unit_multiplier for x in sim_outputs_mc[mc_name]]
-        e_mc = [x[2].e for x in sim_outputs_mc[mc_name]]
-        incl_mc = [x[2].inc for x in sim_outputs_mc[mc_name]]
-        Omega_mc = [x[2].Omega for x in sim_outputs_mc[mc_name]]
-        omega_mc = [x[2].omega for x in sim_outputs_mc[mc_name]]
-        f_mc = [x[2].f for x in sim_outputs_mc[mc_name]]
-        earth_dist = [x[3]["Earth"] for x in sim_outputs_mc[mc_name]]
-
-        axs[0, 0].plot(t_mc, a_mc, alpha=0.5, color='k', lw=0.5)
-        axs[0, 1].plot(t_mc, e_mc, alpha=0.5, color='k', lw=0.5)
-        axs[1, 0].plot(t_mc, np.degrees(incl_mc), alpha=0.5, color='k', lw=0.5)
-        axs[1, 1].plot(t_mc, np.degrees(Omega_mc), alpha=0.5, color='k', lw=0.5)
-        axs[2, 0].plot(t_mc, np.degrees(omega_mc), alpha=0.5, color='k', lw=0.5)
-        axs[2, 1].plot(t_mc, np.degrees(f_mc), alpha=0.5, color='k', lw=0.5)
-        axs[0, 2].plot(t_mc, np.array(earth_dist)*dist_unit_multiplier, alpha=0.5, color='k', lw=0.5)
-
-    
-    
-    axs[0, 0].set_ylabel("a [{:s}]".format(a_units))
-    axs[0, 1].set_ylabel("e")
-    axs[1, 0].set_ylabel("i [deg]")
-    # axs[1, 1] plots REBOUND Omega (ascending node); axs[2, 0] plots omega (argument of perihelion)
-    axs[1, 1].set_ylabel("node [deg]")
-    axs[2, 0].set_ylabel("peri [deg]")
-    axs[2, 1].set_ylabel("f [deg]")
-    axs[0, 2].set_ylabel("Earth distance [{:s}]".format(a_units))
-
-    # Only draw a legend on axes that actually have labeled artists (avoids the empty-legend warning)
-    for ax in axs.flatten():
-        handles, labels = ax.get_legend_handles_labels()
-        if labels:
-            ax.legend()
-
-    plt.tight_layout()
-
-    # Save the figure
-    plt.savefig(plot_png_path)
+    # Evolution of the orbit, the clones as percentile bands (see plotReboundOrbits)
+    plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=plot_png_path,
+                      dist_unit_multiplier=dist_unit_multiplier, length_units=a_units, horizon=horizon,
+                      n_hill=n_hill,
+                      clone_encounters={name: diag.get("encounters", []) for name, diag in clone_diag.items()},
+                      closest_au=nominal_diag.get("min_dist_au"),
+                      closest_time_days=nominal_diag.get("min_time_days"), moid=moid)
 
     # MEGNO evolution, in its own figure
     megno_png_path = None
@@ -3382,7 +4302,7 @@ if __name__ == "__main__":
     def _elementSeries(rows):
         """ Convert one run's outputs into plain lists of floats. """
         return {
-            "time_days": [row[0]/(2*np.pi)*365.25 for row in rows],
+            "time_days": [simTimeToDays(row[0]) for row in rows],
             "a_au": [row[2].a for row in rows],
             "e": [row[2].e for row in rows],
             "incl_deg": [np.degrees(row[2].inc) for row in rows],
@@ -3411,6 +4331,13 @@ if __name__ == "__main__":
             "integrator": args.integrator,
             "dt_days": dt_days,
             "fixed_step_from_days": fixed_from,
+            "sun_j2": None if args.no_sun_j2 else SUN_J2,
+            "gr": args.gr,
+            # Axis of the Earth's J2/J4 in the ecliptic J2000 frame (null: the ecliptic pole was used,
+            #   REBOUNDx < 4.4.0)
+            "earth_spin_axis": (earthSpinAxisEcliptic(astropy.time.Time(
+                traj.jdt_ref, format="jd", scale="utc").tdb.jd)
+                if harmonicsSpinAxisSupported() else None),
             # The close-encounter gates, so a nominal-only run records them too ("clone_outcomes",
             #   which repeats them, is null without --mc)
             "n_hill_threshold": n_hill,
@@ -3457,6 +4384,8 @@ if __name__ == "__main__":
         "clone_encounters": {name: diag.get("encounters", []) for name, diag in clone_diag.items()},
         "energy_rel_drift": nominal_diag.get("energy_rel_drift"),
         "divergence": lyap,
+        "predictability": horizon,
+        "moid": moid,
         "nominal": _elementSeries(sim_outputs),
         "monte_carlo": {name: _elementSeries(rows) for name, rows in sim_outputs_mc.items()},
     }
