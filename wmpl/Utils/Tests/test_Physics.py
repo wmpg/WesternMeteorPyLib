@@ -46,7 +46,7 @@ def _massAndWarnings(**kwargs):
     """ Compute the mass of the synthetic light curve with calcMass(), and keep the warnings it raised.
 
     Keyword arguments:
-        **kwargs: Keyword arguments of calcMass().
+        **kwargs: [dict] Keyword arguments of calcMass().
 
     Return:
         (mass, caught):
@@ -115,12 +115,13 @@ def testCalcMassWarnsAboutP0mForThe1500WModels():
     _, caught = _massAndWarnings(tau=0.007, P_0m=840.0)
     assert caught == []
 
-    # The warning gives the factor the mass is off by, and the mass is not corrected
-    mass_840, caught = _massAndWarnings(tau='kosice', P_0m=840.0)
-    mass_1500, _ = _massAndWarnings(tau='kosice', P_0m=1500.0)
+    # The warning gives the factor the radiated power is off by, which is that of the mass at a fixed
+    #   luminous efficiency, and the mass is not corrected
+    mass_840, caught = _massAndWarnings(tau='kosice', P_0m=840.0, lum_eff_mass=1.0)
+    mass_1500, _ = _massAndWarnings(tau='kosice', P_0m=1500.0, lum_eff_mass=1.0)
 
     assert "factor of 0.56" in caught[0]
-    assert np.isclose(mass_840/mass_1500, 840.0/1500.0, rtol=1e-2)
+    assert np.isclose(mass_840/mass_1500, 840.0/1500.0, rtol=1e-6)
 
 
 
