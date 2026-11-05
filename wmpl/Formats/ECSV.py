@@ -247,8 +247,8 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
 
 def solverStationIDs(meteors):
     """ Compute the station IDs the trajectory solver gives the observations when they are added in the
-        given order. A station which was already added gets the suffix _2, _3, ... (see
-        Trajectory.infillTrajectory()).
+        given order. A station whose ID was already given gets the suffix _2, or the one after the largest
+        suffix given to it (see Trajectory.infillTrajectory()).
 
     Arguments:
         meteors: [list] MeteorObservation objects, in the order they are given to the solver.
@@ -258,18 +258,89 @@ def solverStationIDs(meteors):
     """
 
     station_ids = []
-    counts = {}
     for meteor in meteors:
 
         station_id = str(meteor.station_id)
-        counts[station_id] = counts.get(station_id, 0) + 1
 
-        if counts[station_id] == 1:
-            station_ids.append(station_id)
-        else:
-            station_ids.append("{:s}_{:d}".format(station_id, counts[station_id]))
+        if station_id in station_ids:
+
+            # Suffixes already given to this station
+            suffixes = [int(sid.split('_')[-1]) for sid in station_ids \
+                if sid.startswith(station_id + '_') and sid.split('_')[-1].isdigit()]
+
+            station_id += '_' + str(max(suffixes) + 1 if suffixes else 2)
+
+        station_ids.append(station_id)
 
     return station_ids
+
+
+
+def parseStationOffsets(offsets_str):
+    """ Parse the time offsets given per station on the command line, e.g. "CA001A:0.42,CA0005:-0.3".
+
+    Arguments:
+        offsets_str: [str] The offsets. Anything else than a string (e.g. True or None) gives none.
+
+    Return:
+        [dict] {station ID: time offset (s)}.
+    """
+
+    if not isinstance(offsets_str, str):
+        return {}
+
+    offsets = {}
+    for entry in offsets_str.split(','):
+        if ':' in entry:
+            station_id, offset = entry.rsplit(':', 1)
+            offsets[station_id] = float(offset)
+
+    return offsets
+
+
+
+def formatStationOffsets(offsets):
+    """ Format time offsets per station as they are given on the command line (see parseStationOffsets()).
+
+    Arguments:
+        offsets: [dict] {station ID: time offset (s)}.
+
+    Return:
+        [str] The offsets, None if there are none.
+    """
+
+    if not offsets:
+        return None
+
+    return ",".join("{:s}:{:.6f}".format(station_id, offset) for station_id, offset in offsets.items())
+
+
+
+def fragmentStationOffsets(offsets, main_ids, station_ids, meteors):
+    """ Rename the time offsets given per station for the main trajectory to the station IDs of a fragment.
+        A station with several files can have other IDs in the fragment, e.g. when the fragment is not in its
+        first file.
+
+    Arguments:
+        offsets: [dict] {station ID in the main trajectory: time offset (s)}, see parseStationOffsets().
+        main_ids: [dict] {ecsv_file: station ID in the main trajectory}.
+        station_ids: [list] Station IDs of the observations of the fragment, see solverStationIDs().
+        meteors: [list] MeteorObservation objects of the fragment.
+
+    Return:
+        [dict] {station ID in the fragment: time offset (s)}.
+    """
+
+    frag_offsets = {}
+    for station_id, meteor in zip(station_ids, meteors):
+
+        # A file of the main trajectory takes the offset given under its ID there, another file the one given
+        #   under its own ID
+        main_id = main_ids.get(meteor.ecsv_file, station_id)
+        if main_id in offsets:
+            frag_offsets[station_id] = offsets[main_id]
+
+    return frag_offsets
 
 
 
@@ -285,8 +356,9 @@ def appliedTimeOffsets(traj, input_meteors):
             they were given to the solver.
 
     Return:
-        [dict] {ecsv_file: time offset (s)} of every input observation matched by a solved one, by the
-            station ID the solver gave it (see solverStationIDs()), its number of points and its time steps.
+        [dict] {ecsv_file: time offset (s)} of every input observation matched by a solved one which was not
+            ignored, by the station ID the solver gave it (see solverStationIDs()), its number of points and
+            its time steps.
     """
 
     solved = {str(obs.station_id): obs for obs in traj.observations}
@@ -297,7 +369,8 @@ def appliedTimeOffsets(traj, input_meteors):
         obs = solved.get(station_id)
         input_jd = meteor.jdt_ref + np.array(meteor.time_data)/86400
 
-        if obs is None:
+        # Skip the stations the solver ignored, e.g. without an overlap in time to estimate their offsets
+        if (obs is None) or getattr(obs, 'ignore_station', False):
             continue
 
         # Check that the solved observation has the same points
@@ -367,6 +440,9 @@ def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=
     _, input_meteors = loadECSVs(ecsv_paths, no_prepare=True)
     main_offsets = appliedTimeOffsets(originalPicksTrajectory(traj), input_meteors)
 
+    # Station IDs of the files in the main trajectory, under which the offsets on the command line are given
+    main_ids = dict(zip([meteor.ecsv_file for meteor in input_meteors], solverStationIDs(input_meteors)))
+
     # The time offsets are estimated unless the timing estimation was turned off, or given offsets
     #   for every station (estimate_timing_vel is then False or a string)
     estimate_timing = (kwargs.get('estimate_timing_vel', True) is True)
@@ -377,31 +453,53 @@ def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=
         print()
         print("Solving the trajectory of fragment {:d}...".format(fragment))
 
+        # A fragment needs two stations, which several files of the same station are not
         _, meteor_list = loadECSVs(ecsv_paths, no_prepare=True, fragment=fragment)
-        if len(meteor_list) < 2:
+        n_stations = len(set(str(meteor.station_id) for meteor in meteor_list))
+        if n_stations < 2:
             print("Fragment {:d} has enough points (4 or more) from only {:d} station(s), but 2 are needed, "
-                "skipping.".format(fragment, len(meteor_list)))
+                "skipping.".format(fragment, n_stations))
             continue
 
         jdt_ref, meteor_list = prepareObservations(meteor_list)
 
-        frag_kwargs = dict(kwargs)
-        if reuse_timing and estimate_timing:
+        # Station IDs the solver will give the observations of the fragment
+        station_ids = solverStationIDs(meteor_list)
 
-            # Offsets of the main trajectory for the same files, under the station IDs the solver will use
-            station_ids = solverStationIDs(meteor_list)
-            missing = [station_id for station_id, meteor in zip(station_ids, meteor_list) \
-                if meteor.ecsv_file not in main_offsets]
+        # Offsets fixed on the command line, under the station IDs of the fragment
+        given_fixed = fragmentStationOffsets(parseStationOffsets(kwargs.get('fixed_times')), main_ids, \
+            station_ids, meteor_list)
+
+        frag_kwargs = dict(kwargs)
+        if not estimate_timing:
+
+            # Without the timing estimation, keep the offsets given for every station, under the IDs of the
+            #   fragment
+            if isinstance(kwargs.get('estimate_timing_vel'), str):
+                given = fragmentStationOffsets(parseStationOffsets(kwargs['estimate_timing_vel']), main_ids, \
+                    station_ids, meteor_list)
+                frag_kwargs['estimate_timing_vel'] = formatStationOffsets(given) or False
+
+        elif reuse_timing:
+
+            # Fix the offsets of the stations in the main trajectory, which are then kept in the Monte Carlo
+            #   runs too, and those fixed on the command line for the other ones. They are given as fixed
+            #   times with the timing estimation on, so that the timing residuals the Monte Carlo runs are
+            #   checked against are still computed
+            fixed = dict(given_fixed)
+            for station_id, meteor in zip(station_ids, meteor_list):
+                if meteor.ecsv_file in main_offsets:
+                    fixed[station_id] = main_offsets[meteor.ecsv_file]
+
+            missing = [station_id for station_id in station_ids if station_id not in fixed]
             if missing:
                 print("Stations not in the main trajectory, whose time offsets are estimated:", \
                     ", ".join(missing))
 
-            # Fix the offsets of the stations in the main trajectory, which are then kept in the Monte Carlo
-            #   runs too. They are given as fixed times with the timing estimation on, so that the timing
-            #   residuals the Monte Carlo runs are checked against are still computed
-            fixed = ["{:s}:{:.6f}".format(station_id, main_offsets[meteor.ecsv_file]) \
-                for station_id, meteor in zip(station_ids, meteor_list) if meteor.ecsv_file in main_offsets]
-            frag_kwargs['fixed_times'] = ",".join(fixed) if fixed else None
+            frag_kwargs['fixed_times'] = formatStationOffsets(fixed)
+
+        elif isinstance(kwargs.get('fixed_times'), str):
+            frag_kwargs['fixed_times'] = formatStationOffsets(given_fixed)
 
         frag_traj = solveTrajectoryGeneric(jdt_ref, meteor_list, \
             os.path.join(traj.output_dir, "fragment_{:d}".format(fragment)), solver=solver, **frag_kwargs)
@@ -909,7 +1007,11 @@ if __name__ == "__main__":
     # Solve the trajectories of the additional fragments, after the main one
     if cml_args.fragments and (traj is not None):
 
-        if not ecsvFragments(ecsv_paths):
+        if cml_args.solver != 'original':
+            print()
+            print("The trajectories of additional fragments can only be solved with the original solver.")
+
+        elif not ecsvFragments(ecsv_paths):
             print()
             print("There are no additional fragments in the ECSV files.")
 

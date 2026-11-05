@@ -130,6 +130,11 @@ def testSolverStationIDs():
 
     assert solverStationIDs(meteors) == ['A', 'B', 'A_2', 'A_3', 'B_2']
 
+    # A station whose ID already ends in a suffix takes the next one, as in the solver
+    meteors = [SimpleNamespace(station_id=station_id) for station_id in ('A', 'A_2', 'A')]
+
+    assert solverStationIDs(meteors) == ['A', 'A_2', 'A_3']
+
 
 
 def testAppliedTimeOffsetsOfAStationWithTwoFiles(tmp_path):
@@ -159,6 +164,11 @@ def testAppliedTimeOffsetsOfAStationWithTwoFiles(tmp_path):
     assert sorted(offsets) == sorted([path_a, path_b])
     assert np.isclose(offsets[path_a], 0.25, atol=1e-4)
     assert np.isclose(offsets[path_b], -0.1, atol=1e-4)
+
+    # A station the solver ignored has no offset to take
+    observations[1].ignore_station = True
+
+    assert sorted(appliedTimeOffsets(SimpleNamespace(observations=observations), meteors)) == [path_a]
 
 
 

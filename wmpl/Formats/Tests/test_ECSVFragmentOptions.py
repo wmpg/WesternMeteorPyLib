@@ -123,8 +123,74 @@ def testFragmentsKeepTheTimingOfTheMainOneWithoutTheTimingEstimation(tmp_path, m
         ECSV.solveFragmentTrajectories(_solvedMain(paths, 0.25), paths, \
             estimate_timing_vel=estimate_timing_vel, fixed_times=None)
 
-        assert calls[0]['estimate_timing_vel'] == estimate_timing_vel
+        if estimate_timing_vel is False:
+            assert calls[0]['estimate_timing_vel'] is False
+
+        else:
+            given = dict(entry.split(':') for entry in calls[0]['estimate_timing_vel'].split(','))
+            assert {station_id: float(offset) for station_id, offset in given.items()} \
+                == {'XX0001': 0.25, 'XX0002': 0.25}
+
         assert calls[0]['fixed_times'] is None
+
+
+
+def testOffsetsGivenForTheMainFragmentAreRenamedForTheFragment(tmp_path, monkeypatch):
+    """ Check that without the timing estimation, the offsets given per station are renamed to the station
+        IDs of the fragment: the second file of a station, XX0001_2 in the main trajectory, is XX0001 in a
+        fragment which is not in its first file.
+    """
+
+    paths = [writeFragmentECSV(tmp_path/"a1.ecsv", "XX0001", fragments=False), \
+        writeFragmentECSV(tmp_path/"a2.ecsv", "XX0001"), writeFragmentECSV(tmp_path/"b.ecsv", "XX0002")]
+
+    calls = []
+    monkeypatch.setattr(ECSV, 'solveTrajectoryGeneric', _fakeSolver(calls))
+
+    ECSV.solveFragmentTrajectories(_solvedMain(paths, 0.0), paths, \
+        estimate_timing_vel="XX0001:0.1,XX0001_2:0.7,XX0002:0", fixed_times=None)
+
+    given = dict(entry.split(':') for entry in calls[0]['estimate_timing_vel'].split(','))
+    assert {station_id: float(offset) for station_id, offset in given.items()} \
+        == {'XX0001': 0.7, 'XX0002': 0.0}
+
+
+
+def testOffsetsFixedForAStationOnlyInTheFragmentAreKept(tmp_path, monkeypatch):
+    """ Check that the offset fixed on the command line for a station without points of the main fragment
+        is kept for the fragment, with those of the main trajectory for the other stations.
+    """
+
+    paths = _twoStations(tmp_path) + [writeFragmentECSV(tmp_path/"c.ecsv", "XX0003")]
+
+    # The main fragment points of the third station are all flagged as not to be used
+    with open(paths[2]) as f:
+        text = f.read()
+    with open(paths[2], 'w') as f:
+        f.write(text.replace(',True,', ',False,'))
+
+    calls = []
+    monkeypatch.setattr(ECSV, 'solveTrajectoryGeneric', _fakeSolver(calls))
+
+    ECSV.solveFragmentTrajectories(_solvedMain(paths, 0.25), paths, estimate_timing_vel=True, \
+        fixed_times="XX0003:0.75")
+
+    fixed = dict(entry.split(':') for entry in calls[0]['fixed_times'].split(','))
+    assert {station_id: round(float(offset), 3) for station_id, offset in fixed.items()} \
+        == {'XX0001': 0.25, 'XX0002': 0.25, 'XX0003': 0.75}
+
+
+
+def testAFragmentSeenByOneStationInTwoFilesIsSkipped(tmp_path, monkeypatch):
+    """ Check that a fragment in two files of the same station is not solved, as it needs two stations. """
+
+    paths = [writeFragmentECSV(tmp_path/"a1.ecsv", "XX0001"), writeFragmentECSV(tmp_path/"a2.ecsv", "XX0001")]
+
+    calls = []
+    monkeypatch.setattr(ECSV, 'solveTrajectoryGeneric', _fakeSolver(calls))
+
+    assert ECSV.solveFragmentTrajectories(_solvedMain(paths, 0.0), paths) == []
+    assert calls == []
 
 
 
