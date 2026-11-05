@@ -3821,10 +3821,12 @@ class ObservationData:
         height_step = np.zeros(len(lum_data['height']))
         for station in np.unique(lum_data['flag_station']):
             indices = np.where(lum_data['flag_station'] == station)[0]
-            indices = indices[np.argsort(lum_data['time'][indices], kind='stable')]
-            if len(indices) > 1:
-                diffs = np.diff(lum_data['height'][indices])
-                height_step[indices] = np.concatenate(([diffs[0]], diffs))
+
+            # Take the steps between the distinct frames, as the same frame can come from several files
+            _, first, inverse = np.unique(lum_data['time'][indices], return_index=True, return_inverse=True)
+            if len(first) > 1:
+                diffs = np.diff(lum_data['height'][indices][first])
+                height_step[indices] = np.concatenate(([diffs[0]], diffs))[inverse.ravel()]
         lum_data['height_step'] = height_step
 
         # # print all the keys in the lag_data
