@@ -159,7 +159,7 @@ These exist to serve the Tancredi scheme but are usable on their own.
 
 | Function | What it does |
 | :--- | :--- |
-| `calcMOID(a1, e1, i1, O1, w1, a2, e2, i2, O2, w2)` | Minimum orbital intersection distance between two orbits, in AU |
+| `calcMOID(a1, e1, i1, O1, w1, a2, e2, i2, O2, w2)` | Minimum orbital intersection distance between two orbits, in AU. It is `wmpl.Utils.MOID.calcMOID`, vectorised: the elements can be arrays |
 | `calcGiantPlanetMOIDs(a, e, i, node, peri)` | The MOID with each giant planet, in that planet's Hill radii |
 | `calcHillRadius(a_planet, mass_ratio)` | Hill radius of a planet, circular-orbit form |
 | `calcResonanceSemiMajorAxis(p, p_plus_q)` | Centre of a mean-motion resonance |
@@ -184,10 +184,15 @@ Three things to watch:
 
 Most of this module is arithmetic, but the MOID is not.
 
-`calcMOID` minimises the separation over two eccentric anomalies with Powell's method, restarted
-from four points because the surface has several local minima. `calcGiantPlanetMOIDs` calls it four
-times, once per giant planet. Classifying a large asteroid catalogue this way is a real computation,
-not a lookup — budget for it, or supply MOIDs computed in bulk elsewhere.
+`calcMOID` is `wmpl.Utils.MOID.calcMOID`: a scan of one orbit, the closest point of the other for each
+sample, and a two-dimensional Newton refinement of the deepest minima, vectorised over any number of
+orbit pairs at ~30-40 µs per pair (see the module for the method and its validation).
+`calcGiantPlanetMOIDs` calls it once per giant planet.
+
+It replaced the implementation of Tancredi (2014, appendix A): Powell's method restarted from four
+points, ~20 ms per pair. That one is kept as `wmpl.Utils.MOID.calcMOIDTancredi` for comparison. Both
+agree for an orbit against a planet, but for two eccentric orbits Powell's method can stop at a local
+minimum (in 1 of 80 random pairs, 0.0260 AU instead of 0.0206 AU).
 
 The Laplace coefficients are evaluated by quadrature rather than from a truncated series, so they
 stay exact as the semi-major axis ratio approaches 1. They are cached, since only a handful of
