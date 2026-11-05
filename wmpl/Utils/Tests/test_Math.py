@@ -42,6 +42,9 @@ def testCircPercentileOfAnglesFrom0To360():
         data = np.array([82.0, 82.1, 82.2], dtype=dtype)
         assert np.isclose(circPercentile(data, 50, q0=82.0), 82.1%(2*np.pi), atol=1e-5)
 
+    # A tiny negative angle with a given 0th percentile of 0 stays at the end of the ordering
+    assert np.isclose(circPercentile([-1e-16, 0.1, 0.2], 50, q0=0), 0.2)
+
 
 
 def testCircPercentileOfAnglesFromMinus180To180():

@@ -212,21 +212,21 @@ def circPercentile(data, percentile, q0=None):
 
     """
 
-    # Wrap the angles to 0-360, so angles from -180 to 180 (e.g. longitudes) are also taken
-    data = np.array(data, dtype=np.float64)%(2*np.pi)
-
-    # Wrap a given 0th percentile in the same way, so the data equal to it stay at 0
-    if q0 is not None:
-        q0 = np.float64(q0)%(2*np.pi)
+    data = np.array(data)
 
     if q0 is None:
+
+        # Find the 0/360 break on the angles wrapped to 0-360, so angles from -180 to 180 (e.g. longitudes)
+        #   are also taken
+        wrapped = data%(2*np.pi)
+
         # If the data is on the 0/360 discontinuity, adjust the 0th percentile
-        if np.abs(np.min(data) - np.max(data)) > np.pi:
-            q0 = np.min(data[data > np.pi])
+        if np.abs(np.min(wrapped) - np.max(wrapped)) > np.pi:
+            q0 = np.min(wrapped[wrapped > np.pi])
 
         # If the data is not on the 0/360 break
         else:
-            q0 = np.min(data)
+            q0 = np.min(wrapped)
 
     # Normalize the data
     data = (data - q0) % (2 * np.pi)
