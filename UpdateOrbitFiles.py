@@ -434,8 +434,10 @@ def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorite
 	lines = []
 	for row in rows[1:]:
 
+		# Keep the existing file if a row was not read completely
 		if len(row) < len(header):
-			continue
+			print("Incomplete row {:s}, the existing file is kept.".format(repr(row)))
+			return False
 
 		ab, name, mtype, country, date, time, zone, mass = [row[c] for c in cols[:8]]
 		ref = row[cols[13]]
