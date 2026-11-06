@@ -1659,6 +1659,10 @@ def calcMCUncertainties(traj_list, traj_best):
         un.ht_ref_wgs84 = np.std([traj.orbit.ht_ref_wgs84 for traj in traj_list])
         un.ht_ref_wgs84_ci = confidenceInterval([traj.orbit.ht_ref_wgs84 for traj in traj_list], un.ci)
 
+        # Stop here if a run is slower than the escape velocity and has no geocentric orbit
+        if any(traj.orbit.ra_g is None for traj in traj_list):
+            return un
+
         # Geocentric
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
         un.ra_g_ci = confidenceInterval([traj.orbit.ra_g for traj in traj_list], un.ci, angle=True)
@@ -1929,7 +1933,7 @@ def trajNoiseGenerator(traj, noise_sigma):
 
 
 
-def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False):
+def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False, require_orbit=True):
     """ Filter out MC computed trajectories and only return successful ones. 
     
     Arguments:
@@ -1940,6 +1944,8 @@ def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False):
         geometric_uncert: [bool] If True, all MC runs will be taken to estimate the uncertainty, not just
             the ones with the better cost function value than the pure geometric solution. Use this when
             the lag is not reliable.
+        require_orbit: [bool] Reject the runs without a geocentric orbit. Set it to False when the original
+            solution is slower than the escape velocity and has no orbit either. True by default.
 
     Returns:
         [list] A filtered list of trajectories.
@@ -1958,8 +1964,9 @@ def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False):
     mc_results = [mc_traj for mc_traj in mc_results if mc_traj.los_mini_status == True]
 
     # Reject those solutions for which the orbit could not be calculated
-    mc_results = [mc_traj for mc_traj in mc_results if (mc_traj.orbit.ra_g is not None) \
-        and (mc_traj.orbit.dec_g is not None)]
+    if require_orbit:
+        mc_results = [mc_traj for mc_traj in mc_results if (mc_traj.orbit.ra_g is not None) \
+            and (mc_traj.orbit.dec_g is not None)]
 
     print("{:d} successful MC runs done...".format(len(mc_results)))
 
@@ -2041,9 +2048,13 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Init the trajectory noise generator
     traj_generator = trajNoiseGenerator(traj, noise_sigma)
 
-    
+
+    # Keep the runs without an orbit if the solution is slower than the escape velocity
+    has_orbit = (traj.orbit is not None) and (traj.orbit.ra_g is not None)
+
     # Run the MC solutions
-    results_check_kwagrs = {"timing_res": traj.timing_res, "geometric_uncert": geometric_uncert}
+    results_check_kwagrs = {"timing_res": traj.timing_res, "geometric_uncert": geometric_uncert, \
+        "require_orbit": has_orbit}
     mc_results = parallelComputeGenerator(traj_generator, _MCTrajSolve, checkMCTrajectories, mc_runs, \
         results_check_kwagrs=results_check_kwagrs, n_proc=mc_cores, max_runs=max_runs)
 
@@ -2060,8 +2071,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
     # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
-    if traj.orbit.ra_g is not None:
-        mc_results.append(traj)
+    mc_results.append(traj)
 
     
     ##########################################################################################################
@@ -2097,7 +2107,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ### PLOT RADIANT SPREAD (Vg color and length stddev) ###
     ##########################################################################################################
 
-    if (traj.orbit is not None) and plot_results:
+    if has_orbit and plot_results:
 
         ra_g_list = np.array([traj_temp.orbit.ra_g for traj_temp in mc_results])
         dec_g_list = np.array([traj_temp.orbit.dec_g for traj_temp in mc_results])
@@ -2183,7 +2193,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ### PLOT ORBITAL ELEMENTS SPREAD ###
     ##########################################################################################################
 
-    if (traj.orbit is not None) and plot_results:
+    if has_orbit and plot_results:
 
         a_list = np.array([traj_temp.orbit.a for traj_temp in mc_results])
         incl_list = np.array([traj_temp.orbit.i for traj_temp in mc_results])
