@@ -1,5 +1,6 @@
 """ Given the trajectory, beginning and ending height (or time) of sampling and the step, this code will
-    sample the trajectory and produce time, height, geo coordinates and velocity for every sample.
+    sample the trajectory and produce time, height, geo and ECI coordinates, velocity with its uncertainty,
+    deceleration, dynamic pressure and ballistic coefficient for every sample.
 
     This is used as a step in dark flight modelling.
 """
@@ -60,6 +61,13 @@ def _plotSphereAndArrow(centre, radius, origin, direction, intersection_list):
 
 
 
+# Names of the quantities stored for every sample
+SAMPLE_ATTRIBUTES = ('t_est', 'ht', 'lat', 'lon', 'ele_geo', 'azim_norot', 'elev_norot', 'vel', 'vel_norot', \
+    'length', 'eci', 'radiant_eci', 'vel_std', 'time_std', 'len_std', 'decel', 'dyn_pressure', 'k', \
+    'log_k_std', 'extrapolated')
+
+
+
 class TrajectorySamples(object):
     def __init__(self, traj, drag_fit=None):
         """ Container for the sampled positions on the trajectory.
@@ -85,9 +93,62 @@ class TrajectorySamples(object):
         self.vel = []
         self.vel_norot = []
 
+        # Position along the trajectory and the direction of the radiant
+        self.length = []
+        self.eci = []
+        self.radiant_eci = []
+
+        # Uncertainties of the motion from the drag fit
+        self.vel_std = []
+        self.time_std = []
+        self.len_std = []
+
+        # Dynamics of the drag model
+        self.decel = []
+        self.dyn_pressure = []
+        self.k = []
+        self.log_k_std = []
+
+        # Flags of the samples outside the observed part
+        self.extrapolated = []
 
 
-    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel=None, vel_norot=None):
+
+    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel=None, vel_norot=None, \
+        length=None, eci=None, radiant_eci=None, vel_std=None, time_std=None, len_std=None, decel=None, \
+        dyn_pressure=None, k=None, log_k_std=None, extrapolated=None):
+        """ Add a sample to the container.
+
+        Arguments:
+            t_est: [float] Time relative to the reference Julian date of the trajectory (s).
+            ht: [float] Height above the mean sea level (m).
+            lat: [float] Geodetic latitude (radians).
+            lon: [float] Longitude (radians).
+            ele_geo: [float] Height above the mean sea level computed from the ECI coordinates (m).
+            azim_norot: [float] Ground-fixed azimuth of the radiant, +E of due N (radians).
+            elev_norot: [float] Ground-fixed elevation of the radiant (radians).
+
+        Keyword arguments:
+            vel: [float] Velocity in the ECI frame (m/s). None by default.
+            vel_norot: [float] Velocity relative to the ground (m/s). None by default.
+            length: [float] Length along the trajectory from the state vector (m). None by default.
+            eci: [ndarray] ECI coordinates, epoch of date (m). None by default.
+            radiant_eci: [ndarray] Unit vector towards the radiant in the ECI frame, bent by gravity. None by
+                default.
+            vel_std: [float] Standard deviation of the velocity (m/s). None by default.
+            time_std: [float] Standard deviation of the time (s), zero when sampling by time. None by default.
+            len_std: [float] Standard deviation of the length along the trajectory (m), zero when sampling by
+                height. None by default.
+            decel: [float] Deceleration of the drag model (m/s^2), positive when the meteor slows down. None
+                by default.
+            dyn_pressure: [float] Dynamic pressure rho*v^2, with the velocity relative to the air, assumed
+                at rest relative to the ground (Pa). None by default.
+            k: [float] Ballistic coefficient of the drag model (m^2/kg). None by default.
+            log_k_std: [float] Standard deviation of the natural logarithm of the ballistic coefficient. None
+                by default.
+            extrapolated: [bool] True if the sample is outside the observed part of the trajectory. None by
+                default.
+        """
 
         self.t_est.append(t_est)
         self.ht.append(ht)
@@ -99,12 +160,102 @@ class TrajectorySamples(object):
         self.vel.append(vel)
         self.vel_norot.append(vel_norot)
 
+        self.length.append(length)
+        self.eci.append(eci)
+        self.radiant_eci.append(radiant_eci)
+        self.vel_std.append(vel_std)
+        self.time_std.append(time_std)
+        self.len_std.append(len_std)
+        self.decel.append(decel)
+        self.dyn_pressure.append(dyn_pressure)
+        self.k.append(k)
+        self.log_k_std.append(log_k_std)
+        self.extrapolated.append(extrapolated)
+
+
+
+    def toArrays(self):
+        """ Convert the samples to numpy arrays.
+
+        Return:
+            [dict] Arrays of the sampled quantities, keyed by the names of the attributes. The ECI coordinates
+                and the directions of the radiant have one row per sample, and the missing values are NaN.
+        """
+
+        arrays = {}
+        for name in SAMPLE_ATTRIBUTES:
+
+            values = getattr(self, name)
+
+            # Keep the vectors as rows
+            if name in ('eci', 'radiant_eci'):
+                values = [np.full(3, np.nan) if val is None else val for val in values]
+                arrays[name] = np.array(values, dtype=np.float64).reshape(-1, 3)
+
+            elif name == 'extrapolated':
+                arrays[name] = np.array(values, dtype=bool)
+
+            else:
+                arrays[name] = np.array(values, dtype=np.float64)
+
+
+        return arrays
+
+
+
+    def saveCSV(self, file_path):
+        """ Save the samples to a CSV file, one row per sample.
+
+        Arguments:
+            file_path: [str] Path to the CSV file.
+        """
+
+        arrays = self.toArrays()
+
+        # Make the columns as the header, the values and the format
+        columns = [
+            ('Time (s)', arrays['t_est'], "{:.6f}"),
+            ('Time std (s)', arrays['time_std'], "{:.6f}"),
+            ('JD', self.traj.jdt_ref + arrays['t_est']/86400.0, "{:.10f}"),
+            ('Height (m)', arrays['ht'], "{:.2f}"),
+            ('Lat (deg)', np.degrees(arrays['lat']), "{:.8f}"),
+            ('Lon (deg)', np.degrees(arrays['lon']), "{:.8f}"),
+            ('Length (m)', arrays['length'], "{:.2f}"),
+            ('Length std (m)', arrays['len_std'], "{:.2f}"),
+            ('X ECI (m)', arrays['eci'][:, 0], "{:.2f}"),
+            ('Y ECI (m)', arrays['eci'][:, 1], "{:.2f}"),
+            ('Z ECI (m)', arrays['eci'][:, 2], "{:.2f}"),
+            ('Azim (deg)', np.degrees(arrays['azim_norot']), "{:.6f}"),
+            ('Elev (deg)', np.degrees(arrays['elev_norot']), "{:.6f}"),
+            ('Vel (m/s)', arrays['vel'], "{:.2f}"),
+            ('Vel std (m/s)', arrays['vel_std'], "{:.2f}"),
+            ('Vgnd (m/s)', arrays['vel_norot'], "{:.2f}"),
+            ('Decel (m/s^2)', arrays['decel'], "{:.4f}"),
+            ('Dyn pres (Pa)', arrays['dyn_pressure'], "{:.6e}"),
+            ('K (m^2/kg)', arrays['k'], "{:.6e}"),
+            ('ln K std', arrays['log_k_std'], "{:.4f}"),
+            ('Extrapolated', arrays['extrapolated'].astype(int), "{:d}"),
+            ]
+
+        with open(file_path, 'w') as f:
+
+            f.write("# Samples of the trajectory from the drag fit of wmpl.Utils.DragFit\n")
+            f.write("# Reference Julian date: {:.10f}\n".format(self.traj.jdt_ref))
+            f.write("# Azim and Elev are the radiant above a fixed ground, epoch of date\n")
+            f.write("# Vel is in the ECI frame, Vgnd relative to the ground, Dyn pres is rho*Vgnd^2 " \
+                + "(no wind)\n")
+            f.write(", ".join([col[0] for col in columns]) + "\n")
+
+            for i in range(len(arrays['t_est'])):
+                f.write(", ".join([fmt.format(values[i]) for _, values, fmt in columns]) + "\n")
+
 
 
 def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_time=False, drag_above=False):
     """ Given the trajectory, beginning, end and step in meters, this function will sample the positions on
         the trajectory and compute the geographical coordinates, the ground-fixed azimuth and elevation of the
-        radiant and the velocity for every sample. The times and velocities are computed from a drag model
+        radiant, the velocity with its uncertainty, the deceleration, the dynamic pressure and the ballistic
+        coefficient for every sample. The times and velocities are computed from a drag model
         fitted to the observations (see wmpl.Utils.DragFit), which also extrapolates them
         above the beginning and below the end of the observed part of the trajectory.
 
@@ -135,6 +286,10 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         len_array = drag_fit.lengthAtTime(time_array)
         height_array = drag_fit.heightAtLength(len_array)
 
+        # Compute the uncertainties of the velocities and the lengths at the exact sampled times
+        vel_std_array, len_std_array = drag_fit.motionStdAtTime(time_array)
+        time_std_array = np.zeros_like(time_array)
+
     else:
 
         # Set begin and end heights, if not given
@@ -149,8 +304,20 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         len_array = drag_fit.lengthAtHeight(height_array)
         time_array = drag_fit.timeAtLength(len_array)
 
+        # Compute the uncertainties of the velocities and the times at the exact sampled heights
+        vel_std_array, time_std_array = drag_fit.motionStdAtLength(len_array)
+        len_std_array = np.zeros_like(len_array)
+
 
     vel_array = drag_fit.velocityAtLength(len_array)
+
+    # Compute the velocity relative to the ground
+    vel_norot_array = drag_fit.groundVelocityAtLength(len_array)
+
+    # Compute the deceleration, the air density and the ballistic coefficient of the drag model
+    decel_array = drag_fit.decelerationAtLength(len_array)
+    rho_array = drag_fit.airDensityAtLength(len_array)
+    k_array, log_k_std_array = drag_fit.ballisticCoeffAtLength(len_array)
 
     if show_plots:
 
@@ -166,7 +333,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         print()
         print("Ground-fixed azimuth and altitude:")
         print(' Time(s), Sample ht (m),  Lat (deg),   Lon (deg), Height (m), Azim (deg), Elev (deg), ' \
-            + 'Vel (km/s), Vgnd (km/s)')
+            + 'Vel (km/s), Vstd (m/s), Vgnd (km/s), Decel (m/s^2), Dyn pres (kPa)')
 
 
     # Open a trajectory sample container
@@ -174,7 +341,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
 
     # Compute the geo coordinates, the ground-fixed azimuth and elevation and the velocity of every sample
     n_skipped = 0
-    for t_est, ht, len_val, vel in zip(time_array, height_array, len_array, vel_array):
+    for i, (t_est, ht, len_val, vel) in enumerate(zip(time_array, height_array, len_array, vel_array)):
 
         # Skip the samples outside the modelled part of the trajectory
         if np.isnan(t_est) or np.isnan(len_val) or np.isnan(vel):
@@ -186,26 +353,36 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         jd = traj.jdt_ref + t_est/86400.0
         lat, lon, ele_geo = cartesian2Geo(jd, *height_eci)
 
-        # Compute the ground-fixed alt/az of the radiant with the instantaneous velocity, along the path bent
-        #   by the gravity drop. The ECI coordinates are already in the epoch of date, so no precession is
-        #   applied
-        azim_norot, elev_norot, vel_norot = derotatedRadiantAltAz(vel*drag_fit.radiantAtLength(len_val)[0], \
-            height_eci, jd, lat, lon)
+        # Compute the ground-fixed alt/az of the radiant along the path bent by the gravity drop. Drag acts
+        #   against the velocity relative to the air, so it does not turn the direction of motion above the
+        #   ground, and the radiant is derotated with the initial velocity, as in Orbit.calcOrbit and
+        #   DynamicMassFit. The ECI coordinates are already in the epoch of date, so no precession is applied
+        radiant_eci = drag_fit.radiantAtLength(len_val)[0]
+        azim_norot, elev_norot, _ = derotatedRadiantAltAz(traj.v_init*radiant_eci, height_eci, jd, lat, lon)
+
+        # Compute the dynamic pressure with the velocity relative to the air, which moves with the ground
+        vel_norot = vel_norot_array[i]
+        dyn_pressure = rho_array[i]*vel_norot**2
 
         # Mark the samples extrapolated outside the observed part
-        if (len_val < drag_fit.len_first) or (len_val > drag_fit.len_last):
+        extrapolated = (len_val < drag_fit.len_first) or (len_val > drag_fit.len_last)
+        if extrapolated:
             time_marker = "*"
         else:
             time_marker = " "
 
 
         # Add point parameters
-        traj_samples.addSample(t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel, vel_norot)
+        traj_samples.addSample(t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel, vel_norot, \
+            length=len_val, eci=height_eci, radiant_eci=radiant_eci, vel_std=vel_std_array[i], \
+            time_std=time_std_array[i], len_std=len_std_array[i], decel=decel_array[i], \
+            dyn_pressure=dyn_pressure, k=k_array[i], log_k_std=log_k_std_array[i], extrapolated=extrapolated)
 
         if show_plots:
             print(("{:s}{:7.3f}, {:13.1f}, {:10.6f}, {:11.6f}, {:10.1f}, {:10.6f}, {:10.6f}, {:10.3f}, " \
-                + "{:11.3f}").format(time_marker, t_est, ht, np.degrees(lat), np.degrees(lon), ele_geo, \
-                np.degrees(azim_norot), np.degrees(elev_norot), vel/1000, vel_norot/1000))
+                + "{:10.1f}, {:11.3f}, {:13.2f}, {:14.3f}").format(time_marker, t_est, ht, np.degrees(lat), \
+                np.degrees(lon), ele_geo, np.degrees(azim_norot), np.degrees(elev_norot), vel/1000, \
+                vel_std_array[i], vel_norot/1000, decel_array[i], dyn_pressure/1000))
 
 
     # Warn about the samples outside the modelled part of the trajectory, which goes from the top (or where
@@ -231,6 +408,19 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
             + 'the drag model.')
         print("The horizontal coordinates are apparent above a fixed ground, not topocentric in J2000!")
         print('Vel is the velocity in the ECI frame, Vgnd the velocity relative to the ground.')
+        print('Vstd is the 1 sigma uncertainty of Vel from the noise of the points, without the ' \
+            + 'uncertainty of the trajectory solution or the bias of the drag model.')
+        print('Decel is the deceleration of the drag model, Dyn pres the dynamic pressure rho*Vgnd^2, ' \
+            + 'with the air at rest relative to the ground.')
+
+        # Report the largest dynamic pressure among the samples
+        if traj_samples.t_est:
+
+            arrays = traj_samples.toArrays()
+            i_peak = np.nanargmax(arrays['dyn_pressure'])
+            print('Peak dynamic pressure of the samples: {:.3f} kPa at {:.3f} km, t = {:.3f} s'.format( \
+                arrays['dyn_pressure'][i_peak]/1000, arrays['ht'][i_peak]/1000, arrays['t_est'][i_peak]))
+
         print()
         print('End coordinates (observed):')
         print('    Lat: {:.6f}'.format(np.degrees(traj.rend_lat)))
@@ -266,6 +456,9 @@ if __name__ == "__main__":
         + 'instead of moving without drag.')
 
     arg_parser.add_argument('-t', '--time', action='store_true', help='Sample by time instead of height. The begin, end and step are then given in seconds relative to the reference time of the trajectory, and -1 does not mean the observed begin and end.')
+
+    arg_parser.add_argument('-c', '--csv', metavar='CSV_PATH', type=str, \
+        help='Save the samples to the given CSV file.')
 
 
 
@@ -313,8 +506,13 @@ if __name__ == "__main__":
 
 
     # Run trajectory sampling
-    sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True, by_time=cml_args.time, \
-        drag_above=cml_args.dragabove)
+    traj_samples = sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True, \
+        by_time=cml_args.time, drag_above=cml_args.dragabove)
+
+    # Save the samples
+    if cml_args.csv is not None:
+        traj_samples.saveCSV(cml_args.csv)
+        print("Samples saved to: {:s}".format(cml_args.csv))
 
 
     # # Test the line and sphere intersection
