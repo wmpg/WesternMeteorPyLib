@@ -28,7 +28,6 @@ from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.Math import vectNorm
 
 
-
 @contextlib.contextmanager
 def _replaced(obj, name, value):
     """ Replace an attribute of an object while the context is open.
