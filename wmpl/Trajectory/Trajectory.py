@@ -6422,6 +6422,21 @@ class Trajectory(object):
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, \
                 method="Nelder-Mead")
 
+        # Minimize again from the previous solution (of the pass before the timing was estimated, or the main
+        #   solution in a Monte Carlo run) if its cost is lower than at the minimum found, as the minimization
+        #   can stop in a distant local minimum
+        if (self.state_vect_mini is not None) and (self.radiant_eci_mini is not None):
+
+            previous = np.r_[self.state_vect_mini, self.radiant_eci_mini]
+
+            if minimizeAngleCost(previous, *minimize_args) < minimize_solution.fun:
+
+                previous_solution = scipy.optimize.minimize(minimizeAngleCost, previous, \
+                    args=minimize_args, method="Nelder-Mead")
+
+                if previous_solution.success or (not minimize_solution.success):
+                    minimize_solution = previous_solution
+
         unbounded_solution = minimize_solution
 
         # NOTE

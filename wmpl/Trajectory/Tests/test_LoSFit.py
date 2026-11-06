@@ -2,9 +2,10 @@
 
 The fit lost a good solution in two ways: a false alarm of the divergence check, after which a far worse
 bounded solution was taken, and running out of function evaluations, after which the solution was replaced
-by the intersecting planes. The optional restarts of the Nelder-Mead minimization (los_restarts) are also
-tested. The tests solve a noisy straight trajectory seen from three stations, with scipy.optimize.minimize
-replaced to record or alter the minimizations of the fit.
+by the intersecting planes. A fit which stops in a distant minimum after the timing was estimated must be
+minimized again from the solution of the pass before. The optional restarts of the Nelder-Mead minimization
+(los_restarts) are also tested. The tests solve a noisy straight trajectory seen from three stations, with
+scipy.optimize.minimize replaced to record or alter the minimizations of the fit.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_LoSFit.py -v
@@ -24,6 +25,7 @@ matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import stateVectorDiverged
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
+from wmpl.Utils.Math import vectNorm
 
 
 
@@ -260,6 +262,51 @@ def testAFailedBoundedSolutionIsNotTaken():
 
 
 
+def testAFitInADistantMinimumIsMinimizedAgainFromThePreviousSolution():
+    """ Check that when the fit after the timing was estimated stops in a distant minimum, with a higher cost
+        than at the solution of the pass before, it is minimized again from that solution.
+    """
+
+    original = scipy.optimize.minimize
+    starts = []
+    results = []
+
+    def distant(fun, x0, args=(), **options):
+
+        result = original(fun, x0, args=args, **options)
+
+        if not _isLoSFit(fun, options):
+            return result
+
+        starts.append(np.array(x0))
+
+        # The fit of the second pass stops with the radiant 5 degrees away, as seen on real events
+        if len(starts) == 2:
+            radiant = result.x[3:] + np.tan(np.radians(5))*np.linalg.norm(result.x[3:]) \
+                *vectNorm(np.cross(result.x[3:], [0, 0, 1]))
+            x = np.r_[result.x[:3], radiant]
+            result = SimpleNamespace(x=x, fun=fun(x, *args), success=True, nit=1, message='Distant')
+
+        results.append(result)
+
+        return result
+
+    traj, _, _ = observeStraightMeteor(seed=20261105, estimate_timing_vel=True, calc_orbit=False)
+
+    with _replaced(scipy.optimize, 'minimize', distant):
+        traj = traj.run()
+
+    assert len(starts) >= 3
+
+    # The third minimization starts from the solution of the first pass
+    first = results[0].x
+    assert _angle(starts[2][3:], first[3:]) < 1e-6
+
+    assert _angle(traj.radiant_eci_mini, results[1].x[3:]) > 4
+    assert _angle(traj.radiant_eci_mini, first[3:]) < 0.1
+
+
+
 def _recordLoSFits(seed=20261019, **kwargs):
     """ Solve the trajectory and record every Nelder-Mead minimization of its line-of-sight fit.
 
@@ -349,8 +396,8 @@ if __name__ == "__main__":
         testALargeMoveIsADivergenceWhenACoordinateIsNegative, testALineWhichRanOutOfEvaluationsIsContinued, \
         testALineWhichWanderedOffAlongItselfIsContinuedFromTheMeteor, \
         testABoundedSolutionIsOnlyTakenIfItIsBetter, testAFailedBoundedSolutionIsNotTaken, \
-        testNoRestartByDefault, testEachRestartStartsFromThePreviousSolution, \
-        testAFailedRestartDoesNotReplaceAConvergedSolution]
+        testAFitInADistantMinimumIsMinimizedAgainFromThePreviousSolution, testNoRestartByDefault, \
+        testEachRestartStartsFromThePreviousSolution, testAFailedRestartDoesNotReplaceAConvergedSolution]
 
     for test in test_list:
         test()
