@@ -1904,6 +1904,15 @@ def trajNoiseGenerator(traj, noise_sigma):
             azim_noise_list = []
             elev_noise_list = []
 
+            # Draw a systematic error of the station for this run, if its size is given, as a cross-track
+            #   constant and slope along the trajectory, the same for all its points
+            systematics = getattr(traj, 'mc_systematics', None)
+            if systematics is not None:
+                constant = np.random.normal(0, systematics['sigma_c'])
+                slope = np.random.normal(0, systematics['sigma_g'])
+                along = traj.v_init*(np.array(obs.time_data) - np.mean(obs.time_data))
+                systematic_offsets = iter(constant + slope*along)
+
             # Go through all ECI unit vectors of measurement LoS, add the noise and calculate alt/az coords
             for jd, rhat in zip(obs.JD_data, obs.meas_eci_los):
 
@@ -1934,6 +1943,10 @@ def trajNoiseGenerator(traj, noise_sigma):
 
                 # Add noise to observations
                 meas_eci_noise = rhat + np.random.normal(0, sigma)*uhat + np.random.normal(0, sigma)*vhat
+
+                # Add the systematic error of the station across the trajectory
+                if systematics is not None:
+                    meas_eci_noise += next(systematic_offsets)*vectNorm(np.cross(rhat, traj.radiant_eci_mini))
 
                 # Normalize to a unit vector
                 meas_eci_noise = vectNorm(meas_eci_noise)
@@ -2093,6 +2106,11 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Keep the runs without an orbit if the solution is slower than the escape velocity
     has_orbit = (traj.orbit is not None) and (traj.orbit.ra_g is not None)
 
+    # Runs with systematic errors of the stations cannot be judged by their timing residuals
+    with_systematics = getattr(traj, 'mc_systematics', None) is not None
+    if with_systematics:
+        geometric_uncert = True
+
     # Run the MC solutions
     results_check_kwagrs = {"timing_res": traj.timing_res, "geometric_uncert": geometric_uncert, \
         "require_orbit": has_orbit}
@@ -2127,6 +2145,10 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Choose the solution with the lowest timing residuals as the best solution
     timing_res_trajs = [traj_tmp.timing_res for traj_tmp in mc_results]
     best_traj_ind = timing_res_trajs.index(min(timing_res_trajs))
+
+    # With systematic errors of the stations the runs are not better solutions, so keep the original one
+    if with_systematics:
+        best_traj_ind = mc_results.index(traj)
 
     # Choose the best trajectory
     traj_best = mc_results[best_traj_ind]

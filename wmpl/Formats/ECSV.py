@@ -11,6 +11,7 @@ import numpy as np
 
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations, writeMiligInputFileMeteorObservation
+from wmpl.Trajectory.StationSystematics import stationSystematicErrors, systematicErrorSize
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenSphericalCoords
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
@@ -416,7 +417,8 @@ def originalPicksTrajectory(traj):
 
 
 
-def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=True, **kwargs):
+def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=True, systematics=True, \
+    **kwargs):
     """ Solve the trajectories of the additional fragments described in ECSV files (see ecsvFragments()),
         after the main one and with the same solver options. Each one is saved in a fragment_k folder of the
         output directory of the main trajectory.
@@ -432,6 +434,9 @@ def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=
             of its solution with the original picks, instead of estimating them again from the fewer points
             of every fragment. Only used when the time offsets are estimated, as otherwise the fragments
             take the fixed ones of the main trajectory anyway. True by default.
+        systematics: [bool] Include in the Monte Carlo uncertainties of every fragment the systematic errors
+            of the stations, measured on the main trajectory if it has 3 stations or more (see
+            StationSystematics). True by default.
         **kwargs: Keyword arguments for the trajectory solver, those the main trajectory was solved with.
 
     Return:
@@ -452,6 +457,18 @@ def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=
     # The time offsets are estimated unless the timing estimation was turned off, or given offsets
     #   for every station (estimate_timing_vel is then False or a string)
     estimate_timing = (kwargs.get('estimate_timing_vel', True) is True)
+
+    # Measure the systematic errors of the stations on the main trajectory, which needs 3 distinct stations
+    main_errors = {}
+    if systematics and kwargs.get('monte_carlo', True):
+
+        if len(set(str(meteor.station_id) for meteor in input_meteors)) >= 3:
+            traj_orig = originalPicksTrajectory(traj)
+            main_errors = stationSystematicErrors(traj_orig)
+
+        if not main_errors:
+            print("The systematic errors of the stations can only be measured with 3 stations or more in " \
+                "the main trajectory, the uncertainties of the fragments do not include them.")
 
     fragment_trajs = []
     for fragment in ecsvFragments(ecsv_paths):
@@ -506,6 +523,14 @@ def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=
 
         elif isinstance(kwargs.get('fixed_times'), str):
             frag_kwargs['fixed_times'] = formatStationOffsets(given_fixed)
+
+        # Add the systematic errors of the stations at the fragment to its Monte Carlo runs
+        if main_errors:
+            frag_kwargs['mc_systematics'] = systematicErrorSize(traj_orig, main_errors, meteor_list)
+            print("Systematic errors of the stations in the Monte Carlo runs: {:.1f} arcsec across the " \
+                "trajectory, {:.1f} arcsec/km along it".format( \
+                np.degrees(frag_kwargs['mc_systematics']['sigma_c'])*3600, \
+                np.degrees(frag_kwargs['mc_systematics']['sigma_g'])*3600*1000))
 
         frag_traj = solveTrajectoryGeneric(jdt_ref, meteor_list, \
             os.path.join(traj.output_dir, "fragment_{:d}".format(fragment)), solver=solver, **frag_kwargs)
@@ -666,6 +691,10 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
     else:
         out_str += "Solutions with the original picks, with the uncertainties (1 sigma) of the Monte Carlo " \
             "runs.\n"
+
+        if any(getattr(frag_traj, 'mc_systematics', None) is not None for _, frag_traj in fragment_trajs):
+            out_str += "The uncertainties of the fragments include the systematic errors of the stations, " \
+                "measured on the main trajectory.\n"
 
     if not fragment_trajs:
         out_str += "\nNone of the additional fragments could be solved.\n"
@@ -907,6 +936,12 @@ if __name__ == "__main__":
             "fragment_k folder of the output directory.", \
         action="store_true")
 
+    arg_parser.add_argument('--fragnosys', \
+        help="With --fragments, do not include in the Monte Carlo uncertainties of the fragments the " \
+            "systematic errors of the stations, measured on the main trajectory if it has 3 stations or " \
+            "more.", \
+        action="store_true")
+
     arg_parser.add_argument('--fragtimefit', \
         help="With --fragments, estimate the time offsets of the stations for every fragment instead of " \
             "taking the ones of the main trajectory, which are better constrained by its larger number of " \
@@ -1032,6 +1067,7 @@ if __name__ == "__main__":
 
         else:
             fragment_trajs = solveFragmentTrajectories(traj, ecsv_paths, solver=cml_args.solver,
-                reuse_timing=(not cml_args.fragtimefit), **solver_kwargs)
+                reuse_timing=(not cml_args.fragtimefit), systematics=(not cml_args.fragnosys), \
+                **solver_kwargs)
             print(fragmentComparison(originalPicksTrajectory(traj), fragment_trajs, \
                 reuse_timing=(not cml_args.fragtimefit)))

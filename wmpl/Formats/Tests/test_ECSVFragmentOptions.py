@@ -226,13 +226,16 @@ def testOtherSolversAreNotSupported(tmp_path, monkeypatch):
 
 def testTheReturnedTrajectoryKeepsNothingAboutTheOptions(tmp_path, monkeypatch):
     """ Check that the generic solver sets no attribute on what it returns, so that nothing new reaches the
-        pickles (AutoGUI saves the returned trajectory itself, with savePickle()).
+        pickles (AutoGUI saves the returned trajectory itself, with savePickle()), except the size of the
+        systematic errors of the stations when it is given.
     """
+
+    given = []
 
     class FakeTrajectory(object):
 
         def __init__(self, *args, **kwargs):
-            pass
+            given.append(kwargs)
 
         def infillTrajectory(self, *args, **kwargs):
             pass
@@ -248,6 +251,14 @@ def testTheReturnedTrajectoryKeepsNothingAboutTheOptions(tmp_path, monkeypatch):
 
     assert vars(traj) == {}
 
+    # The size of the systematic errors of the stations is set on the trajectory, not given to the solver
+    size = {'sigma_c': 1e-4, 'sigma_g': 0.0}
+    traj = GENERIC.solveTrajectoryGeneric(2461000.5, [meteor], str(tmp_path), solver='original', \
+        mc_systematics=size)
+
+    assert vars(traj) == {'mc_systematics': size}
+    assert 'mc_systematics' not in given[-1]
+
 
 
 def testAnOffsetGivenForAnotherFileIsNotTaken():
@@ -261,3 +272,31 @@ def testAnOffsetGivenForAnotherFileIsNotTaken():
     offsets = ECSV.fragmentStationOffsets({'A_2': 0.75, 'B': 0.0}, main_ids, ['A', 'A_2', 'B'], meteors)
 
     assert offsets == {'B': 0.0}
+
+
+
+def testFragmentsGetTheSystematicErrorsOfTheMainOne(tmp_path, monkeypatch):
+    """ Check that with the Monte Carlo runs and 3 stations the fragments get the size of the systematic
+        errors of the stations measured on the main trajectory by default, and not when asked not to,
+        without the Monte Carlo runs, or with 2 stations.
+    """
+
+    size = {'sigma_c': 1e-4, 'sigma_g': 1e-8}
+    monkeypatch.setattr(ECSV, 'stationSystematicErrors', lambda traj: {'XX0001': (0.0, 1e-4)})
+    monkeypatch.setattr(ECSV, 'systematicErrorSize', lambda traj, errors, meteors: size)
+
+    three = _twoStations(tmp_path) + [writeFragmentECSV(tmp_path/"c.ecsv", "XX0003")]
+    cases = [
+        (three, {}, True),
+        (three, {'systematics': False}, False),
+        (three, {'monte_carlo': False}, False),
+        (_twoStations(tmp_path), {}, False),
+    ]
+
+    for paths, options, expected in cases:
+
+        calls = []
+        monkeypatch.setattr(ECSV, 'solveTrajectoryGeneric', _fakeSolver(calls))
+        ECSV.solveFragmentTrajectories(_solvedMain(paths, 0.0), paths, **options)
+
+        assert (calls[0].get('mc_systematics') is size) == expected
