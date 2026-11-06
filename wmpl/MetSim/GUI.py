@@ -2909,6 +2909,9 @@ class MetSimGUI(QMainWindow):
             # Load the constants from the JSON files
             self.const, const_json = loadConstants(const_json_file)
 
+            # Take the latitude for the gravity from the trajectory, as JSON files may not have it
+            self.const.lat = self.traj.rbeg_lat
+
 
             # Init the fragmentation container for the GUI
             if len(self.const.fragmentation_entries):
@@ -2964,7 +2967,10 @@ class MetSimGUI(QMainWindow):
                     (np.cos(lat)*a)**2 + (np.sin(lat)*b)**2
                 )
             )
-            
+
+            # Use the same latitude for the gravity
+            self.const.lat = lat
+
 
             # Set the constants value from the trajectory
             self.const.v_init = self.traj.orbit.v_init

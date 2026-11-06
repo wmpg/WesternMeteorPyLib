@@ -12,6 +12,7 @@ import scipy.interpolate
 import matplotlib.pyplot as plt
 
 from wmpl.Utils.AtmosphereDensity import getAtmDensity, atmDensPoly6th
+from wmpl.Utils.TrajConversions import gravity
 
 
 # Verbose printing flags
@@ -36,11 +37,9 @@ K_BOLTZMAN = 1.3806485279e-23
 P_SUR = 101325.0
 # was P_sur
 
-# earth acceleration in m/s^2
-g0 = 9.81
-
 # Earth radius (m) at 43.930723 deg latitude
 R_EARTH = 6367888.0
+LAT_EARTH = math.radians(43.930723)
 # was: re
 
 # Specific gas constant in J/kg*K
@@ -726,7 +725,7 @@ def ablate(met, consts, no_atmosphere_end_ht=-1):
     printd('a_current', a_current)
 
     # g at height h in m/s^2
-    gv = g0/((1 + met.h/R_EARTH)**2)
+    gv = gravity(LAT_EARTH, met.h)
 
     # Vertical component of a
     av = -gv - a_current*met.vv/met.v + met.vh*met.v/(R_EARTH + met.h)
