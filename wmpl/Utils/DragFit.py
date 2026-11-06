@@ -1224,7 +1224,7 @@ class DragFit(object):
         out.append("The star * marks the segments where K grows significantly (more than 2 sigma). K std " \
             + "is the relative uncertainty of K at the segment end.")
         out.append("Dyn pres is the dynamic pressure rho*v^2 at the segment beginning, with the velocity " \
-            + "relative to the ground.")
+            + "relative to the air, assumed at rest relative to the ground.")
         out.append("The final dynamic mass is the mass of the leading body at the last point for the " \
             + "assumed Gamma*A and density, m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is " \
             + "propagated.")

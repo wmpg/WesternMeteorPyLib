@@ -141,8 +141,8 @@ class TrajectorySamples(object):
                 height. None by default.
             decel: [float] Deceleration of the drag model (m/s^2), positive when the meteor slows down. None
                 by default.
-            dyn_pressure: [float] Dynamic pressure rho*v^2, with the velocity relative to the ground (Pa).
-                None by default.
+            dyn_pressure: [float] Dynamic pressure rho*v^2, with the velocity relative to the air, assumed
+                at rest relative to the ground (Pa). None by default.
             k: [float] Ballistic coefficient of the drag model (m^2/kg). None by default.
             log_k_std: [float] Standard deviation of the natural logarithm of the ballistic coefficient. None
                 by default.
@@ -242,7 +242,8 @@ class TrajectorySamples(object):
             f.write("# Samples of the trajectory from the drag fit of wmpl.Utils.DragFit\n")
             f.write("# Reference Julian date: {:.10f}\n".format(self.traj.jdt_ref))
             f.write("# Azim and Elev are the radiant above a fixed ground, epoch of date\n")
-            f.write("# Vel is in the ECI frame, Vgnd and Dyn pres relative to the ground\n")
+            f.write("# Vel is in the ECI frame, Vgnd relative to the ground, Dyn pres is rho*Vgnd^2 " \
+                + "(no wind)\n")
             f.write(", ".join([col[0] for col in columns]) + "\n")
 
             for i in range(len(arrays['t_est'])):
@@ -409,7 +410,8 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         print('Vel is the velocity in the ECI frame, Vgnd the velocity relative to the ground.')
         print('Vstd is the 1 sigma uncertainty of Vel from the noise of the points, without the ' \
             + 'uncertainty of the trajectory solution or the bias of the drag model.')
-        print('Decel is the deceleration of the drag model, Dyn pres the dynamic pressure rho*Vgnd^2.')
+        print('Decel is the deceleration of the drag model, Dyn pres the dynamic pressure rho*Vgnd^2, ' \
+            + 'with the air at rest relative to the ground.')
 
         # Report the largest dynamic pressure among the samples
         if traj_samples.t_est:

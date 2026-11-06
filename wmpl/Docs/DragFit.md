@@ -146,7 +146,7 @@ Drag model of the motion: dv/dt = -K*rho*v² + g
 
 - **Residuals RMS** is the scatter of the observed lengths around the model, along the track.
 - **Dyn pres** is the dynamic pressure `rho*v^2` at the top of the segment, with the velocity
-  relative to the ground, as the air moves with the ground.
+  relative to the air, which is assumed to be at rest relative to the ground (no wind).
 - **K std** is the relative uncertainty of `K` at the bottom of the segment (1 sigma). It is large
   high up, where the meteor barely decelerates, and `inf` where the data do not constrain `K`.
 - **Growth** is the factor by which `K` grows in the segment, and **Signif** its significance in
@@ -201,10 +201,11 @@ printed at the end. For the example trajectory, sampled every 2 km from 118 to 9
   across the path: 0.5 deg at the end and 2 deg at 5 km/s for the synthetic fireball of the tests.
 - **Decel** is `K*rho*v^2 - g_along`, positive when the meteor slows down. Above the beginning, without
   drag, it is the small negative acceleration by gravity.
-- **Dyn pres** is `rho*v^2` with the velocity relative to the ground (`Vgnd`), as in the `DragFit`
-  table. The ECI velocity differs from it by up to the speed of the Earth's rotation (465 m/s at the
-  equator). For the synthetic fireball of the tests, sampled from 18 to 7 km/s at 45 deg latitude,
-  the dynamic pressure with the ECI velocity would be 2 to 6% lower.
+- **Dyn pres** is `rho*v^2` with the velocity relative to the air, as in the `DragFit` table. The
+  air is assumed to be at rest relative to the ground (no wind), so this velocity is `Vgnd`. The ECI
+  velocity differs from it by up to the speed of the Earth's rotation (465 m/s at the equator). For
+  the synthetic fireball of the tests, sampled from 18 to 7 km/s at 45 deg latitude, the dynamic
+  pressure with the ECI velocity would be 2 to 6% lower.
 - **Vstd** is propagated from the covariance of the fitted parameters. When sampling by height, the
   uncertainty of the time is also computed. When sampling by time, it is the uncertainty of the
   length along the trajectory. The sampled coordinate itself is exact.
