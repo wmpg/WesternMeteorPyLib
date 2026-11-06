@@ -17,6 +17,7 @@ import sys
 import numpy as np
 
 from wmpl.Formats.ECSV import loadECSVs, unsolvedFragments, unsolvedFragmentReport
+from wmpl.Formats.ECSV import flareHeights, runTimeOffsets
 from wmpl.Formats.GenericFunctions import solveTrajectoryGeneric
 from wmpl.Utils.TrajConversions import latLonAlt2ECEF, ecef2ENU, ecef2LatLonAlt
 
@@ -371,6 +372,40 @@ def testTheTimeOffsetOfTheStationIsTheOneOfTheMainTrajectory(tmp_path):
 
     assert frag['station_id'] == 'XX0002'
     assert np.max(np.abs(frag['ahead'])) < 30.0
+
+
+
+def testTheSolutionWithTheOriginalPicksAmongTheRunsAddsNoTimeOffset(tmp_path):
+    """ Check that the solution with the original picks, which the solver adds to its Monte Carlo runs with
+        the time offsets it estimated already applied to its times, does not have them added again: with a
+        clock 40 ms late, that run would move a flare by 40 ms and a fragment along the path by 800 m.
+    """
+
+    paths = writeEvent(tmp_path, fragment_stations=('XX0002',), clocks={'XX0002': 0.040})
+
+    # Flag a point of the main fragment as a flare
+    path = [path for path in paths if path.endswith('XX0002.ecsv')][0]
+    with open(path) as f:
+        text = f.read()
+    with open(path, 'w') as f:
+        f.write(text.replace(",{:d},False,True,".format(FRAGMENT_START), \
+            ",{:d},True,True,".format(FRAGMENT_START)))
+
+    traj = solveMain(paths, tmp_path, estimate_timing=True)
+    runs = monteCarloRuns(traj) + [traj]
+
+    assert np.max(np.abs(traj.time_diffs_final)) > 0.03
+    assert all(t_diff == 0 for t_diff in runTimeOffsets(traj, traj).values())
+
+    frag = unsolvedFragments(traj, paths, [1], mc_trajs=runs)[0]
+
+    assert np.max(frag['std']['t']) < 1e-3
+    assert frag['std']['ahead_first'] < 50.0
+
+    flares = flareHeights(traj, paths, mc_trajs=runs)
+
+    assert len(flares) == 1
+    assert flares[0]['t_std_mc'] < 1e-3
 
 
 

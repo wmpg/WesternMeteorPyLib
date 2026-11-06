@@ -896,19 +896,44 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
     return projected
 
 
+
+def runTimeOffsets(mc_traj, traj):
+    """ Get the time offsets a Monte Carlo run estimated, which it does not apply to the times of its
+        observations, to add to those applied to the solution with the original picks (see projectFlares()).
+        The solver adds that solution to its runs, with the offsets it estimated already applied to its times,
+        so it has none to add.
+
+    Arguments:
+        mc_traj: [Trajectory object] One of the Monte Carlo runs.
+        traj: [Trajectory object] The solution with the original picks (see originalPicksTrajectory()).
+
+    Return:
+        [dict] {station ID: time offset (s)}.
+    """
+
+    # The solution with the original picks itself, by its values, as it may have been loaded from its file
+    same = np.array_equal(mc_traj.state_vect_mini, traj.state_vect_mini) \
+        and np.array_equal(mc_traj.time_diffs_final, traj.time_diffs_final)
+
+    return {str(obs.station_id): 0.0 if same else t_diff for obs, t_diff \
+        in zip(mc_traj.observations, mc_traj.time_diffs_final)}
+
+
+
 def flareHeights(traj, ecsv_paths, mc_trajs=None):
     """ Times and heights of the points of the main fragment flagged as flares in ECSV files, used in its
         trajectory or not (trajectory_use = False), on a solution of it (see projectFlares()), with their
         uncertainties from its Monte Carlo runs, if given.
 
     Arguments:
-        traj: [Trajectory] Solved trajectory of the main fragment.
+        traj: [Trajectory] Solved trajectory of the main fragment, the solution with the original picks (see
+            originalPicksTrajectory()).
         ecsv_paths: [list] List of paths to ECSV files it was solved from.
 
     Keyword arguments:
         mc_trajs: [list] Its Monte Carlo runs. The flares are projected on each one, with the noise of the runs
-            on their lines of sight and the time offsets each run estimated, and the standard deviations of 
-            their times and heights are their uncertainties.
+            on their lines of sight and the time offsets each run estimated (see runTimeOffsets()), and the
+            standard deviations of their times and heights are their uncertainties.
 
     Return:
         [list] Dictionaries of the flare points sorted by time, with the station_id, jd, t_rel (s from the
@@ -937,8 +962,7 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
         for mc_traj in mc_trajs:
 
             mc_projected = projectFlares(mc_traj, flare_meteors, input_meteors, noise_sigma=traj.mc_noise_std, 
-                ang_res_std=ang_res_std, time_diffs={str(obs.station_id): t_diff for obs, t_diff 
-                    in zip(mc_traj.observations, mc_traj.time_diffs_final)})
+                ang_res_std=ang_res_std, time_diffs=runTimeOffsets(mc_traj, traj))
 
             for key, flare in mc_projected.items():
                 if key in mc_values:
@@ -1258,8 +1282,9 @@ def unsolvedFragments(traj, ecsv_paths, fragments, mc_trajs=None):
     Keyword arguments:
         mc_trajs: [list] Its Monte Carlo runs. The points are projected on each one, with the noise of the
             runs on their lines of sight (the scatter of the points of the fragment, as they are not the
-            points of the main fragment) and the time offsets each run estimated. The standard deviations
-            are the uncertainties, which do not include a separation from the main path. None by default.
+            points of the main fragment) and the time offsets each run estimated (see runTimeOffsets()). The
+            standard deviations are the uncertainties, which do not include a separation from the main path.
+            None by default.
 
     Return:
         [list] A dictionary for every file of every fragment: the values of oneStationSolution(), with also
@@ -1297,8 +1322,7 @@ def unsolvedFragments(traj, ecsv_paths, fragments, mc_trajs=None):
                 mc_solution = oneStationSolution(mc_traj, meteor, input_meteors, \
                     noise_sigma=traj.mc_noise_std, \
                     ang_res_std={solution['station_id']: solution['los_noise']}, \
-                    time_diffs={str(obs.station_id): t_diff for obs, t_diff \
-                        in zip(mc_traj.observations, mc_traj.time_diffs_final)})
+                    time_diffs=runTimeOffsets(mc_traj, traj))
 
                 if mc_solution is not None:
                     mc_solutions.append(mc_solution)
