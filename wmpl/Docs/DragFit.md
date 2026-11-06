@@ -46,6 +46,12 @@ Sample by time instead, every 0.05 s from 0 to 2 s after the reference time of t
 python -m wmpl.Utils.SampleTrajectoryPositions traj.pickle 0 2 0.05 --time
 ```
 
+Save the samples to a CSV file, with all the sampled quantities:
+
+```
+python -m wmpl.Utils.SampleTrajectoryPositions traj.pickle 30 15 0.1 --csv samples.csv
+```
+
 An example trajectory is included in the repository:
 `wmpl/Dynesty/examples/20191023_091225/20191023_091225_trajectory.pickle`.
 
@@ -114,6 +120,7 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 | `beg`, `end`, `step` | Heights of the first and last sample and the step (km). `-1` uses the observed beginning or end height. With `--time` they are times relative to the reference time of the trajectory (s), and `-1` has no special meaning. |
 | `-t`, `--time` | Sample by time instead of height. |
 | `-a`, `--dragabove` | As above. |
+| `-c`, `--csv` | Save the samples to the given CSV file. |
 
 ---
 
@@ -169,10 +176,36 @@ The plots for the fireball of the table above:
   leading body, 0.13 kg (0.08 to 0.20 kg) for `Gamma*A = 0.78` and `rho_m = 3500 kg/m³`.
 
 **The samples** printed by `SampleTrajectoryPositions` give, for every sample, the time, the
-geographical coordinates, the ground-fixed azimuth and elevation of the radiant, and the velocity in
-the ECI frame (`Vel`) and relative to the ground (`Vgnd`). Samples outside the observed part are
-marked with a star. Samples outside the modelled part are skipped, and a message gives the modelled
-range of heights and times.
+geographical coordinates, the ground-fixed azimuth and elevation of the radiant, the velocity in
+the ECI frame (`Vel`) with its 1 sigma uncertainty (`Vstd`) and relative to the ground (`Vgnd`), the
+deceleration of the model (`Decel`) and the dynamic pressure (`Dyn pres`). Samples outside the
+observed part are marked with a star. Samples outside the modelled part are skipped, and a message
+gives the modelled range of heights and times. The largest dynamic pressure among the samples is
+printed at the end. For the example trajectory, sampled every 2 km from 118 to 94 km:
+
+```
+ Time(s), Sample ht (m),  Lat (deg),   Lon (deg), Height (m), Azim (deg), Elev (deg), Vel (km/s), Vstd (m/s), Vgnd (km/s), Decel (m/s^2), Dyn pres (kPa)
+* -0.032,      118000.0,  44.121908,  -81.316691,   118000.0, 162.213625,  61.012562,     67.426,       30.2,      67.476,         -8.28,          0.124
+   0.002,      116000.0,  44.131234,  -81.320845,   116000.0, 162.211296,  61.002840,     67.426,       30.1,      67.476,        141.91,          0.161
+ ...
+   0.308,       98000.0,  44.215458,  -81.358420,    98000.0, 162.183031,  60.915191,     66.584,       64.5,      66.633,      19239.82,          3.658
+*  0.342,       96000.0,  44.224849,  -81.362618,    96000.0, 162.171817,  60.904322,     65.566,      379.3,      65.616,      40396.81,          5.101
+```
+
+- **Decel** is `K*rho*v^2 - g_along`, positive when the meteor slows down. Above the beginning, without
+  drag, it is the small negative acceleration by gravity.
+- **Dyn pres** is `rho*v^2` with the velocity relative to the ground, as the air moves with the
+  ground. The `Dyn pres` column of the `DragFit` table uses the ECI velocity, which differs by up to
+  the speed of the Earth's rotation (465 m/s at the equator). For the synthetic fireball of the tests,
+  sampled from 18 to 7 km/s at 45 deg latitude, the dynamic pressure relative to the ground is 2 to 6%
+  larger.
+- **Vstd** is propagated from the covariance of the fitted parameters. When sampling by height, the
+  uncertainty of the time is also computed. When sampling by time, it is the uncertainty of the
+  length along the trajectory. The sampled coordinate itself is exact.
+
+With `--csv`, the samples are saved with the Julian date, the length along the trajectory, the ECI
+coordinates, the uncertainties of the time and the length, the ballistic coefficient and its
+uncertainty, and a flag of the extrapolated samples.
 
 ---
 
@@ -210,12 +243,34 @@ print(drag_fit.summaryTable(gamma_a=0.78, bulk_density=3500.0))
 eci = drag_fit.eciAtLength(drag_fit.lengthAtTime(time_arr))
 radiant = drag_fit.radiantAtLength(drag_fit.lengthAtTime(time_arr))
 
+# The deceleration (m/s^2) and the air density (kg/m^3) of the model
+len_arr = drag_fit.lengthAtTime(time_arr)
+decel = drag_fit.decelerationAtLength(len_arr)
+rho = drag_fit.airDensityAtLength(len_arr)
+
+# The 1 sigma uncertainties of the velocity and the time at given lengths, or of the velocity and the
+#   length at given times
+vel_std, time_std = drag_fit.motionStdAtLength(len_arr)
+vel_std, len_std = drag_fit.motionStdAtTime(time_arr)
+
 # The plots, with the final dynamic mass
 plotDragFit(drag_fit, gamma_a=0.78, bulk_density=3500.0)
 
 # Samples every 100 m of height between the observed beginning and end (-1)
 samples = sampleTrajectory(traj, -1, -1, 100.0)
 print(samples.t_est[0], samples.ht[0], samples.vel[0], samples.azim_norot[0], samples.elev_norot[0])
+
+# All sampled quantities as numpy arrays: t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel,
+#   vel_norot, length, eci, radiant_eci, vel_std, time_std, len_std, decel, dyn_pressure, k, log_k_std
+#   and extrapolated
+arrays = samples.toArrays()
+print(arrays['vel_std'], arrays['decel'], arrays['dyn_pressure'])
+
+# The dynamic mass of every sample, from the fitted ballistic coefficient
+mass, mass_lo, mass_hi = samples.drag_fit.dynamicMassAtLength(arrays['length'])
+
+# Save the samples to a CSV file
+samples.saveCSV("samples.csv")
 ```
 
 All functions return `NaN` outside the modelled part of the trajectory. The lengths are measured
@@ -302,6 +357,13 @@ the photometric mass (e.g. 1e-10 kg for the faint example trajectory in the repo
   velocity above the beginning would have grown by 10%.
 - **Without the gravity correction** in the trajectory solution, the positions and the radiant stay
   on the straight line.
+- **The uncertainties of the velocity, the time and the length** only include the noise of the
+  points. They do not include the uncertainty of the trajectory solution or the bias of the model,
+  e.g. from the smoothing of `K` by the penalty on its growth. On the synthetic fireball of the tests
+  (18 to 10 km/s, `K` growing five times), over 20 realisations of the noise the errors of the
+  velocity were 0.8 to 0.9 sigma (RMS) in the first quarter of the observed part and 0.6 to 0.7 sigma
+  below the end, but 5 sigma at 70 to 90% of the observed part, where `K` grows fastest and the model
+  is biased by 70 to 100 m/s. They are linearised, which is less accurate far below the end.
 
 ---
 
