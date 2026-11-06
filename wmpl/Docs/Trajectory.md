@@ -104,18 +104,19 @@ saturation, the true direction of a fragment was within the 95 % region of its u
 cases with them, and in 75 % without. With 2 stations in the main trajectory there is nothing to measure,
 and the solver says so.
 
-A fragment seen with enough points (4 or more) from only one station cannot be solved, as one station
-gives a plane and not a line, and the trajectory of a fragment seen from more can still fail. The points of
-such a fragment are projected on the main trajectory, each station on its own, at the times of their frames
-corrected by the time offset of the station, as the flares are. The terminal and the end of the saved report
-give the height and time of every point, how far off the main path it is and how fast it moves away from it,
-and how far ahead of the main fragment it is at the same time. This assumes that the fragment is on the main
-path, which one station cannot test. Only the part of a separation across the line of sight is seen, so the
-distances off the path and the speeds are lower limits. The rest moves the point along the line of sight,
-which the report gives as the error of the height, and of how far ahead it is, per 100 m off the path. The
-uncertainties come from the Monte Carlo runs of the main trajectory, with the scatter of the points of the
-fragment as their noise, and do not include a separation from the main path. A station which is not in the
-main trajectory is skipped, as its time offset is unknown.
+A fragment seen with enough points (4 or more) from only one station cannot be solved, as one station gives a
+plane and not a line, and the trajectory of a fragment seen from more can still fail, or say little: its
+stations can converge by less than 3 deg, or it can be more than 1.5 km off the main path (see above). The
+points of such a fragment are projected on the main trajectory, each station on its own, at the times of their
+frames corrected by the time offset of the station, as the flares are, and the report says why. The terminal
+and the end of the saved report give the height and time of every point, how far off the main path it is and
+how fast it moves away from it, and how far ahead of the main fragment it is at the same time. This assumes
+that the fragment is on the main path, which one station cannot test. Only the part of a separation across the
+line of sight is seen, so the distances off the path and the speeds are lower limits. The rest moves the point
+along the line of sight, which the report gives as the error of the height, and of how far ahead it is, per
+100 m off the path. The uncertainties come from the Monte Carlo runs of the main trajectory, with the scatter
+of the points of the fragment as their noise, and do not include a separation from the main path. A station
+which is not in the main trajectory is skipped, as its time offset is unknown.
 
 ## The trajectory pickle
 

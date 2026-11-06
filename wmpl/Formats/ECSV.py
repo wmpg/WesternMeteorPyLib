@@ -1347,11 +1347,43 @@ def oneStationSolution(traj, meteor, input_meteors, time_diffs=None, **noise_kwa
 
 
 
-def unsolvedFragments(traj, ecsv_paths, fragments, mc_trajs=None):
+def poorFragmentTrajectories(traj, fragment_trajs):
+    """ Find the solved fragments whose trajectory says little, to project their points on the main
+        trajectory too (see unsolvedFragments()): those whose stations converge by less than the trajectory
+        correlator of WMPL takes, and those further off the main path than fragments of the main one go (see
+        fragmentComparison()).
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory of the main fragment, the solution with the original
+            picks (see originalPicksTrajectory()).
+        fragment_trajs: [list] (fragment, trajectory) pairs, from solveFragmentTrajectories().
+
+    Return:
+        [dict] {fragment: why}, with why saying it in a few words.
+    """
+
+    poor = {}
+    for fragment, frag_traj in fragment_trajs:
+
+        conv_angle = convergenceAngle(frag_traj)
+        off = max(offMainPath(traj, frag_traj))
+
+        if (conv_angle is not None) and (conv_angle < FRAGMENT_MIN_CONVERGENCE):
+            poor[fragment] = "its stations converge by only {:.1f} deg".format(conv_angle)
+
+        elif off > FRAGMENT_OFF_PATH_LIMIT:
+            poor[fragment] = "its trajectory is {:.1f} km off the main path".format(off/1000)
+
+    return poor
+
+
+
+def unsolvedFragments(traj, ecsv_paths, fragments, mc_trajs=None, why=None):
     """ Project on the main trajectory the points of additional fragments in ECSV files which have no
         trajectory of their own, each station on its own (see oneStationSolution()): those seen from one
-        station, and those whose trajectory could not be solved. This assumes that the fragment is on the
-        main path, which one station cannot test.
+        station, and those whose trajectory could not be solved, or says little (see
+        poorFragmentTrajectories()). This assumes that the fragment is on the main path, which one station
+        cannot test.
 
     Arguments:
         traj: [Trajectory object] Solved trajectory of the main fragment, the solution with the original
@@ -1365,11 +1397,15 @@ def unsolvedFragments(traj, ecsv_paths, fragments, mc_trajs=None):
             points of the main fragment) and the time offsets each run estimated (see runTimeOffsets()). The
             standard deviations are the uncertainties, which do not include a separation from the main path.
             None by default.
+        why: [dict] Why a fragment is projected, {fragment: why}, e.g. from poorFragmentTrajectories().
+            For the others it is that it was seen from one station, or that its trajectory could not be
+            solved. None by default.
 
     Return:
         [list] A dictionary for every file of every fragment: the values of oneStationSolution(), with also
-            fragment, n_stations (distinct stations of the fragment), n_points, t_rel (s from the reference
-            time of the trajectory), and in std a dictionary of the standard deviations in the Monte Carlo
+            fragment, n_stations (distinct stations of the fragment), why, n_points, t_rel (s from the
+            reference time of the trajectory), and in std a dictionary of the standard deviations in the Monte
+            Carlo
             runs of the time of every point (t, s), of its height (ht), and of off_first, off_last, off_rate,
             ahead_first and ahead_last. std is None without runs.
     """
@@ -1394,6 +1430,8 @@ def unsolvedFragments(traj, ecsv_paths, fragments, mc_trajs=None):
 
             solution.update(fragment=fragment, n_stations=n_stations, n_points=len(meteor.time_data), \
                 std=None, t_rel=(solution['jd'] - traj.jdt_ref)*86400)
+            solution['why'] = (why or {}).get(fragment, "seen from one station" if (n_stations == 1) \
+                else "its trajectory could not be solved")
 
             # Project the points on every Monte Carlo run of the main trajectory
             mc_solutions = []
@@ -1454,15 +1492,19 @@ def unsolvedFragmentReport(solutions, traj, ref_stations=None):
 
 
     out_str = "\n"
-    out_str += "Additional fragments without a trajectory\n"
-    out_str += "-----------------------------------------\n"
-    out_str += "Fragments seen from one station, or whose trajectory could not be solved, have their\n"
-    out_str += "points projected on the main trajectory, each station on its own, at the times of their\n"
-    out_str += "frames corrected by the time offset of the station. Heights above sea level. This assumes\n"
-    out_str += "that the fragment is on the main path, which one station cannot test: only the part of a\n"
-    out_str += "separation across the line of sight is seen, so the distances off the path and the speeds\n"
-    out_str += "are lower limits, and the rest moves the heights, as given below. The heights are those of\n"
-    out_str += "the main path where the line of sight passes closest to it.\n"
+    out_str += "Additional fragments projected on the main trajectory\n"
+    out_str += "-----------------------------------------------------\n"
+    out_str += "Fragments seen from one station, whose trajectory could not be solved, or whose\n"
+    out_str += "trajectory says little (stations converging by less than {:.0f} deg, or more than\n" \
+        .format(FRAGMENT_MIN_CONVERGENCE)
+    out_str += "{:.1f} km off the main path), have their points projected on the main trajectory, each\n" \
+        .format(FRAGMENT_OFF_PATH_LIMIT/1000)
+    out_str += "station on its own, at the times of their frames corrected by the time offset of the\n"
+    out_str += "station. Heights above sea level. This assumes that the fragment is on the main path,\n"
+    out_str += "which one station cannot test: only the part of a separation across the line of sight is\n"
+    out_str += "seen, so the distances off the path and the speeds are lower limits, and the rest moves the\n"
+    out_str += "heights, as given below. The heights are those of the main path where the line of sight\n"
+    out_str += "passes closest to it.\n"
     out_str += timeReferenceStr(ref_stations)
     if any(frag['std'] is not None for frag in solutions):
         out_str += "Uncertainties (1 sigma) from projecting them on the Monte Carlo runs, with the\n"
@@ -1474,7 +1516,8 @@ def unsolvedFragmentReport(solutions, traj, ref_stations=None):
     for frag in solutions:
 
         sign = np.sign(frag['off_last'])
-        why = "seen from one station" if (frag['n_stations'] == 1) else "its trajectory could not be solved"
+        why = frag.get('why', "seen from one station" if (frag['n_stations'] == 1) \
+            else "its trajectory could not be solved")
 
         out_str += "\n"
         out_str += "Fragment {:d}, from {:s} ({:s})\n".format(frag['fragment'], frag['station_id'], why)
@@ -1855,13 +1898,16 @@ if __name__ == "__main__":
             print(fragmentComparison(originalPicksTrajectory(traj), fragment_trajs, \
                 reuse_timing=(not cml_args.fragtimefit)))
 
-            # Project the fragments without a trajectory on the main one, also in its saved report
-            solved = [fragment for fragment, _ in fragment_trajs]
-            unsolved = [fragment for fragment in ecsvFragments(ecsv_paths) if fragment not in solved]
-
+            # Project on the main trajectory the fragments without a trajectory, and those whose trajectory
+            #   says little, also in its saved report
             traj_orig = originalPicksTrajectory(traj)
+            solved = [fragment for fragment, _ in fragment_trajs]
+            why = poorFragmentTrajectories(traj_orig, fragment_trajs)
+            unsolved = [fragment for fragment in ecsvFragments(ecsv_paths) \
+                if (fragment not in solved) or (fragment in why)]
+
             mc_trajs = getattr(traj, 'mc_traj_list', None)
-            projections = unsolvedFragments(traj_orig, ecsv_paths, unsolved, mc_trajs=mc_trajs)
+            projections = unsolvedFragments(traj_orig, ecsv_paths, unsolved, mc_trajs=mc_trajs, why=why)
             if projections:
 
                 unsolved_report = unsolvedFragmentReport(projections, traj_orig, \

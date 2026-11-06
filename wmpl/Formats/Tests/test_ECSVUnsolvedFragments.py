@@ -1,6 +1,6 @@
 """ Tests for the additional fragments of ECSV files without a trajectory of their own, seen from one station
-    or whose trajectory could not be solved, which are projected on the main trajectory, each station on its
-    own. Noiseless events with a known truth, solved with the real solver.
+    or whose trajectory could not be solved or says little, which are projected on the main trajectory, each
+    station on its own, and for the flares. Noiseless events with a known truth, solved with the real solver.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVUnsolvedFragments.py -v
@@ -13,12 +13,14 @@ import datetime
 import os
 import shutil
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 
 from wmpl.Formats.ECSV import loadECSVs, unsolvedFragments, unsolvedFragmentReport
 from wmpl.Formats.ECSV import flareHeights, runTimeOffsets
 from wmpl.Formats.ECSV import loadFlares, projectFlares
+from wmpl.Formats.ECSV import poorFragmentTrajectories
 from wmpl.Formats.GenericFunctions import solveTrajectoryGeneric
 from wmpl.Utils.TrajConversions import latLonAlt2ECEF, ecef2ENU, ecef2LatLonAlt
 
@@ -548,3 +550,47 @@ def testTheReportWithAndWithoutTheMonteCarloRuns(tmp_path):
     assert "Without the Monte Carlo runs" not in report
     assert "They do not include a\nseparation from the main path" in report
     assert "+/-" in report
+
+
+
+def testPoorFragmentTrajectoriesAreFound():
+    """ Check that the solved fragments whose stations converge by less than 3 deg, or whose trajectory is
+        more than 1.5 km off the main path, are found, with why, and not the others.
+    """
+
+    def solution(offset, conv_angle):
+        """ Make a solution along a straight path, this far off the main one, with this convergence angle. """
+
+        along = 800.0*np.arange(20)
+        obs = SimpleNamespace(JD_data=2461000.5 + np.arange(20)/FPS/86400, ignore_station=False, \
+            model_eci=np.array([[6.5e6 - distance, offset, 0.0] for distance in along]), \
+            ignore_list=np.zeros(20, dtype=int))
+
+        return SimpleNamespace(observations=[obs], radiant_eci_mini=np.array([1.0, 0.0, 0.0]), \
+            state_vect_mini=np.array([6.5e6, 0.0, 0.0]), best_conv_inter=None if (conv_angle is None) \
+            else SimpleNamespace(conv_angle=np.radians(conv_angle)))
+
+    main = solution(0.0, 40.0)
+    fragment_trajs = [(1, solution(0.0, 2.0)), (2, solution(2000.0, 10.0)), (3, solution(300.0, 10.0)), \
+        (4, solution(300.0, None))]
+
+    assert poorFragmentTrajectories(main, fragment_trajs) == {1: "its stations converge by only 2.0 deg", \
+        2: "its trajectory is 2.0 km off the main path"}
+
+
+
+def testTheReportSaysWhyAFragmentIsProjected(tmp_path):
+    """ Check that the report says why a fragment is projected when given, e.g. a solved one whose stations
+        hardly converge, and otherwise that it was seen from one station.
+    """
+
+    paths = writeEvent(tmp_path)
+    traj = solveMain(paths, tmp_path)
+
+    why = {1: "its stations converge by only 2.0 deg"}
+    report = unsolvedFragmentReport(unsolvedFragments(traj, paths, [1], why=why), traj)
+
+    assert "Fragment 1, from XX0001 (its stations converge by only 2.0 deg)" in report
+    assert "Additional fragments projected on the main trajectory" in report
+    assert "(seen from one station)" in unsolvedFragmentReport(unsolvedFragments(traj, paths, [1]), traj)
+
