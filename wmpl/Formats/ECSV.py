@@ -335,8 +335,14 @@ def fragmentStationOffsets(offsets, main_ids, station_ids, meteors):
     for station_id, meteor in zip(station_ids, meteors):
 
         # A file of the main trajectory takes the offset given under its ID there, another file the one given
-        #   under its own ID
-        main_id = main_ids.get(meteor.ecsv_file, station_id)
+        #   under its own ID, unless that ID is the one of another file of the main trajectory
+        main_id = main_ids.get(meteor.ecsv_file)
+        if main_id is None:
+            if station_id in main_ids.values():
+                continue
+
+            main_id = station_id
+
         if main_id in offsets:
             frag_offsets[station_id] = offsets[main_id]
 
@@ -523,20 +529,29 @@ def localMotionFit(t, along, window=0.3):
         along: [ndarray] Distance along the path of every point (m).
 
     Keyword arguments:
-        window: [float] The fit uses the points within this time (s), or the 10 closest ones if there are
-            fewer. 0.3 by default.
+        window: [float] The fit uses the points within this time (s), or those of the 10 closest distinct
+            times if there are fewer. Past the ends of the path the window is that of its closest end. 0.3 by
+            default.
 
     Return:
         [function] Distance along the path at a given time.
     """
 
+    times = np.unique(t)
+
     def motion(time):
 
-        near = np.abs(t - time) <= window
-        if np.sum(near) < 10:
-            near = np.argsort(np.abs(t - time))[:10]
+        # Past the ends of the path, fit its last part
+        centre = np.clip(time, times[0], times[-1])
 
-        return np.polyval(np.polyfit(t[near], along[near], min(2, len(t[near]) - 1)), time)
+        # Take enough distinct times, as the points of several stations can share one
+        near_times = times[np.abs(times - centre) <= window]
+        if len(near_times) < 10:
+            near_times = times[np.argsort(np.abs(times - centre))[:10]]
+
+        near = np.isin(t, near_times)
+
+        return np.polyval(np.polyfit(t[near], along[near], min(2, len(near_times) - 1)), time)
 
     return motion
 
