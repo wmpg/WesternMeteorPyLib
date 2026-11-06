@@ -402,6 +402,121 @@ def generateTrajectoryKML(traj, dir_path):
 
     return None
 
+def _kmlColor(rgb, alpha=255):
+    """ Matplotlib RGB(A) (0-1) -> KML 'aabbggrr' string. """
+    r, g, b = [int(round(c*255)) for c in rgb[:3]]
+    return "{:02x}{:02x}{:02x}{:02x}".format(alpha, b, g, r)
+
+
+# Icons that Google Earth Web renders with their colour
+WEB_ICON = "https://earth.google.com/earth/document/icon?"
+
+# Above this many frames the KML may not load in Google Earth Web (tested: ~1000 frames, 4.5 MB, loads;
+#   ~2000 frames, 9 MB, fails; Google Earth Pro handled 7800 frames, 36 MB)
+MAX_FRAMES_WEB = 1000
+
+# Number of dashes in each residual line
+N_DASHES = 6
+
+
+def trajectoryToKML(traj, output_kml_path):
+    """ Write a 3D KML with the projected points, raw lines of sight, residuals and stations.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory.
+        output_kml_path: [str] Path of the KML file to write.
+    """
+
+    import simplekml
+    import matplotlib.pyplot as plt
+
+    from wmpl.Utils.TrajConversions import geo2Cartesian
+
+    colors = plt.get_cmap('tab10').colors
+    deg = np.degrees
+    xyz = lambda lat, lon, h: np.array(geo2Cartesian(lat, lon, h, traj.jdt_ref))
+    llh = lambda lat, lon, h: (deg(lon), deg(lat), h)
+
+    kml = simplekml.Kml(name=traj.file_name)
+    f_plane = kml.newfolder(name="1. Vertical Plane")
+    f_pts, f_rays, f_res, f_stat = [kml.newfolder(name=n) for n in ("2. Projected Points",
+        "3. Lines of Sight", "4. Residuals", "5. Stations")]
+
+    for i, obs in enumerate(traj.observations):
+
+        sid = obs.station_id
+        col = _kmlColor(colors[i%len(colors)])
+        col_ray = _kmlColor(colors[i%len(colors)], 130)
+        fp = f_pts.newfolder(name=sid)
+        fr = f_rays.newfolder(name=sid)
+        fd = f_res.newfolder(name=sid)
+
+        # Station placemark
+        pt = f_stat.newpoint(name=sid, coords=[llh(obs.lat, obs.lon, obs.ele)])
+        pt.altitudemode = simplekml.AltitudeMode.clamptoground
+        pt.style.iconstyle.icon.href = WEB_ICON + "color={:02x}{:02x}{:02x}&id=2000&scale=4".format(
+            *[int(round(c*255)) for c in colors[i%len(colors)][:3]])
+        pt.description = "Lat {:.5f}, Lon {:.5f}, Elev {:.0f} m, {:d} frames".format(deg(obs.lat), 
+            deg(obs.lon), obs.ele, int(np.sum(obs.ignore_list == 0)))
+
+        for k in np.where(obs.ignore_list == 0)[0]:
+
+            tp = (obs.model_lat[k], obs.model_lon[k], obs.model_ht[k])
+            rp = (obs.meas_lat[k], obs.meas_lon[k], obs.meas_ht[k])
+            res = np.linalg.norm(xyz(*tp) - xyz(*rp))
+            vel = "{:.3f} km/s".format(obs.velocities[k]/1000) if obs.velocities is not None else "N/A"
+
+            # Projected point on the trajectory
+            p = fp.newpoint(coords=[llh(*tp)])
+            p.altitudemode = simplekml.AltitudeMode.absolute
+            p.style.iconstyle.color = col
+            p.style.iconstyle.scale = 0.4
+            p.style.iconstyle.icon.href = WEB_ICON + "id=304&scale=4"  # round marker, tinted by its colour
+            p.style.labelstyle.scale = 0  # points are unnamed so Google Earth Web shows no label
+            p.description = ("Station {}, frame {}<br>t = {:.4f} s<br>Alt = {:.3f} km<br>"
+                "Distance = {:.3f} km<br>v = {}<br>Lat {:.5f}, Lon {:.5f}").format(sid, k, obs.time_data[k], 
+                tp[2]/1000, obs.length[k]/1000, vel, deg(tp[0]), deg(tp[1]))
+
+            # Raw line of sight, from the station to its closest point to the trajectory
+            ray = fr.newlinestring(name="{} #{}".format(sid, k), 
+                coords=[llh(obs.lat, obs.lon, obs.ele), llh(*rp)])
+            ray.altitudemode = simplekml.AltitudeMode.absolute
+            ray.style.linestyle.color = col_ray
+            ray.style.linestyle.width = 2
+            ray.description = "t = {:.4f} s<br>Azim = {:.4f} deg<br>Elev = {:.4f} deg<br>Discrepancy = {:.1f} m"\
+                .format(obs.time_data[k], deg(obs.azim_data[k]), deg(obs.elev_data[k]), res)
+
+            # Residual: ray end -> projected point
+            # (KML has no dashed lines, so draw it as a row of short segments)
+            pts = np.linspace(llh(*rp), llh(*tp), 2*N_DASHES + 1)
+            r = fd.newmultigeometry(name="Residual {} #{}: {:.1f} m".format(sid, k, res))
+            for a in range(0, 2*N_DASHES, 2):
+                r.newlinestring(coords=pts[a:a + 2].tolist(), altitudemode=simplekml.AltitudeMode.absolute)
+            r.style.linestyle.color = col
+            r.style.linestyle.width = 2
+
+    # Vertical plane
+    # It spans the first and last observed points and their projection to 0 m
+    b, e = (traj.rbeg_lat, traj.rbeg_lon, traj.rbeg_ele), (traj.rend_lat, traj.rend_lon, traj.rend_ele)
+    # An extruded line (not a polygon) lets Google Earth show what is behind the curtain
+    wall = f_plane.newlinestring(name="Vertical plane", coords=[llh(*b), llh(*e)])
+    wall.altitudemode = simplekml.AltitudeMode.absolute
+    wall.extrude = 1
+    wall.tessellate = 1
+    wall.style.linestyle.color = "ff00aaff"
+    wall.style.linestyle.width = 1.5
+    wall.style.polystyle.color = simplekml.Color.changealphaint(127, "ff00aaff")
+
+    kml.save(output_kml_path)
+
+    n_frames = sum(int(np.sum(obs.ignore_list == 0)) for obs in traj.observations)
+    if n_frames > MAX_FRAMES_WEB:
+        print("WARNING: the KML has {:d} frames (3 elements each); it may not load in Google Earth Web "
+            "(limit of 10,000 map elements and file size), but should open in Google Earth Pro.".format(n_frames))
+
+    return output_kml_path
+
+
 if __name__ == "__main__":
 
     import os
@@ -421,6 +536,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('traj_path', nargs="?", metavar='TRAJ_PATH', type=str, \
         help="Path to the trajectory pickle file.")
 
+    arg_parser.add_argument('-k', '--kml', action='store_true', 
+        help="Write the enriched 3D KML (*_3D.kml) instead of the simple one.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -434,6 +552,9 @@ if __name__ == "__main__":
         traj = loadPickle(*os.path.split(cml_args.traj_path))
 
         # Generate the KML
-        generateTrajectoryKML(traj, os.path.dirname(cml_args.traj_path))
+        if cml_args.kml:
+            trajectoryToKML(traj, cml_args.traj_path.replace('_trajectory.pickle', '') + '_3D.kml')
+        else:
+            generateTrajectoryKML(traj, os.path.dirname(cml_args.traj_path))
 
 
