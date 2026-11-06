@@ -12,6 +12,7 @@ References:
 from __future__ import print_function, division, absolute_import
 
 
+import bisect
 import math
 
 import numpy as np
@@ -68,9 +69,17 @@ class Constants(object):
         # Power of a 0 magnitude meteor
         self.P_0m = 840
 
-        # Atmosphere density coefficients
+        # Atmosphere density coefficients (6th degree polynomial in log10 of the density, see 
+        #   wmpl.Utils.AtmosphereDensity.fitAtmPoly). Used only if no density table is given below.
         self.dens_co = np.array([6.96795507e+01, -4.14779163e+03, 9.64506379e+04, -1.16695944e+06, \
             7.62346229e+06, -2.55529460e+07, 3.45163318e+07])
+
+        # Tabulated atmosphere density profile - heights (m, ascending) and log10 of the density (kg/m^3), 
+        #   interpolated linearly in log10 between the points (see 
+        #   wmpl.Utils.AtmosphereDensity.getAtmDensityTable). If given, it is used instead of dens_co, as it
+        #   follows the MSIS model much more closely than the polynomial.
+        self.atm_table_ht = None
+        self.atm_table_log10_rho = None
         
         # Radius of the Earth (m)
         self.r_earth = 6_371_008.7714
@@ -691,6 +700,75 @@ def getErosionCoeff(const, h):
         return 0
 
 
+def atmDensityTable(ht, table_ht, table_log10_rho):
+    """ Atmosphere density from a tabulated profile, interpolating log10(density) linearly in height (i.e. an
+    exponential atmosphere between the table points). Outside the table, the first/last segment is
+    extrapolated.
+
+    Arguments:
+        ht: [float] Height (m).
+        table_ht: [list] Table heights (m), ascending.
+        table_log10_rho: [list] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        [float] Atmosphere density (kg/m^3).
+
+    """
+
+    # Index of the table segment, using the end segments outside the table (if-chains instead of min/max as
+    #   this is called for every fragment on every time step)
+    i = bisect.bisect_right(table_ht, ht) - 1
+    if i < 0:
+        i = 0
+    elif i > len(table_ht) - 2:
+        i = len(table_ht) - 2
+
+    ht_0 = table_ht[i]
+    log10_rho_0 = table_log10_rho[i]
+
+    return 10**(log10_rho_0 + (ht - ht_0)*(table_log10_rho[i + 1] - log10_rho_0)/(table_ht[i + 1] - ht_0))
+
+
+def atmDensity(ht, const):
+    """ Atmosphere density (kg/m^3) at the given height: from the tabulated profile if the constants have one
+    (const.atm_table_ht and const.atm_table_log10_rho), otherwise from the density polynomial const.dens_co.
+    """
+
+    # getattr keeps Constants pickled before the table was introduced working
+    table_ht = getattr(const, 'atm_table_ht', None)
+    if table_ht is None:
+        return atmDensityPoly(ht, const.dens_co)
+
+    return atmDensityTable(ht, table_ht, const.atm_table_log10_rho)
+
+
+def prepareAtmDensityTable(const):
+    """ Check the tabulated atmosphere density profile of the constants (if any) and store it as plain lists
+    of floats, which are much faster to index in the simulation loop than numpy arrays (e.g. after a JSON 
+    load that converted the lists to arrays).
+    """
+
+    if getattr(const, 'atm_table_ht', None) is None:
+        return
+
+    table_ht = [float(ht) for ht in const.atm_table_ht]
+    table_log10_rho = [float(lr) for lr in const.atm_table_log10_rho]
+
+    if len(table_ht) < 2:
+        raise ValueError("The atmosphere density table needs at least 2 points, got {:d}".format(
+            len(table_ht)))
+
+    if len(table_ht) != len(table_log10_rho):
+        raise ValueError("atm_table_ht and atm_table_log10_rho have different lengths ({:d} vs {:d})".format(
+            len(table_ht), len(table_log10_rho)))
+
+    if any(ht_next <= ht_prev for ht_prev, ht_next in zip(table_ht[:-1], table_ht[1:])):
+        raise ValueError("atm_table_ht must be strictly ascending")
+
+    const.atm_table_ht = table_ht
+    const.atm_table_log10_rho = table_log10_rho
+
+
 def killFragment(const, frag):
     """ Deactivate the given fragment and keep track of the stats. """
 
@@ -773,6 +851,10 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     #   post-loop scan of the whole fragment list
     mass_total_active = 0.0
 
+    # Pick the atmosphere density source once, not per fragment: the table if there is one (see atmDensity)
+    atm_table_ht = getattr(const, 'atm_table_ht', None)
+    atm_table_log10_rho = getattr(const, 'atm_table_log10_rho', None)
+
     # Go through all active fragments
     for frag in fragments:
 
@@ -781,7 +863,10 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             continue
 
         # Get atmosphere density for the given height
-        rho_atm = atmDensityPoly(frag.h, const.dens_co)
+        if atm_table_ht is None:
+            rho_atm = atmDensityPoly(frag.h, const.dens_co)
+        else:
+            rho_atm = atmDensityTable(frag.h, atm_table_ht, atm_table_log10_rho)
 
         # Compute the mass loss of the fragment due to ablation
         mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
@@ -1396,6 +1481,9 @@ def runSimulation(const, compute_wake=False):
     if const.erosion_mass_min > const.erosion_mass_max:
         const.erosion_mass_min, const.erosion_mass_max = const.erosion_mass_max, const.erosion_mass_min
 
+    # Check the atmosphere density table (if given) and convert it to lists for fast indexing
+    prepareAtmDensityTable(const)
+
     ###
 
 
@@ -1536,8 +1624,9 @@ def energyReceivedBeforeErosion(const, lam=1.0):
     """
 
     # Integrate atmosphere density from the beginning of simulation to beginning of erosion.
-    dens_integ = scipy.integrate.quad(atmDensityPoly, const.erosion_height_start, const.h_init, \
-        args=(const.dens_co))[0]
+    prepareAtmDensityTable(const)
+    dens_integ = scipy.integrate.quad(atmDensity, const.erosion_height_start, const.h_init, \
+        args=(const,))[0]
 
     # Compute the energy per unit cross-section
     es = 1/2*lam*(const.v_init**2)*dens_integ/np.cos(const.zenith_angle)
@@ -1556,7 +1645,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
 
-    from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+    from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable
     from wmpl.Utils.TrajConversions import date2JD
 
 
@@ -1576,6 +1665,11 @@ if __name__ == "__main__":
         180000, # height_max in m (this needs to be the same as the beginning of simulation)
         date2JD(2020, 4, 20, 16, 15, 0) # Julian date
         )
+
+    # Tabulate the atmosphere density for the same location, time and heights - the simulation uses the table
+    #   instead of the polynomial when it is given, as it follows the MSIS model much more closely
+    const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(np.radians(45.3), np.radians(18.1), 
+        70000, 180000, date2JD(2020, 4, 20, 16, 15, 0))
 
 
     ### Set some physical parameters of the meteoroid ###
