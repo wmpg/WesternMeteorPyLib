@@ -1466,9 +1466,9 @@ class TrajectoryCorrelator(object):
                             # 'unpaired' observations. These will then be formed into a duplicate solution in the next step.  
                             # Analysis of historical data by @AstroEloy indicates about 15% may fall into this category.
 
-                            if hasattr(traj_reduced, 'obs_ids') and hasattr(traj_reduced,'ign_obs_ids') \
-                                and hasattr(traj_reduced,'cand_id') and traj_reduced.cand_id is not None \
-                                and candidate_observations:
+                            if candidate_observations and hasattr(traj_reduced, 'obs_ids') \
+                                and hasattr(traj_reduced,'ign_obs_ids') \
+                                and hasattr(traj_reduced,'cand_id') and traj_reduced.cand_id is not None:
 
                                 unpair_ids = traj_reduced.obs_ids + traj_reduced.ign_obs_ids
 
