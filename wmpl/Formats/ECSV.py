@@ -585,6 +585,96 @@ def localMotionFit(t, along, window=0.3):
 # Distance off the main path (m) beyond which no fragment of the main went in fireballs simulated with MetSim
 FRAGMENT_OFF_PATH_LIMIT = 1500.0
 
+# Least convergence angle of the stations (deg) the trajectory correlator of WMPL takes (see CorrelateEngine)
+FRAGMENT_MIN_CONVERGENCE = 3.0
+
+
+
+def convergenceAngle(traj):
+    """ Get the convergence angle of the best pair of stations of a solved trajectory.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        [float] The angle (deg), None if the solver did not compute it.
+    """
+
+    best = getattr(traj, 'best_conv_inter', None)
+    if best is None:
+        return None
+
+    return np.degrees(best.conv_angle)
+
+
+
+def trajectoryModelPoints(traj):
+    """ Get the ECI positions on the fitted path of a solved trajectory (with the gravity drop, if corrected),
+        sorted by time, with their Julian dates.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        (jd, eci): [tuple of ndarrays] Julian dates and ECI positions (m) of its used points.
+    """
+
+    used = [obs for obs in traj.observations if not obs.ignore_station]
+    jd = np.concatenate([obs.JD_data[obs.ignore_list == 0] for obs in used])
+    eci = np.concatenate([obs.model_eci[obs.ignore_list == 0] for obs in used])
+    order = np.argsort(jd)
+
+    return jd[order], eci[order]
+
+
+
+def offMainPath(traj, frag_traj):
+    """ Compute how far the first and the last point of a fragment are from the main path, each one from the
+        point of the main path as far along it.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory of the main fragment.
+        frag_traj: [Trajectory object] Solved trajectory of the fragment.
+
+    Return:
+        (off_first, off_last): [tuple of floats] The distances (m).
+    """
+
+    def interpolate(x, xp, fp):
+        """ Interpolate fp(xp) linearly at x, extrapolating linearly from the end points. """
+
+        if (x < xp[0]) and (xp[1] > xp[0]):
+            return fp[0] + (x - xp[0])*(fp[1] - fp[0])/(xp[1] - xp[0])
+
+        if (x > xp[-1]) and (xp[-1] > xp[-2]):
+            return fp[-1] + (x - xp[-1])*(fp[-1] - fp[-2])/(xp[-1] - xp[-2])
+
+        return np.interp(x, xp, fp)
+
+
+    # Distance travelled along the main path by each of its points
+    _, main_eci = trajectoryModelPoints(traj)
+    direction = -vectNorm(traj.radiant_eci_mini)
+    main_along = np.dot(main_eci - traj.state_vect_mini, direction)
+    along_order = np.argsort(main_along)
+
+    def crossDistance(point):
+        """ Compute the distance (m) of a point from the main path, as far along it as the point. """
+
+        along = np.dot(point - traj.state_vect_mini, direction)
+
+        # Point of the main path as far along as the given one, with the gravity drop
+        main_point = np.array([interpolate(along, main_along[along_order], main_eci[along_order, i]) \
+            for i in range(3)])
+        diff = point - main_point
+
+        return vectMag(diff - np.dot(diff, direction)*direction)
+
+
+    _, frag_eci = trajectoryModelPoints(frag_traj)
+
+    return crossDistance(frag_eci[0]), crossDistance(frag_eci[-1])
+
 
 
 def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
@@ -634,50 +724,11 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
         return " ({:.1f} sigma)".format(abs(diff)/np.hypot(sig1, sig2))
 
 
-    def modelPoints(t):
-        """ Get the ECI positions on the fitted path of a trajectory (with the gravity drop, if corrected),
-            sorted by time, with their Julian dates.
-        """
-
-        used = [obs for obs in t.observations if not obs.ignore_station]
-        jd = np.concatenate([obs.JD_data[obs.ignore_list == 0] for obs in used])
-        eci = np.concatenate([obs.model_eci[obs.ignore_list == 0] for obs in used])
-        order = np.argsort(jd)
-
-        return jd[order], eci[order]
-
-
-    def interpolate(x, xp, fp):
-        """ Interpolate fp(xp) linearly at x, extrapolating linearly from the end points. """
-
-        if (x < xp[0]) and (xp[1] > xp[0]):
-            return fp[0] + (x - xp[0])*(fp[1] - fp[0])/(xp[1] - xp[0])
-
-        if (x > xp[-1]) and (xp[-1] > xp[-2]):
-            return fp[-1] + (x - xp[-1])*(fp[-1] - fp[-2])/(xp[-1] - xp[-2])
-
-        return np.interp(x, xp, fp)
-
-
     # Distance travelled along the main path by each of its points
-    main_jd, main_eci = modelPoints(traj)
+    main_jd, main_eci = trajectoryModelPoints(traj)
     direction = -vectNorm(traj.radiant_eci_mini)
     main_along = np.dot(main_eci - traj.state_vect_mini, direction)
-    along_order = np.argsort(main_along)
     main_motion = localMotionFit((main_jd - main_jd[0])*86400, main_along)
-
-
-    def crossDistance(point):
-        """ Compute the distance (m) of a point from the main path, as far along it as the point. """
-
-        along = np.dot(point - traj.state_vect_mini, direction)
-
-        # Point of the main path as far along as the given one, with the gravity drop
-        main_point = np.array([interpolate(along, main_along[along_order], main_eci[along_order, i]) \
-            for i in range(3)])
-        diff = point - main_point
-
-        return vectMag(diff - np.dot(diff, direction)*direction)
 
 
     def stationsPoints(t):
@@ -711,6 +762,15 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
         out_str += "  Stations / points     : {:s} (main fragment: {:s})\n".format( \
             stationsPoints(frag_traj), stationsPoints(traj))
 
+        # Warn about stations which hardly converge for the fragment, which leave its line unconstrained
+        conv_angle, main_conv_angle = convergenceAngle(frag_traj), convergenceAngle(traj)
+        if conv_angle is not None:
+            out_str += "  Convergence angle     : {:.1f} deg{:s}\n".format(conv_angle, \
+                "" if main_conv_angle is None else " (main fragment: {:.1f} deg)".format(main_conv_angle))
+            if conv_angle < FRAGMENT_MIN_CONVERGENCE:
+                out_str += "  NOTE: less than {:.0f} deg, the least the trajectory correlator of WMPL " \
+                    "takes: its trajectory\n        is poorly constrained\n".format(FRAGMENT_MIN_CONVERGENCE)
+
         if (frag_traj.orbit is not None) and (traj.orbit is not None) and (frag_traj.orbit.ra_g is not None) \
             and (traj.orbit.ra_g is not None):
 
@@ -733,7 +793,7 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
             "km)\n".format(frag_traj.rbeg_ele/1000, frag_traj.rend_ele/1000, traj.rbeg_ele/1000, \
             traj.rend_ele/1000)
 
-        frag_jd, frag_eci = modelPoints(frag_traj)
+        frag_jd, frag_eci = trajectoryModelPoints(frag_traj)
 
         # How far ahead of the main fragment, fitted over the noise of the individual points. The fit is on
         #   the difference between the two, which is much smoother than the motion of either
@@ -742,7 +802,7 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
             - np.array([main_motion(t) for t in frag_t])
         ahead_poly = np.polyfit(frag_t, ahead, min(2, len(frag_t) - 1))
 
-        off_first, off_last = crossDistance(frag_eci[0]), crossDistance(frag_eci[-1])
+        off_first, off_last = offMainPath(traj, frag_traj)
         out_str += "  Off the main path     : {:.0f} m at the fragment's first point, {:.0f} m at its " \
             "last\n".format(off_first, off_last)
 
