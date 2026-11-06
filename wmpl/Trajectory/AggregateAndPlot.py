@@ -132,16 +132,36 @@ def computeMass(traj, P_0m):
 
 
 def computePeakMagHt(traj):
-    """ Compute the peak magnitude and peak height. """
+    """ Compute the peak magnitude and peak height. Points without a magnitude (NaN) are skipped.
 
-    # Compute peak magnitude from all stations
-    peak_mags = [np.min(obs.absolute_magnitudes[obs.ignore_list == 0]) for obs in traj.observations 
-        if obs.ignore_station is False]
-    peak_mag = np.min(peak_mags)
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
 
-    # Compute the peak height
-    peak_ht = [obs.model_ht[np.argmin(obs.absolute_magnitudes[obs.ignore_list == 0])] 
-        for obs in traj.observations if obs.ignore_station is False][np.argmin(peak_mags)]
+    Return:
+        (peak_mag, peak_ht): Peak absolute magnitude and its height (m), NaN if no point has a magnitude.
+    """
+
+    peak_mag = np.nan
+    peak_ht = np.nan
+
+    # Find the brightest point of all stations
+    for obs in traj.observations:
+
+        if obs.ignore_station or (obs.absolute_magnitudes is None):
+            continue
+
+        used = obs.ignore_list == 0
+        abs_mags = np.array(obs.absolute_magnitudes, dtype=np.float64)[used]
+        heights = np.array(obs.model_ht)[used]
+
+        finite = np.isfinite(abs_mags)
+        if not np.any(finite):
+            continue
+
+        i_peak = np.argmin(np.where(finite, abs_mags, np.inf))
+        if np.isnan(peak_mag) or (abs_mags[i_peak] < peak_mag):
+            peak_mag = abs_mags[i_peak]
+            peak_ht = heights[i_peak]
 
 
     return peak_mag, peak_ht
