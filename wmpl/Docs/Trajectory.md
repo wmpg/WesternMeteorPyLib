@@ -57,7 +57,7 @@ python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 
 | Flag | Description |
 | :--- | :--- |
-| `--fragments` | After the main fragment, solve every additional fragment seen from at least 2 stations with the same options (Monte Carlo included), save each one in a `fragment_k` folder of the output directory, and print how it differs from the main one: radiant, velocities, heights, distance from the main path and how far ahead of the main fragment it is at the same time. |
+| `--fragments` | After the main fragment, solve every additional fragment seen from at least 2 stations with the same options (Monte Carlo included), save each one in a `fragment_k` folder of the output directory, and print how it differs from the main one: convergence angle of its stations, radiant, velocities, heights, distance from the main path and how far ahead of the main fragment it is at the same time. |
 | `--fragtimefit` | Estimate the station time offsets for every fragment, instead of reusing those of the main trajectory, which its larger number of points constrains better. Without the timing estimation (`-e`), the fragments take the same fixed offsets as the main fragment. |
 | `--fragnosys` | Leave out of the Monte Carlo uncertainties of the fragments the systematic errors of the stations, which are otherwise included when the main trajectory has 3 stations or more (see below). |
 
@@ -75,6 +75,11 @@ real fragmentations), while fragments of another body 2 km away did in 97 % of t
 may come from another body, or the stations may have measured different fragments under the same number.
 Two stations measuring different fragments mostly give a line close to the main path anyway, which cannot be
 told apart, and often no trajectory at all.
+
+The comparison also gives the convergence angle of the stations of every fragment, against that of the main
+trajectory, and notes one below 3 deg, the least the trajectory correlator of WMPL takes. Two stations that
+hardly converge for a fragment, e.g. close to each other and looking the same way, still give a line, but one
+which the small errors of their picks can turn far from the true path.
 
 The pointing of a station can be off by the same amount at all its points (its calibration, or the centroid
 of a saturated meteor), which does not average out with their number, so the Monte Carlo runs do not
