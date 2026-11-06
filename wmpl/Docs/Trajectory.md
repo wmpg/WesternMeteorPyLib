@@ -53,13 +53,15 @@ leaving out its points with `trajectory_use` = False (e.g. saturated flares kept
 
 Points of the main fragment flagged with `flare` = True are used in the trajectory like the others,
 unless they are also flagged with `trajectory_use` = False. Either way, the solver reports the time and
-height of every flare point, projected on the main trajectory, in the terminal and at the end of the
-saved report: the flares of every station (its consecutive flare points), with the uncertainties of their
-times and heights, and how the flares of different stations compare, as they need not be the same flare
-(two cameras can see a fireball flaring at different times). The uncertainties come from the Monte Carlo
-runs and from the duration of the frame the flare was seen in, as it happened at any time within it. The
-times are relative to the clock of the reference station, whose time offset is not estimated, so the Monte
-Carlo runs give it no uncertainty in time, but the frame does.
+height of every flare point in the terminal and at the end of the saved report. A point used in the
+trajectory is projected on it. A point not used is only a time, as where it was clicked is not a
+measurement (e.g. a saturated flare in which the meteor cannot be seen), and takes the height of the
+trajectory at that time. The report gives the flares of every station (its consecutive flare points),
+with the uncertainties of their times and heights, and how the flares of different stations compare, as
+they need not be the same flare (two cameras can see a fireball flaring at different times). The
+uncertainties come from the Monte Carlo runs and from the duration of the frame the flare was seen in, as
+it happened at any time within it. The times are relative to the clock of the reference station, whose
+time offset is not estimated, so the Monte Carlo runs give it no uncertainty in time, but the frame does.
 
 ```
 python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments

@@ -831,9 +831,10 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
 
     Return:
         [dict] For the key (ecsv_file, index) of every flare point of a station in the trajectory: its 
-            station_id, jd (corrected time), ht (m above sea level, as the heights of the trajectory), used 
-            (in the trajectory), frame_dt (time step of the station, s), and the ECI vectors eci (the point
-            on the trajectory), stat (the station) and los (the line of sight).
+            station_id, jd (corrected time), ht (m above sea level, as the heights of the trajectory), ht_time
+            (the height of the trajectory at the time of the point, from its own points, m), used (in the
+            trajectory), frame_dt (time step of the station, s), and the ECI vectors eci (the point on the
+            trajectory), stat (the station) and los (the line of sight).
     """
 
     offsets = appliedTimeOffsets(traj, input_meteors)
@@ -885,11 +886,20 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
     traj_copy.calcECIEqAltAz(traj.state_vect_mini, traj.radiant_eci_mini, observations)
     traj_copy.calcLLA(traj.state_vect_mini, traj.radiant_eci_mini, observations)
 
+    # Heights of the trajectory in time, from its own points on this solution, with the time offsets added to
+    #   the times of the flares
+    main_obs = [obs for obs in observations[:len(traj.observations)] if not obs.ignore_station]
+    main_t = np.concatenate([(obs.JD_data[obs.ignore_list == 0] - traj.jdt_ref)*86400 \
+        + (time_diffs or {}).get(str(obs.station_id), 0.0) for obs in main_obs])
+    main_ht = np.concatenate([obs.model_ht[obs.ignore_list == 0] for obs in main_obs])
+    heightAt = localMotionFit(main_t, main_ht)
+
     projected = {}
     for meteor, obs in zip(obs_meteors, flare_obs):
         for i in range(len(obs.time_data)):
             projected[(meteor.ecsv_file, i)] = {'station_id': str(obs.station_id), 'jd': obs.JD_data[i], 
-                'ht': obs.model_ht[i], 'used': bool(meteor.trajectory_use[i]), 
+                'ht': obs.model_ht[i], 'ht_time': heightAt((obs.JD_data[i] - traj.jdt_ref)*86400), 
+                'used': bool(meteor.trajectory_use[i]), 
                 'frame_dt': frame_dts[meteor.ecsv_file], 'eci': np.array(obs.model_eci[i]),
                 'stat': np.array(obs.stat_eci_los[i]), 'los': np.array(obs.meas_eci_los[i])}
 
@@ -923,7 +933,9 @@ def runTimeOffsets(mc_traj, traj):
 def flareHeights(traj, ecsv_paths, mc_trajs=None):
     """ Times and heights of the points of the main fragment flagged as flares in ECSV files, used in its
         trajectory or not (trajectory_use = False), on a solution of it (see projectFlares()), with their
-        uncertainties from its Monte Carlo runs, if given.
+        uncertainties from its Monte Carlo runs, if given. A point not used in the trajectory is only a time:
+        where it was clicked is not a measurement (e.g. a saturated flare in which the meteor cannot be seen),
+        so it takes the height of the trajectory at that time, not that of its line of sight.
 
     Arguments:
         traj: [Trajectory] Solved trajectory of the main fragment, the solution with the original picks (see
@@ -966,7 +978,8 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
 
             for key, flare in mc_projected.items():
                 if key in mc_values:
-                    mc_values[key].append(((flare['jd'] - projected[key]['jd'])*86400, flare['ht']))
+                    mc_values[key].append(((flare['jd'] - projected[key]['jd'])*86400, \
+                        flare['ht'] if flare['used'] else flare['ht_time']))
 
     # Heights of the trajectory in time, to compare flares seen at different times
     used_obs = [obs for obs in traj.observations if not obs.ignore_station]
@@ -977,6 +990,8 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
     for key, flare in projected.items():
 
         flare['t_rel'] = (flare['jd'] - traj.jdt_ref)*86400
+        if not flare['used']:
+            flare['ht'] = flare['ht_time']
 
         # Local rate of change of the height, from the points of the trajectory within 0.3 s
         near = np.abs(traj_t - flare['t_rel']) <= 0.3
@@ -1091,8 +1106,11 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
     out_str = "\n"
     out_str += "Flares\n"
     out_str += "------\n"
-    out_str += "Points flagged as flares, used in the trajectory or not, projected on the main trajectory at the\n"
-    out_str += "times of their frames corrected by the time offsets of their stations. Heights above sea level.\n"
+    out_str += "Points flagged as flares, used in the trajectory or not, at the times of their frames\n"
+    out_str += "corrected by the time offsets of their stations. Heights above sea level. A point used in\n"
+    out_str += "the trajectory is projected on it. A point not used (trajectory_use = False) is only a\n"
+    out_str += "time, as where it was clicked is not a measurement (e.g. a saturated flare in which the\n"
+    out_str += "meteor cannot be seen): it takes the height of the trajectory at that time.\n"
     out_str += timeReferenceStr(ref_stations)
     if uncertain:
         out_str += "Uncertainties (1 sigma) from projecting them on the Monte Carlo runs, and from the duration\n"
@@ -1146,7 +1164,9 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
         out_str += "\n"
         out_str += "Flares of different stations compared, each one with the closest one in time of every other\n"
         out_str += "station: the time between them (none if their times overlap; the time uncertainty includes a\n"
-        out_str += "frame of each camera) and the difference of their heights at the same time.\n"
+        out_str += "frame of each camera) and the difference of their heights at the same time. Between\n"
+        out_str += "points not used in the trajectory, whose heights are those of the trajectory, only the\n"
+        out_str += "times count.\n"
 
         compared = set()
         for i, event in enumerate(events):

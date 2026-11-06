@@ -18,6 +18,7 @@ import numpy as np
 
 from wmpl.Formats.ECSV import loadECSVs, unsolvedFragments, unsolvedFragmentReport
 from wmpl.Formats.ECSV import flareHeights, runTimeOffsets
+from wmpl.Formats.ECSV import loadFlares, projectFlares
 from wmpl.Formats.GenericFunctions import solveTrajectoryGeneric
 from wmpl.Utils.TrajConversions import latLonAlt2ECEF, ecef2ENU, ecef2LatLonAlt
 
@@ -406,6 +407,64 @@ def testTheSolutionWithTheOriginalPicksAmongTheRunsAddsNoTimeOffset(tmp_path):
 
     assert len(flares) == 1
     assert flares[0]['t_std_mc'] < 1e-3
+
+
+
+def testAFlareNotUsedInTheTrajectoryTakesTheHeightOfTheTrajectoryAtItsTime(tmp_path):
+    """ Check that a flare point not used in the trajectory, clicked where the meteor was 1 s later (as in a
+        saturated flare, in which it cannot be seen), takes the height of the trajectory at its time and not
+        that of its line of sight, also in the Monte Carlo runs, while a flare used in the trajectory is
+        projected on it.
+    """
+
+    paths = writeEvent(tmp_path)
+    frame_unused, frame_used = FRAGMENT_START, FRAGMENT_START + 5
+    clicked = azAlt(mainPoint(frame_unused + int(FPS)), 'XX0002')
+
+    # Flag the two flares at XX0002, the one not used clicked elsewhere
+    path = [path for path in paths if path.endswith('XX0002.ecsv')][0]
+    with open(path) as f:
+        lines = f.read().splitlines()
+    for n, line in enumerate(lines):
+        fields = line.split(',')
+        if line.startswith('#') or (fields[0] == 'datetime'):
+            continue
+        if int(fields[8]) == frame_unused:
+            fields[3], fields[4] = '{:.8f}'.format(clicked[0]), '{:.8f}'.format(clicked[1])
+            fields[9], fields[10] = 'True', 'False'
+        elif int(fields[8]) == frame_used:
+            fields[9] = 'True'
+        lines[n] = ','.join(fields)
+    with open(path, 'w') as f:
+        f.write("\n".join(lines) + "\n")
+
+    traj = solveMain(paths, tmp_path)
+    reference = [obs for obs in traj.observations if obs.station_id == 'XX0001'][0]
+
+    flares = flareHeights(traj, paths)
+    unused = [flare for flare in flares if not flare['used']][0]
+    used = [flare for flare in flares if flare['used']][0]
+
+    assert abs(unused['ht'] - reference.model_ht[frame_unused]) < 20.0
+    assert abs(used['ht'] - reference.model_ht[frame_used]) < 20.0
+
+    # Its line of sight would be kilometres away
+    flare_meteors, input_meteors = loadFlares(paths)
+    projected = projectFlares(traj, flare_meteors, input_meteors)
+    assert min(abs(flare['ht'] - unused['ht']) for flare in projected.values() if not flare['used']) > 1000.0
+
+    # In the runs, given other time offsets of the station than the other stations, it follows the
+    #   trajectory at the time each run gives it, while its line of sight would not move
+    runs = monteCarloRuns(traj)
+    index = [obs.station_id for obs in traj.observations].index('XX0002')
+    offsets = 0.01*np.arange(len(runs))
+    for run, offset in zip(runs, offsets):
+        run.time_diffs_final = np.zeros(len(traj.observations))
+        run.time_diffs_final[index] = offset
+
+    unused = [flare for flare in flareHeights(traj, paths, mc_trajs=runs) if not flare['used']][0]
+
+    assert unused['ht_std_mc'] > 0.3*abs(unused['ht_rate'])*np.std(offsets)
 
 
 
