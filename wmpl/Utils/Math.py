@@ -144,7 +144,8 @@ def angleBetweenVectors(a, b):
         [float] Angle between a and b (radians).
     """
 
-    return np.arccos(np.dot(a, b) / (vectMag(a) * vectMag(b)))
+    # Clip the cosine, which can be slightly above 1 for parallel vectors due to rounding
+    return np.arccos(np.clip(np.dot(a, b) / (vectMag(a) * vectMag(b)), -1.0, 1.0))
 
 
 def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):

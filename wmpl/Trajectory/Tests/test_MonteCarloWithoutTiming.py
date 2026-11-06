@@ -16,7 +16,6 @@ matplotlib.use('Agg')
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 
 
-
 def _simulateTrajectory(estimate_timing_vel, monte_carlo, seed=20261018):
     """ Make a trajectory object filled with noisy observations of a straight, constant-velocity meteor.
 

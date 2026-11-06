@@ -25,7 +25,7 @@ matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import stateVectorDiverged
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
-from wmpl.Utils.Math import vectNorm
+from wmpl.Utils.Math import angleBetweenVectors, vectNorm
 
 
 @contextlib.contextmanager
@@ -61,23 +61,6 @@ def _isLoSFit(fun, options):
     """
 
     return (getattr(fun, '__name__', '') == 'minimizeAngleCost') and (options.get('method') == 'Nelder-Mead')
-
-
-
-def _angle(a, b):
-    """ Compute the angle between two vectors.
-
-    Arguments:
-        a: [ndarray] First vector.
-        b: [ndarray] Second vector.
-
-    Return:
-        [float] Angle between the vectors (deg).
-    """
-
-    a, b = np.array(a)/np.linalg.norm(a), np.array(b)/np.linalg.norm(b)
-
-    return np.degrees(np.arccos(np.clip(np.dot(a, b), -1, 1)))
 
 
 
@@ -160,7 +143,7 @@ def testALineWhichRanOutOfEvaluationsIsContinued():
 
     assert not results[0].success
     assert len(results) >= 2
-    assert _angle(traj.radiant_eci_mini, results[-1].x[3:]) < 1e-6
+    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, results[-1].x[3:])) < 1e-6
 
 
 
@@ -226,7 +209,7 @@ def testABoundedSolutionIsOnlyTakenIfItIsBetter():
         traj, _ = _solve(worseBounded)
 
     assert bounded
-    assert _angle(traj.radiant_eci_mini, fitted[-1].x[3:]) < 1e-6
+    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, fitted[-1].x[3:])) < 1e-6
 
 
 
@@ -257,7 +240,7 @@ def testAFailedBoundedSolutionIsNotTaken():
         traj, _ = _solve(failedBounded)
 
     assert traj.los_mini_status
-    assert _angle(traj.radiant_eci_mini, fitted[-1].x[3:]) < 1e-6
+    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, fitted[-1].x[3:])) < 1e-6
 
 
 
@@ -299,10 +282,10 @@ def testAFitInADistantMinimumIsMinimizedAgainFromThePreviousSolution():
 
     # The third minimization starts from the solution of the first pass
     first = results[0].x
-    assert _angle(starts[2][3:], first[3:]) < 1e-6
+    assert np.degrees(angleBetweenVectors(starts[2][3:], first[3:])) < 1e-6
 
-    assert _angle(traj.radiant_eci_mini, results[1].x[3:]) > 4
-    assert _angle(traj.radiant_eci_mini, first[3:]) < 0.1
+    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, results[1].x[3:])) > 4
+    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, first[3:])) < 0.1
 
 
 
@@ -383,7 +366,7 @@ def testAFailedRestartDoesNotReplaceAConvergedSolution():
     assert results[0].success
     assert not results[1].success
     assert traj.los_mini_status
-    assert _angle(traj.radiant_eci_mini, results[0].x[3:]) < 1e-6
+    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, results[0].x[3:])) < 1e-6
 
 
 
