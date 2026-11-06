@@ -349,11 +349,15 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         jd = traj.jdt_ref + t_est/86400.0
         lat, lon, ele_geo = cartesian2Geo(jd, *height_eci)
 
-        # Compute the ground-fixed alt/az of the radiant with the instantaneous velocity, along the path bent
-        #   by the gravity drop. The ECI coordinates are already in the epoch of date, so no precession is
-        #   applied
+        # Compute the ground-fixed alt/az of the radiant along the path bent by the gravity drop. Drag acts
+        #   against the velocity relative to the air, so it does not turn the direction of motion above the
+        #   ground, and the radiant is derotated with the initial velocity, as in Orbit.calcOrbit and
+        #   DynamicMassFit. The ECI coordinates are already in the epoch of date, so no precession is applied
         radiant_eci = drag_fit.radiantAtLength(len_val)[0]
-        azim_norot, elev_norot, vel_norot = derotatedRadiantAltAz(vel*radiant_eci, height_eci, jd, lat, lon)
+        azim_norot, elev_norot, _ = derotatedRadiantAltAz(traj.v_init*radiant_eci, height_eci, jd, lat, lon)
+
+        # Compute the velocity relative to the ground with the instantaneous velocity
+        _, _, vel_norot = derotatedRadiantAltAz(vel*radiant_eci, height_eci, jd, lat, lon)
 
         # Compute the dynamic pressure with the velocity relative to the air, which moves with the ground
         dyn_pressure = rho_array[i]*vel_norot**2

@@ -1,5 +1,6 @@
 """ Tests of the sampling of trajectory positions by height and by time in
-    wmpl.Utils.SampleTrajectoryPositions, on the example trajectory 20191023_091225.
+    wmpl.Utils.SampleTrajectoryPositions, on the example trajectory 20191023_091225 and on a synthetic
+    fireball.
 
 Run with pytest:
     python -m pytest wmpl/Utils/Tests/test_SampleTrajectoryPositions.py -v
@@ -19,6 +20,7 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.SampleTrajectoryPositions import SAMPLE_ATTRIBUTES, TrajectorySamples
 from wmpl.Utils.Physics import dynamicPressure
+from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
 
 
 # Directory and the file name of the example trajectory
@@ -242,6 +244,42 @@ def testSaveCSV():
 
 
 
+def testGroundFixedRadiantDoesNotTurnWithDrag():
+    """ Check that the direction of the radiant above the ground stays fixed while a fireball decelerates
+        from 18 to 5 km/s, as drag acts against the velocity relative to the air. The trajectory is solved
+        without the gravity correction, so the path is not bent. Derotating the radiant with the
+        instantaneous velocity turned it by 0.5 deg at the end and 2 deg at 5 km/s.
+    """
+
+    meteor = DragMeteor(18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
+    traj = observeMeteor(meteor)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj = traj.run()
+
+    arrays = sampleTrajectory(traj, 0.0, 4.4, 0.4, by_time=True).toArrays()
+    assert arrays['vel'][-1] < 6000.0
+
+    # Convert the azimuths and elevations to unit vectors in the Earth-fixed frame, with the local east,
+    #   north and up directions
+    lat, lon = arrays['lat'], arrays['lon']
+    east = np.column_stack([-np.sin(lon), np.cos(lon), np.zeros_like(lon)])
+    north = np.column_stack([-np.sin(lat)*np.cos(lon), -np.sin(lat)*np.sin(lon), np.cos(lat)])
+    up = np.column_stack([np.cos(lat)*np.cos(lon), np.cos(lat)*np.sin(lon), np.sin(lat)])
+
+    azim, elev = arrays['azim_norot'], arrays['elev_norot']
+    direction = (np.cos(elev)*np.sin(azim))[:, None]*east + (np.cos(elev)*np.cos(azim))[:, None]*north \
+        + np.sin(elev)[:, None]*up
+
+    # The direction changes only by the change of the rotation velocity along the path
+    turn = np.degrees(np.arccos(np.clip(direction.dot(direction[0]), -1.0, 1.0)))
+    assert np.max(turn) < 0.05
+
+    # The radiant at the beginning is the one of the solver
+    assert np.degrees(abs(azim[0] - traj.orbit.azimuth_apparent_norot)) < 0.01
+    assert np.degrees(abs(elev[0] - traj.orbit.elevation_apparent_norot)) < 0.01
+
+
+
 def testSamplesWithoutTheNewQuantities():
     """ Check that samples added only with the positions give NaN for the other quantities. """
 
@@ -265,7 +303,8 @@ if __name__ == "__main__":
     test_list = [testHeightModeReturnsTheRequestedHeights, testTimeModeReturnsTheRequestedTimes, \
         testTimeModeMatchesTheHeightMode, testVelocitiesArePhysical, testSkippedSamplesAreReported, \
         testSamplesHaveTheMotionAndTheDynamics, testTimeModeUncertainties, \
-        testDynamicPressureIsRelativeToTheGround, testSaveCSV, testSamplesWithoutTheNewQuantities]
+        testDynamicPressureIsRelativeToTheGround, testSaveCSV, testGroundFixedRadiantDoesNotTurnWithDrag, \
+        testSamplesWithoutTheNewQuantities]
 
     for test in test_list:
         test()

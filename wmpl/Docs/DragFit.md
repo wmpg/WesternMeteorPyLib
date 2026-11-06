@@ -185,13 +185,19 @@ printed at the end. For the example trajectory, sampled every 2 km from 118 to 9
 
 ```
  Time(s), Sample ht (m),  Lat (deg),   Lon (deg), Height (m), Azim (deg), Elev (deg), Vel (km/s), Vstd (m/s), Vgnd (km/s), Decel (m/s^2), Dyn pres (kPa)
-* -0.032,      118000.0,  44.121908,  -81.316691,   118000.0, 162.213625,  61.012562,     67.426,       30.2,      67.476,         -8.28,          0.124
-   0.002,      116000.0,  44.131234,  -81.320845,   116000.0, 162.211296,  61.002840,     67.426,       30.1,      67.476,        141.91,          0.161
+* -0.032,      118000.0,  44.121908,  -81.316691,   118000.0, 162.213031,  61.012481,     67.426,       30.2,      67.476,         -8.28,          0.124
+   0.002,      116000.0,  44.131234,  -81.320845,   116000.0, 162.210702,  61.002759,     67.426,       30.1,      67.476,        141.91,          0.161
  ...
-   0.308,       98000.0,  44.215458,  -81.358420,    98000.0, 162.183031,  60.915191,     66.584,       64.5,      66.633,      19239.82,          3.658
-*  0.342,       96000.0,  44.224849,  -81.362618,    96000.0, 162.171817,  60.904322,     65.566,      379.3,      65.616,      40396.81,          5.101
+   0.308,       98000.0,  44.215458,  -81.358420,    98000.0, 162.189576,  60.916085,     66.584,       64.5,      66.633,      19239.82,          3.658
+*  0.342,       96000.0,  44.224849,  -81.362618,    96000.0, 162.187211,  60.906425,     65.566,      379.3,      65.616,      40396.81,          5.101
 ```
 
+- **Azim** and **Elev** are the radiant above a fixed ground. Drag acts against the velocity
+  relative to the air, so it does not turn the direction of motion above the ground, and the radiant
+  is derotated with the initial velocity, as in `Orbit.calcOrbit` and `DynamicMassFit`. Only the
+  bending by gravity changes it. Derotating it with the instantaneous velocity would turn it by about
+  `v_rot*(1/v - 1/v_init)` radians, where `v_rot` is the component of the Earth's rotation velocity
+  across the path: 0.5 deg at the end and 2 deg at 5 km/s for the synthetic fireball of the tests.
 - **Decel** is `K*rho*v^2 - g_along`, positive when the meteor slows down. Above the beginning, without
   drag, it is the small negative acceleration by gravity.
 - **Dyn pres** is `rho*v^2` with the velocity relative to the ground, as the air moves with the
