@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from wmpl.Formats.ECSV import fragmentComparison, localMotionFit
+from wmpl.Formats.ECSV import offMainPath
 
 
 # Julian date of the first point, frame rate (frames per second) and initial speed (m/s)
@@ -198,3 +199,34 @@ def testAFragmentFarOffTheMainPathIsNoted():
 
     assert "off the main path, where no fragment" not in reports[0]
     assert "more than 1.5 km off the main path" in reports[1]
+
+
+
+def testAFragmentOfStationsHardlyConvergingIsNoted():
+    """ Check that the comparison gives the convergence angle of the stations of a fragment, and notes one
+        below the least the trajectory correlator takes, and that the distance off the main path it gives is
+        that of offMainPath().
+    """
+
+    t = np.arange(0, 2.0, 1/FPS)
+    main = _solution(t, _mainAlong(t, lag=0.0))
+    main.best_conv_inter = SimpleNamespace(conv_angle=np.radians(40.0))
+
+    reports = []
+    for conv_angle in (2.0, 10.0):
+
+        later = t[t >= 1.0]
+        fragment = _solution(later, _mainAlong(later, lag=0.0))
+        fragment.observations[0].model_eci[:, 1] += 300.0
+        fragment.best_conv_inter = SimpleNamespace(conv_angle=np.radians(conv_angle))
+
+        reports.append(fragmentComparison(main, [(1, fragment)]))
+
+    assert "Convergence angle     : 2.0 deg (main fragment: 40.0 deg)" in reports[0]
+    assert "the least the trajectory correlator of WMPL takes" in reports[0]
+    assert "Convergence angle     : 10.0 deg" in reports[1]
+    assert "the least the trajectory correlator" not in reports[1]
+
+    assert np.allclose(offMainPath(main, fragment), 300.0)
+    assert "Off the main path     : 300 m at the fragment's first point, 300 m at its last" in reports[1]
+
