@@ -310,6 +310,9 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
 
     vel_array = drag_fit.velocityAtLength(len_array)
 
+    # Compute the velocity relative to the ground
+    vel_norot_array = drag_fit.groundVelocityAtLength(len_array)
+
     # Compute the deceleration, the air density and the ballistic coefficient of the drag model
     decel_array = drag_fit.decelerationAtLength(len_array)
     rho_array = drag_fit.airDensityAtLength(len_array)
@@ -356,10 +359,8 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         radiant_eci = drag_fit.radiantAtLength(len_val)[0]
         azim_norot, elev_norot, _ = derotatedRadiantAltAz(traj.v_init*radiant_eci, height_eci, jd, lat, lon)
 
-        # Compute the velocity relative to the ground with the instantaneous velocity
-        _, _, vel_norot = derotatedRadiantAltAz(vel*radiant_eci, height_eci, jd, lat, lon)
-
         # Compute the dynamic pressure with the velocity relative to the air, which moves with the ground
+        vel_norot = vel_norot_array[i]
         dyn_pressure = rho_array[i]*vel_norot**2
 
         # Mark the samples extrapolated outside the observed part

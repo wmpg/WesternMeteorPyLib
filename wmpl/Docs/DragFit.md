@@ -145,7 +145,8 @@ Drag model of the motion: dv/dt = -K*rho*v² + g
 ```
 
 - **Residuals RMS** is the scatter of the observed lengths around the model, along the track.
-- **Dyn pres** is the dynamic pressure `rho*v^2` at the top of the segment.
+- **Dyn pres** is the dynamic pressure `rho*v^2` at the top of the segment, with the velocity
+  relative to the ground, as the air moves with the ground.
 - **K std** is the relative uncertainty of `K` at the bottom of the segment (1 sigma). It is large
   high up, where the meteor barely decelerates, and `inf` where the data do not constrain `K`.
 - **Growth** is the factor by which `K` grows in the segment, and **Signif** its significance in
@@ -200,11 +201,10 @@ printed at the end. For the example trajectory, sampled every 2 km from 118 to 9
   across the path: 0.5 deg at the end and 2 deg at 5 km/s for the synthetic fireball of the tests.
 - **Decel** is `K*rho*v^2 - g_along`, positive when the meteor slows down. Above the beginning, without
   drag, it is the small negative acceleration by gravity.
-- **Dyn pres** is `rho*v^2` with the velocity relative to the ground, as the air moves with the
-  ground. The `Dyn pres` column of the `DragFit` table uses the ECI velocity, which differs by up to
-  the speed of the Earth's rotation (465 m/s at the equator). For the synthetic fireball of the tests,
-  sampled from 18 to 7 km/s at 45 deg latitude, the dynamic pressure relative to the ground is 2 to 6%
-  larger.
+- **Dyn pres** is `rho*v^2` with the velocity relative to the ground (`Vgnd`), as in the `DragFit`
+  table. The ECI velocity differs from it by up to the speed of the Earth's rotation (465 m/s at the
+  equator). For the synthetic fireball of the tests, sampled from 18 to 7 km/s at 45 deg latitude,
+  the dynamic pressure with the ECI velocity would be 2 to 6% lower.
 - **Vstd** is propagated from the covariance of the fitted parameters. When sampling by height, the
   uncertainty of the time is also computed. When sampling by time, it is the uncertainty of the
   length along the trajectory. The sampled coordinate itself is exact.
@@ -249,10 +249,12 @@ print(drag_fit.summaryTable(gamma_a=0.78, bulk_density=3500.0))
 eci = drag_fit.eciAtLength(drag_fit.lengthAtTime(time_arr))
 radiant = drag_fit.radiantAtLength(drag_fit.lengthAtTime(time_arr))
 
-# The deceleration (m/s^2) and the air density (kg/m^3) of the model
+# The deceleration (m/s^2) and the air density (kg/m^3) of the model, and the velocity relative to the
+#   ground (m/s)
 len_arr = drag_fit.lengthAtTime(time_arr)
 decel = drag_fit.decelerationAtLength(len_arr)
 rho = drag_fit.airDensityAtLength(len_arr)
+vel_gnd = drag_fit.groundVelocityAtLength(len_arr)
 
 # The 1 sigma uncertainties of the velocity and the time at given lengths, or of the velocity and the
 #   length at given times

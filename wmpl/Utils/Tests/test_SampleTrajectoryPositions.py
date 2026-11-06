@@ -197,8 +197,10 @@ def testDynamicPressureIsRelativeToTheGround():
     arrays = traj_samples.toArrays()
     rho = traj_samples.drag_fit.airDensityAtLength(arrays['length'])
 
-    # The velocities in the ECI frame and relative to the ground differ by about 50 m/s
+    # The velocities in the ECI frame and relative to the ground differ by about 50 m/s, and never by more
+    #   than the rotation velocity at the equator
     assert np.all(np.abs(arrays['vel_norot'] - arrays['vel']) > 10.0)
+    assert np.all(np.abs(arrays['vel_norot'] - arrays['vel']) < 465.0)
     assert np.allclose(arrays['dyn_pressure'], rho*arrays['vel_norot']**2, rtol=1e-9)
 
     jd_arr = traj.jdt_ref + arrays['t_est']/86400.0

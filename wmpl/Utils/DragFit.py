@@ -60,7 +60,7 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.Physics import ballisticCoeffMass
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
+from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, derotatedRadiantAltAz, ecef2LatLonAlt
 
 
 # Gravitational acceleration at the surface of the Earth (m/s^2)
@@ -919,6 +919,41 @@ class DragFit(object):
 
 
 
+    def groundVelocityAtLength(self, len_arr):
+        """ Compute the velocities relative to the ground at the given lengths along the trajectory, by adding
+            back the rotation velocity of the Earth at every point to the modelled velocity along the radiant.
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            [ndarray] Velocities relative to the ground (m/s), NaN outside the modelled part.
+        """
+
+        len_arr = np.atleast_1d(len_arr)
+
+        vel = self.velocityAtLength(len_arr)
+        time_arr = self.timeAtLength(len_arr)
+        eci_arr = self.eciAtLength(len_arr)
+        radiant_arr = self.radiantAtLength(len_arr)
+
+        vel_norot = np.full(len(len_arr), np.nan)
+        for i in range(len(len_arr)):
+
+            # Skip the points outside the modelled part
+            if not (np.isfinite(vel[i]) and np.isfinite(time_arr[i])):
+                continue
+
+            # Derotate the velocity at the point. The ECI coordinates are in the epoch of date
+            jd = self.traj.jdt_ref + time_arr[i]/86400.0
+            lat, lon, _ = cartesian2Geo(jd, *eci_arr[i])
+            _, _, vel_norot[i] = derotatedRadiantAltAz(vel[i]*radiant_arr[i], eci_arr[i], jd, lat, lon)
+
+
+        return vel_norot
+
+
+
     def airDensityAtLength(self, len_arr):
         """ Compute the air density used by the model at the given lengths along the trajectory.
 
@@ -1170,9 +1205,10 @@ class DragFit(object):
             vel_seg = self.velocityAtLength(len_seg)
             k_seg, log_k_std = self.ballisticCoeffAtLength(len_seg)
 
-            # Compute the dynamic pressure at the beginning of the segment
+            # Compute the dynamic pressure at the beginning of the segment, with the velocity relative to the
+            #   air, which moves with the ground
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
-            dyn_pres = rho_beg*vel_seg[0]**2
+            dyn_pres = rho_beg*self.groundVelocityAtLength(len_seg[0])[0]**2
 
             # Compute the significance of the growth of K in the segment
             if d_std[i] > 0:
@@ -1187,6 +1223,8 @@ class DragFit(object):
 
         out.append("The star * marks the segments where K grows significantly (more than 2 sigma). K std " \
             + "is the relative uncertainty of K at the segment end.")
+        out.append("Dyn pres is the dynamic pressure rho*v^2 at the segment beginning, with the velocity " \
+            + "relative to the ground.")
         out.append("The final dynamic mass is the mass of the leading body at the last point for the " \
             + "assumed Gamma*A and density, m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is " \
             + "propagated.")

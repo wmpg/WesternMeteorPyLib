@@ -524,6 +524,36 @@ def testMotionUncertaintyUnconstrained():
 
 
 
+def testDynamicPressureOfTheTableIsRelativeToTheGround():
+    """ Check that the velocity relative to the ground adds back the rotation of the Earth, and that the
+        dynamic pressure in the table is computed with it.
+    """
+
+    _, _, drag_fit = _solvedMeteor()
+
+    # The fireball flies to the west-northwest, against the rotation of the Earth, so it is faster above the
+    #   ground. The rotation velocity at 45 deg latitude is 330 m/s
+    len_arr = np.linspace(drag_fit.len_first, drag_fit.len_last, 5)
+    vel_diff = drag_fit.groundVelocityAtLength(len_arr) - drag_fit.velocityAtLength(len_arr)
+    assert np.all((vel_diff > 100.0) & (vel_diff < 330.0))
+
+    # Outside the modelled part the velocity is not defined
+    assert np.isnan(drag_fit.groundVelocityAtLength(drag_fit.len_grid[-1] + 1e3)[0])
+
+    # Read the dynamic pressure at the beginning of every segment from the table (kPa)
+    rows = [line for line in drag_fit.summaryTable().split("\n") if line[:4].strip().isdigit()]
+    dyn_pres_table = np.array([float(row.split(",")[5]) for row in rows])
+
+    rho = drag_fit.airDensityAtLength(drag_fit.ramp_beg)
+    dyn_pres = rho*drag_fit.groundVelocityAtLength(drag_fit.ramp_beg)**2/1000
+    assert np.allclose(dyn_pres_table, dyn_pres, atol=0.051)
+
+    # The ECI velocity gives a lower pressure, by much more than the rounding of the table at the end
+    dyn_pres_eci = rho*drag_fit.velocityAtLength(drag_fit.ramp_beg)**2/1000
+    assert np.max(dyn_pres_table - dyn_pres_eci) > 1.0
+
+
+
 
 if __name__ == "__main__":
 
@@ -534,7 +564,8 @@ if __name__ == "__main__":
         testHeightsAreConsistent, testGravityDropMatchesTheSolution, testRadiantBentByGravity, \
         testUnconstrainedCoefficient, testPlotWithALargeUncertainty, testNoUsedPoints, testPlotDragFit, \
         testDecelerationMatchesTheModel, testMotionUncertaintyIsTheLinearPropagation, \
-        testMotionUncertaintyAboveAndBelow, testMotionUncertaintyUnconstrained]
+        testMotionUncertaintyAboveAndBelow, testMotionUncertaintyUnconstrained, \
+        testDynamicPressureOfTheTableIsRelativeToTheGround]
 
     for test in test_list:
         test()
