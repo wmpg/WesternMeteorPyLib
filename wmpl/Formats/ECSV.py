@@ -819,7 +819,8 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
     Return:
         [dict] For the key (ecsv_file, index) of every flare point of a station in the trajectory: its 
             station_id, jd (corrected time), ht (m above sea level, as the heights of the trajectory), used 
-            (in the trajectory) and frame_dt (time step of the station, s).
+            (in the trajectory), frame_dt (time step of the station, s), and the ECI vectors eci (the point
+            on the trajectory), stat (the station) and los (the line of sight).
     """
 
     offsets = appliedTimeOffsets(traj, input_meteors)
@@ -876,7 +877,8 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
         for i in range(len(obs.time_data)):
             projected[(meteor.ecsv_file, i)] = {'station_id': str(obs.station_id), 'jd': obs.JD_data[i], 
                 'ht': obs.model_ht[i], 'used': bool(meteor.trajectory_use[i]), 
-                'frame_dt': frame_dts[meteor.ecsv_file]}
+                'frame_dt': frame_dts[meteor.ecsv_file], 'eci': np.array(obs.model_eci[i]),
+                'stat': np.array(obs.stat_eci_los[i]), 'los': np.array(obs.meas_eci_los[i])}
 
     return projected
 
@@ -985,6 +987,34 @@ def timeReferenceStations(traj, mc_trajs=None):
         if not isinstance(status, bool)]
 
 
+
+def timeReferenceStr(ref_stations):
+    """ Say which clocks the times of a report refer to.
+
+    Arguments:
+        ref_stations: [list] Stations whose clocks the times refer to, from timeReferenceStations(), or None.
+
+    Return:
+        [str] The sentence, empty if ref_stations is None.
+    """
+
+    if ref_stations is None:
+        return ""
+
+    if len(ref_stations) == 1:
+        return "Times relative to the clock of the reference station {:s}, whose time offset is not\n" \
+            "estimated: their absolute accuracy depends on how well it was synchronised (e.g. NTP, GPS).\n" \
+            .format(ref_stations[0])
+
+    if ref_stations:
+        return "Times relative to the clocks of the stations with fixed time offsets, {:s}: their\n" \
+            "absolute accuracy depends on how well those clocks were synchronised (e.g. NTP, GPS).\n" \
+            .format(", ".join(ref_stations))
+
+    return "The time offsets of the stations were not estimated: times from the clock of each station.\n"
+
+
+
 def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
     """ Report the flare points from flareHeights(): the flares of every station (its flare points no further
         apart than max_gap), the points, and how the flares of different stations compare, as they need not be 
@@ -1026,18 +1056,7 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
     out_str += "------\n"
     out_str += "Points flagged as flares, used in the trajectory or not, projected on the main trajectory at the\n"
     out_str += "times of their frames corrected by the time offsets of their stations. Heights above sea level.\n"
-    # Clocks the times refer to
-    if ref_stations is not None:
-        if len(ref_stations) == 1:
-            out_str += "Times relative to the clock of the reference station {:s}, whose time offset is not\n" \
-                .format(ref_stations[0])
-            out_str += "estimated: their absolute accuracy depends on how well it was synchronised (e.g. NTP, GPS).\n"
-        elif ref_stations:
-            out_str += "Times relative to the clocks of the stations with fixed time offsets, {:s}: their\n" \
-                .format(", ".join(ref_stations))
-            out_str += "absolute accuracy depends on how well those clocks were synchronised (e.g. NTP, GPS).\n"
-        else:
-            out_str += "The time offsets of the stations were not estimated: times from the clock of each station.\n"
+    out_str += timeReferenceStr(ref_stations)
     if uncertain:
         out_str += "Uncertainties (1 sigma) from projecting them on the Monte Carlo runs, and from the duration\n"
         out_str += "of the frame the flare was seen in, at any time within it (in time, and in height as the\n"
@@ -1131,6 +1150,254 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
                         "consistent" if consistent else "NOT consistent, different flares?")
 
                 out_str += line + "\n"
+
+    return out_str
+
+
+
+def oneStationSolution(traj, meteor, input_meteors, time_diffs=None, **noise_kwargs):
+    """ Measure the points of a fragment seen from one station against a solution of the main trajectory, on
+        which they are projected as the flares are (see projectFlares()).
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory of the main fragment, or one of its Monte Carlo runs.
+        meteor: [MeteorObservation object] Points of the fragment from one file, from loadECSVs().
+        input_meteors: [list] Observations the trajectory was solved from.
+
+    Keyword arguments:
+        time_diffs: [dict] Time offsets (s) of station IDs to add to the applied ones, see projectFlares().
+            None by default.
+        noise_kwargs: noise_sigma and ang_res_std of projectFlares().
+
+    Return:
+        [dict] None if the station is not in the trajectory. Otherwise, for every point sorted by time, in
+            arrays: jd, eci (the point on the path), ht (m), off (distance between its line of sight and
+            the path, m, signed), ahead (distance along the path from the main fragment at the same time, m),
+            and ht_per_m and ahead_per_m (error of its height and of ahead per metre the fragment is off the
+            path, in the plane of the path and the line of sight). Also the first and last values of straight
+            and quadratic fits over the noise of the points, off_first, off_last, off_rate (m/s), ahead_first
+            and ahead_last, and off_noise, the scatter of the points about the fit (m), los_noise, the same as
+            an angle (rad), outside (the time the fragment is seen outside the main fragment, s) and
+            station_id.
+    """
+
+    projected = projectFlares(traj, [meteor], input_meteors, time_diffs=time_diffs, **noise_kwargs)
+    if not projected:
+        return None
+
+    points = [projected[(meteor.ecsv_file, i)] for i in range(len(meteor.time_data))]
+    jd = np.array([point['jd'] for point in points])
+    eci = np.array([point['eci'] for point in points])
+    stat = np.array([point['stat'] for point in points])
+    los = np.array([point['los'] for point in points])
+    t = (jd - jd[0])*86400
+
+    direction = -vectNorm(traj.radiant_eci_mini)
+
+    # Distance between the line of sight and the path along the normal to both, all one station sees of it
+    normal = np.cross(los, direction)
+    normal /= np.linalg.norm(normal, axis=1, keepdims=True)
+    off = np.sum((eci - stat)*normal, axis=1)
+    off_poly = np.polyfit(t, off, 1)
+    off_residuals = off - np.polyval(off_poly, t)
+
+    # Distance along the path of the main fragment at the time of every point, as in this solution
+    used = [obs for obs in traj.observations if not obs.ignore_station]
+    main_t = np.concatenate([(obs.JD_data[obs.ignore_list == 0] - jd[0])*86400 \
+        + (time_diffs or {}).get(str(obs.station_id), 0.0) for obs in used])
+    main_along = np.dot(np.concatenate([obs.model_eci[obs.ignore_list == 0] for obs in used]) \
+        - traj.state_vect_mini, direction)
+
+    main_motion = localMotionFit(main_t, main_along)
+
+    # Fit the difference with the main fragment, which is much smoother than the motion of either
+    ahead = np.dot(eci - traj.state_vect_mini, direction) - np.array([main_motion(time) for time in t])
+    ahead_fit = np.polyval(np.polyfit(t, ahead, min(2, len(t) - 1)), t)
+
+    # A fragment off the path in the plane of the path and the line of sight is distance/sin(angle) from
+    #   its projection along the line of sight, which moves its height and how far ahead it is
+    los_path_angle = np.arccos(np.clip(np.abs(np.dot(los, direction)), 0, 1))
+    sin_altitude = np.abs(np.sum(los*eci, axis=1))/np.linalg.norm(eci, axis=1)
+
+    return {'station_id': points[0]['station_id'], 'jd': jd, 'eci': eci, \
+        'ht': np.array([point['ht'] for point in points]), 'off': off, 'ahead': ahead, \
+        'ht_per_m': sin_altitude/np.sin(los_path_angle), 'ahead_per_m': 1/np.tan(los_path_angle), \
+        'off_first': np.polyval(off_poly, t[0]), 'off_last': np.polyval(off_poly, t[-1]), \
+        'off_rate': off_poly[0], 'ahead_first': ahead_fit[0], 'ahead_last': ahead_fit[-1], \
+        'off_noise': np.std(off_residuals, ddof=2), \
+        'outside': max(t[-1] - np.max(main_t), np.min(main_t) - t[0]), \
+        'los_noise': np.std(off_residuals/np.linalg.norm(eci - stat, axis=1), ddof=2)}
+
+
+
+def unsolvedFragments(traj, ecsv_paths, fragments, mc_trajs=None):
+    """ Project on the main trajectory the points of additional fragments in ECSV files which have no
+        trajectory of their own, each station on its own (see oneStationSolution()): those seen from one
+        station, and those whose trajectory could not be solved. This assumes that the fragment is on the
+        main path, which one station cannot test.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory of the main fragment, the solution with the original
+            picks (see originalPicksTrajectory()).
+        ecsv_paths: [list] List of paths to ECSV files it was solved from.
+        fragments: [list] Numbers of the fragments to project.
+
+    Keyword arguments:
+        mc_trajs: [list] Its Monte Carlo runs. The points are projected on each one, with the noise of the
+            runs on their lines of sight (the scatter of the points of the fragment, as they are not the
+            points of the main fragment) and the time offsets each run estimated. The standard deviations
+            are the uncertainties, which do not include a separation from the main path. None by default.
+
+    Return:
+        [list] A dictionary for every file of every fragment: the values of oneStationSolution(), with also
+            fragment, n_stations (distinct stations of the fragment), n_points, t_rel (s from the reference
+            time of the trajectory), and in std a dictionary of the standard deviations in the Monte Carlo
+            runs of the time of every point (t, s), of its height (ht), and of off_first, off_last, off_rate,
+            ahead_first and ahead_last. std is None without runs.
+    """
+
+    _, input_meteors = loadECSVs(ecsv_paths, no_prepare=True)
+
+    solutions = []
+    for fragment in fragments:
+
+        _, meteors = loadECSVs(ecsv_paths, no_prepare=True, fragment=fragment)
+        n_stations = len(set(str(meteor.station_id) for meteor in meteors))
+
+        for meteor in meteors:
+
+            meteor.trajectory_use = np.ones(len(meteor.time_data), dtype=bool)
+
+            solution = oneStationSolution(traj, meteor, input_meteors)
+            if solution is None:
+                print("Fragment {:d} from {:s} is not projected, as the station is not in the main " \
+                    "trajectory: {:s}".format(fragment, str(meteor.station_id), meteor.ecsv_file))
+                continue
+
+            solution.update(fragment=fragment, n_stations=n_stations, n_points=len(meteor.time_data), \
+                std=None, t_rel=(solution['jd'] - traj.jdt_ref)*86400)
+
+            # Project the points on every Monte Carlo run of the main trajectory
+            mc_solutions = []
+            for mc_traj in (mc_trajs or []):
+
+                mc_solution = oneStationSolution(mc_traj, meteor, input_meteors, \
+                    noise_sigma=traj.mc_noise_std, \
+                    ang_res_std={solution['station_id']: solution['los_noise']}, \
+                    time_diffs={str(obs.station_id): t_diff for obs, t_diff \
+                        in zip(mc_traj.observations, mc_traj.time_diffs_final)})
+
+                if mc_solution is not None:
+                    mc_solutions.append(mc_solution)
+
+            if len(mc_solutions) > 1:
+
+                solution['std'] = {'t': np.std([(mc['jd'] - solution['jd'])*86400 for mc in mc_solutions], \
+                    axis=0), 'ht': np.std([mc['ht'] for mc in mc_solutions], axis=0)}
+                for name in ('off_first', 'off_last', 'off_rate', 'ahead_first', 'ahead_last'):
+                    solution['std'][name] = np.std([mc[name] for mc in mc_solutions])
+
+            solutions.append(solution)
+
+    return solutions
+
+
+
+def unsolvedFragmentReport(solutions, traj, ref_stations=None):
+    """ Report the projections of the fragments without a trajectory, from unsolvedFragments().
+
+    Arguments:
+        solutions: [list] Projections from unsolvedFragments().
+        traj: [Trajectory object] Solved trajectory of the main fragment they were projected on.
+
+    Keyword arguments:
+        ref_stations: [list] Stations whose clocks the times refer to, from timeReferenceStations(), to say
+            so in the report. None by default, to leave it out.
+
+    Return:
+        [str] The report.
+    """
+
+    def valueStr(value, std, fmt, scale=1):
+        """ Format a value with its standard deviation, if known. """
+
+        if std is None:
+            return fmt.format(value/scale)
+
+        return (fmt + " +/- " + fmt.replace("+", "")).format(value/scale, std/scale)
+
+
+    def stdOf(frag, name, i=None):
+        """ Get a standard deviation of a projection, None without the Monte Carlo runs. """
+
+        if frag['std'] is None:
+            return None
+
+        return frag['std'][name] if (i is None) else frag['std'][name][i]
+
+
+    out_str = "\n"
+    out_str += "Additional fragments without a trajectory\n"
+    out_str += "-----------------------------------------\n"
+    out_str += "Fragments seen from one station, or whose trajectory could not be solved, have their\n"
+    out_str += "points projected on the main trajectory, each station on its own, at the times of their\n"
+    out_str += "frames corrected by the time offset of the station. Heights above sea level. This assumes\n"
+    out_str += "that the fragment is on the main path, which one station cannot test: only the part of a\n"
+    out_str += "separation across the line of sight is seen, so the distances off the path and the speeds\n"
+    out_str += "are lower limits, and the rest moves the heights, as given below. The heights are those of\n"
+    out_str += "the main path where the line of sight passes closest to it.\n"
+    out_str += timeReferenceStr(ref_stations)
+    if any(frag['std'] is not None for frag in solutions):
+        out_str += "Uncertainties (1 sigma) from projecting them on the Monte Carlo runs, with the\n"
+        out_str += "scatter of the points of each fragment as their noise. They do not include a\n"
+        out_str += "separation from the main path.\n"
+    else:
+        out_str += "Without the Monte Carlo runs the values have no uncertainties.\n"
+
+    for frag in solutions:
+
+        sign = np.sign(frag['off_last'])
+        why = "seen from one station" if (frag['n_stations'] == 1) else "its trajectory could not be solved"
+
+        out_str += "\n"
+        out_str += "Fragment {:d}, from {:s} ({:s})\n".format(frag['fragment'], frag['station_id'], why)
+        out_str += "  Points                : {:d}\n".format(frag['n_points'])
+        out_str += "  First seen            : {:+.3f} s from the main fragment\n".format( \
+            (frag['jd'][0] - traj.rbeg_jd)*86400)
+        out_str += "  Begin / end height    : {:s} / {:s} km (main fragment: {:.2f} / {:.2f} km)\n".format( \
+            valueStr(frag['ht'][0], stdOf(frag, 'ht', 0), "{:.2f}", 1000), \
+            valueStr(frag['ht'][-1], stdOf(frag, 'ht', -1), "{:.2f}", 1000), traj.rbeg_ele/1000, \
+            traj.rend_ele/1000)
+        out_str += "  Off the main path     : {:s} m at the fragment's first point, {:s} m at its last, " \
+            "across the\n                          line of sight only (scatter of the points: {:.0f} " \
+            "m)\n".format(valueStr(abs(frag['off_first']), stdOf(frag, 'off_first'), "{:.0f}"), \
+            valueStr(abs(frag['off_last']), stdOf(frag, 'off_last'), "{:.0f}"), frag['off_noise'])
+        out_str += "  Moving off the path   : {:s} m/s, across the line of sight only\n".format( \
+            valueStr(sign*frag['off_rate'], stdOf(frag, 'off_rate'), "{:+.0f}"))
+        out_str += "  Ahead of the main one : {:s} m at the fragment's first point, {:s} m at its last " \
+            "(at the same\n                          time), as if on the main path\n".format( \
+            valueStr(frag['ahead_first'], stdOf(frag, 'ahead_first'), "{:+.0f}"), \
+            valueStr(frag['ahead_last'], stdOf(frag, 'ahead_last'), "{:+.0f}"))
+
+        if frag['outside'] > 0.05:
+            out_str += "  NOTE: the fragment is seen {:.2f} s outside the main one, for which that part is " \
+                "extrapolated\n".format(frag['outside'])
+
+        out_str += "  If 100 m off the path : in the plane of the path and the line of sight, which is not " \
+            "seen, the\n                          heights are off by {:.0f} m at the fragment's first " \
+            "point and {:.0f} m at its\n                          last, and how far ahead it is by {:.0f} " \
+            "and {:.0f} m\n".format(100*frag['ht_per_m'][0], 100*frag['ht_per_m'][-1], \
+            100*abs(frag['ahead_per_m'][0]), 100*abs(frag['ahead_per_m'][-1]))
+
+        # Every point of the fragment
+        out_str += "\n"
+        out_str += "  Time (UTC)      t (s)                  Ht (km)               Off (m)  Ahead (m)\n"
+        for i in range(frag['n_points']):
+            out_str += "  {:s}    {:21s}  {:20s}  {:7.0f}  {:+9.0f}\n".format( \
+                jd2Date(frag['jd'][i], dt_obj=True).strftime("%H:%M:%S.%f")[:-3], \
+                valueStr(frag['t_rel'][i], stdOf(frag, 't', i), "{:.4f}"), \
+                valueStr(frag['ht'][i], stdOf(frag, 'ht', i), "{:.3f}", 1000), abs(frag['off'][i]), \
+                frag['ahead'][i])
 
     return out_str
 
@@ -1470,3 +1737,21 @@ if __name__ == "__main__":
                 **solver_kwargs)
             print(fragmentComparison(originalPicksTrajectory(traj), fragment_trajs, \
                 reuse_timing=(not cml_args.fragtimefit)))
+
+            # Project the fragments without a trajectory on the main one, also in its saved report
+            solved = [fragment for fragment, _ in fragment_trajs]
+            unsolved = [fragment for fragment in ecsvFragments(ecsv_paths) if fragment not in solved]
+
+            traj_orig = originalPicksTrajectory(traj)
+            mc_trajs = getattr(traj, 'mc_traj_list', None)
+            projections = unsolvedFragments(traj_orig, ecsv_paths, unsolved, mc_trajs=mc_trajs)
+            if projections:
+
+                unsolved_report = unsolvedFragmentReport(projections, traj_orig, \
+                    ref_stations=timeReferenceStations(traj_orig, mc_trajs=mc_trajs))
+                print(unsolved_report)
+
+                report_path = os.path.join(traj.output_dir, traj.file_name + '_report.txt')
+                if os.path.isfile(report_path):
+                    with open(report_path, 'a') as f:
+                        f.write(unsolved_report)
