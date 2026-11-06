@@ -146,7 +146,33 @@ def testTheLocalFitFollowsThePointsAndTakesFewOfThem():
 
     assert abs(localMotionFit(t, along)(2.9) - _mainAlong(2.9, lag=5.0)) < 5.0
 
-    # Past the last point it extrapolates from the closest ones
+    # Past the last point it extrapolates from the last part of the path
     assert abs(localMotionFit(t, along)(3.1) - _mainAlong(3.1, lag=5.0)) < 100.0
 
     assert np.isclose(localMotionFit(t[:2], along[:2])(0.02), np.interp(0.02, t[:2], along[:2]))
+
+
+
+def testTheLocalFitPastTheEndOfSeveralStations():
+    """ Check that past the end of a path seen by several stations, the local fit extrapolates from its last
+        part, also when the stations share the times of their points.
+    """
+
+    # Twelve synchronised stations, with the same frame times
+    t = np.tile(np.arange(0, 2.0, 1/FPS), 12)
+    assert abs(localMotionFit(t, SPEED*t)(2.5) - SPEED*2.5) < 1.0
+
+    # Five stations with frames at other times, and 10 m of noise
+    rng = np.random.default_rng(1)
+    t = np.concatenate([np.arange(rng.uniform(0, 1/FPS), 2.0, 1/FPS) for _ in range(5)])
+    along = _mainAlong(t, lag=5.0) + rng.normal(0, 10.0, len(t))
+    assert abs(localMotionFit(t, along)(t.max() + 0.5) - _mainAlong(t.max() + 0.5, lag=5.0)) < 400.0
+
+
+
+def testTheLocalFitTakesDistinctTimes():
+    """ Check that the degree of the local fit is limited by the number of distinct times, not of points. """
+
+    # Six stations sharing the times of two frames
+    t = np.repeat([0.0, 1/FPS], 6)
+    assert np.isclose(localMotionFit(t, SPEED*t)(0.5/FPS), SPEED*0.5/FPS)

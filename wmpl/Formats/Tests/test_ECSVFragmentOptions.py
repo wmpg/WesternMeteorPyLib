@@ -247,3 +247,17 @@ def testTheReturnedTrajectoryKeepsNothingAboutTheOptions(tmp_path, monkeypatch):
     traj = GENERIC.solveTrajectoryGeneric(2461000.5, [meteor], str(tmp_path), solver='original', mc_runs=7)
 
     assert vars(traj) == {}
+
+
+
+def testAnOffsetGivenForAnotherFileIsNotTaken():
+    """ Check that a file of a fragment which is not in the main trajectory does not take the offset given
+        for another file of the main trajectory, whose ID it has in the fragment.
+    """
+
+    main_ids = {'a1.ecsv': 'A', 'a2.ecsv': 'A_2', 'b.ecsv': 'B'}
+    meteors = [SimpleNamespace(ecsv_file=name) for name in ('a1.ecsv', 'a3.ecsv', 'b.ecsv')]
+
+    offsets = ECSV.fragmentStationOffsets({'A_2': 0.75, 'B': 0.0}, main_ids, ['A', 'A_2', 'B'], meteors)
+
+    assert offsets == {'B': 0.0}
