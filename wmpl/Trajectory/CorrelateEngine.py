@@ -1374,7 +1374,7 @@ class TrajectoryCorrelator(object):
 
                             # Skip trajectory if there are no new observations
                             if not traj_time_pairs:
-                                log.info(f'no traj pairs for {traj_reduced.traj_id}')
+                                #log.info(f'no traj pairs for {traj_reduced.traj_id}')
                                 continue
 
 
@@ -1467,7 +1467,9 @@ class TrajectoryCorrelator(object):
                             # Analysis of historical data by @AstroEloy indicates about 15% may fall into this category.
 
                             if hasattr(traj_reduced, 'obs_ids') and hasattr(traj_reduced,'ign_obs_ids') \
-                                and hasattr(traj_reduced,'cand_id') and traj_reduced.cand_id is not None:
+                                and hasattr(traj_reduced,'cand_id') and traj_reduced.cand_id is not None \
+                                and candidate_observations:
+
                                 unpair_ids = traj_reduced.obs_ids + traj_reduced.ign_obs_ids
 
                                 # some older trajectories may have simple numeric Obs IDs - we can't use these
