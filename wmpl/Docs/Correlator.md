@@ -223,7 +223,7 @@ configuration file. `paramiko` provides the SFTP client and is already a require
 ## Setting up a child node
 
 This is a one-time setup, and most of it happens on the parent. The commands are for Linux; a child
-can also run under WSL2 on Windows.
+can also run on Windows, either natively or under WSL2.
 
 ### Create a key on the child
 
