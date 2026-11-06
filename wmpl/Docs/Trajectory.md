@@ -79,6 +79,13 @@ about 1 sigma even for identical data), and the differences are also given in un
 uncertainty. The time offsets reused by the fragments are also those of the main solution with the original
 picks, the ones in its report.
 
+The comparison notes a fragment more than 1.5 km off the main path at its first or last point. No fragment
+of the main went further in fireballs simulated with MetSim (2 to 7 fragments, with the lateral speeds of
+real fragmentations), while fragments of another body 2 km away did in 97 % of the cases. Such a fragment
+may come from another body, or the stations may have measured different fragments under the same number.
+Two stations measuring different fragments mostly give a line close to the main path anyway, which cannot be
+told apart, and often no trajectory at all.
+
 The pointing of a station can be off by the same amount at all its points (its calibration, or the centroid
 of a saturated meteor), which does not average out with their number, so the Monte Carlo runs do not
 include it. With 3 or more stations in the main trajectory, the others constrain its line, and the residuals

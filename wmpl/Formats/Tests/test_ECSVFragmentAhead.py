@@ -1,5 +1,5 @@
 """ Tests for how far ahead of the main fragment the comparison of the fragments of ECSV files puts each
-    one, with a main fragment that slows down.
+    one, with a main fragment that slows down, and for how far off the main path.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVFragmentAhead.py -v
@@ -176,3 +176,25 @@ def testTheLocalFitTakesDistinctTimes():
     # Six stations sharing the times of two frames
     t = np.repeat([0.0, 1/FPS], 6)
     assert np.isclose(localMotionFit(t, SPEED*t)(0.5/FPS), SPEED*0.5/FPS)
+
+
+
+def testAFragmentFarOffTheMainPathIsNoted():
+    """ Check that the comparison notes a fragment further off the main path than any fragment of the main
+        one in simulations, and not one closer to it.
+    """
+
+    t = np.arange(0, 2.0, 1/FPS)
+    main = _solution(t, _mainAlong(t, lag=0.0))
+
+    reports = []
+    for offset in (1000.0, 2000.0):
+
+        later = t[t >= 1.0]
+        fragment = _solution(later, _mainAlong(later, lag=0.0))
+        fragment.observations[0].model_eci[:, 1] += offset
+
+        reports.append(fragmentComparison(main, [(1, fragment)]))
+
+    assert "off the main path, where no fragment" not in reports[0]
+    assert "more than 1.5 km off the main path" in reports[1]
