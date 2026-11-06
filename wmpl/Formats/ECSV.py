@@ -582,6 +582,11 @@ def localMotionFit(t, along, window=0.3):
 
 
 
+# Distance off the main path (m) beyond which no fragment of the main went in fireballs simulated with MetSim
+FRAGMENT_OFF_PATH_LIMIT = 1500.0
+
+
+
 def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
     """ Summarize how the trajectories of additional fragments differ from the main one, to judge at a
         glance whether they are consistent with it.
@@ -737,8 +742,16 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
             - np.array([main_motion(t) for t in frag_t])
         ahead_poly = np.polyfit(frag_t, ahead, min(2, len(frag_t) - 1))
 
+        off_first, off_last = crossDistance(frag_eci[0]), crossDistance(frag_eci[-1])
         out_str += "  Off the main path     : {:.0f} m at the fragment's first point, {:.0f} m at its " \
-            "last\n".format(crossDistance(frag_eci[0]), crossDistance(frag_eci[-1]))
+            "last\n".format(off_first, off_last)
+
+        # Warn about a fragment too far from the main path to have come from the main fragment
+        if max(off_first, off_last) > FRAGMENT_OFF_PATH_LIMIT:
+            out_str += "  NOTE: more than {:.1f} km off the main path, where no fragment of the main one " \
+                "was in simulated\n        fireballs: another body, or different fragments measured by " \
+                "the stations?\n".format(FRAGMENT_OFF_PATH_LIMIT/1000)
+
         out_str += "  Ahead of the main one : {:+.0f} m at the fragment's first point, {:+.0f} m at its " \
             "last (at the same time)\n".format(np.polyval(ahead_poly, frag_t[0]), \
             np.polyval(ahead_poly, frag_t[-1]))
