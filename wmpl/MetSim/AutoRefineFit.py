@@ -129,9 +129,9 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
         # Sample the simulated normalized length at observed times
         sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[len_filter])
 
-        # Compute the length residual
+        # Compute the length residual, averaged only over the points used
         len_res_sum += np.sum(np.abs(obs.state_vect_dist[len_filter] - sim_norm_len_sampled))
-        len_res_count += len(obs.state_vect_dist)
+        len_res_count += np.sum(len_filter)
 
 
         # Plot the observed and simulated magnitudes

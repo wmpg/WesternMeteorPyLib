@@ -69,6 +69,7 @@ python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 | :--- | :--- |
 | `--fragments` | After the main fragment, solve every additional fragment seen from at least 2 stations with the same options (Monte Carlo included), save each one in a `fragment_k` folder of the output directory, and print how it differs from the main one: radiant, velocities, heights, distance from the main path and how far ahead of the main fragment it is at the same time. |
 | `--fragtimefit` | Estimate the station time offsets for every fragment, instead of reusing those of the main trajectory, which its larger number of points constrains better. Without the timing estimation (`-e`), the fragments take the same fixed offsets as the main fragment. |
+| `--fragnosys` | Leave out of the Monte Carlo uncertainties of the fragments the systematic errors of the stations, which are otherwise included when the main trajectory has 3 stations or more (see below). |
 
 Two solutions differ slightly even for identical data, as each goes through its own iterations of the
 timing and velocity estimation: in tests, by about 0.001 deg and tens of metres with well spread stations,
@@ -77,6 +78,17 @@ solutions compared are still those with the original picks (not the best Monte C
 about 1 sigma even for identical data), and the differences are also given in units of the combined
 uncertainty. The time offsets reused by the fragments are also those of the main solution with the original
 picks, the ones in its report.
+
+The pointing of a station can be off by the same amount at all its points (its calibration, or the centroid
+of a saturated meteor), which does not average out with their number, so the Monte Carlo runs do not
+include it. With 3 or more stations in the main trajectory, the others constrain its line, and the residuals
+of each station across the line show its own error, as a constant and a slope along the trajectory. Their
+typical size is added to the Monte Carlo runs of every fragment, as a random constant and slope of each
+station in every run. The solution of the fragment is the one with the original picks, as without them, and
+only its uncertainties change. On fireballs simulated with MetSim, with 2 to 7 fragments, noise and
+saturation, the true direction of a fragment was within the 95 % region of its uncertainties in 93 % of the
+cases with them, and in 75 % without. With 2 stations in the main trajectory there is nothing to measure,
+and the solver says so.
 
 ## The trajectory pickle
 
