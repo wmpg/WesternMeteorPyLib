@@ -47,6 +47,7 @@ grows faster if the meteor fragments, as the fragments have a larger area per ma
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import os
 import argparse
 
@@ -915,6 +916,147 @@ class DragFit(object):
         """
 
         return self.velocityAtLength(self.lengthAtHeight(ht_arr))
+
+
+
+    def airDensityAtLength(self, len_arr):
+        """ Compute the air density used by the model at the given lengths along the trajectory.
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            [ndarray] Air densities (kg/m^3).
+        """
+
+        return np.exp(np.interp(self.heightAtLength(len_arr), self.ht_atm, self.log_rho_atm))
+
+
+
+    def decelerationAtLength(self, len_arr):
+        """ Compute the deceleration of the model at the given lengths along the trajectory,
+            K*rho*v**2 - g_along.
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            [ndarray] Decelerations (m/s^2), positive when the meteor slows down, NaN outside the modelled
+                part.
+        """
+
+        len_arr = np.atleast_1d(len_arr)
+
+        k_arr, _ = self.ballisticCoeffAtLength(len_arr)
+        vel = self.velocityAtLength(len_arr)
+        g_along = np.interp(len_arr, self.len_grid, self.g_grid)
+
+        return k_arr*self.airDensityAtLength(len_arr)*vel**2 - g_along
+
+
+
+    def _motionGradients(self, coord_arr, by_time):
+        """ Compute the derivatives of the velocity and of the time or the length with respect to the
+            parameters, at the given lengths or times, by finite differences. The gravity drop is kept
+            fixed.
+
+        Arguments:
+            coord_arr: [ndarray] Lengths along the trajectory from the state vector (m), or times (s).
+            by_time: [bool] If True, coord_arr are times and the derivatives of the lengths are computed. If
+                False, coord_arr are lengths and the derivatives of the times are computed.
+
+        Return:
+            (grad_vel, grad_coord):
+                - grad_vel: [ndarray] Derivatives of the velocities, one row per point.
+                - grad_coord: [ndarray] Derivatives of the times or the lengths, one row per point.
+        """
+
+        def _solution(params):
+
+            # Solve the motion with the given parameters on a copy, which keeps this fit unchanged
+            drag_fit = copy.copy(self)
+            drag_fit.params = params
+            drag_fit._solveFull()
+
+            valid = drag_fit._valid
+            if by_time:
+                x_arr, y_arr = drag_fit.time_grid[valid], drag_fit.len_grid[valid]
+            else:
+                x_arr, y_arr = drag_fit.len_grid[valid], drag_fit.time_grid[valid]
+
+            vel = np.interp(coord_arr, x_arr, drag_fit.vel_grid[valid], left=np.nan, right=np.nan)
+            coord = np.interp(coord_arr, x_arr, y_arr, left=np.nan, right=np.nan)
+
+            return np.column_stack([vel, coord])
+
+
+        n_params = len(self.params)
+        params_std = np.sqrt(np.maximum(np.diag(self.params_cov), 0.0))
+        nominal = _solution(self.params)
+
+        grad = np.zeros((len(coord_arr), 2, n_params))
+        for j in range(n_params):
+
+            # Step by a tenth of the uncertainty of the parameter
+            step = 0.1*params_std[j]
+            if not (np.isfinite(step) and (step > 0)):
+                step = 1e-6*max(abs(self.params[j]), 1.0)
+
+            params_step = np.zeros(n_params)
+            params_step[j] = step
+            plus = _solution(self.params + params_step)
+            minus = _solution(self.params - params_step)
+
+            # Take central differences, or one-sided ones where a step leaves the modelled part
+            grad_j = (plus - minus)/(2*step)
+            grad_j = np.where(np.isnan(minus), (plus - nominal)/step, grad_j)
+            grad_j = np.where(np.isnan(plus), (nominal - minus)/step, grad_j)
+            grad[:, :, j] = grad_j
+
+
+        return grad[:, 0, :], grad[:, 1, :]
+
+
+
+    def motionStdAtLength(self, len_arr):
+        """ Compute the uncertainties of the velocity and of the time at the given lengths along the
+            trajectory, propagated linearly from the covariance of the fitted parameters. Only the noise of
+            the points is included, not the uncertainty of the trajectory solution or the bias of the model.
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            (vel_std, time_std):
+                - vel_std: [ndarray] Standard deviations of the velocities (m/s), NaN outside the modelled
+                    part and infinite if they depend on a direction not constrained by the data.
+                - time_std: [ndarray] Standard deviations of the times (s).
+        """
+
+        grad_vel, grad_time = self._motionGradients(np.atleast_1d(len_arr).astype(np.float64), False)
+
+        return self._paramStd(grad_vel), self._paramStd(grad_time)
+
+
+
+    def motionStdAtTime(self, time_arr):
+        """ Compute the uncertainties of the velocity and of the length along the trajectory at the given
+            times, propagated linearly from the covariance of the fitted parameters. Only the noise of the
+            points is included, not the uncertainty of the trajectory solution or the bias of the model.
+
+        Arguments:
+            time_arr: [float or ndarray] Times relative to the reference Julian date (s).
+
+        Return:
+            (vel_std, len_std):
+                - vel_std: [ndarray] Standard deviations of the velocities (m/s), NaN outside the modelled
+                    part and infinite if they depend on a direction not constrained by the data.
+                - len_std: [ndarray] Standard deviations of the lengths along the trajectory (m).
+        """
+
+        grad_vel, grad_len = self._motionGradients(np.atleast_1d(time_arr).astype(np.float64), True)
+
+        return self._paramStd(grad_vel), self._paramStd(grad_len)
 
 
 

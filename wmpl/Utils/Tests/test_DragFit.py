@@ -408,6 +408,122 @@ def testPlotDragFit():
 
 
 
+def testDecelerationMatchesTheModel():
+    """ Check that the deceleration is the time derivative of the modelled velocity, that it agrees with the
+        truth where the fireball decelerates measurably, and that above the beginning only gravity acts.
+    """
+
+    meteor, _, drag_fit = _solvedMeteor()
+
+    # The air density is the one the model was solved with
+    assert np.allclose(drag_fit.airDensityAtLength(drag_fit.len_grid), drag_fit.rho_grid, rtol=1e-9)
+
+    # Compare with the derivative of the modelled velocity, except where K jumps at the first point and at
+    #   the one-sided derivative at the end of the modelled part
+    ind = np.where(drag_fit._valid)[0]
+    dv_dt = np.gradient(drag_fit.vel_grid[ind], drag_fit.time_grid[ind])
+    decel = drag_fit.decelerationAtLength(drag_fit.len_grid[ind])
+    inner = (ind != drag_fit.i_first) & (ind != ind[-1]) & (np.abs(dv_dt) > 1.0)
+    assert np.max(np.abs(decel[inner]/(-dv_dt[inner]) - 1.0)) < 2e-3
+
+    # Compare with the truth in the part where the deceleration is larger than 200 m/s^2
+    time_arr = np.linspace(0.85, 3.25, 7)
+    decel_true = -np.interp(time_arr + meteor.t_vis_beg, meteor.time, np.gradient(meteor.vel, meteor.time))
+    decel_fit = drag_fit.decelerationAtLength(drag_fit.lengthAtTime(time_arr))
+    assert np.all(np.abs(decel_fit/decel_true - 1.0) < 0.15)
+
+    # Above the beginning the meteor moves without drag, so it is accelerated by gravity along the path
+    len_above = drag_fit.len_first - np.array([1e3, 10e3])
+    g_along = np.interp(len_above, drag_fit.len_grid, drag_fit.g_grid)
+    assert np.allclose(drag_fit.decelerationAtLength(len_above), -g_along)
+    assert np.all(g_along > 0)
+
+    # Outside the modelled part the deceleration is not defined
+    assert np.isnan(drag_fit.decelerationAtLength(drag_fit.len_grid[-1] + 1e3)[0])
+
+
+
+def testMotionUncertaintyIsTheLinearPropagation():
+    """ Check the uncertainties of the velocity, the time and the length against the spread of the model
+        for parameters drawn from a tenth of their covariance, where the model is linear.
+    """
+
+    _, _, drag_fit = _solvedMeteor()
+
+    time_arr = np.linspace(0.05, 3.25, 9)
+    len_arr = drag_fit.lengthAtTime(time_arr)
+
+    vel_std_len, time_std_len = drag_fit.motionStdAtLength(len_arr)
+    vel_std_time, len_std_time = drag_fit.motionStdAtTime(time_arr)
+
+    # Solve the model for parameters drawn from the scaled covariance
+    scale = 0.1
+    rng = np.random.default_rng(3)
+    draws = rng.multivariate_normal(drag_fit.params, drag_fit.params_cov*scale**2, 400)
+
+    samples = []
+    for params in draws:
+
+        drag_fit_draw = copy.copy(drag_fit)
+        drag_fit_draw.params = params
+        drag_fit_draw._solveFull()
+        valid = drag_fit_draw._valid
+
+        len_grid = drag_fit_draw.len_grid[valid]
+        time_grid = drag_fit_draw.time_grid[valid]
+        vel_grid = drag_fit_draw.vel_grid[valid]
+
+        samples.append([np.interp(len_arr, len_grid, vel_grid), np.interp(len_arr, len_grid, time_grid), \
+            np.interp(time_arr, time_grid, vel_grid), np.interp(time_arr, time_grid, len_grid)])
+
+    mc_std = np.std(np.array(samples), axis=0)/scale
+
+    for lin_std, draw_std in zip([vel_std_len, time_std_len, vel_std_time, len_std_time], mc_std):
+        assert np.all((lin_std/draw_std > 0.8) & (lin_std/draw_std < 1.25))
+
+    # The velocity is known to tens of m/s in the observed part
+    assert np.all((vel_std_len > 3.0) & (vel_std_len < 100.0))
+
+    # Outside the modelled part the uncertainties are not defined
+    vel_std, time_std = drag_fit.motionStdAtLength(drag_fit.len_grid[-1] + 1e3)
+    assert np.isnan(vel_std[0]) and np.isnan(time_std[0])
+
+
+
+def testMotionUncertaintyAboveAndBelow():
+    """ Check that above the beginning the uncertainty of the velocity is that of the first velocity, and
+        that it grows below the end, where the model is extrapolated.
+    """
+
+    _, _, drag_fit = _solvedMeteor()
+
+    vel_std, _ = drag_fit.motionStdAtLength(drag_fit.len_first - np.array([1e3, 10e3]))
+    assert np.allclose(vel_std, np.sqrt(drag_fit.params_cov[1, 1]), rtol=1e-3)
+
+    vel_std_obs, _ = drag_fit.motionStdAtTime(np.array([1.6]))
+    vel_std_below, _ = drag_fit.motionStdAtTime(np.array([3.8]))
+    assert vel_std_below[0] > 5*vel_std_obs[0]
+
+
+
+def testMotionUncertaintyUnconstrained():
+    """ Check that the uncertainty of the velocity is infinite where it depends on a direction not
+        constrained by the data, and finite above the beginning, where it does not.
+    """
+
+    _, _, drag_fit = _solvedMeteor()
+
+    # Make K at the first point unconstrained
+    drag_fit = copy.copy(drag_fit)
+    drag_fit.params_null = np.zeros((len(drag_fit.params), 1))
+    drag_fit.params_null[2, 0] = 1.0
+
+    vel_std, _ = drag_fit.motionStdAtLength(np.array([drag_fit.len_first - 1e3, drag_fit.len_last]))
+    assert np.isfinite(vel_std[0])
+    assert np.isinf(vel_std[1])
+
+
+
 
 if __name__ == "__main__":
 
@@ -416,7 +532,9 @@ if __name__ == "__main__":
         testExtrapolationBelowTheEnd, testBallisticCoefficient, testNoDragAboveTheBeginning, \
         testTimeAndHeightFunctions, testSummaryTable, testDynamicMass, testVelocityIsPhysical, \
         testHeightsAreConsistent, testGravityDropMatchesTheSolution, testRadiantBentByGravity, \
-        testUnconstrainedCoefficient, testPlotWithALargeUncertainty, testNoUsedPoints, testPlotDragFit]
+        testUnconstrainedCoefficient, testPlotWithALargeUncertainty, testNoUsedPoints, testPlotDragFit, \
+        testDecelerationMatchesTheModel, testMotionUncertaintyIsTheLinearPropagation, \
+        testMotionUncertaintyAboveAndBelow, testMotionUncertaintyUnconstrained]
 
     for test in test_list:
         test()
