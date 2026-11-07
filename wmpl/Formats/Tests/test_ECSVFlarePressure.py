@@ -108,22 +108,63 @@ def testWithoutTheDragFitTheFlaresHaveNoPressure(tmp_path, monkeypatch, capsys):
 
 
 
+def flarePoint(station_id, t, frame_dt):
+    """ Make a flare point of a meteor descending at 10 km/s, with uncertainties as from flareHeights().
+
+    Arguments:
+        station_id: [str] Station ID.
+        t: [float] Time from the reference time (s).
+        frame_dt: [float] Duration of the frame of the camera (s).
+
+    Return:
+        [dict] The flare point.
+    """
+
+    frame_std = frame_dt/np.sqrt(12)
+
+    return {'station_id': station_id, 'jd': 2461070.9 + t/86400, 't_rel': t, 'ht': 90000.0 - 10000.0*t, \
+        'used': True, 'frame_dt': frame_dt, 'ht_rate': -10000.0, 't_std_mc': 0.0005, 'ht_std_mc': 50.0, \
+        't_std': np.hypot(0.0005, frame_std), 'ht_std': np.hypot(50.0, 10000.0*frame_std)}
+
+
+
 def testFlaresOneFrameOfTheSlowerCameraApartAreConsistent():
     """ Check that the same flare marked one frame apart by a 13 fps and a 25 fps camera is consistent, and two
         frames apart not.
     """
 
-    jd0 = 2461070.9
-
-    def point(station_id, t, frame_dt):
-        frame_std = frame_dt/np.sqrt(12)
-        return {'station_id': station_id, 'jd': jd0 + t/86400, 't_rel': t, 'ht': 90000.0 - 10000.0*t, \
-            'used': True, 'frame_dt': frame_dt, 'ht_rate': -10000.0, 't_std_mc': 0.0005, 'ht_std_mc': 50.0, \
-            't_std': np.hypot(0.0005, frame_std), 'ht_std': np.hypot(50.0, 10000.0*frame_std)}
-
-    one = flareReport([point('A', 0.5, 0.075), point('B', 0.575, 0.04)])
-    two = flareReport([point('A', 0.5, 0.075), point('B', 0.65, 0.04)])
+    one = flareReport([flarePoint('A', 0.5, 0.075), flarePoint('B', 0.575, 0.04)])
+    two = flareReport([flarePoint('A', 0.5, 0.075), flarePoint('B', 0.65, 0.04)])
 
     assert " 1 A -  2 B: 0.075 s apart" in one
     assert "(0.0 and 0.0 sigma): consistent" in one
     assert "NOT consistent" in two
+
+
+
+def testTheRealErrorOfTheTimeOffsetsIsAddedWhenTheSolverEstimatedThem():
+    """ Check that the real error of the time offsets is added to the uncertainty of the time between the flares
+        of two stations when the solver estimated the offset of one of them, and not when the offsets were not
+        estimated or both are fixed: two 25 fps cameras 0.091 s apart are 3.1 sigma apart without it, after
+        taking off a frame, and 2.9 sigma with it.
+    """
+
+    flares = [flarePoint('A', 0.5, 0.04), flarePoint('B', 0.591, 0.04)]
+
+    estimated = flareReport(flares, ref_stations=['A'])
+    assert "(2.9 and 0.0 sigma): consistent" in estimated
+    assert "real error of\nthe time offsets the solver estimated, 7 ms" in estimated
+
+    for ref_stations in ([], ['A', 'B']):
+        report = flareReport(flares, ref_stations=ref_stations)
+        assert "(3.1 and 0.0 sigma): NOT consistent" in report
+        assert "real error" not in report
+
+    # The same for the heights compared at the same time, which the error of the offsets also moves: 250 m
+    #   apart are 3.5 sigma without it and 2.5 sigma with it
+    above = flarePoint('B', 0.5, 0.04)
+    above['ht'] += 250.0
+    flares = [flarePoint('A', 0.5, 0.04), above]
+
+    assert "(0.0 and 2.5 sigma): consistent" in flareReport(flares, ref_stations=['A'])
+    assert "(0.0 and 3.5 sigma): NOT consistent" in flareReport(flares, ref_stations=[])

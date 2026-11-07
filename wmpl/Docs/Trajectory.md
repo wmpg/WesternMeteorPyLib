@@ -76,8 +76,11 @@ two, so the comparison takes one frame of the slower camera off the time between
 weighs it against its uncertainty. In the simulated fireballs, with the frames of each camera at a random
 phase and each marking the frame with the most light, 4.9 % of the same flares of a 25 and a 13 fps camera
 were further apart than 3 sigma of the duration of their frames, and 2.7 % with that frame taken off (2.1 %
-and 1.1 % with two 25 fps cameras). The real errors of the time offsets of the stations, 4 ms in the median
-against 0.5 ms from the fit, changed these by at most 0.3 points and are not added.
+and 1.1 % with two 25 fps cameras). When the solver estimated the time offsets, the uncertainty of the time
+between two stations also includes their real error, 7 ms (68 % of the errors in the same simulations, with
+a median of 4.4 ms), against about 0.24 ms from the fit and the Monte Carlo runs, which do not predict it.
+It also enters the heights compared at the same time. It changed the rates above by 0.2 to 0.3 points, with
+cameras of 25 fps; with faster cameras the frames weigh less and it matters more.
 
 ```
 python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments

@@ -1319,6 +1319,13 @@ def timeReferenceStr(ref_stations):
 
 
 
+# Real error of the time offset the solver estimates between two stations (s). Its fit and Monte Carlo runs
+#   give it about 30 times too small (0.24 ms in the median). In fireballs simulated with MetSim and seen by
+#   25 fps cameras, 68 % of the errors were below 7 ms, with a median of 4.4 ms and a 99th percentile of 28 ms
+FLARE_TIME_OFFSET_ERROR = 0.007
+
+
+
 def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
     """ Report the flare points from flareHeights(): the flares of every station (its flare points no further
         apart than max_gap), the points, and how the flares of different stations compare, as they need not be 
@@ -1331,7 +1338,10 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
         max_gap: [float] Largest time between the points of one flare of a station (s), 0.1 by default.
         match_window: [float] Largest time between the flares of two stations compared (s), 1 by default.
         ref_stations: [list] Stations whose clocks the times refer to, from timeReferenceStations(), to say
-            so in the report. None by default, to leave it out.
+            so in the report. When the solver estimated the time offsets of the others, the comparison of
+            the flares of two stations adds the real error of those offsets (FLARE_TIME_OFFSET_ERROR) to the
+            uncertainty of their times, except between two of these stations. None by default, to leave it
+            out.
 
     Return:
         [str] The report.
@@ -1435,6 +1445,11 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
         out_str += "times count. Two cameras can mark the same flare a frame apart, e.g. as it lasts longer\n"
         out_str += "than a frame, so one frame of the slower camera is taken off the time between them\n"
         out_str += "before it is weighed against its uncertainty.\n"
+        if ref_stations and any(station_id not in ref_stations for station_id in stations):
+            out_str += "The uncertainty of the time between two stations also includes the real error of\n"
+            out_str += "the time offsets the solver estimated, {:.0f} ms, measured in simulations, far\n" \
+                .format(1000*FLARE_TIME_OFFSET_ERROR)
+            out_str += "above the uncertainty of their fit.\n"
 
         compared = set()
         for i, event in enumerate(events):
@@ -1466,9 +1481,17 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
                     # The time of each flare is known to within its frame, but the heights are compared at the 
                     #   same time along the trajectory, which does not depend on when the flares happened within 
                     #   their frames, only on the Monte Carlo uncertainties
-                    t_sig = np.hypot(pa['t_std'], pb['t_std'])
+                    # The time offsets the solver estimated err far more than the uncertainties of its fit,
+                    #   which moves the time between two stations, and the height of one at the time of the
+                    #   other
+                    offset_error = 0.0
+                    if ref_stations and not ((pa['station_id'] in ref_stations) \
+                        and (pb['station_id'] in ref_stations)):
+                        offset_error = FLARE_TIME_OFFSET_ERROR
+
+                    t_sig = np.sqrt(pa['t_std']**2 + pb['t_std']**2 + offset_error**2)
                     ht_sig = np.sqrt(pa['ht_std_mc']**2 + pb['ht_std_mc']**2 
-                        + (pa['ht_rate']**2)*(pa['t_std_mc']**2 + pb['t_std_mc']**2))
+                        + (pa['ht_rate']**2)*(pa['t_std_mc']**2 + pb['t_std_mc']**2 + offset_error**2))
 
                     # Two cameras can mark frames of the same flare up to a frame of the slower one apart. In
                     #   fireballs simulated with MetSim, 4.9 % of the same flares of a 25 and a 13 fps camera
