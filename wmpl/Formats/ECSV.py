@@ -1765,6 +1765,8 @@ def eventFlaresStr(events, pairTest, valueStr, speedStr, pressureStr):
 
     for k, group in enumerate(groups):
 
+        # The first point in time among the stations, which in fireballs simulated with MetSim was closer to
+        #   the fragmentation than the mean of their beginnings or of their centres (see Docs/Trajectory.md)
         first = min((events[i][0] for i in group), key=lambda flare: flare['jd'])
         ht_std = None if first['ht_std'] is None else first['ht_std']/1000
         motion_str = "{:18s}  {:s}".format(speedStr(first), pressureStr(first)) if motion else ""

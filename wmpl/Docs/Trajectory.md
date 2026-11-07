@@ -117,6 +117,27 @@ missed more of the same flares marked only on their brightest frame. A third of 
 or more stations had a flare that already held another fragmentation, a median 85 ms apart, which no
 comparison of stations can split.
 
+Every flare of the event takes the values of its first point in time among its stations. A camera flags a
+flare once the light it integrates over a frame stands out, on average after the fragmentation, and the
+earliest camera is the least late. In the simulated fireballs (threshold 0.25 mag, 54 957 joined flares), with
+the times compared to that of the fragmentation and the pressures to the true pressure of the main at the time
+taken:
+
+| Time of the joined flare | Bias in time | Bias in pressure | Error of the pressure, median / 90th pct. |
+|---|---|---|---|
+| first point of any camera (used) | -2 ms | -0.3 % | 1.5 % / 4.3 % |
+| mean of the beginnings of the stations | +10 ms | +1.7 % | 1.8 % / 5.1 % |
+| one station | +10 ms | +1.7 % | 2.0 % / 5.8 % |
+| mean of the centres of the flares | +35 ms | +6.4 % | 6.4 % / 31 % |
+
+The centres of the flares come after the fragmentation, as its dust shines for several frames. With a
+threshold of 0.5 mag the first point does better still (1.5 % / 4.6 % against 2.6 % / 6.6 % for the mean of
+the beginnings). With 0.1 mag, which flags almost any brightening, the mean of the beginnings does slightly
+better (1.4 % / 5.9 % against 1.7 % / 7.0 %), as the first point is then early. The simulated frames are timed
+at the middle of their exposure, and RMS times the frames of FF files at their beginning, but the flares and
+the trajectory share those times and the solver fits the time offsets of the stations, so the heights and
+pressures follow the position of the meteor in the frame either way.
+
 ```
 python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 ```
