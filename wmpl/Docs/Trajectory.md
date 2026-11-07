@@ -71,10 +71,20 @@ picks, the ones in its report.
 
 The comparison notes a fragment more than 1.5 km off the main path at its first or last point. No fragment
 of the main went further in fireballs simulated with MetSim (2 to 7 fragments, with the lateral speeds of
-real fragmentations), while fragments of another body 2 km away did in 97 % of the cases. Such a fragment
-may come from another body, or the stations may have measured different fragments under the same number.
-Two stations measuring different fragments mostly give a line close to the main path anyway, which cannot be
-told apart, and often no trajectory at all.
+real fragmentations, stations converging by 20 deg), while fragments of another body 2 km away did in 97 %
+of the cases. Such a fragment may come from another body, the stations may have measured different fragments
+under the same number, or its trajectory may be poorly constrained: with stations converging by 8 deg, 8 to
+14 % of the fragments of the main went further. Two stations measuring different fragments mostly give a line
+close to the main path anyway, and often no trajectory at all.
+
+With the time offsets of the main trajectory, the comparison also gives how far apart along the path of the
+fragment every two of its stations see it at the same times, from their points on its line, as a constant
+difference in a joint fit of their positions in time, and notes more than 1 km. Two stations measuring
+different fragments see them where the line passes closest to their lines of sight, at different places
+along it. In the simulated fireballs, 0.2 to 0.3 % of the fragments of the main went further, against 70 %
+of the fragments whose 2 stations measured different fragments, and 56 % with 3 stations, one of which did.
+Time offsets estimated for the fragment (`--fragtimefit`) would absorb the difference, so it is then not
+given.
 
 The comparison also gives the convergence angle of the stations of every fragment, against that of the main
 trajectory, and notes one below 3 deg, the least the trajectory correlator of WMPL takes. Two stations that

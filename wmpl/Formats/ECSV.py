@@ -6,6 +6,7 @@ import os
 import sys
 import glob
 import datetime
+import itertools
 
 import numpy as np
 
@@ -677,6 +678,101 @@ def offMainPath(traj, frag_traj):
 
 
 
+# Largest distance along the path of a fragment between two of its stations at the same times, with the time
+#   offsets of the main trajectory (m). In fireballs simulated with MetSim 0.2-0.3 % of the fragments of the
+#   main one were further, and 56-70 % of those whose stations measured different fragments
+FRAGMENT_TIMING_LIMIT = 1000.0
+
+
+
+def projectionMismatch(t_a, along_a, t_b, along_b, deg=2):
+    """ Measure how far apart along the path the projections of a fragment from two stations are at the same
+        times, as the constant difference of the second station in a joint polynomial fit of their positions
+        in time. The points further from the fit than 4 times its robust scatter are dropped, keeping at
+        least 2 points of each station.
+
+    Arguments:
+        t_a: [ndarray] Times of the points of the first station (s).
+        along_a: [ndarray] Their positions along the path (m).
+        t_b: [ndarray] Times of the points of the second station (s).
+        along_b: [ndarray] Their positions along the path (m).
+
+    Keyword arguments:
+        deg: [int] Degree of the polynomial, lowered when there are few points. 2 by default.
+
+    Return:
+        [float] Position of the second station minus that of the first (m), None with too few points.
+    """
+
+    t = np.concatenate([t_a, t_b])
+    along = np.concatenate([along_a, along_b])
+    is_b = np.concatenate([np.zeros(len(t_a)), np.ones(len(t_b))])
+
+    deg = min(deg, len(t) - 3)
+    if deg < 1:
+        return None
+
+    design = np.column_stack([(t - np.mean(t))**p for p in range(deg + 1)] + [is_b])
+
+    # Drop the outliers, with a scatter of at least a metre for points without noise
+    good = np.ones(len(t), dtype=bool)
+    for _ in range(4):
+
+        coeffs = np.linalg.lstsq(design[good], along[good], rcond=None)[0]
+        residuals = along - design.dot(coeffs)
+        scatter = 1.4826*np.median(np.abs(residuals[good]))
+        new_good = np.abs(residuals) < 4*max(scatter, 1.0)
+
+        if (np.sum(new_good & (is_b == 0)) < 2) or (np.sum(new_good & (is_b == 1)) < 2) \
+            or np.array_equal(new_good, good):
+            break
+
+        good = new_good
+
+    return np.linalg.lstsq(design[good], along[good], rcond=None)[0][-1]
+
+
+
+def stationsApart(traj):
+    """ Measure how far apart along the path of a solved trajectory every two of its stations see the meteor
+        at the same times, from their points on the path (see projectionMismatch()). Stations which measured
+        different fragments under one number give a line on which they are far apart, unless the time
+        offsets were estimated for that line, which absorbs it.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        [dict] {(station ID, station ID): distance (m)} for every two stations with 3 used points or more.
+    """
+
+    direction = -vectNorm(traj.radiant_eci_mini)
+
+    tracks = {}
+    for obs in traj.observations:
+
+        if getattr(obs, 'ignore_station', False):
+            continue
+
+        used = np.array(obs.ignore_list) == 0
+        if np.sum(used) < 3:
+            continue
+
+        tracks[str(obs.station_id)] = ((np.array(obs.JD_data)[used] - traj.jdt_ref)*86400, \
+            np.dot(np.array(obs.model_eci)[used] - traj.state_vect_mini, direction))
+
+    apart = {}
+    for station_a, station_b in itertools.combinations(sorted(tracks), 2):
+
+        (t_a, along_a), (t_b, along_b) = tracks[station_a], tracks[station_b]
+        mismatch = projectionMismatch(t_a, along_a, t_b, along_b)
+        if mismatch is not None:
+            apart[(station_a, station_b)] = abs(mismatch)
+
+    return apart
+
+
+
 def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
     """ Summarize how the trajectories of additional fragments differ from the main one, to judge at a
         glance whether they are consistent with it.
@@ -809,8 +905,26 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
         # Warn about a fragment too far from the main path to have come from the main fragment
         if max(off_first, off_last) > FRAGMENT_OFF_PATH_LIMIT:
             out_str += "  NOTE: more than {:.1f} km off the main path, where no fragment of the main one " \
-                "was in simulated\n        fireballs: another body, or different fragments measured by " \
-                "the stations?\n".format(FRAGMENT_OFF_PATH_LIMIT/1000)
+                "was in simulated\n        fireballs: another body, different fragments measured by the " \
+                "stations, or a poorly\n        constrained trajectory?\n" \
+                .format(FRAGMENT_OFF_PATH_LIMIT/1000)
+
+        # Warn about stations which see the fragment at different places along its path at the same times, as
+        #   when they measured different fragments under one number. Time offsets estimated for the fragment
+        #   would absorb it
+        apart = stationsApart(frag_traj) if (reuse_timing and (len(frag_traj.observations) > 1)) else {}
+        if apart:
+
+            pairs = ["{:s}-{:s} {:.0f} m".format(station_a, station_b, dist) \
+                for (station_a, station_b), dist in sorted(apart.items())]
+            out_str += "  Stations apart        : {:s}\n".format(",\n                          ".join( \
+                ", ".join(pairs[i:i + 3]) for i in range(0, len(pairs), 3)))
+            out_str += "                          along the path at the same times\n"
+
+            if max(apart.values()) > FRAGMENT_TIMING_LIMIT:
+                out_str += "  NOTE: more than {:.1f} km apart, which hardly any fragment of the main one " \
+                    "was in simulated\n        fireballs: different fragments measured by the " \
+                    "stations?\n".format(FRAGMENT_TIMING_LIMIT/1000)
 
         out_str += "  Ahead of the main one : {:+.0f} m at the fragment's first point, {:+.0f} m at its " \
             "last (at the same time)\n".format(np.polyval(ahead_poly, frag_t[0]), \
