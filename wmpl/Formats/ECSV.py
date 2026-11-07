@@ -72,8 +72,8 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
         flares: [bool] Only load the points of the main fragment flagged as flares (flare = True), also those
             not used in its trajectory, whose flags are kept in the trajectory_use array of every observation.
             The flare_rows array of every observation keeps the position of every flare point among all the
-            points of the main fragment in its file, in time. The minimum number of points of an observation
-            does not apply.
+            points of the main fragment in its file, in time.
+            The minimum number of points of an observation does not apply.
     
     """
 
