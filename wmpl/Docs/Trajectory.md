@@ -80,7 +80,7 @@ the drag model on every run gave 2 to 3 m/s of scatter in these fireballs, again
 30 m/s. As `Trajectory.sampleMCVelocities()` does with the initial velocity, every run therefore shifts the
 speed within its uncertainty from the covariance of the drag fit (`DragFit.motionStdAtTime()`), and the
 pressure of the run follows. Near the fragmentations of the simulated fireballs that uncertainty, about
-30 m/s, held the real error within 1 sigma in 48 to 55 % of the cases and within 2 sigma in 75 to 82 %,
+30 m/s, held the real error within 1 sigma in 50 to 55 % of the cases and within 2 sigma in 77 to 82 %,
 so it is somewhat small: the bias of the fit where the meteor fragments is not included. Its share of the
 uncertainty of the pressure, about 0.3 %, is small next to that of the frame.
 
