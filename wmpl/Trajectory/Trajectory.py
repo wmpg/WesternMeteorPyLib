@@ -6852,12 +6852,12 @@ class Trajectory(object):
             # which needs to have fixed stations and the average velocity should be the reference velocity
 
             # Store the orbit-solve convention so it can be reused when the orbit is recomputed later
-            #   (e.g. by MetSim's saveUpdatedOrbit)
-            self.orbit_los_success = bool(minimize_solution.success)
+            #   (e.g. by MetSim's saveUpdatedOrbit), taking the status of the last pass of the fit
+            self.orbit_los_success = bool(self.los_mini_status)
 
             self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, self.v_avg, self.state_vect_mini, \
-                self.rbeg_jd, stations_fixed=(not minimize_solution.success), \
-                reference_init=minimize_solution.success, v_init_stddev_direct=self.v_init_stddev)
+                self.rbeg_jd, stations_fixed=(not self.orbit_los_success), \
+                reference_init=self.orbit_los_success, v_init_stddev_direct=self.v_init_stddev)
 
             if self.verbose:
                 print(self.orbit.__repr__(v_init_ht=self.v_init_ht))

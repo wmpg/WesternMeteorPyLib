@@ -6,7 +6,7 @@ fitted line was exactly the one gravity_correction=False gives.
 
 The tests drop a noise-free constant-velocity meteor by gravity, observe it from three stations, and check
 that the solver recovers it. A time range excluded from a station must still be excluded in the gravity pass,
-and lines of sight given as RA and Dec must not change in it.
+and lines of sight given as RA and Dec must not change in it. The orbit must take the fit status of that pass.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityWithoutTiming.py -v
@@ -14,7 +14,11 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+from types import SimpleNamespace
+from unittest import mock
+
 import numpy as np
+import scipy.optimize
 
 import matplotlib
 matplotlib.use('Agg')
@@ -154,6 +158,40 @@ def testRADecAreKeptInTheGravityPassWhenTheTimesDoNotStartAtZero():
 
     for obs in traj.observations:
         assert np.allclose(obs.meas_eci_los, lines_of_sight[obs.station_id], rtol=0, atol=1e-8)
+
+
+
+def testTheOrbitTakesTheStatusOfTheGravityPass():
+    """ Check that when the fit of the gravity pass fails after the first pass succeeded, the orbit is
+        computed as for a failed fit, from the intersecting planes with fixed stations.
+    """
+
+    original = scipy.optimize.minimize
+    fits = []
+
+    def failingGravityPass(fun, x0, args=(), **options):
+
+        if getattr(fun, '__name__', '') != 'minimizeAngleCost':
+            return original(fun, x0, args=args, **options)
+
+        fits.append(x0)
+
+        # Only the line-of-sight fit of the first pass converges
+        if len(fits) == 1:
+            return original(fun, x0, args=args, **options)
+
+        return SimpleNamespace(x=np.array(x0), fun=fun(np.array(x0), *args), success=False, nit=1, \
+            message='Failed')
+
+    traj, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True, estimate_timing_vel=False, \
+        gravity_correction=True, calc_orbit=True)
+
+    with mock.patch('scipy.optimize.minimize', failingGravityPass):
+        traj = traj.run()
+
+    assert len(fits) > 1
+    assert not traj.los_mini_status
+    assert not traj.orbit_los_success
 
 
 
