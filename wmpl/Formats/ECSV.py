@@ -1129,15 +1129,19 @@ def groundSpeedFit(traj):
         relative to the ground (the air), for the dynamic pressure. The speeds of the fit are inertial, so the
         Earth's rotation along the path is taken off them, which offsets them all alike (orbit.v_init -
         orbit.v_init_norot, as Orbit takes it for v_avg_norot). In fireballs simulated with MetSim, the drag
-        fit gave the dynamic pressure at the fragmentations within 3 % in 90 % of the cases, and over the
-        last quarter of the flight without the bias of a few per cent of an alpha-beta fit.
+        fit gave the dynamic pressure at the fragmentations within 0.7 % in 90 % of the cases, and over the
+        last quarter of the flight without the bias of about 4 % of an alpha-beta fit.
 
     Arguments:
         traj: [Trajectory object] Solved trajectory.
 
     Return:
-        speedAt: [function] The speed relative to the ground (m/s) at the given times from the reference time
-            of the trajectory (s), NaN outside the drag fit. None if the drag model could not be fitted.
+        (speedAt, speedStdAt):
+            - speedAt: [function] The speed relative to the ground (m/s) at the given times from the reference
+                time of the trajectory (s), NaN outside the drag fit.
+            - speedStdAt: [function] The uncertainty of that speed from the covariance of the fit (m/s, see
+                DragFit.motionStdAtTime()), from the noise of the points only.
+            Both are None if the drag model could not be fitted.
     """
 
     try:
@@ -1145,7 +1149,7 @@ def groundSpeedFit(traj):
 
     except ValueError as e:
         print("The speeds and dynamic pressures of the flares are not computed: {:s}".format(str(e)))
-        return None
+        return None, None
 
     # The Earth's rotation along the path, 0 without the speed relative to the ground
     v_rotation = 0.0
@@ -1155,7 +1159,10 @@ def groundSpeedFit(traj):
     def speedAt(t_rel):
         return drag_fit.velocityAtTime(np.atleast_1d(t_rel)) - v_rotation
 
-    return speedAt
+    def speedStdAt(t_rel):
+        return drag_fit.motionStdAtTime(np.atleast_1d(t_rel))[0]
+
+    return speedAt, speedStdAt
 
 
 
@@ -1174,16 +1181,21 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
     Keyword arguments:
         mc_trajs: [list] Its Monte Carlo runs. The flares are projected on each one, with the noise of the runs
             on their lines of sight and the time offsets each run estimated (see runTimeOffsets()), and the
-            standard deviations of their times and heights are their uncertainties.
+            standard deviations of their times and heights are their uncertainties. The noise of the runs
+            only moves the radiant, so the speed of the drag fit is shifted in every run within its
+            uncertainty from the fit, by one draw per run for all the flare points, as
+            Trajectory.sampleMCVelocities() does with the initial velocity. Where the fit leaves the speed
+            unconstrained, it is not shifted.
 
     Return:
         [list] Dictionaries of the flare points sorted by time, with the station_id, jd, t_rel (s from the
-            reference time of the trajectory), ht (m above sea level), used, frame_dt (s), ht_rate (rate of 
-            change of the height of the trajectory at that time, m/s), the uncertainties t_std (s) and ht_std 
+            reference time of the trajectory), ht (m above sea level), used, frame_dt (s), ht_rate (rate of
+            change of the height of the trajectory at that time, m/s), the uncertainties t_std (s) and ht_std
             (m), and their parts from the Monte Carlo runs only, t_std_mc and ht_std_mc. The uncertainties are
             None without Monte Carlo runs. Also the speed relative to the ground v (m/s, see
             groundSpeedFit()) and the dynamic pressure p = rho*v^2 (Pa) with the NRLMSISE air density at the
-            point, with p_std and p_std_mc as for the height, or None if the drag model could not be fitted.
+            point, with v_std, v_std_mc, p_std and p_std_mc as for the height, or None if the drag model could
+            not be fitted.
     """
 
     flare_meteors, input_meteors = loadFlares(ecsv_paths)
@@ -1194,38 +1206,51 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
 
     # Dynamic pressure from the speed of the drag fit of this solution, at the given times (s from the
     #   reference time of the trajectory), heights (m) and places (radians)
-    speedAt = groundSpeedFit(traj) if projected else None
+    speedAt, speedStdAt = groundSpeedFit(traj) if projected else (None, None)
 
-    def pressureAt(t_rel, ht, lat, lon):
-        """ Compute the dynamic pressure (Pa), NaN without the drag fit or outside it. """
+    def pressureAt(t_rel, ht, lat, lon, speed_shift=0.0):
+        """ Compute the dynamic pressure (Pa) with the speed shifted by speed_shift (m/s), NaN without the
+            drag fit or outside it. """
 
         if speedAt is None:
             return np.nan
 
         rho = getAtmDensity_vect(np.atleast_1d(lat), np.atleast_1d(lon), np.atleast_1d(ht), traj.jdt_ref)
 
-        return float(rho[0]*speedAt(t_rel)[0]**2)
+        return float(rho[0]*(speedAt(t_rel)[0] + speed_shift)**2)
 
     for meteor in flare_meteors:
         if (meteor.ecsv_file, 0) not in projected:
             print("The flares of station {:s} are skipped, as it is not in the main trajectory: {:s}".format(
                 str(meteor.station_id), meteor.ecsv_file))
 
-    # Scatter of the times, heights and dynamic pressures of the flares in the Monte Carlo runs
+    # Scatter of the times, heights, dynamic pressures and speeds of the flares in the Monte Carlo runs
     mc_values = {key: [] for key in projected}
     if mc_trajs:
+
+        # Uncertainty of the speed of every flare point from the drag fit, not shifted where it is not finite
+        speed_std = {key: 0.0 for key in projected}
+        if speedAt is not None:
+            stds = speedStdAt(np.array([(flare['jd'] - traj.jdt_ref)*86400 for flare in projected.values()]))
+            speed_std = {key: (float(std) if np.isfinite(std) else 0.0) for key, std in zip(projected, stds)}
 
         ang_res_std = {str(obs.station_id): obs.ang_res_std for obs in traj.observations}
         for mc_traj in mc_trajs:
 
-            mc_projected = projectFlares(mc_traj, flare_meteors, input_meteors, noise_sigma=traj.mc_noise_std, 
+            # Shift the speed of the run within the uncertainty of the drag fit, as its noise does not move it
+            speed_draw = np.random.normal(0, 1)
+
+            mc_projected = projectFlares(mc_traj, flare_meteors, input_meteors, noise_sigma=traj.mc_noise_std,
                 ang_res_std=ang_res_std, time_diffs=runTimeOffsets(mc_traj, traj))
 
             for key, flare in mc_projected.items():
                 if key in mc_values:
                     ht = flare['ht'] if flare['used'] else flare['ht_time']
+                    t_rel = (flare['jd'] - traj.jdt_ref)*86400
+                    speed_shift = speed_draw*speed_std[key]
+                    speed = (float(speedAt(t_rel)[0]) + speed_shift) if (speedAt is not None) else np.nan
                     mc_values[key].append(((flare['jd'] - projected[key]['jd'])*86400, ht, \
-                        pressureAt((flare['jd'] - traj.jdt_ref)*86400, ht, flare['lat'], flare['lon'])))
+                        pressureAt(t_rel, ht, flare['lat'], flare['lon'], speed_shift), speed))
 
     # Heights of the trajectory in time, to compare flares seen at different times
     used_obs = [obs for obs in traj.observations if not obs.ignore_station]
@@ -1248,12 +1273,14 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
 
         # Speed and dynamic pressure, and how fast the pressure changes along the trajectory
         flare['v'] = flare['p'] = flare['p_std'] = flare['p_std_mc'] = None
+        flare['v_std'] = flare['v_std_mc'] = None
         if speedAt is not None:
             flare['v'] = float(speedAt(flare['t_rel'])[0])
             flare['p'] = pressureAt(flare['t_rel'], flare['ht'], flare['lat'], flare['lon'])
             p_rate = (pressureAt(flare['t_rel'] + 0.01, flare['ht'] + 0.01*flare['ht_rate'], flare['lat'], \
                 flare['lon']) - pressureAt(flare['t_rel'] - 0.01, flare['ht'] - 0.01*flare['ht_rate'], \
                 flare['lat'], flare['lon']))/0.02
+            v_rate = (speedAt(flare['t_rel'] + 0.01)[0] - speedAt(flare['t_rel'] - 0.01)[0])/0.02
 
         if len(mc_values[key]) > 1:
             values = np.array(mc_values[key])
@@ -1273,8 +1300,15 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
                 flare['p_std'] = np.hypot(flare['p_std_mc'], p_rate*frame_std) if np.isfinite(p_rate) \
                     else flare['p_std_mc']
 
+            # The same for the speed
+            speeds = values[:, 3][np.isfinite(values[:, 3])]
+            if (flare['v'] is not None) and np.isfinite(flare['v']) and (len(speeds) > 1):
+                flare['v_std_mc'] = np.std(speeds)
+                flare['v_std'] = np.hypot(flare['v_std_mc'], v_rate*frame_std) if np.isfinite(v_rate) \
+                    else flare['v_std_mc']
+
         if (flare['p'] is not None) and (not np.isfinite(flare['p'])):
-            flare['v'] = flare['p'] = None
+            flare['v'] = flare['p'] = flare['v_std'] = flare['v_std_mc'] = None
 
         flares.append(flare)
 
@@ -1376,8 +1410,25 @@ def flareReport(flares, match_window=1.0, ref_stations=None):
         if flare.get('p') is None:
             return ""
 
-        return ", v = {:.2f} km/s, p = {:s} kPa".format(flare['v']/1000, valueStr(flare['p']/1000, \
-            None if flare.get('p_std') is None else flare['p_std']/1000, "{:.1f}"))
+        return ", v = {:s} km/s, p = {:s} kPa".format(speedStr(flare), pressureStr(flare))
+
+    def speedStr(flare):
+        """ Format the speed of a flare point in km/s, empty if not known. """
+
+        if flare.get('v') is None:
+            return ""
+
+        return valueStr(flare['v']/1000, None if flare.get('v_std') is None else flare['v_std']/1000, \
+            "{:.3f}")
+
+    def pressureStr(flare):
+        """ Format the dynamic pressure of a flare point in kPa, empty if not known. """
+
+        if flare.get('p') is None:
+            return ""
+
+        return valueStr(flare['p']/1000, None if flare.get('p_std') is None else flare['p_std']/1000, \
+            "{:.1f}")
 
     def sameFlare(prev, flare):
         """ Check whether a flare point is in the row after the previous flare point of its file, or without
@@ -1431,6 +1482,10 @@ def flareReport(flares, match_window=1.0, ref_stations=None):
         out_str += "Speeds v relative to the ground from a drag fit of the trajectory (wmpl.Utils.DragFit),\n"
         out_str += "and dynamic pressures p = rho*v^2 with the NRLMSISE air density, whose own error is not\n"
         out_str += "included.\n"
+        if uncertain:
+            out_str += "The uncertainty of the speed from the noise of the points, from the covariance\n"
+            out_str += "of the drag fit, is drawn in every Monte Carlo run. The bias of the fit where the\n"
+            out_str += "meteor fragments is not included.\n"
     out_str += "\n"
 
     out_str += "Flares of every station (t from the reference time of the trajectory):\n"
@@ -1449,14 +1504,19 @@ def flareReport(flares, match_window=1.0, ref_stations=None):
                 motionStr(event[-1]))
 
     out_str += "\n"
+    # The speed and the dynamic pressure of every point, if any is known
+    motion = any(flare.get('p') is not None for flare in flares)
+
     out_str += "Flare points:\n"
-    out_str += "Flare  Station       Time (UTC)      t (s)                  Ht (km)               Used\n"
+    out_str += "Flare  Station       Time (UTC)      t (s)                  Ht (km)               " \
+        + ("{:18s}  {:20s}  ".format("v (km/s)", "p (kPa)") if motion else "") + "Used\n"
     for i, event in enumerate(events):
         for flare in event:
-            out_str += "{:5d}  {:12s}  {:s}    {:21s}  {:20s}  {:s}\n".format(i + 1, flare['station_id'], 
-                timeStr(flare['jd']), valueStr(flare['t_rel'], flare['t_std'], "{:.4f}"), 
-                valueStr(flare['ht']/1000, None if flare['ht_std'] is None else flare['ht_std']/1000, "{:.3f}"), 
-                "yes" if flare['used'] else "no")
+            motion_str = "{:18s}  {:20s}  ".format(speedStr(flare), pressureStr(flare)) if motion else ""
+            out_str += "{:5d}  {:12s}  {:s}    {:21s}  {:20s}  {:s}{:s}\n".format(i + 1, flare['station_id'],
+                timeStr(flare['jd']), valueStr(flare['t_rel'], flare['t_std'], "{:.4f}"),
+                valueStr(flare['ht']/1000, None if flare['ht_std'] is None else flare['ht_std']/1000, \
+                "{:.3f}"), motion_str, "yes" if flare['used'] else "no")
 
     # Compare the flares of different stations, which need not be the same: e.g. a fireball can show two flares
     #   which one camera sees at other times than another

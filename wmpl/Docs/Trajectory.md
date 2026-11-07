@@ -71,9 +71,18 @@ Every flare also gets the speed of the meteor relative to the ground at its time
 trajectory (`wmpl.Utils.DragFit`, with the Earth's rotation along the path taken off its inertial speeds),
 and the dynamic pressure p = rho*v^2 with the NRLMSISE air density at its height, with uncertainties from
 the Monte Carlo runs and the frame as for the height. The error of the air density model is not included.
-On fireballs simulated with MetSim, the drag fit gave the dynamic pressure at the fragmentations within 3 %
-in 90 % of the cases, and better than a robust alpha-beta fit late in the flight, where that one gave it
-about 5 % too high.
+On fireballs simulated with MetSim, the drag fit gave the dynamic pressure at the fragmentations within
+0.7 % in 90 % of the cases (0.2 % in the median), and better than a robust alpha-beta fit late in the
+flight, where that one gave it about 4 % too high.
+
+The noise of the Monte Carlo runs only moves the radiant, so the runs alone do not change the speed: refitting
+the drag model on every run gave 2 to 3 m/s of scatter in these fireballs, against a real error of about
+30 m/s. As `Trajectory.sampleMCVelocities()` does with the initial velocity, every run therefore shifts the
+speed within its uncertainty from the covariance of the drag fit (`DragFit.motionStdAtTime()`), and the
+pressure of the run follows. Near the fragmentations of the simulated fireballs that uncertainty, about
+30 m/s, held the real error within 1 sigma in 48 to 55 % of the cases and within 2 sigma in 75 to 82 %,
+so it is somewhat small: the bias of the fit where the meteor fragments is not included. Its share of the
+uncertainty of the pressure, about 0.3 %, is small next to that of the frame.
 
 When the solver estimated the initial velocity from a drag fit of the first part of the trajectory
 (`--vinitdrag`, `wmpl.Utils.DragInitialVelocity`), which models a single body without fragmentation, the

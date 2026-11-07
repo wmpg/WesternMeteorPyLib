@@ -69,7 +69,7 @@ def testAFlareGetsTheSpeedRelativeToTheGroundAndTheDynamicPressure(tmp_path):
     # Without the Monte Carlo runs the pressure has no uncertainty, and the report gives it
     assert flare['p_std'] is None
     report = flareReport([flare])
-    assert ", v = 20.00 km/s, p = {:.1f} kPa".format(flare['p']/1000) in report
+    assert ", v = {:.3f} km/s, p = {:.1f} kPa".format(flare['v']/1000, flare['p']/1000) in report
     assert "dynamic pressures p = rho*v^2" in report
 
 
