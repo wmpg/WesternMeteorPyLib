@@ -71,6 +71,11 @@ On fireballs simulated with MetSim, the drag fit gave the dynamic pressure at th
 in 90 % of the cases, and better than a robust alpha-beta fit late in the flight, where that one gave it
 about 5 % too high.
 
+When the solver estimated the initial velocity from a drag fit of the first part of the trajectory
+(`--vinitdrag`, `wmpl.Utils.DragInitialVelocity`), which models a single body without fragmentation, the
+report warns if a flare point lies at or above the lowest fitted point, giving the highest flare point of
+every station, and suggests a `--vinitdraght` that keeps only the points above the highest flare.
+
 Two cameras can mark the same flare a frame apart, e.g. as it lasts longer than a frame or peaks between
 two, so the comparison takes one frame of the slower camera off the time between two flares before it
 weighs it against its uncertainty. In the simulated fireballs, with the frames of each camera at a random
