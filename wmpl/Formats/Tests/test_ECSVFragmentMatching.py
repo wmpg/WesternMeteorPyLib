@@ -15,7 +15,7 @@ import shutil
 
 import numpy as np
 
-from wmpl.Formats.ECSV import fragmentMatches, fragmentMatchReport, projectionMismatch
+from wmpl.Formats.ECSV import fragmentMatches, fragmentMatchReport
 from wmpl.Formats.Tests.test_ECSVUnsolvedFragments import META, MAIN, FRAGMENT, STATIONS, T0, FPS, N_FRAMES, \
     FRAGMENT_START, DIRECTION, azAlt, mainPoint, solveMain
 
@@ -96,24 +96,6 @@ def reportRows(report):
     """
 
     return "\n".join(line for line in report.splitlines() if line.startswith("  "))
-
-
-
-def testTheDistanceAlongThePathOfTwoStationsIsMeasured():
-    """ Check that the distance between the projections of two stations is measured despite an outlier, and
-        that too few points give none.
-    """
-
-    t_a = np.linspace(0.0, 1.0, 20)
-    t_b = np.linspace(0.02, 0.98, 25)
-    rng = np.random.default_rng(3)
-
-    along_a = 20000*t_a - 1500*t_a**2 + rng.normal(0, 20.0, len(t_a))
-    along_b = 20000*t_b - 1500*t_b**2 + 300.0 + rng.normal(0, 20.0, len(t_b))
-    along_b[5] += 5000.0
-
-    assert abs(projectionMismatch(t_a, along_a, t_b, along_b) - 300.0) < 20.0
-    assert projectionMismatch(t_a[:1], along_a[:1], t_b[:2], along_b[:2]) is None
 
 
 

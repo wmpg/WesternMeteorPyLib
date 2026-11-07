@@ -1691,54 +1691,6 @@ FRAGMENT_MATCH_OVERLAP = 0.08
 
 
 
-def projectionMismatch(t_a, along_a, t_b, along_b, deg=2):
-    """ Measure how far apart along the path the projections of a fragment from two stations are at the same
-        times, as the constant difference of the second station in a joint polynomial fit of their positions
-        in time. The points further from the fit than 4 times its robust scatter are dropped, keeping at
-        least 2 points of each station.
-
-    Arguments:
-        t_a: [ndarray] Times of the points of the first station (s).
-        along_a: [ndarray] Their positions along the path (m).
-        t_b: [ndarray] Times of the points of the second station (s).
-        along_b: [ndarray] Their positions along the path (m).
-
-    Keyword arguments:
-        deg: [int] Degree of the polynomial, lowered when there are few points. 2 by default.
-
-    Return:
-        [float] Position of the second station minus that of the first (m), None with too few points.
-    """
-
-    t = np.concatenate([t_a, t_b])
-    along = np.concatenate([along_a, along_b])
-    is_b = np.concatenate([np.zeros(len(t_a)), np.ones(len(t_b))])
-
-    deg = min(deg, len(t) - 3)
-    if deg < 1:
-        return None
-
-    design = np.column_stack([(t - np.mean(t))**p for p in range(deg + 1)] + [is_b])
-
-    # Drop the outliers, with a scatter of at least a metre for points without noise
-    good = np.ones(len(t), dtype=bool)
-    for _ in range(4):
-
-        coeffs = np.linalg.lstsq(design[good], along[good], rcond=None)[0]
-        residuals = along - design.dot(coeffs)
-        scatter = 1.4826*np.median(np.abs(residuals[good]))
-        new_good = np.abs(residuals) < 4*max(scatter, 1.0)
-
-        if (np.sum(new_good & (is_b == 0)) < 2) or (np.sum(new_good & (is_b == 1)) < 2) \
-            or np.array_equal(new_good, good):
-            break
-
-        good = new_good
-
-    return np.linalg.lstsq(design[good], along[good], rcond=None)[0][-1]
-
-
-
 def fragmentMatches(traj, ecsv_paths, fragments):
     """ Match the additional fragments seen from every two stations by where they are along the main path at
         the same times, whatever their numbers in the ECSV files. The points of every station are projected
