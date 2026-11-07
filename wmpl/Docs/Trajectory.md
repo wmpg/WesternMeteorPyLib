@@ -43,6 +43,65 @@ To see the solver working on a synthetic example without any data of your own:
 python -m wmpl.Trajectory.Trajectory
 ```
 
+### Additional fragments in ECSV files
+
+ECSV files can describe more fragments than the main one, as in Appendix 4 of the GFE standard: one row
+per frame, with the columns of each additional fragment carrying its number as a suffix (`datetime1`,
+`ra1`, `dec1`, `azimuth1`, `altitude1`, ...), empty on the frames where it was not measured. The main
+fragment, fragment 0, is always solved from the columns without a suffix (or with the optional suffix 0),
+leaving out its points with `trajectory_use` = False (e.g. saturated flares kept in the file).
+
+```
+python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
+```
+
+| Flag | Description |
+| :--- | :--- |
+| `--fragments` | After the main fragment, solve every additional fragment seen from at least 2 stations with the same options (Monte Carlo included), save each one in a `fragment_k` folder of the output directory, and print how it differs from the main one: convergence angle of its stations, radiant, velocities, heights, distance from the main path and how far ahead of the main fragment it is at the same time. |
+| `--fragtimefit` | Estimate the station time offsets for every fragment, instead of reusing those of the main trajectory, which its larger number of points constrains better. Without the timing estimation (`-e`), the fragments take the same fixed offsets as the main fragment. |
+| `--fragnosys` | Leave out of the Monte Carlo uncertainties of the fragments the systematic errors of the stations, which are otherwise included when the main trajectory has 3 stations or more (see below). |
+
+Two solutions differ slightly even for identical data, as each goes through its own iterations of the
+timing and velocity estimation: in tests, by about 0.001 deg and tens of metres with well spread stations,
+and up to about 0.1 deg and a few hundred metres with nearly parallel ones. With the Monte Carlo runs, the
+solutions compared are still those with the original picks (not the best Monte Carlo runs, which differ by
+about 1 sigma even for identical data), and the differences are also given in units of the combined
+uncertainty. The time offsets reused by the fragments are also those of the main solution with the original
+picks, the ones in its report.
+
+The comparison notes a fragment more than 1.5 km off the main path at its first or last point. No fragment
+of the main went further in fireballs simulated with MetSim (2 to 7 fragments, with the lateral speeds of
+real fragmentations, stations converging by 20 deg), while fragments of another body 2 km away did in 97 %
+of the cases. Such a fragment may come from another body, the stations may have measured different fragments
+under the same number, or its trajectory may be poorly constrained: with stations converging by 8 deg, 8 to
+14 % of the fragments of the main went further. Two stations measuring different fragments mostly give a line
+close to the main path anyway, and often no trajectory at all.
+
+With the time offsets of the main trajectory, the comparison also gives how far apart along the path of the
+fragment every two of its stations see it at the same times, from their points on its line, as a constant
+difference in a joint fit of their positions in time, and notes more than 1 km. Two stations measuring
+different fragments see them where the line passes closest to their lines of sight, at different places
+along it. In the simulated fireballs, 0.2 to 0.3 % of the fragments of the main went further, against 70 %
+of the fragments whose 2 stations measured different fragments, and 56 % with 3 stations, one of which did.
+Time offsets estimated for the fragment (`--fragtimefit`) would absorb the difference, so it is then not
+given.
+
+The comparison also gives the convergence angle of the stations of every fragment, against that of the main
+trajectory, and notes one below 3 deg, the least the trajectory correlator of WMPL takes. Two stations that
+hardly converge for a fragment, e.g. close to each other and looking the same way, still give a line, but one
+which the small errors of their picks can turn far from the true path.
+
+The pointing of a station can be off by the same amount at all its points (its calibration, or the centroid
+of a saturated meteor), which does not average out with their number, so the Monte Carlo runs do not
+include it. With 3 or more stations in the main trajectory, the others constrain its line, and the residuals
+of each station across the line show its own error, as a constant and a slope along the trajectory. Their
+typical size is added to the Monte Carlo runs of every fragment, as a random constant and slope of each
+station in every run. The solution of the fragment is the one with the original picks, as without them, and
+only its uncertainties change. On fireballs simulated with MetSim, with 2 to 7 fragments, noise and
+saturation, the true direction of a fragment was within the 95 % region of its uncertainties in 93 % of the
+cases with them, and in 75 % without. With 2 stations in the main trajectory there is nothing to measure,
+and the solver says so.
+
 ## The trajectory pickle
 
 A successful run writes `<event>_trajectory.pickle` (plus plots and a text report) into the output
