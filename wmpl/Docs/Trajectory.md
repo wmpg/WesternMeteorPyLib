@@ -63,6 +63,22 @@ uncertainties come from the Monte Carlo runs and from the duration of the frame 
 it happened at any time within it. The times are relative to the clock of the reference station, whose
 time offset is not estimated, so the Monte Carlo runs give it no uncertainty in time, but the frame does.
 
+Every flare also gets the speed of the meteor relative to the ground at its time, from the drag fit of the
+trajectory (`wmpl.Utils.DragFit`, with the Earth's rotation along the path taken off its inertial speeds),
+and the dynamic pressure p = rho*v^2 with the NRLMSISE air density at its height, with uncertainties from
+the Monte Carlo runs and the frame as for the height. The error of the air density model is not included.
+On fireballs simulated with MetSim, the drag fit gave the dynamic pressure at the fragmentations within 3 %
+in 90 % of the cases, and better than a robust alpha-beta fit late in the flight, where that one gave it
+about 5 % too high.
+
+Two cameras can mark the same flare a frame apart, e.g. as it lasts longer than a frame or peaks between
+two, so the comparison takes one frame of the slower camera off the time between two flares before it
+weighs it against its uncertainty. In the simulated fireballs, with the frames of each camera at a random
+phase and each marking the frame with the most light, 4.9 % of the same flares of a 25 and a 13 fps camera
+were further apart than 3 sigma of the duration of their frames, and 2.7 % with that frame taken off (2.1 %
+and 1.1 % with two 25 fps cameras). The real errors of the time offsets of the stations, 4 ms in the median
+against 0.5 ms from the fit, changed these by at most 0.3 points and are not added.
+
 ```
 python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 ```

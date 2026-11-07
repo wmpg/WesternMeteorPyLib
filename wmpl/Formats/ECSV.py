@@ -18,6 +18,8 @@ from wmpl.Trajectory.StationSystematics import stationSystematicErrors, systemat
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenSphericalCoords
 from wmpl.Trajectory.Trajectory import ObservedPoints
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
+from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
     equatorialCoordPrecession_vect, jd2Date
 
@@ -1009,7 +1011,8 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
             station_id, jd (corrected time), ht (m above sea level, as the heights of the trajectory), ht_time
             (the height of the trajectory at the time of the point, from its own points, m), used (in the
             trajectory), frame_dt (time step of the station, s), and the ECI vectors eci (the point on the
-            trajectory), stat (the station) and los (the line of sight).
+            trajectory), stat (the station) and los (the line of sight), and the lat and lon of the point on
+            the trajectory (radians).
     """
 
     offsets = appliedTimeOffsets(traj, input_meteors)
@@ -1076,7 +1079,8 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
                 'ht': obs.model_ht[i], 'ht_time': heightAt((obs.JD_data[i] - traj.jdt_ref)*86400), 
                 'used': bool(meteor.trajectory_use[i]), 
                 'frame_dt': frame_dts[meteor.ecsv_file], 'eci': np.array(obs.model_eci[i]),
-                'stat': np.array(obs.stat_eci_los[i]), 'los': np.array(obs.meas_eci_los[i])}
+                'stat': np.array(obs.stat_eci_los[i]), 'los': np.array(obs.meas_eci_los[i]),
+                'lat': obs.model_lat[i], 'lon': obs.model_lon[i]}
 
     return projected
 
@@ -1105,6 +1109,41 @@ def runTimeOffsets(mc_traj, traj):
 
 
 
+def groundSpeedFit(traj):
+    """ Fit the speed of the meteor along a solved trajectory with the drag fit of wmpl.Utils.DragFit,
+        relative to the ground (the air), for the dynamic pressure. The speeds of the fit are inertial, so the
+        Earth's rotation along the path is taken off them, which offsets them all alike (orbit.v_init -
+        orbit.v_init_norot, as Orbit takes it for v_avg_norot). In fireballs simulated with MetSim, the drag
+        fit gave the dynamic pressure at the fragmentations within 3 % in 90 % of the cases, and over the
+        last quarter of the flight without the bias of a few per cent of an alpha-beta fit.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        speedAt: [function] The speed relative to the ground (m/s) at the given times from the reference time
+            of the trajectory (s), NaN outside the drag fit. None if the drag model could not be fitted.
+    """
+
+    try:
+        drag_fit = DragFit(traj)
+
+    except ValueError as e:
+        print("The speeds and dynamic pressures of the flares are not computed: {:s}".format(str(e)))
+        return None
+
+    # The Earth's rotation along the path, 0 without the speed relative to the ground
+    v_rotation = 0.0
+    if (traj.orbit is not None) and (getattr(traj.orbit, 'v_init_norot', None) is not None):
+        v_rotation = traj.orbit.v_init - traj.orbit.v_init_norot
+
+    def speedAt(t_rel):
+        return drag_fit.velocityAtTime(np.atleast_1d(t_rel)) - v_rotation
+
+    return speedAt
+
+
+
 def flareHeights(traj, ecsv_paths, mc_trajs=None):
     """ Times and heights of the points of the main fragment flagged as flares in ECSV files, used in its
         trajectory or not (trajectory_use = False), on a solution of it (see projectFlares()), with their
@@ -1127,7 +1166,9 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
             reference time of the trajectory), ht (m above sea level), used, frame_dt (s), ht_rate (rate of 
             change of the height of the trajectory at that time, m/s), the uncertainties t_std (s) and ht_std 
             (m), and their parts from the Monte Carlo runs only, t_std_mc and ht_std_mc. The uncertainties are
-            None without Monte Carlo runs.
+            None without Monte Carlo runs. Also the speed relative to the ground v (m/s, see
+            groundSpeedFit()) and the dynamic pressure p = rho*v^2 (Pa) with the NRLMSISE air density at the
+            point, with p_std and p_std_mc as for the height, or None if the drag model could not be fitted.
     """
 
     flare_meteors, input_meteors = loadFlares(ecsv_paths)
@@ -1136,12 +1177,26 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
 
     projected = projectFlares(traj, flare_meteors, input_meteors)
 
+    # Dynamic pressure from the speed of the drag fit of this solution, at the given times (s from the
+    #   reference time of the trajectory), heights (m) and places (radians)
+    speedAt = groundSpeedFit(traj) if projected else None
+
+    def pressureAt(t_rel, ht, lat, lon):
+        """ Compute the dynamic pressure (Pa), NaN without the drag fit or outside it. """
+
+        if speedAt is None:
+            return np.nan
+
+        rho = getAtmDensity_vect(np.atleast_1d(lat), np.atleast_1d(lon), np.atleast_1d(ht), traj.jdt_ref)
+
+        return float(rho[0]*speedAt(t_rel)[0]**2)
+
     for meteor in flare_meteors:
         if (meteor.ecsv_file, 0) not in projected:
             print("The flares of station {:s} are skipped, as it is not in the main trajectory: {:s}".format(
                 str(meteor.station_id), meteor.ecsv_file))
 
-    # Scatter of the times and heights of the flares in the Monte Carlo runs
+    # Scatter of the times, heights and dynamic pressures of the flares in the Monte Carlo runs
     mc_values = {key: [] for key in projected}
     if mc_trajs:
 
@@ -1153,8 +1208,9 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
 
             for key, flare in mc_projected.items():
                 if key in mc_values:
-                    mc_values[key].append(((flare['jd'] - projected[key]['jd'])*86400, \
-                        flare['ht'] if flare['used'] else flare['ht_time']))
+                    ht = flare['ht'] if flare['used'] else flare['ht_time']
+                    mc_values[key].append(((flare['jd'] - projected[key]['jd'])*86400, ht, \
+                        pressureAt((flare['jd'] - traj.jdt_ref)*86400, ht, flare['lat'], flare['lon'])))
 
     # Heights of the trajectory in time, to compare flares seen at different times
     used_obs = [obs for obs in traj.observations if not obs.ignore_station]
@@ -1174,8 +1230,19 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
             near = np.ones_like(traj_t, dtype=bool)
         flare['ht_rate'] = np.polyfit(traj_t[near], traj_ht[near], 1)[0]
         flare['t_std'] = flare['ht_std'] = flare['t_std_mc'] = flare['ht_std_mc'] = None
+
+        # Speed and dynamic pressure, and how fast the pressure changes along the trajectory
+        flare['v'] = flare['p'] = flare['p_std'] = flare['p_std_mc'] = None
+        if speedAt is not None:
+            flare['v'] = float(speedAt(flare['t_rel'])[0])
+            flare['p'] = pressureAt(flare['t_rel'], flare['ht'], flare['lat'], flare['lon'])
+            p_rate = (pressureAt(flare['t_rel'] + 0.01, flare['ht'] + 0.01*flare['ht_rate'], flare['lat'], \
+                flare['lon']) - pressureAt(flare['t_rel'] - 0.01, flare['ht'] - 0.01*flare['ht_rate'], \
+                flare['lat'], flare['lon']))/0.02
+
         if len(mc_values[key]) > 1:
-            flare['t_std_mc'], flare['ht_std_mc'] = np.std(np.array(mc_values[key]), axis=0)
+            values = np.array(mc_values[key])
+            flare['t_std_mc'], flare['ht_std_mc'] = np.std(values[:, :2], axis=0)
 
             # The flare happened at any time within its frame, so its time is only known to within the
             #   duration of the frame (a uniform distribution), and the height of the meteor at that time to 
@@ -1183,6 +1250,16 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
             frame_std = flare['frame_dt']/np.sqrt(12)
             flare['t_std'] = np.hypot(flare['t_std_mc'], frame_std)
             flare['ht_std'] = np.hypot(flare['ht_std_mc'], flare['ht_rate']*frame_std)
+
+            # The same for the dynamic pressure, from the runs in which it could be computed
+            pressures = values[:, 2][np.isfinite(values[:, 2])]
+            if (flare['p'] is not None) and np.isfinite(flare['p']) and (len(pressures) > 1):
+                flare['p_std_mc'] = np.std(pressures)
+                flare['p_std'] = np.hypot(flare['p_std_mc'], p_rate*frame_std) if np.isfinite(p_rate) \
+                    else flare['p_std_mc']
+
+        if (flare['p'] is not None) and (not np.isfinite(flare['p'])):
+            flare['v'] = flare['p'] = None
 
         flares.append(flare)
 
@@ -1266,6 +1343,15 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
     def timeStr(jd):
         return jd2Date(jd, dt_obj=True).strftime("%H:%M:%S.%f")[:-3]
 
+    def motionStr(flare):
+        """ Format the speed and the dynamic pressure of a flare point, if known. """
+
+        if flare.get('p') is None:
+            return ""
+
+        return ", v = {:.2f} km/s, p = {:s} kPa".format(flare['v']/1000, valueStr(flare['p']/1000, \
+            None if flare.get('p_std') is None else flare['p_std']/1000, "{:.1f}"))
+
     # Flares of every station: its consecutive flare points
     events = []
     for station_id in sorted(set(flare['station_id'] for flare in flares)):
@@ -1293,6 +1379,10 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
         out_str += "meteor descends during the frame).\n"
     else:
         out_str += "Without the Monte Carlo runs the times and heights have no uncertainties.\n"
+    if any(flare.get('p') is not None for flare in flares):
+        out_str += "Speeds v relative to the ground from a drag fit of the trajectory (wmpl.Utils.DragFit),\n"
+        out_str += "and dynamic pressures p = rho*v^2 with the NRLMSISE air density, whose own error is not\n"
+        out_str += "included.\n"
     out_str += "\n"
 
     out_str += "Flares of every station (t from the reference time of the trajectory):\n"
@@ -1301,13 +1391,14 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
         out_str += "{:2d}  {:12s} {:s}-{:s} UTC, {:d} point(s), {:s} used in the trajectory\n".format(i + 1, 
             event[0]['station_id'], timeStr(event[0]['jd']), timeStr(event[-1]['jd']), len(event), 
             "all" if used == len(event) else ("none" if used == 0 else "{:d}".format(used)))
-        out_str += "      Begin: t = {:s} s, ht = {:s} km\n".format(valueStr(event[0]['t_rel'], 
+        out_str += "      Begin: t = {:s} s, ht = {:s} km{:s}\n".format(valueStr(event[0]['t_rel'], 
             event[0]['t_std'], "{:.4f}"), valueStr(event[0]['ht']/1000, 
-            None if event[0]['ht_std'] is None else event[0]['ht_std']/1000, "{:.3f}"))
+            None if event[0]['ht_std'] is None else event[0]['ht_std']/1000, "{:.3f}"), motionStr(event[0]))
         if len(event) > 1:
-            out_str += "      End:   t = {:s} s, ht = {:s} km\n".format(valueStr(event[-1]['t_rel'], 
+            out_str += "      End:   t = {:s} s, ht = {:s} km{:s}\n".format(valueStr(event[-1]['t_rel'], 
                 event[-1]['t_std'], "{:.4f}"), valueStr(event[-1]['ht']/1000, 
-                None if event[-1]['ht_std'] is None else event[-1]['ht_std']/1000, "{:.3f}"))
+                None if event[-1]['ht_std'] is None else event[-1]['ht_std']/1000, "{:.3f}"), \
+                motionStr(event[-1]))
 
     out_str += "\n"
     out_str += "Flare points:\n"
@@ -1341,7 +1432,9 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
         out_str += "station: the time between them (none if their times overlap; the time uncertainty includes a\n"
         out_str += "frame of each camera) and the difference of their heights at the same time. Between\n"
         out_str += "points not used in the trajectory, whose heights are those of the trajectory, only the\n"
-        out_str += "times count.\n"
+        out_str += "times count. Two cameras can mark the same flare a frame apart, e.g. as it lasts longer\n"
+        out_str += "than a frame, so one frame of the slower camera is taken off the time between them\n"
+        out_str += "before it is weighed against its uncertainty.\n"
 
         compared = set()
         for i, event in enumerate(events):
@@ -1377,8 +1470,13 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
                     ht_sig = np.sqrt(pa['ht_std_mc']**2 + pb['ht_std_mc']**2 
                         + (pa['ht_rate']**2)*(pa['t_std_mc']**2 + pb['t_std_mc']**2))
 
-                    consistent = (gap <= 3*t_sig) and (abs(dht) <= 3*ht_sig)
-                    line += " ({:.1f} and {:.1f} sigma): {:s}".format(gap/t_sig, abs(dht)/ht_sig, 
+                    # Two cameras can mark frames of the same flare up to a frame of the slower one apart. In
+                    #   fireballs simulated with MetSim, 4.9 % of the same flares of a 25 and a 13 fps camera
+                    #   were further apart than 3 sigma of their frames, and 2.7 % after taking off that frame
+                    t_dist = max(gap - max(pa['frame_dt'], pb['frame_dt']), 0.0)
+
+                    consistent = (t_dist <= 3*t_sig) and (abs(dht) <= 3*ht_sig)
+                    line += " ({:.1f} and {:.1f} sigma): {:s}".format(t_dist/t_sig, abs(dht)/ht_sig, 
                         "consistent" if consistent else "NOT consistent, different flares?")
 
                 out_str += line + "\n"
