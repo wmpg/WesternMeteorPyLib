@@ -100,8 +100,11 @@ def stationSystematicErrors(traj):
 
                 r0 = getattr(traj, 'gravity_r0', None)
 
+                # The drop of a decelerating meteor is scaled in solutions which have the scale
+                drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: traj.gravity_factor)
+
                 return applyGravityDrop(point, obs.time_data[i] - t0, \
-                    vectMag(point) if (r0 is None) else r0, traj.gravity_factor, traj.v0z)
+                    vectMag(point) if (r0 is None) else r0, drop_factor(obs.time_data[i] - t0), traj.v0z)
 
         residuals, along = crossTrackResiduals(traj.state_vect_mini, traj.radiant_eci_mini, \
             obs.stat_eci_los, obs.meas_eci_los, drop=drop)
