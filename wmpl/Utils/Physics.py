@@ -523,8 +523,8 @@ def groundDragFit(traj):
         in groundAlphaBetaFit().
 
     In fireballs simulated with MetSim (2 to 7 fragmentations), the drag fit gave the maximum dynamic pressure
-    within 2.1 % in the median and 4.4 % at the 90th percentile, against 3.0 % and 6.5 % for the robust
-    alpha-beta fit, which gave it 2.9 % too high in the median as it does not follow the deceleration of the
+    within 0.9 % in the median and 2.3 % at the 90th percentile, against 2.4 % and 5.3 % for the robust
+    alpha-beta fit, which gave it 2.4 % too high in the median as it does not follow the deceleration of the
     fragmentations.
 
     Arguments:
