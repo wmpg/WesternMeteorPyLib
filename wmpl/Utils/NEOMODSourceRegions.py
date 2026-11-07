@@ -88,6 +88,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import ssl
 import json
+import textwrap
 from urllib.error import URLError
 
 import numpy as np
@@ -109,7 +110,10 @@ NEOMOD2 = {
     'size_mb': 62,
     'reference': "Nesvorny, D., Vokrouhlicky, D., Shelly, F., et al. (2024), NEOMOD 2: An updated model "
         "of Near-Earth Objects from a decade of Catalina Sky Survey observations, Icarus 411, 115922, "
-        "doi:10.1016/j.icarus.2023.115922",
+        "doi:10.1016/j.icarus.2023.115922, and Nesvorny, D., Deienno, R., Bottke, W. F., et al. (2023), "
+        "NEOMOD: A New Orbital Distribution Model for Near-Earth Objects, AJ 166, 55, "
+        "doi:10.3847/1538-3881/ace040",
+    'short_reference': "Nesvorny et al. (2024), Icarus 411, 115922; Nesvorny et al. (2023), AJ 166, 55",
     }
 
 # The intermediate certificate of the authors' server, which the server does not send with its own, so
@@ -236,7 +240,8 @@ def downloadNEOMOD(model=NEOMOD2, file_path=None, url=None, verbose=True):
 
     if verbose:
         print("  to {:s}".format(path))
-        print("  Please cite {:s}".format(model['reference']))
+        for line in _wrapped("Please cite {:s}.".format(model['reference'])):
+            print(line)
 
     return path
 
@@ -360,6 +365,9 @@ def hBin(neomod, h_mag=None):
     Return:
         [dict] 'index', the bin (0-based); 'range', its H limits; 'h_mag', the H given; 'extrapolated',
             True if H was outside the model or not given.
+
+    Reference: the calibrated range 15 < H < 28 and the last bin used beyond it, Nesvorny et al. (2024),
+        Icarus 411, 115922, Sect. 3, and neomod2_simulator.f.
     """
 
     n_h, h_min, h_max = neomod['h']
@@ -391,6 +399,9 @@ def diameterToH(diameter, albedo=ALBEDO):
 
     Return:
         [float or ndarray] H.
+
+    Reference: the relation neomod3_simulator.f uses for NEOMOD3, Nesvorny et al. (2024), Icarus 417,
+        116110, doi:10.1016/j.icarus.2024.116110.
     """
 
     return 5.0*np.log10(1329.0/(np.asarray(diameter, dtype=float)/1000.0*np.sqrt(albedo)))
@@ -492,6 +503,11 @@ def sourceProbabilities(neomod, a, e, incl, h_mag=None):
             - status: [ndarray] IN_MODEL, OUTSIDE or EMPTY_BIN for each orbit.
             - bins: [ndarray] The bin of each orbit as a flat index in (H, a, e, i), -1 outside.
             - h_bin: [dict] The H bin used (see hBin).
+
+    Reference: the binned model of NEOMOD2 distributed with the NEOMOD Simulator, read as its
+        give_me_prob.f reads it. Nesvorny et al. (2024), Icarus 411, 115922,
+        doi:10.1016/j.icarus.2023.115922; the sources are those of Nesvorny et al. (2023), AJ 166, 55,
+        doi:10.3847/1538-3881/ace040.
     """
 
     a, e, incl = np.broadcast_arrays(np.asarray(a, dtype=float), np.asarray(e, dtype=float),
@@ -671,26 +687,9 @@ def cloneSourceRegions(neomod, a, e, incl, h_mag=None, nominal=None, interval=CL
 
 
 
-def sourceRegionSeries(neomod, time_days, nominal, clones=None, h_mag=None, interval=CLONE_INTERVAL):
-    """ The source probabilities of an integrated orbit at each output time, of its nominal solution and
-        over its clones, as wmpl.Rebound.REBOUND --neomod computes them.
-
-    Arguments:
-        neomod: [dict] Return of loadNEOMOD.
-        time_days: [ndarray] The output times (days).
-        nominal: [ndarray] a (AU), e and incl (rad) of the nominal solution at each output, one row each.
-
-    Keyword arguments:
-        clones: [ndarray] The same for the clones, (clone, output, element). None by default.
-        h_mag: [float] The absolute magnitude of the body. None for a meteoroid, by default.
-        interval: [tuple] Percentiles of the interval of the clones. CLONE_INTERVAL by default.
-
-    Return:
-        [dict] 'time_days'; 'sources'; 'h_bin'; 'nominal', the probabilities (output, source), NaN
-            outside the model; 'nominal_reason', None or why the nominal has none at each output;
-            'n_clones'; and, with clones, 'clones_mean', 'clones_low' and 'clones_high' (output, source)
-            and 'clones_in_model', the share of the clones in the model at each output, else None.
-    """
+def _seriesOf(neomod, time_days, nominal, clones, h_mag, interval):
+    """ The source probabilities of the nominal solution and the clones at some outputs (see
+        sourceRegionSeries). """
 
     time_days = np.asarray(time_days, dtype=float)
     nominal = np.asarray(nominal, dtype=float).reshape(-1, 3)
@@ -735,6 +734,104 @@ def sourceRegionSeries(neomod, time_days, nominal, clones=None, h_mag=None, inte
         'clones_high': high, 'clones_in_model': n_in/len(clones)})
 
     return out
+
+
+
+def sourceRegionSeries(neomod, time_days, nominal, clones=None, h_mag=None, interval=CLONE_INTERVAL,
+        horizon=None, representative=None):
+    """ The source probabilities of an integrated orbit at each output time, of its nominal solution and
+        over its clones, as wmpl.Rebound.REBOUND --neomod computes them, and those of the orbits to use
+        beyond the predictability horizon: the nominal at the horizon and the clone that represents the
+        clones at the end.
+
+    Arguments:
+        neomod: [dict] Return of loadNEOMOD.
+        time_days: [ndarray] The output times (days).
+        nominal: [ndarray] a (AU), e and incl (rad) of the nominal solution at each output, one row each.
+
+    Keyword arguments:
+        clones: [ndarray] The same for the clones, (clone, output, element). None by default.
+        h_mag: [float] The absolute magnitude of the body. None for a meteoroid, by default.
+        interval: [tuple] Percentiles of the interval of the clones. CLONE_INTERVAL by default.
+        horizon: [tuple] (time_days, nominal, clones) at the predictability horizon, the last output at
+            which the measurement still sets the nominal orbit (see
+            wmpl.Rebound.REBOUND.predictabilityHorizon and orbitAtHorizon): its time, a, e and incl of
+            the nominal, and those of the clones, one row each. None by default.
+        representative: [tuple] (name, elements) of the clone that represents the clones at the end (see
+            wmpl.Rebound.REBOUND.representativeOrbit): its name, and a, e and incl at each output, one
+            row each. None by default.
+
+    Return:
+        [dict] 'time_days'; 'sources'; 'h_bin'; 'nominal', the probabilities (output, source), NaN
+            outside the model; 'nominal_reason', None or why the nominal has none at each output;
+            'n_clones'; with clones, 'clones_mean', 'clones_low' and 'clones_high' (output, source) and
+            'clones_in_model', the share of the clones in the model at each output, else None;
+            'horizon', the same keys for the one output at the horizon, or None; and 'representative',
+            {'clone', 'probabilities' (output, source), 'reason'} or None.
+    """
+
+    out = _seriesOf(neomod, time_days, nominal, clones, h_mag, interval)
+
+    out['horizon'] = None
+    if horizon is not None:
+
+        t_h, nominal_h, clones_h = horizon
+        clones_h = None if (clones_h is None) or (len(clones_h) == 0) else [[c] for c in clones_h]
+
+        out['horizon'] = _seriesOf(neomod, [t_h], [nominal_h], clones_h, h_mag, interval)
+
+    out['representative'] = None
+    if representative is not None:
+
+        name, elements = representative
+        elements = np.asarray(elements, dtype=float).reshape(-1, 3)
+
+        if len(elements) != len(out['time_days']):
+            raise ValueError("The representative clone has {:d} outputs, the series {:d}.".format(
+                len(elements), len(out['time_days'])))
+
+        probs, _, status, _, _ = sourceProbabilities(neomod, elements[:, 0], elements[:, 1],
+            elements[:, 2], h_mag=h_mag)
+
+        out['representative'] = {'clone': str(name), 'probabilities': probs,
+            'reason': [outsideReason(neomod, *row, st) for row, st in zip(elements, status)]}
+
+    return out
+
+
+
+def extrapolationWarning(h_bin):
+    """ A warning that the H bin used extrapolates the model beyond the sizes it was calibrated for, or
+        None.
+
+    Arguments:
+        h_bin: [dict] Return of hBin.
+
+    Return:
+        [str] The warning, or None.
+    """
+
+    if not h_bin['extrapolated']:
+        return None
+
+    if h_bin['h_mag'] is None:
+        return "WARNING: no size was given, so the body is taken as smaller than about 9 m (H > 28). " \
+            "NEOMOD was calibrated on the Catalina Sky Survey for 15 < H < 28 only: its faintest bin is " \
+            "used, an extrapolation to smaller bodies. Give the size of a body larger than about 9 m."
+
+    if h_bin['h_mag'] > h_bin['range'][1]:
+        return "WARNING: H = {:.2f} is smaller than NEOMOD was calibrated for on the Catalina Sky Survey " \
+            "(15 < H < 28, D > ~9 m): its faintest bin is used, an extrapolation.".format(h_bin['h_mag'])
+
+    return "WARNING: H = {:.2f} is larger than NEOMOD was calibrated for on the Catalina Sky Survey " \
+        "(15 < H < 28): its brightest bin is used, an extrapolation.".format(h_bin['h_mag'])
+
+
+
+def _wrapped(text, indent="  ", width=100):
+    """ A text wrapped into lines, each starting with the indent. """
+
+    return [indent + line for line in textwrap.wrap(text, width)]
 
 
 
@@ -816,6 +913,16 @@ def formatSourceRegions(results, clones=None, model_name=None):
 
         lines.append(line)
 
+    # The warnings of the sizes outside the model, each once
+    warnings = []
+    for res in results:
+        warning = extrapolationWarning(res['h_bin'])
+        if (warning is not None) and (warning not in warnings):
+            warnings.append(warning)
+
+    for warning in warnings:
+        lines += _wrapped(warning)
+
     if clones is not None:
 
         c = clones[0]
@@ -896,7 +1003,8 @@ def sourceRegionSeriesToJSON(series, mode=None, neomod=None):
         neomod: [dict] Return of loadNEOMOD, for the name of the model file. None by default.
 
     Return:
-        [dict] The series, the probabilities as {source: [value per output]}.
+        [dict] The series, the probabilities as {source: [value per output]}, those at the horizon as
+            {source: value}.
     """
 
     def _bySource(values):
@@ -904,7 +1012,12 @@ def sourceRegionSeriesToJSON(series, mode=None, neomod=None):
             return None
         return {s: _finiteList(values[:, k]) for k, s in enumerate(series['sources'])}
 
-    return {
+    def _atOutput(values):
+        if values is None:
+            return None
+        return {s: _finiteList(values[0, k])[0] for k, s in enumerate(series['sources'])}
+
+    out = {
         'model': NEOMOD2['name'],
         'model_name': None if neomod is None else neomod['model_name'],
         'model_file': None if neomod is None else os.path.basename(neomod['file_path']),
@@ -913,6 +1026,7 @@ def sourceRegionSeriesToJSON(series, mode=None, neomod=None):
         'h_mag': series['h_bin']['h_mag'],
         'h_bin': list(series['h_bin']['range']),
         'h_extrapolated': series['h_bin']['extrapolated'],
+        'h_warning': extrapolationWarning(series['h_bin']),
         'sources': series['sources'],
         'source_names': [SOURCE_NAMES.get(s, s) for s in series['sources']],
         'time_days': _finiteList(series['time_days']),
@@ -925,12 +1039,55 @@ def sourceRegionSeriesToJSON(series, mode=None, neomod=None):
         'clones_high': _bySource(series['clones_high']),
         'clones_in_model': None if series['clones_in_model'] is None
             else _finiteList(series['clones_in_model']),
+        'horizon': None,
+        'representative': None,
         }
+
+    # The nominal and the clones at the predictability horizon
+    horizon = series.get('horizon')
+    if horizon is not None:
+        out['horizon'] = {
+            'time_days': float(horizon['time_days'][0]),
+            'nominal': _atOutput(horizon['nominal']),
+            'nominal_reason': horizon['nominal_reason'][0],
+            'n_clones': horizon['n_clones'],
+            'clones_mean': _atOutput(horizon['clones_mean']),
+            'clones_low': _atOutput(horizon['clones_low']),
+            'clones_high': _atOutput(horizon['clones_high']),
+            'clones_in_model': None if horizon['clones_in_model'] is None
+                else float(horizon['clones_in_model'][0]),
+            }
+
+    # The clone that represents the clones at the end, at every output
+    representative = series.get('representative')
+    if representative is not None:
+        out['representative'] = {
+            'clone': representative['clone'],
+            'probabilities': _bySource(representative['probabilities']),
+            'reason': representative['reason'],
+            }
+
+    return out
+
+
+
+def _horizonIndex(series):
+    """ The output of a series at its predictability horizon, or None if it is not one of them. """
+
+    horizon = series.get('horizon')
+    if horizon is None:
+        return None
+
+    k = int(np.argmin(np.abs(np.asarray(series['time_days']) - horizon['time_days'][0])))
+
+    return k if series['time_days'][k] == horizon['time_days'][0] else None
 
 
 
 def writeSourceRegionCSV(series, file_path):
-    """ Save the return of sourceRegionSeries as a CSV file, one row per output time and source.
+    """ Save the return of sourceRegionSeries as a CSV file, one row per output time and source, with
+        the representative clone's probabilities and a flag on the rows at the predictability horizon,
+        added before the last output if the series does not hold it.
 
     Arguments:
         series: [dict] Return of sourceRegionSeries.
@@ -940,24 +1097,45 @@ def writeSourceRegionCSV(series, file_path):
     def _cell(value):
         return "{:.4f}".format(value) if np.isfinite(value) else ""
 
+    def _rows(part, k, representative, at_horizon):
+        """ The rows of one output of a series. """
+
+        rows = []
+        for j, s in enumerate(part['sources']):
+
+            row = [_cell(part['nominal'][k, j])]
+
+            if part['clones_mean'] is None:
+                row += ["", "", "", ""]
+            else:
+                row += [_cell(part['clones_mean'][k, j]), _cell(part['clones_low'][k, j]),
+                    _cell(part['clones_high'][k, j]), "{:.4f}".format(part['clones_in_model'][k])]
+
+            row.append("" if representative is None else _cell(representative[k, j]))
+            row.append("1" if at_horizon else "0")
+
+            rows.append("{:.6f},{:s},{:s}\n".format(part['time_days'][k], s, ",".join(row)))
+
+        return rows
+
+    representative = None if series.get('representative') is None \
+        else series['representative']['probabilities']
+
+    k_horizon = _horizonIndex(series)
+    n_out = len(series['time_days'])
+
     with open(file_path, 'w') as f:
 
-        f.write("time_days,source,nominal,clones_mean,clones_p{:g},clones_p{:g},clones_in_model\n".format(
-            *series['interval']))
+        f.write("time_days,source,nominal,clones_mean,clones_p{:g},clones_p{:g},clones_in_model,"
+            "representative,horizon\n".format(*series['interval']))
 
-        for k, t in enumerate(series['time_days']):
+        for k in range(n_out):
 
-            for j, s in enumerate(series['sources']):
+            # The horizon, when it is not one of the outputs, before the last one
+            if (k == n_out - 1) and (series.get('horizon') is not None) and (k_horizon is None):
+                f.writelines(_rows(series['horizon'], 0, None, True))
 
-                row = [_cell(series['nominal'][k, j])]
-
-                if series['clones_mean'] is None:
-                    row += ["", "", "", ""]
-                else:
-                    row += [_cell(series['clones_mean'][k, j]), _cell(series['clones_low'][k, j]),
-                        _cell(series['clones_high'][k, j]), "{:.4f}".format(series['clones_in_model'][k])]
-
-                f.write("{:.6f},{:s},{:s}\n".format(t, s, ",".join(row)))
+            f.writelines(_rows(series, k, representative, k == k_horizon))
 
 
 
@@ -983,9 +1161,30 @@ def _seriesColumn(series, key, k):
 
 
 
+def _probabilityText(value):
+    """ A probability as text, n/a where there is none. """
+
+    return "{:.3f}".format(value) if np.isfinite(value) else "n/a"
+
+
+
+def _intervalText(series, k, j):
+    """ The clones' mean and interval of one source at one output of a series, as text. """
+
+    mean = series['clones_mean'][k, j]
+
+    if not np.isfinite(mean):
+        return "n/a"
+
+    return "{:.3f} [{:.3f}, {:.3f}]".format(mean, series['clones_low'][k, j], series['clones_high'][k, j])
+
+
+
 def sourceRegionReportLines(series, first=0, first_note=None, time_label=None):
     """ Lines of text summarising the return of sourceRegionSeries: the source probabilities at a first
-        output and at the last, of the nominal solution and over the clones.
+        output and at the last, of the nominal solution and over the clones, and beyond the
+        predictability horizon those of the nominal at the horizon and of the representative clone at the
+        end.
 
     Arguments:
         series: [dict] Return of sourceRegionSeries.
@@ -1007,23 +1206,43 @@ def sourceRegionReportLines(series, first=0, first_note=None, time_label=None):
     first = min(max(int(first), 0), n_out - 1)
     outputs = [first, n_out - 1] if n_out - 1 > first else [n_out - 1]
 
+    horizon = series.get('horizon')
+    representative = series.get('representative')
+
     lines = ["Source regions in {:s}, {:s}:".format(NEOMOD2['name'], _hBinText(series['h_bin']))]
+
+    warning = extrapolationWarning(series['h_bin'])
+    if warning is not None:
+        lines += _wrapped(warning)
 
     has_clones = series['clones_mean'] is not None
 
+    # Every column of the tables, to order the sources by their largest probability in any of them
     columns = []
     for k in outputs:
         columns.append(_seriesColumn(series, 'nominal', k))
         if has_clones:
             columns.append(_seriesColumn(series, 'clones_mean', k))
 
+    if horizon is not None:
+        columns += [_seriesColumn(horizon, 'nominal', 0), _seriesColumn(horizon, 'clones_mean', 0)]
+
+    if representative is not None:
+        columns.append(_seriesColumn({'probabilities': representative['probabilities'],
+            'sources': series['sources']}, 'probabilities', n_out - 1))
+
+    citation = [""] + _wrapped("Please cite {:s}.".format(NEOMOD2['reference']))
+
     if all(col is None for col in columns):
         for k in outputs:
             lines.append("  At t = {:s}: {:s}.".format(time_label(series['time_days'][k]),
                 series['nominal_reason'][k] or "no clone is in the model"))
-        return lines
+        return lines + citation
 
     order = _orderedSources(series['sources'], columns)
+
+
+    ### The first output and the last ###
 
     header = "  {:<16s}".format("")
     sub = "  {:<16s}".format("Source")
@@ -1047,17 +1266,8 @@ def sourceRegionReportLines(series, first=0, first_note=None, time_label=None):
         line = "  {:<16s}".format(SOURCE_NAMES.get(s, s))
 
         for k in outputs:
-
-            p = series['nominal'][k, j]
-            line += "  {:>8s}".format("{:.3f}".format(p) if np.isfinite(p) else "n/a")
-
-            if has_clones:
-                m = series['clones_mean'][k, j]
-                text = "n/a" if not np.isfinite(m) else "{:.3f} [{:.3f}, {:.3f}]".format(m,
-                    series['clones_low'][k, j], series['clones_high'][k, j])
-                line += "  {:<28s}".format(text)
-            else:
-                line += "  "
+            line += "  {:>8s}".format(_probabilityText(series['nominal'][k, j]))
+            line += "  {:<28s}".format(_intervalText(series, k, j)) if has_clones else "  "
 
         lines.append(line.rstrip())
 
@@ -1079,7 +1289,56 @@ def sourceRegionReportLines(series, first=0, first_note=None, time_label=None):
         lines.append("  The clones' mean is the probability given the uncertainty of the orbit. Over a long run,")
         lines.append("  where the clones have spread, it is the value to quote, the nominal being one of them.")
 
-    return lines
+
+    ### Beyond the predictability horizon ###
+
+    if horizon is not None:
+
+        lines.append("")
+
+        if representative is not None:
+            lines.append("  Beyond the predictability horizon, t = {:s}, the orbits to use are the nominal "
+                "at the horizon".format(time_label(horizon['time_days'][0])))
+            lines.append("  and the clone that represents the clones at the end (see the orbit to use at "
+                "the end):")
+        else:
+            lines.append("  At the predictability horizon, t = {:s}, the last time the measurement sets the "
+                "nominal orbit:".format(time_label(horizon['time_days'][0])))
+
+        has_horizon_clones = horizon['clones_mean'] is not None
+
+        header = "  {:<16s}  {:<{:d}s}".format("", "at the horizon", 38 if has_horizon_clones else 10)
+        sub = "  {:<16s}  {:>8s}".format("Source", "nominal")
+        if has_horizon_clones:
+            sub += "  {:<28s}".format("clones mean [{:g}-{:g}%]".format(*horizon['interval']))
+
+        if representative is not None:
+            header += "  at the end, t = {:s}".format(time_label(series['time_days'][-1]))
+            sub += "  representative ({:s})".format(representative['clone'])
+
+        lines += [header.rstrip(), sub.rstrip()]
+
+        for s in order:
+
+            j = series['sources'].index(s)
+            line = "  {:<16s}  {:>8s}".format(SOURCE_NAMES.get(s, s),
+                _probabilityText(horizon['nominal'][0, j]))
+
+            if has_horizon_clones:
+                line += "  {:<28s}".format(_intervalText(horizon, 0, j))
+
+            if representative is not None:
+                line += "  {:>8s}".format(_probabilityText(representative['probabilities'][-1, j]))
+
+            lines.append(line.rstrip())
+
+        if horizon['nominal_reason'][0] is not None:
+            lines.append("  Nominal at the horizon: {:s}.".format(horizon['nominal_reason'][0]))
+
+        if (representative is not None) and (representative['reason'][-1] is not None):
+            lines.append("  Representative clone at the end: {:s}.".format(representative['reason'][-1]))
+
+    return lines + citation
 
 
 
@@ -1112,16 +1371,15 @@ def plotSourceRegionSeries(series, file_path, title=None):
     """
 
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
 
     time_days = np.asarray(series['time_days'])
 
     # Years for a long run, days for a short one
     span = np.max(np.abs(time_days)) if len(time_days) else 0.0
-    if span > 2*365.25:
-        t, t_unit = time_days/365.25, "yr"
-    else:
-        t, t_unit = time_days, "d"
+    t_scale, t_unit = (365.25, "yr") if span > 2*365.25 else (1.0, "d")
+    t = time_days/t_scale
 
     panels = [('nominal', "Nominal solution")]
     if series['clones_mean'] is not None:
@@ -1150,6 +1408,10 @@ def plotSourceRegionSeries(series, file_path, title=None):
         if np.any(outside):
             ax.fill_between(t, 0, 1, where=outside, step='mid', color='0.92', lw=0)
 
+        # The predictability horizon
+        if series.get('horizon') is not None:
+            ax.axvline(series['horizon']['time_days'][0]/t_scale, color='k', ls='--', lw=1.0)
+
         ax.set_ylim(0, 1)
         ax.set_xlim(np.min(t), np.max(t))
         ax.set_ylabel("Probability")
@@ -1165,14 +1427,20 @@ def plotSourceRegionSeries(series, file_path, title=None):
     # The legend in the order of the stack, top first
     handles = [Patch(facecolor='0.92', label="outside the model")]
     handles += [Patch(facecolor=c, edgecolor='white', label=lab) for c, lab in zip(colors, labels)][::-1]
+    if series.get('horizon') is not None:
+        handles.append(Line2D([], [], color='k', ls='--', lw=1.0, label="predictability\nhorizon"))
     fig.legend(handles=handles, loc='center right', frameon=False, fontsize=9)
 
     if title is None:
         title = "Source regions in {:s}".format(NEOMOD2['name'])
 
-    fig.suptitle("{:s}, H {:.2f}-{:.2f}".format(title, *series['h_bin']['range']), fontsize=11)
+    fig.suptitle("{:s}, H {:.2f}-{:.2f}{:s}".format(title, *series['h_bin']['range'],
+        " (extrapolated)" if series['h_bin']['extrapolated'] else ""), fontsize=11)
 
-    fig.tight_layout(rect=(0, 0, 0.83, 1))
+    fig.text(0.01, 0.005, "NEOMOD2: {:s}".format(NEOMOD2['short_reference']), fontsize=7, color='0.4',
+        ha='left', va='bottom')
+
+    fig.tight_layout(rect=(0, 0.02, 0.83, 1))
     fig.savefig(file_path, dpi=150)
     plt.close(fig)
 
@@ -1337,7 +1605,8 @@ if __name__ == "__main__":
         print(line)
 
     print()
-    print("Please cite {:s}".format(NEOMOD2['reference']))
+    for line in _wrapped("Please cite {:s}.".format(NEOMOD2['reference']), indent=""):
+        print(line)
 
 
     # Save the results

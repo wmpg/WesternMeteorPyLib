@@ -107,10 +107,10 @@ The model is calibrated on the Catalina Sky Survey for 15 < H < 28, and **H = 28
 does not carry the size of the body, so:
 
 - Without `--size`, the faintest bin of the model, 27.75 < H < 28, is used, as the NEOMOD Simulator
-  does for H > 28, and the output says so. This is the right choice for nearly every fireball and
+  does for H > 28, and the output says so with a warning that this is an extrapolation. This is the right choice for nearly every fireball and
   meteorite fall, which are smaller than 9 m: 2008 TC3 (~4 m, H = 30.9) too.
-- A body smaller than that given with `--size` (`--size 13kg`) also takes the faintest bin, flagged as
-  fainter than the model reaches.
+- A body smaller than that given with `--size` (`--size 13kg`) also takes the faintest bin, with the
+  same warning; one with H < 15 takes the brightest bin, with its own.
 - A larger body, such as Chelyabinsk (~19 m, H ~26), needs its size: `--size 26.3`, `--size 1.2e7kg`
   or `--size 19m`.
 
@@ -150,27 +150,51 @@ solved with the Monte Carlo uncertainties.
 | `--neomod_size H\|MASS\|DIAMETER` | The size of the object, as `--size` above. Without it the faintest bin is used. |
 
 The model is loaded before the integration, so a missing network shows up at once and not at the end
-of a long run. The report and the terminal give the probabilities at the first output after the object
-left the Earth (before that its heliocentric osculating orbit is hyperbolic and outside the model) and
-at the end, for the nominal and as the mean and the 2.5-97.5% interval of the clones:
+of a long run. The report and the terminal give, for the nominal and as the mean and the 2.5-97.5%
+interval of the clones:
+
+- the probabilities at the first output after the object left the Earth (before that its
+  heliocentric osculating orbit is hyperbolic and outside the model) and at the end;
+- those at the predictability horizon (see `REBOUND.md`), the last output at which the measurement
+  still sets the nominal orbit, found as REBOUND finds the orbit at the horizon;
+- those of the clone that represents the clones at the end (the medoid REBOUND gives as the orbit to
+  use beyond the horizon), when the run has one;
+- the warning when the size is outside 15 < H < 28, and the papers to cite.
+
+Winchcombe (published pickle with a synthetic covariance of 50 m and 30 m/s), 30 clones, 100 years
+backwards:
 
 ```
 Source regions in NEOMOD2 (Nesvorny et al. 2024), H 27.75-28.00 (no size given: the faintest bin of the model, for a body smaller than about 9 m):
-                    t = -2.0 yr (leaving the Earth)         t = -1000.0 yr
+  WARNING: no size was given, so the body is taken as smaller than about 9 m (H > 28). NEOMOD was
+  calibrated on the Catalina Sky Survey for 15 < H < 28 only: its faintest bin is used, an
+  extrapolation to smaller bodies. Give the size of a body larger than about 9 m.
+                    t = -122.16 d (leaving the Earth)       t = -100.0 yr
   Source             nominal  clones mean [2.5-97.5%]        nominal  clones mean [2.5-97.5%]
-  3:1                  0.701  0.692 [0.455, 0.808]             0.785  0.666 [0.376, 0.808]
-  5:2                  0.132  0.144 [0.037, 0.411]             0.046  0.165 [0.037, 0.448]
-  nu6                  0.145  0.142 [0.097, 0.148]             0.161  0.144 [0.080, 0.161]
+  3:1                  0.701  0.692 [0.455, 0.808]             0.665  0.683 [0.441, 0.808]
+  5:2                  0.132  0.144 [0.037, 0.411]             0.164  0.152 [0.037, 0.418]
+  nu6                  0.145  0.142 [0.097, 0.148]             0.151  0.144 [0.096, 0.151]
   ...
+  At the predictability horizon, t = -58.9 yr, the last time the measurement sets the nominal orbit:
+                    at the horizon
+  Source             nominal  clones mean [2.5-97.5%]
+  3:1                  0.665  0.674 [0.441, 0.808]
+  5:2                  0.164  0.159 [0.037, 0.418]
+  nu6                  0.151  0.144 [0.096, 0.151]
+  ...
+  Please cite Nesvorny, D., Vokrouhlicky, D., Shelly, F., et al. (2024), NEOMOD 2: ...
 ```
+
+When the run gives a representative clone, the second table is headed "Beyond the predictability
+horizon" and has a column `representative (<clone>)` with its probabilities at the end.
 
 It also writes:
 
 | File | Contents |
 | :--- | :--- |
-| `rebound_neomod_sources.csv` | One row per output time and source: the nominal probability, the clones' mean, 2.5% and 97.5% percentiles, and the share of the clones in the model. |
-| `rebound_neomod_sources.png` | Only with `all`: the probabilities against time as stacked areas, the nominal above and the clones' mean below, the time outside the model in grey. |
-| `rebound_simulation_results.json` | The key `"neomod"`: the H bin, the sources, and every series of the CSV, with `null` outside the model and the reason the nominal is outside at each output. |
+| `rebound_neomod_sources.csv` | One row per output time and source: `time_days`, `source`, `nominal`, `clones_mean`, `clones_p2.5`, `clones_p97.5`, `clones_in_model` (the share of the clones in the model), `representative` (the representative clone) and `horizon` (1 on the rows of the predictability horizon; with `final`, those rows are added before the last output). |
+| `rebound_neomod_sources.png` | Only with `all`: the probabilities against time as stacked areas, the nominal above and the clones' mean below, the time outside the model in grey, the predictability horizon dashed, the papers at the foot. |
+| `rebound_simulation_results.json` | The key `"neomod"`: the model and its `reference`, the H bin with `h_extrapolated` and `h_warning`, the sources, every series of the CSV as `{source: [value per output]}` with `null` outside the model, `nominal_reason` (why the nominal is outside at each output), `horizon` (its time, the nominal and the clones' mean and interval there) and `representative` (the clone's name and its series), each `null` when the run has none. |
 
 Over the 1000 years above (Winchcombe, 30 clones), the nominal jumps between bins as its elements
 oscillate, while the mean of the clones changes smoothly. Beyond the predictability horizon the

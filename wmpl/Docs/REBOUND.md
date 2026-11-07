@@ -557,13 +557,15 @@ percentiles; the figure draws both (see [The figure](#the-figure)).
 `--neomod` gives, at every output (or with `--neomod final` at the end only), the probability that the
 object came from each of the 12 source regions of NEOMOD2 (Nesvorný et al. 2024), for the nominal
 solution and as the mean and 2.5-97.5% interval of the clones, the mean being the value to quote. The
-report gives them at the first output after the object left the Earth and at the end; the full series
-go to `rebound_neomod_sources.csv`, the figure `rebound_neomod_sources.png` and the key `"neomod"` of
-the JSON. The model file, 62 MB, is downloaded once, before the integration starts.
+report gives them at the first output after the object left the Earth, at the end, at the
+predictability horizon (the nominal and the clones there) and for the representative clone at the end
+when the run has one, with the papers to cite; the full series go to `rebound_neomod_sources.csv`, the
+figure `rebound_neomod_sources.png` and the key `"neomod"` of the JSON. The model file, 62 MB, is
+downloaded once, before the integration starts.
 
 The trajectory does not give the size of the object, on which the shares of the sources depend. Without
 `--neomod_size`, the faintest bin of the model is used (27.75 < H < 28, about 9 m), which is right for
-nearly every fireball; a larger body needs `--neomod_size`. Which NEOMOD file is used and why, the
+nearly every fireball, and a warning says it is an extrapolation; a larger body needs `--neomod_size`. Which NEOMOD file is used and why, the
 effect of the size and of the bins, and how the values were checked against the authors' own tool, are
 in [Source regions in NEOMOD](NEOMODSourceRegions.md).
 

@@ -349,6 +349,7 @@ def testSeriesOverAnIntegrationIsSavedAndReported(tmp_path):
     assert any("t = -10.00 d (leaving the Earth)" in line for line in lines)
     assert any(line.lstrip().startswith("3:1") for line in lines)
     assert any("50.0% of the 2 clones are in the model" in line for line in lines)
+    assert any("Please cite Nesvorny" in line for line in lines)
 
     png_path = str(tmp_path/"sources.png")
     nm.plotSourceRegionSeries(series, png_path)
@@ -416,3 +417,114 @@ def testThePublishedFileWhenItHasBeenDownloaded():
     # Winchcombe in the faintest bin: the 3:1 first
     res = nm.sourceRegions(neomod, 2.586, 0.618, np.radians(0.46))
     assert max(res['probabilities'], key=res['probabilities'].get) == '3:1'
+
+
+
+def _twoBinModel():
+    """ A model with two neighbouring bins in a, 2.6-2.7 AU and 2.7-2.8 AU, at e 0.60-0.64, i 0-4 deg
+        and the faintest H. """
+
+    return _model([
+        (52, 27, 16, 1, 1.0, shares(nu6=0.2, _3_1=0.8)),
+        (52, 28, 16, 1, 1.0, shares(nu6=0.6, _5_2=0.4)),
+        ])
+
+
+
+def testTheOrbitsBeyondTheHorizonAreSavedAndReported(tmp_path):
+    """ The nominal and the clones at the predictability horizon and the representative clone at every
+        output go to the series, the JSON, the CSV and a table of the report of their own. """
+
+    neomod = _twoBinModel()
+    i0 = np.radians(1.0)
+
+    time_days = np.array([0.0, -10.0, -1000.0])
+    nominal = [[2.65, 0.62, i0], [2.65, 0.62, i0], [2.75, 0.62, i0]]
+    clones = [[[2.65, 0.62, i0]]*3, [[2.75, 0.62, i0]]*3]
+
+    # The horizon at the second output: the nominal in the first bin, the clones one in each
+    horizon = (-10.0, [2.65, 0.62, i0], [[2.65, 0.62, i0], [2.75, 0.62, i0]])
+    representative = ('mc_1', [[2.65, 0.62, i0]]*3)
+
+    series = nm.sourceRegionSeries(neomod, time_days, nominal, clones=clones, horizon=horizon,
+        representative=representative)
+
+    assert series['horizon']['nominal'][0, 1] == 0.8
+    assert series['horizon']['clones_mean'][0, 0] == pytest.approx(0.4)
+    assert series['representative']['clone'] == 'mc_1'
+    assert series['representative']['probabilities'][-1, 1] == 0.8
+
+    saved = json.loads(json.dumps(nm.sourceRegionSeriesToJSON(series, mode='all', neomod=neomod)))
+    assert saved['horizon']['time_days'] == -10.0
+    assert saved['horizon']['nominal']['3:1'] == 0.8
+    assert saved['horizon']['clones_mean']['nu6'] == pytest.approx(0.4)
+    assert saved['representative']['probabilities']['3:1'] == [0.8, 0.8, 0.8]
+
+    # The rows of the horizon are flagged, the representative in a column of its own
+    csv_path = str(tmp_path/"all.csv")
+    nm.writeSourceRegionCSV(series, csv_path)
+    with open(csv_path) as f:
+        rows = [line.split(',') for line in f.read().splitlines()]
+    assert rows[0][-2:] == ['representative', 'horizon']
+    assert len(rows) == 1 + 3*12
+    assert [r[-1] for r in rows[1:]] == ['0']*12 + ['1']*12 + ['0']*12
+    assert rows[1 + 12 + 1][-2] == "0.8000"
+
+    lines = nm.sourceRegionReportLines(series, first=1)
+    text = "\n".join(lines)
+    assert "Beyond the predictability horizon, t = -10.00 d" in text
+    assert "representative (mc_1)" in text
+    row = [line for line in lines if line.lstrip().startswith("3:1")][-1].split()
+    assert row[1:4] == ["0.800", "0.400", "[{:.3f},".format(np.percentile([0.0, 0.8], 2.5))]
+    assert row[-1] == "0.800"
+
+    # With the last output only, the horizon gets rows of its own before it
+    final = nm.sourceRegionSeries(neomod, time_days[-1:], nominal[-1:], clones=[c[-1:] for c in clones],
+        horizon=horizon, representative=('mc_1', representative[1][-1:]))
+    csv_path = str(tmp_path/"final.csv")
+    nm.writeSourceRegionCSV(final, csv_path)
+    with open(csv_path) as f:
+        rows = [line.split(',') for line in f.read().splitlines()]
+    assert [r[0] for r in rows[1:]] == ['-10.000000']*12 + ['-1000.000000']*12
+    assert [r[-1] for r in rows[1:]] == ['1']*12 + ['0']*12
+    assert rows[1][-2] == ""
+
+    png_path = str(tmp_path/"sources.png")
+    nm.plotSourceRegionSeries(series, png_path)
+    assert os.path.getsize(png_path) > 0
+
+    with pytest.raises(ValueError):
+        nm.sourceRegionSeries(neomod, time_days, nominal, representative=('mc_1', [[2.65, 0.62, i0]]))
+
+
+
+def testAnExtrapolatedSizeIsWarned():
+    """ Without a size, and for H outside 15 < H < 28, a warning says the bin used is an extrapolation;
+        inside the model there is none. """
+
+    neomod = _twoBinModel()
+
+    assert "no size was given" in nm.extrapolationWarning(nm.hBin(neomod))
+    assert "H = 36.28 is smaller than NEOMOD was calibrated for" in nm.extrapolationWarning(nm.hBin(neomod,
+        36.28))
+    assert "H = 10.00 is larger than NEOMOD was calibrated for" in nm.extrapolationWarning(nm.hBin(neomod,
+        10.0))
+    assert nm.extrapolationWarning(nm.hBin(neomod, 20.0)) is None
+    assert nm.extrapolationWarning(nm.hBin(neomod, 28.0)) is None
+
+    i0 = np.radians(1.0)
+
+    # In the table of an orbit, each warning once
+    results = [nm.sourceRegions(neomod, 2.65, 0.62, i0, h_mag=h) for h in (None, 36.0, 37.0, 20.0)]
+    text = "\n".join(nm.formatSourceRegions(results))
+    assert text.count("WARNING") == 3
+    assert "no size was given" in text
+
+    # In the report of an integration and its JSON
+    series = nm.sourceRegionSeries(neomod, [0.0, -10.0], [[2.65, 0.62, i0]]*2)
+    assert any("WARNING: no size was given" in line for line in nm.sourceRegionReportLines(series))
+    assert "no size was given" in nm.sourceRegionSeriesToJSON(series)['h_warning']
+
+    series = nm.sourceRegionSeries(neomod, [0.0, -10.0], [[2.65, 0.62, i0]]*2, h_mag=20.0)
+    assert not any("WARNING" in line for line in nm.sourceRegionReportLines(series))
+    assert nm.sourceRegionSeriesToJSON(series)['h_warning'] is None

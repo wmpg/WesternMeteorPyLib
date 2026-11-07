@@ -5296,6 +5296,9 @@ if __name__ == "__main__":
 
     ### Source regions in NEOMOD2, at every output or at the end (see wmpl.Utils.NEOMODSourceRegions) ###
 
+    # Reference: Nesvorny et al. (2024), Icarus 411, 115922, doi:10.1016/j.icarus.2023.115922, and
+    #   Nesvorny et al. (2023), AJ 166, 55, doi:10.3847/1538-3881/ace040
+
     if neomod_model is not None:
 
         from wmpl.Utils.NEOMODSourceRegions import sourceRegionSeries, sourceRegionReportLines, \
@@ -5313,9 +5316,28 @@ if __name__ == "__main__":
         def _neomodElements(rows):
             return [[row[2].a, row[2].e, row[2].inc] for row in rows[neomod_k]]
 
+        # The nominal and the clones at the output of the predictability horizon, the last one at which
+        #   the measurement still sets the nominal orbit, found as orbitAtHorizon finds it
+        neomod_horizon = None
+        if (horizon is not None) and (horizon.get("horizon_days") is not None):
+            neomod_times = np.array([simTimeToDays(row[0]) for row in sim_outputs])
+            k_h = int(np.argmin(np.abs(neomod_times - horizon["horizon_days"])))
+            neomod_horizon = (neomod_times[k_h], [sim_outputs[k_h][2].a, sim_outputs[k_h][2].e,
+                sim_outputs[k_h][2].inc], [[rows[k_h][2].a, rows[k_h][2].e, rows[k_h][2].inc]
+                for rows in sim_outputs_mc.values() if len(rows) > k_h])
+
+        # The clone that represents the clones at the end, if the run has one (see representativeOrbit)
+        neomod_representative = None
+        neomod_rep = None if horizon is None else horizon.get("representative")
+        if (neomod_rep is not None) \
+                and (len(sim_outputs_mc.get(neomod_rep["clone"], [])) == len(sim_outputs)):
+            neomod_representative = (neomod_rep["clone"],
+                _neomodElements(sim_outputs_mc[neomod_rep["clone"]]))
+
         neomod_series = sourceRegionSeries(neomod_model,
             [simTimeToDays(row[0]) for row in sim_outputs[neomod_k]], _neomodElements(sim_outputs),
-            clones=[_neomodElements(rows) for rows in neomod_clones] or None, h_mag=neomod_h)
+            clones=[_neomodElements(rows) for rows in neomod_clones] or None, h_mag=neomod_h,
+            horizon=neomod_horizon, representative=neomod_representative)
 
         # The orbit is heliocentric only once the object has left the Earth
         neomod_first = (findEarthDepartureIndex(sim_outputs, n_hill=n_hill) or 0) if args.neomod == "all" \

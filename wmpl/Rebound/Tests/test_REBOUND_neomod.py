@@ -110,8 +110,19 @@ def testEveryOutputIsSavedWithItsReason(runReboundCli):
 
     assert (run_dir/"rebound_neomod_sources.png").exists()
 
+    # Without clones there is neither a horizon nor a representative clone
+    assert neomod["horizon"] is None
+    assert neomod["representative"] is None
+
+    # The report warns that the size is extrapolated and gives the papers
+    assert "no size was given" in neomod["h_warning"]
+    assert "doi:10.1016/j.icarus.2023.115922" in neomod["reference"]
+
     with open(str(run_dir/"rebound_simulation_results.txt")) as f:
-        assert "Source regions in NEOMOD2" in f.read()
+        report = f.read()
+    assert "Source regions in NEOMOD2" in report
+    assert "WARNING: no size was given" in report
+    assert "Please cite Nesvorny" in report
 
     assert "Saved NEOMOD" in done.stdout
 
@@ -130,6 +141,7 @@ def testTheEndOnlyWithTheSizeGiven(runReboundCli):
     assert len(neomod["time_days"]) == 1
     assert neomod["h_bin"] == [26.25, 26.5]
     assert not neomod["h_extrapolated"]
+    assert neomod["h_warning"] is None
     assert not (run_dir/"rebound_neomod_sources.png").exists()
 
 
