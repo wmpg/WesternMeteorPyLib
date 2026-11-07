@@ -251,7 +251,7 @@ STRAIGHT_STATIONS = [
 
 
 def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, \
-    elevation=55.0, gravity_drop=False, **kwargs):
+    elevation=55.0, gravity_drop=False, clock_offsets=None, **kwargs):
     """ Observe a straight, constant-velocity meteor from three stations and make a trajectory object.
 
     Keyword arguments:
@@ -263,6 +263,8 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
         elevation: [float] Elevation of the radiant at the beginning of the meteor (deg). 55 by default.
         gravity_drop: [bool] Drop the meteor by gravity with applyGravityDrop, so that it is not a straight
             line anymore. False by default.
+        clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
+            default, when all clocks are exact.
         **kwargs: [dict] Keyword arguments of the Trajectory object, which replace the defaults (no timing
             offsets above 1 s, no gravity correction, no Monte Carlo, no plots and no saving).
 
@@ -274,6 +276,9 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
     """
 
     rng = np.random.default_rng(seed)
+
+    if clock_offsets is None:
+        clock_offsets = {}
 
     # Compute the beginning point and the radiant
     lat, lon = np.radians(STRAIGHT_BEG_LAT), np.radians(STRAIGHT_BEG_LON)
@@ -307,7 +312,7 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
         azim = azim + rng.normal(0, noise, len(times))/np.cos(elev)
         elev = elev + rng.normal(0, noise, len(times))
 
-        traj.infillTrajectory(azim, elev, times, np.radians(s_lat), np.radians(s_lon), ele, \
-            station_id=station_id)
+        traj.infillTrajectory(azim, elev, times + clock_offsets.get(station_id, 0.0), np.radians(s_lat), \
+            np.radians(s_lon), ele, station_id=station_id)
 
     return traj, begin, radiant_eci
