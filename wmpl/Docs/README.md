@@ -17,6 +17,8 @@ and what the options are for.
   and the Tancredi scheme for asteroids in cometary orbits.
 - [Choosing a D-criterion threshold](DThresholds.md) — the other half of a stream search, and why
   the traditional threshold is too permissive to use.
+- [Source regions in NEOMOD](NEOMODSourceRegions.md) — the probability that a meteoroid or an NEO
+  came from each source region of the NEOMOD model, from a trajectory, an orbit or a REBOUND run.
 
 Something missing? The tools are all runnable as modules, so `python -m wmpl.<Package>.<Module> --help`
 is usually the fastest answer.

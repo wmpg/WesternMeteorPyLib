@@ -164,7 +164,8 @@ def findDebiasedNEOPopulation(model=GRANVIK2018):
     return None
 
 
-def downloadDebiasedNEOPopulation(model=GRANVIK2018, file_path=None, url=None, verbose=True):
+def downloadDebiasedNEOPopulation(model=GRANVIK2018, file_path=None, url=None, verbose=True,
+        context=None):
     """ Download the file of the model and check it against its SHA-256.
 
         The file is written beside a temporary name and moved into place only once it has been
@@ -176,6 +177,7 @@ def downloadDebiasedNEOPopulation(model=GRANVIK2018, file_path=None, url=None, v
             written.
         url: [str] Where to download it from, the authors' page by default.
         verbose: [bool] Print what is being downloaded.
+        context: [ssl.SSLContext] The SSL context of the connection. None for the default, by default.
 
     Return:
         [str] The path of the file.
@@ -210,7 +212,7 @@ def downloadDebiasedNEOPopulation(model=GRANVIK2018, file_path=None, url=None, v
                 print("  from {:s}".format(url))
                 print("  to {:s}".format(target))
 
-            with os.fdopen(fd, 'wb') as f_out, urlopen(url, timeout=60) as response:
+            with os.fdopen(fd, 'wb') as f_out, urlopen(url, timeout=60, context=context) as response:
                 shutil.copyfileobj(response, f_out)
 
             digest = _sha256(tmp_path)

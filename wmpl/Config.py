@@ -194,6 +194,10 @@ class ConfigStruct(object):
         self.deam2026_residence_file = os.path.join(abs_path, 'share',
             'Deam+_2026_residence_time_distributions.tar.gz')
 
+        # Binned NEOMOD2 model of near-Earth objects of Nesvorny et al. (2024), downloaded on first use by
+        #   wmpl.Utils.NEOMODSourceRegions
+        self.neomod2_file = os.path.join(abs_path, 'share', 'Nesvorny+_2024_NEOMOD2.dat')
+
 
         ### SHOWER ASSOCIATION
 

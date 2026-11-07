@@ -4190,6 +4190,20 @@ if __name__ == "__main__":
                         "at every output, which is drawn in the figure and saved to the JSON by default. With "
                         "--replot, leave the MOID out of the figure.")
 
+    parser.add_argument("--neomod", type=str.lower, nargs="?", const="all", default=None,
+                        choices=["all", "final"],
+                        help="Give the probability that the object came from each source region of the NEOMOD2 "
+                        "model of near-Earth objects (Nesvorny et al. 2024, see wmpl.Utils.NEOMODSourceRegions), "
+                        "for the nominal solution and the clones: at every output (all, the default) or at the "
+                        "end of the run only (final). Saved to the report, the JSON and rebound_neomod_sources.csv "
+                        "(and .png with all). The model file, 62 MB, is downloaded on first use.")
+
+    parser.add_argument("--neomod_size", type=str, default=None, metavar="H|MASS|DIAMETER",
+                        help="Size of the object for --neomod, which the trajectory does not give: its absolute "
+                        "magnitude, its mass ending in kg or g, or its diameter ending in m (e.g. 26.3, 13kg, "
+                        "19m). The model covers 15 < H < 28. Without it, or for a body smaller than about 9 m, "
+                        "the faintest bin of the model is used.")
+
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
@@ -4330,6 +4344,33 @@ if __name__ == "__main__":
 
         if not parent_bodies:
             parent_bodies = None
+
+    ### ###
+
+    ### Source regions in NEOMOD2 (optional), the model loaded before the integration ###
+
+    neomod_model = None
+    neomod_h = None
+    if (args.neomod_size is not None) and (args.neomod is None):
+        parser.error("--neomod_size goes with --neomod.")
+
+    if args.neomod is not None:
+
+        from wmpl.Utils.NEOMODSourceRegions import loadNEOMOD, parseBodySize
+
+        # The model holds heliocentric orbits
+        if reference_frame != "heliocentric":
+            parser.error("--neomod needs the heliocentric frame: drop --geocentric.")
+
+        try:
+            neomod_h = None if args.neomod_size is None else parseBodySize(args.neomod_size)[0]
+        except ValueError as e:
+            parser.error("--neomod_size: {:s}".format(str(e)))
+
+        try:
+            neomod_model = loadNEOMOD()
+        except (IOError, ValueError) as e:
+            parser.error("--neomod: {:s}".format(str(e)))
 
     ### ###
 
@@ -5252,6 +5293,56 @@ if __name__ == "__main__":
             title="D criteria between {:s} and its parent body candidates".format(
                 str(traj.traj_id) if traj.traj_id is not None
                 else os.path.splitext(os.path.basename(args.pickle_path))[0]))
+
+    ### Source regions in NEOMOD2, at every output or at the end (see wmpl.Utils.NEOMODSourceRegions) ###
+
+    if neomod_model is not None:
+
+        from wmpl.Utils.NEOMODSourceRegions import sourceRegionSeries, sourceRegionReportLines, \
+            sourceRegionSeriesToJSON, writeSourceRegionCSV, plotSourceRegionSeries
+
+        # Every output of the clones that ran the whole span, or the end of those of the confidence
+        #   intervals
+        if args.neomod == "all":
+            neomod_k = slice(None)
+            neomod_clones = [rows for rows in sim_outputs_mc.values() if len(rows) == len(sim_outputs)]
+        else:
+            neomod_k = slice(-1, None)
+            neomod_clones = [sim_outputs_mc[name] for name in ci_names]
+
+        def _neomodElements(rows):
+            return [[row[2].a, row[2].e, row[2].inc] for row in rows[neomod_k]]
+
+        neomod_series = sourceRegionSeries(neomod_model,
+            [simTimeToDays(row[0]) for row in sim_outputs[neomod_k]], _neomodElements(sim_outputs),
+            clones=[_neomodElements(rows) for rows in neomod_clones] or None, h_mag=neomod_h)
+
+        # The orbit is heliocentric only once the object has left the Earth
+        neomod_first = (findEarthDepartureIndex(sim_outputs, n_hill=n_hill) or 0) if args.neomod == "all" \
+            else 0
+        neomod_lines = sourceRegionReportLines(neomod_series, first=neomod_first,
+            first_note="leaving the Earth" if neomod_first > 0 else None)
+
+        print()
+        for line in neomod_lines:
+            print("  " + line)
+
+        with open(results_txt_path, "a") as f:
+            f.write("\n" + "\n".join(neomod_lines) + "\n")
+
+        results_json["neomod"] = sourceRegionSeriesToJSON(neomod_series, mode=args.neomod,
+            neomod=neomod_model)
+
+        neomod_csv_path = os.path.join(out_dir, "rebound_neomod_sources.csv")
+        writeSourceRegionCSV(neomod_series, neomod_csv_path)
+        print("  Saved NEOMOD : {:s}".format(neomod_csv_path))
+
+        if args.neomod == "all":
+            neomod_png_path = os.path.join(out_dir, "rebound_neomod_sources.png")
+            plotSourceRegionSeries(neomod_series, neomod_png_path, title="Source regions of {:s} in "
+                "NEOMOD2".format(str(traj.traj_id) if traj.traj_id is not None
+                else os.path.splitext(os.path.basename(args.pickle_path))[0]))
+            print("                 {:s}".format(neomod_png_path))
 
     with open(results_json_path, "w") as jf:
         json.dump(results_json, jf, indent=1, default=float)
