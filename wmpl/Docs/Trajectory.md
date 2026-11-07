@@ -118,6 +118,21 @@ along the line of sight, which the report gives as the error of the height, and 
 of the points of the fragment as their noise, and do not include a separation from the main path. A station
 which is not in the main trajectory is skipped, as its time offset is unknown.
 
+When several fragments are close together, two stations can measure them under crossed numbers, which their
+trajectory hardly shows (see above). So the fragments of every two stations are also matched by where they
+are along the main path at the same times, whatever their numbers in the files. The points of every station
+are projected on the main trajectory on their own, as above, and the distance of two fragments is how far
+apart along the path their projections are, as a constant difference in a joint fit of their positions in
+time. Pairs more than 1.5 km apart are not matched, and the pairs are chosen by the least total distance
+(Hungarian algorithm). The end of the saved report lists the matches of every two stations with the distance
+of the next best candidate of either fragment, calls a match ambiguous when it is less than 0.5 km closer
+than that one, and notes a match of different numbers, and a fragment which is not matched to the one with
+its number at the other station. The numbers in the files are not changed. On fireballs simulated with
+MetSim (2 or 3 stations, 2 to 7 fragments, noise and saturation, 100 events per case), 96 to 99 % of the
+true pairs were matched. The 1 to 3 % of the matches which joined different fragments were all ambiguous,
+and 0.5 % of the true pairs were noted as not matched. As the matching does not use the numbers, crossed
+numbers are noted without ambiguity about two times out of three, and as ambiguous in most of the rest.
+
 ## The trajectory pickle
 
 A successful run writes `<event>_trajectory.pickle` (plus plots and a text report) into the output

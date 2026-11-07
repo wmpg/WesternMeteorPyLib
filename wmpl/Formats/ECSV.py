@@ -7,8 +7,10 @@ import sys
 import copy
 import glob
 import datetime
+import itertools
 
 import numpy as np
+import scipy.optimize
 
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations, writeMiligInputFileMeteorObservation
@@ -1563,6 +1565,254 @@ def unsolvedFragmentReport(solutions, traj, ref_stations=None):
 
 
 
+# Largest distance along the path between the projections of two stations for their fragments to be matched
+#   (m), which 0.2 % of the fragments seen from two stations exceeded in fireballs simulated with MetSim
+FRAGMENT_MATCH_LIMIT = 1500.0
+
+# Least distance by which a match must be closer than the next best candidate not to be ambiguous (m)
+FRAGMENT_MATCH_MARGIN = 500.0
+
+# Least time two stations must both see a pair of fragments for to compare them (s)
+FRAGMENT_MATCH_OVERLAP = 0.08
+
+
+
+def projectionMismatch(t_a, along_a, t_b, along_b, deg=2):
+    """ Measure how far apart along the path the projections of a fragment from two stations are at the same
+        times, as the constant difference of the second station in a joint polynomial fit of their positions
+        in time. The points further from the fit than 4 times its robust scatter are dropped, keeping at
+        least 2 points of each station.
+
+    Arguments:
+        t_a: [ndarray] Times of the points of the first station (s).
+        along_a: [ndarray] Their positions along the path (m).
+        t_b: [ndarray] Times of the points of the second station (s).
+        along_b: [ndarray] Their positions along the path (m).
+
+    Keyword arguments:
+        deg: [int] Degree of the polynomial, lowered when there are few points. 2 by default.
+
+    Return:
+        [float] Position of the second station minus that of the first (m), None with too few points.
+    """
+
+    t = np.concatenate([t_a, t_b])
+    along = np.concatenate([along_a, along_b])
+    is_b = np.concatenate([np.zeros(len(t_a)), np.ones(len(t_b))])
+
+    deg = min(deg, len(t) - 3)
+    if deg < 1:
+        return None
+
+    design = np.column_stack([(t - np.mean(t))**p for p in range(deg + 1)] + [is_b])
+
+    # Drop the outliers, with a scatter of at least a metre for points without noise
+    good = np.ones(len(t), dtype=bool)
+    for _ in range(4):
+
+        coeffs = np.linalg.lstsq(design[good], along[good], rcond=None)[0]
+        residuals = along - design.dot(coeffs)
+        scatter = 1.4826*np.median(np.abs(residuals[good]))
+        new_good = np.abs(residuals) < 4*max(scatter, 1.0)
+
+        if (np.sum(new_good & (is_b == 0)) < 2) or (np.sum(new_good & (is_b == 1)) < 2) \
+            or np.array_equal(new_good, good):
+            break
+
+        good = new_good
+
+    return np.linalg.lstsq(design[good], along[good], rcond=None)[0][-1]
+
+
+
+def fragmentMatches(traj, ecsv_paths, fragments):
+    """ Match the additional fragments seen from every two stations by where they are along the main path at
+        the same times, whatever their numbers in the ECSV files. The points of every station are projected
+        on the main trajectory on their own (see projectFlares()), and two fragments are a candidate pair
+        when their projections are less than FRAGMENT_MATCH_LIMIT apart along the path (see
+        projectionMismatch()). The pairs are chosen by the least total distance (Hungarian algorithm), and a
+        fragment without a candidate is left without a partner. The main fragment is not matched.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory of the main fragment, the solution with the original
+            picks (see originalPicksTrajectory()).
+        ecsv_paths: [list] List of paths to ECSV files it was solved from.
+        fragments: [list] Numbers of the fragments to match.
+
+    Return:
+        [list] For every two stations of the trajectory with fragments seen at the same times, a dictionary
+            with stations (their two station IDs), fragments (the numbers of the fragments of each, two
+            lists), distance (the distance along the path of every pair, m, a matrix with a row for every
+            fragment of the first station, NaN when they are not seen at the same times) and pairs, the
+            matches as (fragment of the first station, fragment of the second, distance (m), distance of the
+            next best candidate of either fragment (m), None if there is none).
+    """
+
+    _, input_meteors = loadECSVs(ecsv_paths, no_prepare=True)
+    direction = -vectNorm(traj.radiant_eci_mini)
+
+    # Times and positions along the path of the points of every fragment from every station in the trajectory
+    tracks, cameras = {}, {}
+    for fragment in fragments:
+
+        _, meteors = loadECSVs(ecsv_paths, no_prepare=True, fragment=fragment)
+        for meteor in meteors:
+            meteor.trajectory_use = np.ones(len(meteor.time_data), dtype=bool)
+
+        projected = projectFlares(traj, meteors, input_meteors)
+
+        for meteor in meteors:
+
+            points = [projected[(meteor.ecsv_file, i)] for i in range(len(meteor.time_data)) \
+                if (meteor.ecsv_file, i) in projected]
+            if not points:
+                continue
+
+            station_id = points[0]['station_id']
+            cameras[station_id] = str(meteor.station_id)
+            tracks.setdefault(station_id, {})[fragment] = ( \
+                np.array([(point['jd'] - traj.jdt_ref)*86400 for point in points]), \
+                np.array([np.dot(point['eci'] - traj.state_vect_mini, direction) for point in points]))
+
+    matches = []
+    for station_a, station_b in itertools.combinations(sorted(tracks), 2):
+
+        # Two files of one camera are one station
+        if cameras[station_a] == cameras[station_b]:
+            continue
+
+        frags_a, frags_b = sorted(tracks[station_a]), sorted(tracks[station_b])
+
+        distance = np.full((len(frags_a), len(frags_b)), np.nan)
+        for (i, frag_a), (j, frag_b) in itertools.product(enumerate(frags_a), enumerate(frags_b)):
+
+            (t_a, along_a), (t_b, along_b) = tracks[station_a][frag_a], tracks[station_b][frag_b]
+            overlap = min(np.max(t_a), np.max(t_b)) - max(np.min(t_a), np.min(t_b))
+            if overlap < FRAGMENT_MATCH_OVERLAP:
+                continue
+
+            mismatch = projectionMismatch(t_a, along_a, t_b, along_b)
+            if mismatch is not None:
+                distance[i, j] = abs(mismatch)
+
+        if np.all(np.isnan(distance)):
+            continue
+
+        # Pairs further apart than the limit, or not compared, cannot be matched
+        allowed = np.nan_to_num(distance, nan=np.inf) < FRAGMENT_MATCH_LIMIT
+        not_allowed = 10*FRAGMENT_MATCH_LIMIT*max(len(frags_a), len(frags_b))
+        cost = np.where(allowed, np.nan_to_num(distance), not_allowed)
+
+        pairs = []
+        for i, j in zip(*scipy.optimize.linear_sum_assignment(cost)):
+
+            if not allowed[i, j]:
+                continue
+
+            # The next best candidate of either fragment
+            others = np.concatenate([np.delete(cost[i, :], j), np.delete(cost[:, j], i)])
+            others = others[others < not_allowed]
+            next_best = np.min(others) if len(others) else None
+
+            pairs.append((frags_a[i], frags_b[j], distance[i, j], next_best))
+
+        matches.append({'stations': (station_a, station_b), 'fragments': (frags_a, frags_b), \
+            'distance': distance, 'pairs': pairs})
+
+    return matches
+
+
+
+def fragmentMatchReport(matches):
+    """ Report the matches of the fragments of every two stations, from fragmentMatches().
+
+    Arguments:
+        matches: [list] Matches from fragmentMatches().
+
+    Return:
+        [str] The report, empty if there are no matches.
+    """
+
+    if not matches:
+        return ""
+
+    out_str = "\n"
+    out_str += "Additional fragments matched between stations\n"
+    out_str += "---------------------------------------------\n"
+    out_str += "The fragments of every two stations are matched by where they are along the main path\n"
+    out_str += "at the same times, whatever their numbers in the files. The points of every station are\n"
+    out_str += "projected on the main trajectory on their own, with the time offsets of the stations, and\n"
+    out_str += "the distance is how far apart along the path the two projections are, which also takes\n"
+    out_str += "part of a separation from the path. Fragments more than {:.1f} km apart are not matched,\n" \
+        .format(FRAGMENT_MATCH_LIMIT/1000)
+    out_str += "and a match less than {:.1f} km closer than the next best candidate of either fragment is\n" \
+        .format(FRAGMENT_MATCH_MARGIN/1000)
+    out_str += "ambiguous. A match of different numbers which is not ambiguous suggests that the stations\n"
+    out_str += "measured the fragments under crossed numbers.\n"
+
+    for match in matches:
+
+        station_a, station_b = match['stations']
+        frags_a, frags_b = match['fragments']
+        width = max(len(station_a), len(station_b), 8)
+
+        def distanceStr(frag_a, frag_b):
+            """ Format the distance of two fragments, None if they were not compared. """
+
+            if (frag_a not in frags_a) or (frag_b not in frags_b):
+                return None
+
+            dist = match['distance'][frags_a.index(frag_a), frags_b.index(frag_b)]
+            if np.isnan(dist):
+                return None
+
+            return "{:.2f} km".format(dist/1000) if (dist >= 1000) else "{:.0f} m".format(dist)
+
+
+        out_str += "\n"
+        out_str += "{:s} and {:s}\n".format(station_a, station_b)
+        out_str += "  {:>{w}s}  {:>{w}s}  Distance (m)  Next best (m)\n".format(station_a, station_b, w=width)
+
+        for frag_a, frag_b, dist, next_best in match['pairs']:
+
+            notes = []
+            if frag_a != frag_b:
+                same_dist = distanceStr(frag_a, frag_a)
+                notes.append("NOTE: different numbers" + ("" if (frag_a not in frags_b) \
+                    else " ({:d} at {:s}: {:s})".format(frag_a, station_b, same_dist if same_dist \
+                    else "not seen at the same times")))
+
+            if (next_best is not None) and (next_best - dist < FRAGMENT_MATCH_MARGIN):
+                notes.append("ambiguous")
+
+            line = "  {:{w}d}  {:{w}d}  {:12.0f}  {:>13s}  {:s}".format(frag_a, frag_b, dist, \
+                "-" if (next_best is None) else "{:.0f}".format(next_best), ", ".join(notes), w=width)
+            out_str += line.rstrip() + "\n"
+
+        # The fragments left without a partner, noting those whose number the other station also has
+        matched_a = [pair[0] for pair in match['pairs']]
+        matched_b = [pair[1] for pair in match['pairs']]
+        unmatched = [(str(frag), "-", frag, station_b, frags_b) for frag in frags_a \
+            if frag not in matched_a] + [("-", str(frag), frag, station_a, frags_a) for frag in frags_b \
+            if frag not in matched_b]
+
+        for frag_a_str, frag_b_str, frag, other_station, other_frags in unmatched:
+
+            dist = distanceStr(frag, frag)
+            if dist:
+                note = "NOTE: not matched, {:d} at {:s} is {:s} away".format(frag, other_station, dist)
+            elif frag in other_frags:
+                note = "not matched, {:d} at {:s} is not seen at the same times".format(frag, other_station)
+            else:
+                note = "not matched"
+
+            out_str += "  {:>{w}s}  {:>{w}s}  {:>12s}  {:>13s}  {:s}\n".format(frag_a_str, frag_b_str, "-", \
+                "-", note, w=width)
+
+    return out_str
+
+
+
 def saveECSV(dir_path, meteor_observations, 
              network_name='RMS', x_res=None, y_res=None, photom_band=None, img_name=None, calib_stars=None, 
              fov_mid_azim=None, fov_mid_elev=None, fov_mid_rot_horiz=None, fov_horiz=None, fov_vert=None):
@@ -1918,3 +2168,15 @@ if __name__ == "__main__":
                 if os.path.isfile(report_path):
                     with open(report_path, 'a') as f:
                         f.write(unsolved_report)
+
+            # Match the fragments of every two stations whatever their numbers, also in the saved report
+            match_report = fragmentMatchReport(fragmentMatches(traj_orig, ecsv_paths, \
+                ecsvFragments(ecsv_paths)))
+            if match_report:
+
+                print(match_report)
+
+                report_path = os.path.join(traj.output_dir, traj.file_name + '_report.txt')
+                if os.path.isfile(report_path):
+                    with open(report_path, 'a') as f:
+                        f.write(match_report)
