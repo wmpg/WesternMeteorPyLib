@@ -437,11 +437,17 @@ def droppedLengths(traj, obs):
     t0 = min([o.time_data[0] for o in traj.observations])
     v0z = traj.v0z if traj.v0z is not None else 0.0
 
+    # Same beginning point of the drop and factor of the drop as the fit, where the solution has them (the
+    #   factor is scaled for a decelerating meteor), else each point's distance and the gravity factor
+    r0 = getattr(traj, 'gravity_r0', None)
+    drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: traj.gravity_factor)
+
     state_vect, radiant_eci = traj.state_vect_mini, traj.radiant_eci_mini
     lengths = []
     for t, stat, meas in zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los):
         _, rad_cpa, _ = findClosestPoints(stat, meas, state_vect, radiant_eci)
-        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa), traj.gravity_factor, v0z)
+        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa) if (r0 is None) else r0, \
+            drop_factor(t - t0), v0z)
         _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
         lengths.append(abs(np.dot(state_vect - rad_cpa_dropped, radiant_eci)))
 
