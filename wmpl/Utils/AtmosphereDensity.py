@@ -183,7 +183,8 @@ def getMSISVariable(lat, lon, height, jd, variable):
         lat: [float or ndarray] Latitude in radians.
         lon: [float or ndarray] Longitude in radians.
         height: [float or ndarray] Height in meters.
-        jd: [float] Julian date. Ignored if a date was set using setAtmosphere().
+        jd: [float or ndarray] Julian date, of all the points or of every point. Ignored if a date was set
+            using setAtmosphere().
         variable: [Variable] Model output to return, e.g. Variable.MASS_DENSITY or Variable.TEMPERATURE.
             The model also gives the number densities of N2, O2, O, He, H, Ar, N, anomalous oxygen and NO.
 
@@ -197,8 +198,12 @@ def getMSISVariable(lat, lon, height, jd, variable):
         jd = MSIS_JD
 
     # Broadcast the inputs to a common shape, so that pymsis evaluates them point by point
-    lat, lon, height = np.broadcast_arrays(np.degrees(lat), np.degrees(lon), height)
-    dt_arr = np.full(lat.size, np.datetime64(jd2Date(jd, dt_obj=True)))
+    lat, lon, height, jd = np.broadcast_arrays(np.degrees(lat), np.degrees(lon), height, jd)
+
+    # Convert every distinct Julian date to a date once
+    jd_unique, jd_index = np.unique(jd.ravel(), return_inverse=True)
+    dt_unique = np.array([np.datetime64(jd2Date(jd_value, dt_obj=True)) for jd_value in jd_unique])
+    dt_arr = dt_unique[jd_index.ravel()]
 
     # f107, f107A, and ap effects are neither large nor well established below 80 km and these parameters
     #   should be set to 150., 150., and 4. respectively
