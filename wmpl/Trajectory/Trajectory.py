@@ -6248,6 +6248,11 @@ class Trajectory(object):
             for obs in self.observations:
                 obs.time_data -= t0
 
+                # Offset the excluded time range too, so it still matches the times when the observations are
+                #   reinitialized for the next pass (observations pickled before it was added do not have it)
+                if getattr(obs, 'excluded_time', None) is not None:
+                    obs.excluded_time = [ex_time - t0 for ex_time in obs.excluded_time]
+
 
             # Recompute the reference JD to corresponds with t0
             self.jdt_ref = self.jdt_ref + t0/86400.0

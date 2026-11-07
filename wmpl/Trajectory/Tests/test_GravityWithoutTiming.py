@@ -5,7 +5,7 @@ from the first. That pass used to run only after a timing estimate, so with esti
 fitted line was exactly the one gravity_correction=False gives.
 
 The tests drop a noise-free constant-velocity meteor by gravity, observe it from three stations, and check
-that the solver recovers it.
+that the solver recovers it. A time range excluded from a station must still be excluded in the gravity pass.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityWithoutTiming.py -v
@@ -96,6 +96,35 @@ def testTheGravityCorrectionChangesTheLineWithoutTiming():
     gravity_off, _ = _solve(5.0, 15000.0, 30.0, estimate_timing_vel=False, gravity_correction=False)
 
     assert not np.allclose(gravity_on.radiant_eci_mini, gravity_off.radiant_eci_mini, rtol=0, atol=1e-9)
+
+
+
+def testAnExcludedTimeRangeIsKeptInTheGravityPass():
+    """ Check that a time range excluded from a station which does not start at 0 is still excluded after the
+        observations are reinitialized for the gravity pass, as the times are shifted to start at 0.
+    """
+
+    traj, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True, estimate_timing_vel=False, \
+        gravity_correction=True, calc_orbit=False)
+
+    # Start the times at 10 s, and exclude 11-11.5 s from the first station
+    observations = traj.observations
+    traj.observations = []
+    for obs in observations:
+
+        obs.time_data = obs.time_data + 10.0
+
+        if obs.station_id == 'A':
+            obs.excluded_time = [11.0, 11.5]
+
+        traj.infillWithObs(obs)
+
+    traj = traj.run()
+
+    station = [obs for obs in traj.observations if obs.station_id == 'A'][0]
+
+    assert np.allclose(station.excluded_time, [1.0, 1.5])
+    assert station.excluded_indx_range
 
 
 
