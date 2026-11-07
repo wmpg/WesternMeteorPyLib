@@ -6257,6 +6257,13 @@ class Trajectory(object):
             # Recompute the reference JD to corresponds with t0
             self.jdt_ref = self.jdt_ref + t0/86400.0
 
+            # Recompute the given RA and Dec for the new reference JD, as they are converted to azimuth and
+            #   elevation at the reference JD when the observations are reinitialized for the next pass
+            if self.meastype == 1:
+                for obs in self.observations:
+                    obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, self.jdt_ref, \
+                        obs.lat, obs.lon)
+
 
         ###################################################################################
 

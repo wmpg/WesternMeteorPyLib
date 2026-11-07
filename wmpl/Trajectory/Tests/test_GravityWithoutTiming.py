@@ -5,7 +5,8 @@ from the first. That pass used to run only after a timing estimate, so with esti
 fitted line was exactly the one gravity_correction=False gives.
 
 The tests drop a noise-free constant-velocity meteor by gravity, observe it from three stations, and check
-that the solver recovers it. A time range excluded from a station must still be excluded in the gravity pass.
+that the solver recovers it. A time range excluded from a station must still be excluded in the gravity pass,
+and lines of sight given as RA and Dec must not change in it.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityWithoutTiming.py -v
@@ -18,8 +19,10 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
+from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.Math import angleBetweenVectors
+from wmpl.Utils.TrajConversions import altAz2RADec_vect
 
 
 def _solve(duration, v_init, elevation, estimate_timing_vel, gravity_correction=True):
@@ -125,6 +128,32 @@ def testAnExcludedTimeRangeIsKeptInTheGravityPass():
 
     assert np.allclose(station.excluded_time, [1.0, 1.5])
     assert station.excluded_indx_range
+
+
+
+def testRADecAreKeptInTheGravityPassWhenTheTimesDoNotStartAtZero():
+    """ Check that the lines of sight given as RA and Dec do not change when the observations are
+        reinitialized for the gravity pass, as the reference JD is moved to the first time.
+    """
+
+    straight, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True)
+
+    traj = Trajectory(straight.jdt_ref, meastype=1, max_toffset=1.0, estimate_timing_vel=False, \
+        gravity_correction=True, monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False, \
+        verbose=False)
+
+    # Give RA and Dec at the reference JD, with the times starting at 10 s
+    for obs in straight.observations:
+        ra, dec = altAz2RADec_vect(obs.azim_data, obs.elev_data, straight.jdt_ref, obs.lat, obs.lon)
+        traj.infillTrajectory(ra, dec, obs.time_data + 10.0, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id)
+
+    lines_of_sight = {obs.station_id: obs.meas_eci_los for obs in traj.observations}
+
+    traj = traj.run()
+
+    for obs in traj.observations:
+        assert np.allclose(obs.meas_eci_los, lines_of_sight[obs.station_id], rtol=0, atol=1e-8)
 
 
 
