@@ -10,6 +10,7 @@ from __future__ import print_function, division, absolute_import
 
 import datetime
 import os
+import re
 import shutil
 
 import numpy as np
@@ -187,6 +188,25 @@ def testAFragmentFarFromItsNumberIsNotMatched(tmp_path):
     assert "NOTE: not matched, 1 at XX0002 is 2.20 km away" in rows
     assert "NOTE: not matched, 1 at XX0001 is 2.20 km away" in rows
     assert rows.count("not matched") == 3
+
+
+
+def testAFragmentWhoseNumberIsMatchedWithAnotherOneSaysWhich(tmp_path):
+    """ Check that a fragment whose number at the other station is close, but matched with another fragment,
+        is reported as such and not noted as far.
+    """
+
+    numbers = {'XX0001': {1: 800.0, 2: 1000.0}, 'XX0002': {1: 1000.0}}
+    paths = writeEvent(tmp_path, numbers)
+
+    matches = fragmentMatches(solveMain(paths, tmp_path), paths, [1, 2])
+
+    assert [(pair[0], pair[1]) for pair in matches[0]['pairs']] == [(2, 1)]
+
+    rows = reportRows(fragmentMatchReport(matches))
+    assert re.search(r"not matched, 1 at XX0002 \(\d+ m away\) is matched with 2", rows)
+    assert "NOTE: not matched" not in rows
+    assert "NOTE: different numbers, ambiguous" in rows
 
 
 

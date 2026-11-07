@@ -1748,7 +1748,9 @@ def fragmentMatchReport(matches):
     out_str += "and a match less than {:.1f} km closer than the next best candidate of either fragment is\n" \
         .format(FRAGMENT_MATCH_MARGIN/1000)
     out_str += "ambiguous. A match of different numbers which is not ambiguous suggests that the stations\n"
-    out_str += "measured the fragments under crossed numbers.\n"
+    out_str += "measured the fragments under crossed numbers, and a fragment further than {:.1f} km from\n" \
+        .format(FRAGMENT_MATCH_LIMIT/1000)
+    out_str += "the one with its number at the other station may not be the same fragment.\n"
 
     for match in matches:
 
@@ -1756,15 +1758,17 @@ def fragmentMatchReport(matches):
         frags_a, frags_b = match['fragments']
         width = max(len(station_a), len(station_b), 8)
 
-        def distanceStr(frag_a, frag_b):
-            """ Format the distance of two fragments, None if they were not compared. """
+        def distanceOf(frag_a, frag_b):
+            """ Get the distance of two fragments (m), NaN if they were not compared. """
 
             if (frag_a not in frags_a) or (frag_b not in frags_b):
-                return None
+                return np.nan
 
-            dist = match['distance'][frags_a.index(frag_a), frags_b.index(frag_b)]
-            if np.isnan(dist):
-                return None
+            return match['distance'][frags_a.index(frag_a), frags_b.index(frag_b)]
+
+
+        def distanceStr(dist):
+            """ Format a distance, in km from 1 km on. """
 
             return "{:.2f} km".format(dist/1000) if (dist >= 1000) else "{:.0f} m".format(dist)
 
@@ -1777,10 +1781,10 @@ def fragmentMatchReport(matches):
 
             notes = []
             if frag_a != frag_b:
-                same_dist = distanceStr(frag_a, frag_a)
+                same_dist = distanceOf(frag_a, frag_a)
                 notes.append("NOTE: different numbers" + ("" if (frag_a not in frags_b) \
-                    else " ({:d} at {:s}: {:s})".format(frag_a, station_b, same_dist if same_dist \
-                    else "not seen at the same times")))
+                    else " ({:d} at {:s}: {:s})".format(frag_a, station_b, "not seen at the same times" \
+                    if np.isnan(same_dist) else distanceStr(same_dist))))
 
             if (next_best is not None) and (next_best - dist < FRAGMENT_MATCH_MARGIN):
                 notes.append("ambiguous")
@@ -1789,22 +1793,31 @@ def fragmentMatchReport(matches):
                 "-" if (next_best is None) else "{:.0f}".format(next_best), ", ".join(notes), w=width)
             out_str += line.rstrip() + "\n"
 
-        # The fragments left without a partner, noting those whose number the other station also has
-        matched_a = [pair[0] for pair in match['pairs']]
-        matched_b = [pair[1] for pair in match['pairs']]
-        unmatched = [(str(frag), "-", frag, station_b, frags_b) for frag in frags_a \
-            if frag not in matched_a] + [("-", str(frag), frag, station_a, frags_a) for frag in frags_b \
-            if frag not in matched_b]
+        # The fragments left without a partner, noting those further than the limit from the fragment with
+        #   their number at the other station
+        partners_a = {pair[0]: pair[1] for pair in match['pairs']}
+        partners_b = {pair[1]: pair[0] for pair in match['pairs']}
+        unmatched = [(str(frag), "-", frag, station_b, frags_b, partners_b) for frag in frags_a \
+            if frag not in partners_a] + [("-", str(frag), frag, station_a, frags_a, partners_a) \
+            for frag in frags_b if frag not in partners_b]
 
-        for frag_a_str, frag_b_str, frag, other_station, other_frags in unmatched:
+        for frag_a_str, frag_b_str, frag, other_station, other_frags, other_partners in unmatched:
 
-            dist = distanceStr(frag, frag)
-            if dist:
-                note = "NOTE: not matched, {:d} at {:s} is {:s} away".format(frag, other_station, dist)
-            elif frag in other_frags:
-                note = "not matched, {:d} at {:s} is not seen at the same times".format(frag, other_station)
-            else:
+            dist = distanceOf(frag, frag)
+            if frag not in other_frags:
                 note = "not matched"
+
+            elif np.isnan(dist):
+                note = "not matched, {:d} at {:s} is not seen at the same times".format(frag, other_station)
+
+            elif dist >= FRAGMENT_MATCH_LIMIT:
+                note = "NOTE: not matched, {:d} at {:s} is {:s} away".format(frag, other_station, \
+                    distanceStr(dist))
+
+            # The fragment with its number is close, but matched with another one
+            else:
+                note = "not matched, {:d} at {:s} ({:s} away) is matched with {:d}".format(frag, \
+                    other_station, distanceStr(dist), other_partners.get(frag, -1))
 
             out_str += "  {:>{w}s}  {:>{w}s}  {:>12s}  {:>13s}  {:s}\n".format(frag_a_str, frag_b_str, "-", \
                 "-", note, w=width)
