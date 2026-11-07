@@ -102,6 +102,12 @@ def testEveryOutputIsSavedWithItsReasonAndTheNeomodBeside(runReboundCli):
     assert meteomod["mode"] == "all"
     assert meteomod["weight"] == "flux"
     assert meteomod["table"] == "published"
+
+    # Without a type, every family once, summed by type too, with the note
+    assert meteomod["all_families_once"]
+    assert "44'" not in meteomod["sources"]
+    assert meteomod["by_type"]["types"]
+    assert "NOTE: no type given" in meteomod["warning"]
     assert len(meteomod["time_days"]) == len(results["nominal"]["time_days"])
     assert all(v is None for values in meteomod["nominal"].values() for v in values)
     assert "doi:10.1051/0004-6361/202450532" in meteomod["reference"]
@@ -124,6 +130,7 @@ def testEveryOutputIsSavedWithItsReasonAndTheNeomodBeside(runReboundCli):
     assert "Source regions in METEOMOD" in report
     assert "Source regions in NEOMOD2" in report
     assert "Please cite Broz" in report
+    assert "NOTE: no type given" in report
 
     assert "Saved METEOMOD" in done.stdout
 
@@ -143,6 +150,7 @@ def testTheEndOnlyAmongTheFamiliesOfAType(runReboundCli):
     assert meteomod["mode"] == "final"
     assert meteomod["types"] == ["CM"]
     assert meteomod["table"] == "download"
+    assert meteomod["by_type"] is None
     assert len(meteomod["time_days"]) == 1
     assert meteomod["sources"]
     assert set(meteomod["family_types"].values()) == {"CM"}

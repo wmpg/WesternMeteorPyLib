@@ -70,7 +70,14 @@ What the probabilities assume:
       where none of the selected families has bodies gives no probabilities.
     - Variants of a family share its map: Koronis(2) and Karin the map of Karin; Massalia and
       Massalia(2), the young dust-band population, that of Massalia; Nysa (LL) and Nysa (E) that of Nysa,
-      with the same Phi, so that selecting both counts Nysa twice. Select the families by type.
+      with the same Phi. When all the families are compared Nysa is taken once, as LL/E; given both by
+      number, it is counted twice, with a warning.
+    - Without a type every family is compared, and the probabilities are also summed by type. That is
+      the probability for a meteoroid of any type on that orbit, which the families with the largest
+      fluxes dominate, not an identification of the type: Winchcombe, a CM chondrite, gets H 0.47, L
+      0.37, CI 0.12 and CM 0.03, and Chelyabinsk, an LL chondrite, L 0.46 and H 0.38. The output says
+      so. The types are those of the families, so a fall of known type is compared with the families
+      of its type.
     - Averaged over clones, each clone weighs the same.
 
 The file is not distributed with wmpl. It is downloaded on first use, 19 MB, from the authors' page,
@@ -92,6 +99,7 @@ Usage:
     python -m wmpl.Utils.METEOMODSourceRegions path/to/trajectory.pickle --types L
     python -m wmpl.Utils.METEOMODSourceRegions path/to/trajectory.pickle --types CM --clones 1000 --seed 1
     python -m wmpl.Utils.METEOMODSourceRegions --a 2.5855 --e 0.6183 --i 0.460 --types CM --weight neo
+    python -m wmpl.Utils.METEOMODSourceRegions path/to/trajectory.pickle
     python -m wmpl.Utils.METEOMODSourceRegions --list
 
 wmpl.Rebound.REBOUND takes --meteomod to give them at every output of an integration, or at its end only.
@@ -111,6 +119,7 @@ from wmpl.Utils.DebiasedNEOPopulation import CACHE_DIR, findDebiasedNEOPopulatio
     downloadDebiasedNEOPopulation
 from wmpl.Utils.SourceRegions import IN_MODEL, OUTSIDE, EMPTY_BIN, CLONE_INTERVAL, PLOT_COLORS, wrapped, \
     orderedSources, leftOutLine
+from wmpl.Utils.SourceRegions import groupSums
 
 
 # METEOMOD as the authors' page distributes it, in the form wmpl.Utils.DebiasedNEOPopulation finds,
@@ -157,6 +166,11 @@ TABLE5_PUBLISHED = {
 # The versions of Table 5: as published, by default, or as in the tab5.tex of the download, which the
 #   authors' page uses
 TABLES = {'published': "Table 5 as published", 'download': "Table 5 of the download"}
+
+# Families listed twice, with the same map and flux, under two readings of their type: the second is left
+#   out when all the families are compared, the first then having both types
+SAME_FAMILY = {"44'": '44'}
+BOTH_TYPES = {'44': 'LL/E'}
 
 # The model, once loaded
 _model_cache = {}
@@ -453,7 +467,8 @@ def selectSources(meteomod, types=None, sources=None):
             default.
 
     Return:
-        [list] The family numbers, in the order of the authors' list.
+        [list] The family numbers, in the order of the authors' list. Without types or numbers, every family
+            once (see allSources).
     """
 
     if (types is not None) and (sources is not None):
@@ -480,7 +495,34 @@ def selectSources(meteomod, types=None, sources=None):
 
         return kept
 
-    return list(meteomod['sources'])
+    return allSources(meteomod)
+
+
+
+def allSources(meteomod):
+    """ The families compared when none are selected: all of them, each once, a family listed twice
+        under two types being taken once (see SAME_FAMILY). """
+
+    return [s for s in meteomod['sources'] if s not in SAME_FAMILY]
+
+
+
+def familyTypes(meteomod, sources, merged=False):
+    """ The type of each family, {number: type}, a family listed twice having both types when all the
+        families are compared (merged). """
+
+    return {s: BOTH_TYPES[s] if (merged and (s in BOTH_TYPES)) else meteomod['types'][s] for s in sources}
+
+
+
+def typeGroups(meteomod, sources, merged=False):
+    """ The families grouped by type, [(type, [numbers])], in the order of the families. """
+
+    groups = {}
+    for s, kind in familyTypes(meteomod, sources, merged=merged).items():
+        groups.setdefault(kind, []).append(s)
+
+    return list(groups.items())
 
 
 
@@ -661,17 +703,19 @@ def sourceRegions(meteomod, a, e, incl, sources=None, weight='flux'):
         incl: [float] Inclination (rad).
 
     Keyword arguments:
-        sources: [list] The family numbers to compare. All, by default.
+        sources: [list] The family numbers to compare. All, each once, by default (see allSources).
         weight: [str] 'flux' or 'neo' (see familyWeights). 'flux' by default.
 
     Return:
-        [dict] 'a', 'e', 'q' (AU), 'incl' (rad); 'weight'; 'sources'; 'in_model'; 'reason', why the
-            orbit has no probabilities, or None; 'bin', the limits of its bin in 'a' and 'incl_deg', or
-            None outside the maps; 'probabilities' and 'map_values', {number: value}, or None.
+        [dict] 'a', 'e', 'q' (AU), 'incl' (rad); 'weight'; 'sources'; 'merged', whether all the families
+            were compared, each once; 'in_model'; 'reason', why the orbit has no probabilities, or None;
+            'bin', the limits of its bin in 'a' and 'incl_deg', or None outside the maps; 'probabilities'
+            and 'map_values', {number: value}, and 'by_type', {type: probability}, or None.
     """
 
-    if sources is None:
-        sources = meteomod['sources']
+    merged = sources is None
+    if merged:
+        sources = allSources(meteomod)
 
     probabilities, map_values, status, _ = sourceProbabilities(meteomod, a, e, incl, sources=sources,
         weight=weight)
@@ -694,11 +738,14 @@ def sourceRegions(meteomod, a, e, incl, sources=None, weight='flux'):
         'a': float(a), 'e': float(e), 'q': float(a*(1.0 - e)), 'incl': float(incl),
         'weight': weight,
         'sources': list(sources),
+        'merged': merged,
         'in_model': in_model,
         'reason': outsideReason(a, e, incl, status),
         'bin': bin_ranges,
         'probabilities': {s: float(p) for s, p in zip(sources, probabilities)} if in_model else None,
         'map_values': {s: float(m) for s, m in zip(sources, map_values)} if inside[0] else None,
+        'by_type': {kind: float(sum(probabilities[sources.index(k)] for k in keys)) for kind, keys
+            in typeGroups(meteomod, sources, merged=merged)} if in_model else None,
         }
 
 
@@ -715,7 +762,7 @@ def cloneSourceRegions(meteomod, a, e, incl, sources=None, weight='flux', nomina
         incl: [ndarray] Inclinations of the clones (rad).
 
     Keyword arguments:
-        sources: [list] The family numbers to compare. All, by default.
+        sources: [list] The family numbers to compare. All, each once, by default (see allSources).
         weight: [str] 'flux' or 'neo' (see familyWeights). 'flux' by default.
         nominal: [tuple] (a, e, incl) of the nominal orbit, to count the clones in its bin. None by
             default.
@@ -723,12 +770,13 @@ def cloneSourceRegions(meteomod, a, e, incl, sources=None, weight='flux', nomina
 
     Return:
         [dict] 'n', the clones; 'n_in_model'; 'n_bins', the bins they fall in; 'share_in_nominal_bin',
-            or None without the nominal; 'interval'; and {number: value} dicts 'mean', 'low' and 'high',
-            None if no clone is in the model.
+            or None without the nominal; 'interval'; {number: value} dicts 'mean', 'low' and 'high', and
+            'by_type', the same of the sums by type, None if no clone is in the model.
     """
 
-    if sources is None:
-        sources = meteomod['sources']
+    merged = sources is None
+    if merged:
+        sources = allSources(meteomod)
 
     probabilities, _, status, bins = sourceProbabilities(meteomod, a, e, incl, sources=sources,
         weight=weight)
@@ -737,7 +785,7 @@ def cloneSourceRegions(meteomod, a, e, incl, sources=None, weight='flux', nomina
 
     out = {'n': int(len(status)), 'n_in_model': int(np.sum(in_model)),
         'n_bins': int(len(np.unique(bins[in_model]))), 'share_in_nominal_bin': None,
-        'interval': tuple(interval), 'mean': None, 'low': None, 'high': None}
+        'interval': tuple(interval), 'mean': None, 'low': None, 'high': None, 'by_type': None}
 
     if nominal is not None:
         _, _, _, nominal_bin = sourceProbabilities(meteomod, *nominal, sources=sources, weight=weight)
@@ -753,24 +801,45 @@ def cloneSourceRegions(meteomod, a, e, incl, sources=None, weight='flux', nomina
         out['low'] = {s: float(v) for s, v in zip(sources, low)}
         out['high'] = {s: float(v) for s, v in zip(sources, high)}
 
+        # The sums by type of each clone, and their mean and interval
+        groups = typeGroups(meteomod, sources, merged=merged)
+        sums = groupSums(values, sources, groups)
+        low, high = np.percentile(sums, interval, axis=0)
+        kinds = [kind for kind, _ in groups]
+
+        out['by_type'] = {'mean': {k: float(v) for k, v in zip(kinds, np.mean(sums, axis=0))},
+            'low': {k: float(v) for k, v in zip(kinds, low)},
+            'high': {k: float(v) for k, v in zip(kinds, high)}}
+
     return out
 
 
 
-def sourceNames(meteomod, sources=None):
-    """ The name of each family with its type, {number: 'Name (type)'}. """
+def sourceNames(meteomod, sources=None, merged=False):
+    """ The name of each family with its type, {number: 'Name (type)'}, a family listed twice having both
+        types when all the families are compared (merged). """
 
     if sources is None:
         sources = meteomod['sources']
 
-    return {s: "{:s} ({:s})".format(meteomod['names'][s], meteomod['types'][s]) for s in sources}
+    kinds = familyTypes(meteomod, sources, merged=merged)
+
+    return {s: "{:s} ({:s})".format(meteomod['names'][s], kinds[s]) for s in sources}
 
 
 
-def selectionWarning(meteomod, sources, weight='flux'):
-    """ A warning about the weights or the families selected, or None. """
+def selectionWarning(meteomod, sources, weight='flux', merged=False):
+    """ A warning about the weights or the families selected, and a note when all the families are
+        compared (merged), or None. """
 
     warnings = []
+
+    if merged:
+        warnings.append("NOTE: no type given, so all the families are compared. This is the probability "
+            "for a meteoroid of any type on this orbit, dominated by the families with the largest fluxes "
+            "(Massalia(2), Koronis(2), Veritas): the orbit alone hardly tells the type, and the sums by "
+            "type are not an identification of it. For a fall of known type, compare the families of that "
+            "type (--types, or --meteomod_types in REBOUND.py).")
 
     if weight == 'neo':
         warnings.append("WARNING: weighted by N_neo, as the authors' meteomod.py computes it, not by the "
@@ -786,11 +855,11 @@ def selectionWarning(meteomod, sources, weight='flux'):
 
 
 
-def headingText(meteomod, sources, weight='flux', types=None):
+def headingText(meteomod, sources, weight='flux', types=None, merged=False):
     """ What the probabilities were computed for, in words. """
 
-    if len(sources) == len(meteomod['sources']):
-        selection = "all {:d} families".format(len(sources))
+    if merged:
+        selection = "all {:d} families, each once".format(len(sources))
     elif types is not None:
         selection = "the {:d} families of type {:s}".format(len(sources), ", ".join(types))
     else:
@@ -809,18 +878,22 @@ def sourceModel(meteomod, sources=None, weight='flux', types=None):
         meteomod: [dict] Return of loadMETEOMOD.
 
     Keyword arguments:
-        sources: [list] The family numbers to compare. All, by default.
+        sources: [list] The family numbers to compare. Without them, those of the types, or all the
+            families, each once (see allSources). None by default.
         weight: [str] 'flux' or 'neo' (see familyWeights). 'flux' by default.
-        types: [list] The types the families were selected by, to say so. None by default.
+        types: [list] The types of the families to compare, if not given by number, else the types they
+            were selected by, to say so. None by default.
 
     Return:
         [dict] The model (see wmpl.Utils.SourceRegions).
     """
 
+    merged = (sources is None) and (types is None)
     if sources is None:
-        sources = list(meteomod['sources'])
+        sources = selectSources(meteomod, types=types)
 
-    names = sourceNames(meteomod, sources)
+    names = sourceNames(meteomod, sources, merged=merged)
+    groups = typeGroups(meteomod, sources, merged=merged)
 
     def _evaluate(a, e, incl):
         probabilities, _, status, _ = sourceProbabilities(meteomod, a, e, incl, sources=sources,
@@ -836,7 +909,7 @@ def sourceModel(meteomod, sources=None, weight='flux', types=None):
     if len(sources) <= len(PLOT_COLORS):
         plot_groups = [(names[s], color, [s]) for s, color in zip(sources, PLOT_COLORS)]
 
-    warning = selectionWarning(meteomod, sources, weight=weight)
+    warning = selectionWarning(meteomod, sources, weight=weight, merged=merged)
 
     return {
         'name': METEOMOD['name'],
@@ -847,20 +920,22 @@ def sourceModel(meteomod, sources=None, weight='flux', types=None):
         'source_names': names,
         'evaluate': _evaluate,
         'reason': _reason,
-        'heading': headingText(meteomod, sources, weight=weight, types=types),
+        'heading': headingText(meteomod, sources, weight=weight, types=types, merged=merged),
         'warning': warning,
         'title_note': ", weighted by {:s}".format("the meteoroid flux" if weight == 'flux' else "N_neo"),
         'print_min': PRINT_MIN,
         'name_width': 22,
         'plot_groups': plot_groups,
+        'type_groups': groups if len(groups) > 1 else None,
         'json': {
             'model_file': os.path.basename(meteomod['file_path']),
             'table': meteomod['table'],
             'table_changes': [s for s in meteomod['table_changes'] if s in sources],
             'weight': weight,
             'types': types,
+            'all_families_once': merged,
             'warning': warning,
-            'family_types': {s: meteomod['types'][s] for s in sources},
+            'family_types': familyTypes(meteomod, sources, merged=merged),
             'n_neo_1e8': {s: list(meteomod['n_neo'][s]) for s in sources},
             'flux_1e-9_km-2_yr-1': {s: list(meteomod['flux'][s]) for s in sources},
             },
@@ -884,13 +959,14 @@ def formatSourceRegions(meteomod, result, clones=None, types=None):
     """
 
     sources = result['sources']
-    names = sourceNames(meteomod, sources)
+    merged = result['merged']
+    names = sourceNames(meteomod, sources, merged=merged)
     weights = dict(zip(sources, familyWeights(meteomod, sources, weight=result['weight'])))
 
     lines = ["Source regions in {:s}, {:s}:".format(METEOMOD['name'], headingText(meteomod, sources,
-        weight=result['weight'], types=types))]
+        weight=result['weight'], types=types, merged=merged))]
 
-    warning = selectionWarning(meteomod, sources, weight=result['weight'])
+    warning = selectionWarning(meteomod, sources, weight=result['weight'], merged=merged)
     if warning is not None:
         lines += wrapped(warning)
 
@@ -936,6 +1012,36 @@ def formatSourceRegions(meteomod, result, clones=None, types=None):
     left_out = leftOutLine({'source_names': names, 'print_min': PRINT_MIN}, sources, order)
     if left_out is not None:
         lines.append(left_out)
+
+    # The sums by type, when the families are of several types
+    if len(result['by_type']) > 1:
+
+        by_type = result['by_type']
+        kinds = sorted(by_type, key=lambda k: -by_type[k])
+        shown = [k for k in kinds if (by_type[k] >= PRINT_MIN) or ((clones is not None)
+            and (clones['by_type'] is not None) and (clones['by_type']['mean'][k] >= PRINT_MIN))]
+
+        lines.append("")
+        lines.append("  By type, the sum of the families of each type:")
+        header = "  {:<30s} {:>8s}".format("Type", "p")
+        if clones is not None:
+            header += "  {:>26s}".format("clones mean [{:g}-{:g}%]".format(*clones['interval']))
+        lines.append(header)
+
+        for k in shown:
+
+            line = "  {:<30s} {:8.3f}".format(k, by_type[k])
+
+            if clones is not None:
+                clone_sums = clones['by_type']
+                line += "  {:>26s}".format("n/a" if clone_sums is None else "{:.3f} [{:.3f}, {:.3f}]".format(
+                    clone_sums['mean'][k], clone_sums['low'][k], clone_sums['high'][k]))
+
+            lines.append(line)
+
+        if len(shown) < len(kinds):
+            lines.append("  ({:s}: below {:g})".format(", ".join(k for k in kinds if k not in shown),
+                PRINT_MIN))
 
     return lines
 
@@ -1046,10 +1152,13 @@ if __name__ == "__main__":
             print(line)
         sys.exit(0)
 
-    try:
-        sources = selectSources(meteomod, types=cml_args.types, sources=cml_args.sources)
-    except ValueError as err:
-        reportError(str(err))
+    # Without types or numbers, all the families, each once
+    sources = None
+    if (cml_args.types is not None) or (cml_args.sources is not None):
+        try:
+            sources = selectSources(meteomod, types=cml_args.types, sources=cml_args.sources)
+        except ValueError as err:
+            reportError(str(err))
 
 
     # Assemble the orbit, either from a trajectory pickle or from the elements given by hand
@@ -1145,7 +1254,7 @@ if __name__ == "__main__":
             'table': meteomod['table'],
             'table_changes': meteomod['table_changes'],
             'weight': cml_args.weight,
-            'family_names': sourceNames(meteomod, sources),
+            'family_names': sourceNames(meteomod, result['sources'], merged=result['merged']),
             'result': dict(result, incl_deg=np.degrees(result['incl'])),
             'clones': None if clone_result is None else {'n': clones['n'], 'seed': clones['seed'],
                 'result': clone_result},

@@ -583,7 +583,9 @@ probability that the object came from each of its 52 asteroid families, each wei
 flux on the Earth. They go to the report, `rebound_meteomod_sources.csv`, the figure
 `rebound_meteomod_sources.png` and the key `"meteomod"` of the JSON, and can be asked for with
 `--neomod` in the same run. `--meteomod_types` compares the families of the meteorite's type only, as
-for a fall of known type it should be (`--meteomod_types L` for an L chondrite).
+for a fall of known type it should be (`--meteomod_types L` for an L chondrite). Without it, every family
+is compared and the probabilities are also summed by type, which gives the prior of a meteoroid of
+unknown type rather than its type.
 
 The families are weighted by the flux, as the model defines it. The authors' `meteomod.py` weights them
 by their number of bodies in the NEO region, which leaves out the collision probability with the Earth;

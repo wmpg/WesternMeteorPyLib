@@ -203,9 +203,11 @@ def testFamiliesAreSelectedByTypeOrNumber():
 
     meteomod = _load()
 
-    assert mm.selectSources(meteomod) == meteomod['sources']
+    # All the families, Nysa once
+    assert mm.selectSources(meteomod) == [s for s in meteomod['sources'] if s != "44'"]
     assert mm.selectSources(meteomod, types=['L']) == ['20', "20'", '3']
-    assert mm.selectSources(meteomod, types=['ll']) == ['3']
+    assert mm.selectSources(meteomod, types=['ll']) == ['3', '44']
+    assert mm.selectSources(meteomod, types=['E']) == ["44'"]
     assert mm.selectSources(meteomod, types=['CM', 'CI']) == ['569', '490']
     assert mm.selectSources(meteomod, sources=['490', '20']) == ['20', '490']
 
@@ -314,8 +316,7 @@ def testThePublishedTableReplacesTheDownloadWhereTheyDiffer():
     assert download['types']['3'] == "L/LL"
 
     # Juno is no longer an LL family
-    with pytest.raises(ValueError):
-        mm.selectSources(published, types=['LL'])
+    assert mm.selectSources(published, types=['LL']) == ['44']
 
     model = mm.sourceModel(published, sources=['20', '3'])
     assert "Table 5 as published" in model['heading']
@@ -323,6 +324,93 @@ def testThePublishedTableReplacesTheDownloadWhereTheyDiffer():
 
     with pytest.raises(ValueError):
         mm.loadMETEOMOD(file_path=path, download=False, table='preprint')
+
+
+
+def testAllTheFamiliesAreComparedOnceAndSummedByType():
+    """ Without a selection every family is compared once, Nysa as LL/E, and the probabilities are summed
+        by type, for one orbit and over clones. """
+
+    meteomod = _load(table='published')
+    a, e, incl = _orbit(165, 2)
+
+    res = mm.sourceRegions(meteomod, a, e, incl)
+
+    assert res['merged']
+    assert "44'" not in res['sources']
+    assert sum(res['probabilities'].values()) == pytest.approx(1.0)
+
+    p = res['probabilities']
+    assert res['by_type']['L'] == pytest.approx(p['20'] + p["20'"] + p['3'])
+    assert res['by_type']['LL/E'] == pytest.approx(p['44'])
+    assert res['by_type']['CI'] == pytest.approx(p['569'])
+    assert sum(res['by_type'].values()) == pytest.approx(1.0)
+    assert mm.sourceNames(meteomod, res['sources'], merged=True)['44'] == "Nysa (LL/E)"
+
+    # Given by number, Nysa keeps its type
+    explicit = mm.sourceRegions(meteomod, a, e, incl, sources=['20', '44'])
+    assert not explicit['merged']
+    assert set(explicit['by_type']) == {'L', 'LL'}
+
+    # Over clones, the mean of the sums is the sum of the means, and the interval is that of the sums
+    orbits = [_orbit(165, 2), _orbit(230, 5), _orbit(230, 5), _orbit(165, 2)]
+    clones = mm.cloneSourceRegions(meteomod, *[np.array(v) for v in zip(*orbits)])
+
+    sums_l = [mm.sourceRegions(meteomod, *o)['by_type']['L'] for o in orbits]
+    assert clones['by_type']['mean']['L'] == pytest.approx(np.mean(sums_l))
+    assert clones['by_type']['low']['L'] == pytest.approx(np.percentile(sums_l, 2.5))
+    assert clones['by_type']['mean']['L'] == pytest.approx(clones['mean']['20'] + clones['mean']["20'"]
+        + clones['mean']['3'])
+
+    text = "\n".join(mm.formatSourceRegions(meteomod, res))
+    assert "all 6 families, each once" in text
+    assert "NOTE: no type given" in text
+    assert "By type" in text
+    assert "Nysa (LL/E)" in text
+
+
+
+def testTheReportSumsByTypeOnlyWithoutAType():
+    """ The model of all the families gives the sums by type in the report, at the horizon too, and in the
+        JSON, with the note; the families of one type give neither, and Nysa given twice is warned of. """
+
+    meteomod = _load(table='published')
+
+    model = mm.sourceModel(meteomod)
+    assert "NOTE: no type given" in model['warning']
+    assert [kind for kind, _ in model['type_groups']] == ['L', 'CI', 'CM', 'LL/E']
+    assert model['json']['all_families_once']
+    assert model['json']['family_types']['44'] == "LL/E"
+
+    nominal = [_orbit(165, 2), _orbit(230, 5)]
+    clones = [[_orbit(165, 2), _orbit(230, 5)], [_orbit(230, 5), _orbit(230, 5)]]
+    horizon = (-10.0, _orbit(230, 5), [_orbit(165, 2), _orbit(230, 5)])
+
+    series = sourceRegionSeries(model, [0.0, -10.0], nominal, clones=clones, horizon=horizon)
+
+    lines = sourceRegionReportLines(series)
+    text = "\n".join(lines)
+    assert text.count("Type ") == 2
+    assert "LL/E" in text
+
+    saved = json.loads(json.dumps(sourceRegionSeriesToJSON(series, mode='all')))
+    expected = mm.sourceRegions(meteomod, *_orbit(230, 5))['by_type']
+    assert saved['by_type']['nominal']['L'][1] == pytest.approx(expected['L'])
+    assert saved['by_type']['horizon']['nominal']['CI'] == pytest.approx(expected['CI'])
+    assert saved['by_type']['members']['LL/E'] == ['44']
+
+    # The families of one type: no sums, no note
+    one_type = mm.sourceModel(meteomod, types=['L'])
+    assert one_type['type_groups'] is None
+    assert one_type['warning'] is None
+    one_series = sourceRegionSeries(one_type, [0.0], nominal[:1])
+    assert "By type" not in "\n".join(sourceRegionReportLines(one_series))
+    assert sourceRegionSeriesToJSON(one_series)['by_type'] is None
+
+    # Nysa given twice by number is counted twice, and warned about
+    twice = mm.sourceModel(meteomod, sources=['44', "44'", '20'])
+    assert "counted twice" in twice['warning']
+    assert "NOTE" not in twice['warning']
 
 
 

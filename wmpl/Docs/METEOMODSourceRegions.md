@@ -56,7 +56,7 @@ Source regions in METEOMOD (Broz et al. 2024), the 9 families of type CM, weight
 | :--- | :--- |
 | `TRAJ_PATH` | Trajectory pickle to take the orbit from. Omit it to give the orbit by hand. |
 | `--q`, `--a`, `--e`, `--i` | The orbit by hand: the perihelion distance or the semi-major axis (AU), the eccentricity and the inclination (deg). |
-| `--types TYPE [...]` | Compare only the families of these types (`L`, `CM CI`, ...). A family of type L/LL is kept for L and for LL. All families by default. |
+| `--types TYPE [...]` | Compare only the families of these types (`L`, `CM CI`, ...). A family of type L/LL is kept for L and for LL. By default every family, each once, with the probabilities also summed by type (see [Without the type of the meteorite](#without-the-type-of-the-meteorite)). |
 | `--sources NUMBER [...]` | Compare these families, by their number in Table 5 (`20` is Massalia, `"20'"` Massalia(2)). |
 | `--weight {flux,neo}` | `flux`, the meteoroid flux on the Earth, as the model defines it (default); `neo`, the number of bodies in the NEO region, as the authors' `meteomod.py` computes it, to compare. |
 | `--table {published,download}` | The values of Table 5: `published`, as in the A&A paper (default), or `download`, as in the `tab5.tex` of the archive, which the authors' page uses. See [Table 5 of the download and of the paper](#table-5-of-the-download-and-of-the-paper). |
@@ -102,8 +102,26 @@ type: `--types L` for an L chondrite, `--types CM` for a CM, as in the examples 
 - **Variants share a map.** Koronis(2), the young population of the 2.1° dust band, and Karin share the
   map of Karin. Massalia and Massalia(2), the young population of the 1.4° dust band, share that of
   Massalia; they are two populations, compared together in the authors' L example.
-- **Nysa appears twice,** as 44 (LL) and 44′ (E), with the same map and the same flux. Comparing all the
-  families counts it twice, and the output warns about it. Choosing the families by type avoids this.
+- **Nysa appears twice** in the authors' list, as 44 (LL) and 44′ (E), with the same map and the same
+  flux. When all the families are compared it is taken once, as LL/E. Given both by number, it is counted
+  twice, with a warning.
+
+### Without the type of the meteorite
+
+Without `--types` every family is compared, each once, and the output adds the probabilities summed by
+type (in the report of REBOUND too, and under `"by_type"` in the JSON). This is the probability for a
+meteoroid of any type on that orbit, and it is dominated by the families with the largest fluxes:
+Massalia(2), Koronis(2) and Veritas. The maps in (*a*, *i*) overlap, so the orbit alone hardly tells the
+type, and the output says so:
+
+| Fall (its type) | Summed by type, all the families compared |
+| :--- | :--- |
+| Novo Mesto (L) | L 0.40, CI 0.19, H 0.18, HED 0.08 |
+| Hamburg (H) | H 0.80, L 0.11, CI 0.05 |
+| Chelyabinsk (LL) | L 0.46, H 0.38, CI 0.07 |
+| Winchcombe (CM) | H 0.47, L 0.37, CI 0.12, CM 0.03 |
+
+For a fall of known type, compare the families of that type.
 
 ---
 
@@ -199,7 +217,8 @@ The outputs are those of `--neomod`, under their own names, described in
 - `rebound_meteomod_sources.csv`;
 - `rebound_meteomod_sources.png` (with `all`);
 - the key `"meteomod"` of the JSON, which also holds the weight, the types, the table, and N_neo and Φ
-  of each family compared.
+  of each family compared, and, without `--meteomod_types`, the probabilities summed by type
+  (`"by_type"`), also given in the report.
 
 `--neomod` and `--meteomod` can be given together. The figure draws a colour per family when there are 7
 or fewer. With more, it draws the 7 with the largest probabilities of the run and groups the rest as

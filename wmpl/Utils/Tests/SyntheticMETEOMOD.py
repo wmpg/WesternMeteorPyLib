@@ -11,7 +11,8 @@ import tarfile
 #   Phi as written in Table 5, and the counts of the map as {(bin in a, bin in i), from 1: count}. The
 #   second family shares the map of the first, as Massalia(2) does; the third is called CM in maps.in
 #   and CI in Table 5, as Misa is; the N_neo of the second is written with LaTeX and a '!', as in the
-#   published table
+#   published table; Nysa is listed twice, as LL and as E, with one map and flux, as in the published
+#   archive
 FAMILIES = [
     ('20', "Massalia (L)", "Massalia (L)", 'massalia-4', '1.1-2.8', '8.0-20',
         {(165, 2): 30.0, (166, 2): 10.0, (230, 5): 60.0}),
@@ -23,6 +24,8 @@ FAMILIES = [
         {(165, 2): 50.0, (230, 5): 50.0}),
     ('490', "{\\bf Veritas (CM)}", "Veritas (CM)", 'veritas-4_4628', '215-249!', '188-217',
         {(260, 1): 20.0, (61, 61): 80.0}),
+    ('44', "Nysa (LL)", "Nysa (LL)", 'nysa-4', '0.8-1.3', '6.3-10', {(165, 2): 5.0, (230, 5): 5.0}),
+    ("44'", "Nysa (E)", "Nysa (E)", 'nysa-4', '0.8-1.3', '6.3-10', None),
     ]
 
 

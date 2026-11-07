@@ -4408,8 +4408,10 @@ if __name__ == "__main__":
 
         try:
             meteomod = loadMETEOMOD(table=args.meteomod_table or "published")
-            meteomod_sources = selectSources(meteomod, types=args.meteomod_types,
-                sources=args.meteomod_sources)
+            meteomod_sources = None
+            if args.meteomod_sources is not None:
+                meteomod_sources = selectSources(meteomod, types=args.meteomod_types,
+                    sources=args.meteomod_sources)
             source_region_models.append(("meteomod", args.meteomod, meteomodSourceModel(meteomod,
                 sources=meteomod_sources, types=args.meteomod_types)))
         except (IOError, ValueError) as e:

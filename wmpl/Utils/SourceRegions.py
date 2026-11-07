@@ -23,6 +23,8 @@ A model is described by a dict, which each of those modules builds with its sour
                        other sources are drawn together as one. None to draw the sources with the
                        largest probabilities of the series, as many as there are colours.
     'json':            [dict] Fields of the model added to its JSON.
+    'type_groups':     [list] (type, [keys]) of the types of the sources, to give the probabilities summed
+                       by type as well, or None. Optional.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -300,7 +302,56 @@ def sourceRegionSeriesToJSON(series, mode=None):
             'reason': representative['reason'],
             }
 
+    # The probabilities summed by type
+    out['by_type'] = None
+    groups = model.get('type_groups')
+    if groups:
+
+        labels = [label for label, _ in groups]
+
+        def _byType(values, at_output=False):
+            if values is None:
+                return None
+            sums = groupSums(values, series['sources'], groups)
+            if at_output:
+                return {label: finiteList(sums[0, g])[0] for g, label in enumerate(labels)}
+            return {label: finiteList(sums[:, g]) for g, label in enumerate(labels)}
+
+        out['by_type'] = {
+            'types': labels,
+            'members': {label: keys for label, keys in groups},
+            'nominal': _byType(series['nominal']),
+            'clones_mean': _byType(series['clones_mean']),
+            'horizon': None if horizon is None else {'nominal': _byType(horizon['nominal'], at_output=True),
+                'clones_mean': _byType(horizon['clones_mean'], at_output=True)},
+            'representative': None if representative is None
+                else _byType(representative['probabilities']),
+            }
+
     return out
+
+
+
+def groupSums(values, sources, groups):
+    """ Probabilities summed over groups of sources.
+
+    Arguments:
+        values: [ndarray] Probabilities, with a last axis over the sources.
+        sources: [list] The keys of the sources, in the order of the last axis.
+        groups: [list] (label, [keys]) of the groups.
+
+    Return:
+        [ndarray] The sums, with a last axis over the groups, NaN where the sources have no probabilities.
+    """
+
+    values = np.asarray(values, dtype=float)
+
+    sums = []
+    for _, keys in groups:
+        columns = [sources.index(s) for s in keys if s in sources]
+        sums.append(np.sum(values[..., columns], axis=-1))
+
+    return np.stack(sums, axis=-1)
 
 
 
@@ -566,6 +617,21 @@ def sourceRegionReportLines(series, first=0, first_note=None, time_label=None):
         lines.append("  where the clones have spread, it is the value to quote, the nominal being one of "
             "them.")
 
+    # The probabilities summed by type
+    groups = model.get('type_groups')
+    if groups:
+
+        columns = []
+        for k in outputs:
+            when = "t = {:s}".format(time_label(series['time_days'][k]))
+            columns.append(('nominal', series, k, when))
+            if has_clones:
+                columns.append(('clones_mean', series, k, when))
+
+        lines.append("")
+        lines.append("  By type, the sum of the families of each type:")
+        lines += _groupTable(series, groups, columns, width_name, model['print_min'])
+
 
     ### Beyond the predictability horizon ###
 
@@ -616,7 +682,56 @@ def sourceRegionReportLines(series, first=0, first_note=None, time_label=None):
         if (representative is not None) and (representative['reason'][-1] is not None):
             lines.append("  Representative clone at the end: {:s}.".format(representative['reason'][-1]))
 
+        # The same by type
+        if groups:
+
+            columns = [('nominal', horizon, 0, "at the horizon")]
+            if has_horizon_clones:
+                columns.append(('clones_mean', horizon, 0, "at the horizon"))
+            if representative is not None:
+                columns.append(('probabilities', dict(representative, sources=series['sources']), n_out - 1,
+                    "at the end"))
+
+            lines.append("  By type:")
+            lines += _groupTable(series, groups, columns, width_name, model['print_min'])
+
     return lines + citation
+
+
+
+def _groupTable(series, groups, columns, width_name, print_min):
+    """ Lines of a table of the probabilities summed by type, a column for each (key, part of the series,
+        output, time), the types under print_min everywhere left out. """
+
+    titles = {'nominal': "nominal", 'clones_mean': "clones mean", 'probabilities': "representative"}
+
+    sums = []
+    for key, part, k, _ in columns:
+        values = part[key]
+        sums.append(groupSums(values[k], series['sources'], groups) if values is not None
+            else np.full(len(groups), np.nan))
+
+    sums = np.array(sums)
+
+    with np.errstate(invalid='ignore'):
+        largest = np.nanmax(np.where(np.isfinite(sums), sums, -1.0), axis=0)
+
+    order = [g for g in np.argsort(-largest, kind='stable') if largest[g] >= print_min]
+
+    lines = ["  {:<{:d}s}".format("", width_name) + "".join("  {:>16s}".format(when)
+        for _, _, _, when in columns)]
+    lines.append("  {:<{:d}s}".format("Type", width_name) + "".join("  {:>16s}".format(titles[key])
+        for key, _, _, _ in columns))
+
+    for g in order:
+        lines.append("  {:<{:d}s}".format(groups[g][0], width_name) + "".join("  {:>16s}".format(
+            _probabilityText(value)) for value in sums[:, g]))
+
+    left_out = [groups[g][0] for g in range(len(groups)) if g not in order]
+    if left_out:
+        lines.append("  ({:s}: below {:g})".format(", ".join(left_out), print_min))
+
+    return lines
 
 
 
