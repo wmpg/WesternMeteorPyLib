@@ -64,8 +64,10 @@ point between them that is not flagged. This works in the same way for any frame
 second frame or fewer were picked. Two flares on consecutive points cannot be told apart, but two cameras
 could not tell them apart either, as the comparison below allows a frame between the same flare. The
 uncertainties come from the Monte Carlo runs and from the duration of the frame the flare was seen in, as
-it happened at any time within it. The times are relative to the clock of the reference station, whose
-time offset is not estimated, so the Monte Carlo runs give it no uncertainty in time, but the frame does.
+it happened at any time within it. The duration of a frame comes from the frame numbers of the file, if it
+gives them, so it is that of one frame also when not every frame was picked. The times are relative to the
+clock of the reference station, whose time offset is not estimated, so the Monte Carlo runs give it no
+uncertainty in time, but the frame does.
 
 Every flare also gets the speed of the meteor relative to the ground at its time, from the drag fit of the
 trajectory (`wmpl.Utils.DragFit`, with the Earth's rotation along the path taken off its inertial speeds),

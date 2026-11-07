@@ -257,6 +257,13 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
             # Keep the file the observation comes from, to match the fragments in it to the main one
             meteor.ecsv_file = ecsv_file
 
+            # Frame numbers of the points in their order sorted by finish(), for the duration of a frame
+            meteor.frame_numbers = None
+            if 'frame_number' in header:
+                frame_numbers = np.array([float(frame) if frame.strip() else np.nan \
+                    for frame in data[:, header.index('frame_number')]])
+                meteor.frame_numbers = frame_numbers[np.argsort(time_data, kind='stable')]
+
             # Flags of the points, in their order sorted by finish()
             if flares:
                 meteor.trajectory_use = trajectory_use[np.argsort(time_data, kind='stable')]
@@ -999,6 +1006,33 @@ def loadFlares(ecsv_paths):
     return flare_meteors, input_meteors
 
 
+
+def frameDuration(meteor):
+    """ Duration of a frame of the camera of an observation, from the time between its points per frame
+        between them if its file gives the frame numbers, so that it is the duration of one frame also when
+        not every frame was picked, or else from the time between its points.
+
+    Arguments:
+        meteor: [MeteorObservation object] Observation from loadECSVs().
+
+    Return:
+        [float] Median duration of a frame (s).
+    """
+
+    time_steps = np.diff(meteor.time_data)
+
+    # The time per frame between the points with increasing frame numbers
+    frame_numbers = getattr(meteor, 'frame_numbers', None)
+    if frame_numbers is not None:
+        frame_steps = np.diff(frame_numbers)
+        valid = np.isfinite(frame_steps) & (frame_steps > 0)
+        if np.any(valid):
+            return float(np.median(time_steps[valid]/frame_steps[valid]))
+
+    return float(np.median(time_steps))
+
+
+
 def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_std=None, time_diffs=None):
     """ Project the flare points on a solved trajectory as the solver does with its own points, with the
         gravity drop, at their times corrected by the time offset the trajectory applied to their station.
@@ -1019,15 +1053,15 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
         [dict] For the key (ecsv_file, index) of every flare point of a station in the trajectory: its 
             station_id, jd (corrected time), ht (m above sea level, as the heights of the trajectory), ht_time
             (the height of the trajectory at the time of the point, from its own points, m), used (in the
-            trajectory), frame_dt (time step of the station, s), and the ECI vectors eci (the point on the
-            trajectory), stat (the station) and los (the line of sight), and the lat and lon of the point on
-            the trajectory (radians). Also its ecsv_file and row, its position among the points of the main
-            fragment in the file in time (see loadECSVs()), or None if not known.
+            trajectory), frame_dt (duration of a frame of the station, s, see frameDuration()), and the ECI
+            vectors eci (the point on the trajectory), stat (the station) and los (the line of sight), and the
+            lat and lon of the point on the trajectory (radians). Also its ecsv_file and row, its position
+            among the points of the main fragment in the file in time (see loadECSVs()), or None if not known.
     """
 
     offsets = appliedTimeOffsets(traj, input_meteors)
     station_ids = dict(zip([meteor.ecsv_file for meteor in input_meteors], solverStationIDs(input_meteors)))
-    frame_dts = {meteor.ecsv_file: np.median(np.diff(meteor.time_data)) for meteor in input_meteors}
+    frame_dts = {meteor.ecsv_file: frameDuration(meteor) for meteor in input_meteors}
 
     flare_obs, obs_meteors = [], []
     for meteor in flare_meteors:
