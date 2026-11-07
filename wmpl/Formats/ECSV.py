@@ -16,10 +16,10 @@ from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGener
     prepareObservations, writeMiligInputFileMeteorObservation
 from wmpl.Trajectory.StationSystematics import stationSystematicErrors, systematicErrorSize
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenSphericalCoords
-from wmpl.Trajectory.Trajectory import ObservedPoints
-from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.DragFit import DragFit
+from wmpl.Trajectory.Trajectory import ObservedPoints
+from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
     equatorialCoordPrecession_vect, jd2Date
 
