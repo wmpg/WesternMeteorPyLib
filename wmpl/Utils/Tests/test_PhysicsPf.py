@@ -1,6 +1,7 @@
 """ Tests for the Borovicka et al. (2022) pressure factor Pf (wmpl.Utils.Physics.calcPf()) and what it takes from a
-trajectory: the maximum dynamic pressure (maxDynamicPressure(), groundAlphaBetaFit()), the average zenith distance
-(averageZenithDistance()) and the photometric mass (photometricMassBorovicka2022(), trajectoryLightCurve()).
+trajectory: the maximum dynamic pressure (maxDynamicPressure(), groundDragFit(), groundAlphaBetaFit()), the average
+zenith distance (averageZenithDistance()) and the photometric mass (photometricMassBorovicka2022(),
+trajectoryLightCurve()).
 
 Run with pytest:
     python -m pytest wmpl/Utils/Tests/test_PhysicsPf.py -v
@@ -9,8 +10,11 @@ or standalone (no pytest required):
     python -m wmpl.Utils.Tests.test_PhysicsPf
 """
 
+import contextlib
 import copy
+import io
 import os
+import sys
 import warnings
 from types import SimpleNamespace
 
@@ -21,6 +25,9 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Trajectory.AggregateAndPlot import computeMass
 from wmpl.Utils.Physics import averageZenithDistance, calcMass, calcPf, groundAlphaBetaFit, maxDynamicPressure, \
     photometricMassBorovicka2022, trajectoryLightCurve
+from wmpl.Utils.Physics import groundDragFit, groundVelocityFit
+from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, JDT_REF, observeMeteor
+from wmpl.Utils.TrajConversions import cartesian2Geo
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -79,15 +86,15 @@ def test_explicit_values():
 
 
 def test_max_dynamic_pressure_of_synthetic_fireballs():
-    """ The robust alpha-beta fit of noisy (50 m/s) inertial speeds, extrapolated 5 km below the last measurement,
-        gives the true maximum pressure within 1%. Taking the inertial speeds as relative to the air would put it
-        4-6% too high for 300 m/s of rotation. """
+    """ The robust alpha-beta fit (velocity_fit='alphabeta') of noisy (50 m/s) inertial speeds of alpha-beta
+        fireballs, extrapolated 5 km below the last measurement, gives the true maximum pressure within 1%. Taking
+        the inertial speeds as relative to the air would put it 4-6% too high for 300 m/s of rotation. """
 
     for alpha, beta, v_ground in ((60.0, 1.5, 20000.0), (300.0, 0.5, 15000.0), (40.0, 0.8, 13500.0)):
         for v_rotation in (300.0, -300.0):
 
             traj, p_true = _syntheticTrajectory(alpha, beta, v_ground, v_rotation)
-            p_max, ht_p_max, v_p_max = maxDynamicPressure(traj)
+            p_max, ht_p_max, v_p_max = maxDynamicPressure(traj, velocity_fit='alphabeta')
 
             assert abs(p_max/p_true - 1) < 0.01, (alpha, beta, v_ground, v_rotation)
             assert traj.rend_ele <= ht_p_max <= traj.rbeg_ele
@@ -96,12 +103,13 @@ def test_max_dynamic_pressure_of_synthetic_fireballs():
         # The rotation left in the speeds
         traj, p_true = _syntheticTrajectory(alpha, beta, v_ground, 300.0)
         traj.orbit.v_init_norot = traj.orbit.v_init
-        assert maxDynamicPressure(traj)[0]/p_true - 1 > 0.02
+        assert maxDynamicPressure(traj, velocity_fit='alphabeta')[0]/p_true - 1 > 0.02
 
 
 def test_pf_from_the_example_trajectory():
-    """ With a trajectory, calcPf() warns that p_max comes from a robust alpha-beta fit, and gives the Pf of the
-        derived values. The maximum pressure of this fast, hardly decelerating meteor is at the end. """
+    """ With a trajectory, calcPf() warns that p_max comes from the drag fit, or from a robust alpha-beta fit with
+        velocity_fit='alphabeta', and gives the Pf of the derived values. The maximum pressure of this fast, hardly
+        decelerating meteor is at the end. """
 
     traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
 
@@ -111,7 +119,16 @@ def test_pf_from_the_example_trajectory():
 
     messages = [str(w.message) for w in caught if "calcPf()" in str(w.message)]
     assert len(messages) == 1
+    assert "the drag fit of the trajectory (wmpl.Utils.DragFit)" in messages[0]
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        pf_ab = calcPf(mass=2e-7, traj=traj, velocity_fit='alphabeta')
+
+    messages = [str(w.message) for w in caught if "calcPf()" in str(w.message)]
     assert "robust alpha-beta fit" in messages[0] and "fitAlphaBeta(method='robust')" in messages[0]
+    assert pf_ab == calcPf(maxDynamicPressure(traj, velocity_fit='alphabeta')[0], averageZenithDistance(traj), 2e-7,
+        traj.orbit.v_init_norot)
 
     p_max, ht_p_max, _ = maxDynamicPressure(traj)
     zangle = averageZenithDistance(traj)
@@ -139,18 +156,18 @@ def test_light_curve_is_aggregate_and_plot_s():
 
 def test_pf_computes_the_photometric_mass():
     """ Without a mass, calcPf() computes Paper I's photometric mass from the trajectory's light curve, at the speeds
-        of the same robust alpha-beta fit, and says so; without magnitudes it needs the mass. """
+        of the same fit (the drag fit by default), and says so; without magnitudes it needs the mass. """
 
     traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
 
     time_arr, mag_arr, ht_arr = trajectoryLightCurve(traj)
-    velocity_at = groundAlphaBetaFit(traj)
+    velocity_at = groundDragFit(traj)
     lats = np.interp(ht_arr, [traj.rend_ele, traj.rbeg_ele], [traj.rend_lat, traj.rbeg_lat])
     lons = np.interp(ht_arr, [traj.rend_ele, traj.rbeg_ele], [traj.rend_lon, traj.rbeg_lon])
     mass = calcMass(time_arr, mag_arr, velocity_at(ht_arr, lats, lons), tau='rc2001', P_0m=1500.0,
         lum_eff_mass=1.0)
 
-    assert np.isclose(photometricMassBorovicka2022(traj), mass, rtol=1e-9)
+    assert np.isclose(photometricMassBorovicka2022(traj), mass, rtol=1e-9, atol=0)
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -188,6 +205,73 @@ def test_inputs_are_checked():
             raise AssertionError("No ValueError for {}".format(sorted(kwargs)))
 
 
+def _solvedDragMeteor(*args):
+    """ Simulate, observe and solve a synthetic fireball decelerated by drag with a growing ballistic coefficient
+        (SyntheticTrajectory.DragMeteor), and give its true maximum dynamic pressure (Pa) between the beginning and
+        end heights of its solution, with the speeds relative to the ground as the fits take them. """
+
+    meteor = DragMeteor(*args)
+    traj = observeMeteor(meteor, calc_orbit=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj = traj.run()
+
+    v_rotation = traj.orbit.v_init - traj.orbit.v_init_norot
+    t = np.linspace(0, meteor.t_vis_end - meteor.t_vis_beg, 2000)
+    llh = np.array([cartesian2Geo(JDT_REF + ti/86400, *eci) for ti, eci in zip(t, meteor.eciAtTime(t))])
+    inside = (llh[:, 2] <= traj.rbeg_ele) & (llh[:, 2] >= traj.rend_ele)
+    pressures = getAtmDensity_vect(llh[:, 0], llh[:, 1], llh[:, 2], traj.jdt_ref) \
+        *(meteor.velocityAtTime(t) - v_rotation)**2
+
+    return traj, np.max(pressures[inside])
+
+
+def test_drag_fit_gives_the_max_pressure_of_decelerating_fireballs():
+    """ The drag fit, by default, gives the true maximum pressure of fireballs whose ballistic coefficient grows
+        (ablation, fragmentation) within 1%, while the robust alpha-beta fit puts it more than 2% too high, as it does
+        not follow that deceleration. """
+
+    for args in ((18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0), (25000.0, 60.0, 30.0, 0.005, 0.04, 3.0, 7.0)):
+
+        traj, p_true = _solvedDragMeteor(*args)
+
+        assert abs(maxDynamicPressure(traj)[0]/p_true - 1) < 0.01, args
+        assert maxDynamicPressure(traj, velocity_fit='alphabeta')[0]/p_true - 1 > 0.02, args
+
+
+def test_velocity_fit_choice():
+    """ An unknown velocity fit is an error, and if the drag model cannot be fitted the alpha-beta fit is made, with
+        a warning, and calcPf() names it. """
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
+
+    try:
+        groundVelocityFit(traj, velocity_fit='jacchia')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("No ValueError for an unknown velocity fit")
+
+    drag_module = sys.modules['wmpl.Utils.DragFit']
+    drag_fit_class = drag_module.DragFit
+
+    def failingFit(traj):
+        raise ValueError("no fit")
+
+    drag_module.DragFit = failingFit
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _, velocity_fit = groundVelocityFit(traj)
+            calcPf(mass=2e-7, traj=traj)
+    finally:
+        drag_module.DragFit = drag_fit_class
+
+    messages = [str(w.message) for w in caught]
+    assert velocity_fit == 'alphabeta'
+    assert any("The drag model could not be fitted (no fit)" in message for message in messages)
+    assert any(("calcPf()" in message) and ("robust alpha-beta fit" in message) for message in messages)
+
+
 if __name__ == "__main__":
 
     test_functions = [
@@ -197,6 +281,8 @@ if __name__ == "__main__":
         test_light_curve_is_aggregate_and_plot_s,
         test_pf_computes_the_photometric_mass,
         test_inputs_are_checked,
+        test_drag_fit_gives_the_max_pressure_of_decelerating_fireballs,
+        test_velocity_fit_choice,
     ]
 
     failed = 0
