@@ -102,6 +102,21 @@ a median of 4.4 ms), against about 0.24 ms from the fit and the Monte Carlo runs
 It also enters the heights compared at the same time. It changed the rates above by 0.2 to 0.3 points, with
 cameras of 25 fps; with faster cameras the frames weigh less and it matters more.
 
+The report then proposes the flares of the event. Two flares of different stations are taken as the same
+flare when they are consistent and each one is the only consistent flare of its station for the other, and
+the joined flares make one flare of the event. A flare consistent with two or more flares of another station
+is left alone as ambiguous, and so are the flares of a group that would hold two flares of one station. Every
+flare of the event gives the values of its first point in time among its stations, how many frames apart its
+stations saw it begin and how far apart their pressures are, which says how much joining them matters.
+Without the Monte Carlo runs the flares are not joined. In the simulated fireballs, with every camera flagging
+the frames in which the light of the dust of a fragmentation exceeds the rest by 0.25 mag, this joined no
+flares of different fragmentations. Of the fragmentations seen by two or more stations whose flares held only
+that fragmentation, 92 % were joined and 8 % left ambiguous; windows of 3 and 5 frames instead of 3 sigma left
+14 and 26 % ambiguous. A window of one frame did better (99 %) when every frame of a flare is flagged, but
+missed more of the same flares marked only on their brightest frame. A third of the fragmentations seen by two
+or more stations had a flare that already held another fragmentation, a median 85 ms apart, which no
+comparison of stations can split.
+
 ```
 python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 ```

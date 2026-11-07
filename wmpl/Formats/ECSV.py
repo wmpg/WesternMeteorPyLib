@@ -1569,6 +1569,39 @@ def flareReport(flares, match_window=1.0, ref_stations=None):
 
             return gap, dht, pa, pb
 
+        def pairTest(a, b):
+            """ Compare two flares of different stations as compare() does, and weigh the time between them
+                and the difference of their heights against their uncertainties. Return the time between
+                them, the difference of their heights, both in sigma, and whether they are consistent at 3
+                sigma, the last three None without the uncertainties. """
+
+            gap, dht, pa, pb = compare(a, b)
+            if (pa['t_std'] is None) or (pb['t_std'] is None):
+                return gap, dht, None, None, None
+
+            # The time of each flare is known to within its frame, but the heights are compared at the same
+            #   time along the trajectory, which does not depend on when the flares happened within their
+            #   frames, only on the Monte Carlo uncertainties
+            # The time offsets the solver estimated err far more than the uncertainties of its fit, which
+            #   moves the time between two stations, and the height of one at the time of the other
+            offset_error = 0.0
+            if ref_stations and not ((pa['station_id'] in ref_stations) \
+                and (pb['station_id'] in ref_stations)):
+                offset_error = FLARE_TIME_OFFSET_ERROR
+
+            t_sig = np.sqrt(pa['t_std']**2 + pb['t_std']**2 + offset_error**2)
+            ht_sig = np.sqrt(pa['ht_std_mc']**2 + pb['ht_std_mc']**2 \
+                + (pa['ht_rate']**2)*(pa['t_std_mc']**2 + pb['t_std_mc']**2 + offset_error**2))
+
+            # Two cameras can mark frames of the same flare up to a frame of the slower one apart. In
+            #   fireballs simulated with MetSim, 4.9 % of the same flares of a 25 and a 13 fps camera were
+            #   further apart than 3 sigma of their frames, and 2.7 % after taking off that frame
+            t_dist = max(gap - max(pa['frame_dt'], pb['frame_dt']), 0.0)
+
+            consistent = (t_dist <= 3*t_sig) and (abs(dht) <= 3*ht_sig)
+
+            return gap, dht, t_dist/t_sig, abs(dht)/ht_sig, consistent
+
         out_str += "\n"
         out_str += "Flares of different stations compared, each one with the closest one in time of every other\n"
         out_str += "station: the time between them (none if their times overlap; the time uncertainty includes a\n"
@@ -1608,33 +1641,162 @@ def flareReport(flares, match_window=1.0, ref_stations=None):
                     event[0]['station_id'], j + 1, station_id, 
                     "times overlap" if gap == 0 else "{:.3f} s apart".format(gap), dht/1000)
 
-                if (pa['t_std'] is not None) and (pb['t_std'] is not None):
-
-                    # The time of each flare is known to within its frame, but the heights are compared at the 
-                    #   same time along the trajectory, which does not depend on when the flares happened within 
-                    #   their frames, only on the Monte Carlo uncertainties
-                    # The time offsets the solver estimated err far more than the uncertainties of its fit,
-                    #   which moves the time between two stations, and the height of one at the time of the
-                    #   other
-                    offset_error = 0.0
-                    if ref_stations and not ((pa['station_id'] in ref_stations) \
-                        and (pb['station_id'] in ref_stations)):
-                        offset_error = FLARE_TIME_OFFSET_ERROR
-
-                    t_sig = np.sqrt(pa['t_std']**2 + pb['t_std']**2 + offset_error**2)
-                    ht_sig = np.sqrt(pa['ht_std_mc']**2 + pb['ht_std_mc']**2 
-                        + (pa['ht_rate']**2)*(pa['t_std_mc']**2 + pb['t_std_mc']**2 + offset_error**2))
-
-                    # Two cameras can mark frames of the same flare up to a frame of the slower one apart. In
-                    #   fireballs simulated with MetSim, 4.9 % of the same flares of a 25 and a 13 fps camera
-                    #   were further apart than 3 sigma of their frames, and 2.7 % after taking off that frame
-                    t_dist = max(gap - max(pa['frame_dt'], pb['frame_dt']), 0.0)
-
-                    consistent = (t_dist <= 3*t_sig) and (abs(dht) <= 3*ht_sig)
-                    line += " ({:.1f} and {:.1f} sigma): {:s}".format(t_dist/t_sig, abs(dht)/ht_sig, 
+                _, _, t_sigma, ht_sigma, consistent = pairTest(event, events[j])
+                if consistent is not None:
+                    line += " ({:.1f} and {:.1f} sigma): {:s}".format(t_sigma, ht_sigma, \
                         "consistent" if consistent else "NOT consistent, different flares?")
 
                 out_str += line + "\n"
+
+        out_str += eventFlaresStr(events, pairTest, valueStr, speedStr, pressureStr)
+
+    return out_str
+
+
+
+def joinFlares(events, consistent):
+    """ Join the flares of different stations taken as the same flare of the event: two flares are linked if
+        they are consistent and each one is the only consistent flare of its station for the other, and the
+        linked flares make one flare of the event. A flare consistent with two or more flares of another
+        station is not linked to that station, and the flares of a group that would hold two flares of one
+        station are left alone. Both are ambiguous.
+
+    Arguments:
+        events: [list] Flares of the stations, each a list of flare points with their station_id.
+        consistent: [function] consistent(i, j) says whether the flares i and j of two stations are
+            consistent.
+
+    Return:
+        (groups, ambiguous):
+            - groups: [list] Flares of the event, each a list of the indices of its flares in events, sorted
+                by the time of their first point.
+            - ambiguous: [dict] For the index of every ambiguous flare, the indices of the flares it could be.
+    """
+
+    stations = [event[0]['station_id'] for event in events]
+
+    # The consistent flares of every flare in every other station
+    matches = {}
+    for i in range(len(events)):
+        for j in range(len(events)):
+            if (stations[i] != stations[j]) and consistent(i, j):
+                matches.setdefault((i, stations[j]), []).append(j)
+
+    # Link the flares which are the only consistent flare of each other in their stations
+    parent = list(range(len(events)))
+
+    def root(i):
+        while parent[i] != i:
+            i = parent[i]
+        return i
+
+    ambiguous = {}
+    for (i, station_id), others in matches.items():
+
+        # A flare and the flares it could be are all ambiguous
+        if len(others) > 1:
+            ambiguous.setdefault(i, set()).update(others)
+            for j in others:
+                ambiguous.setdefault(j, set()).add(i)
+            continue
+
+        j = others[0]
+        if matches.get((j, stations[i])) == [i]:
+            parent[root(i)] = root(j)
+
+    groups = {}
+    for i in range(len(events)):
+        groups.setdefault(root(i), []).append(i)
+
+    # Leave alone the flares of a group with two flares of one station
+    joined = []
+    for group in groups.values():
+
+        group_stations = [stations[i] for i in group]
+        if len(set(group_stations)) < len(group_stations):
+            for i in group:
+                ambiguous.setdefault(i, set()).update(j for j in group if j != i)
+                joined.append([i])
+
+        else:
+            joined.append(sorted(group, key=lambda i: events[i][0]['jd']))
+
+    joined = sorted(joined, key=lambda group: min(events[i][0]['jd'] for i in group))
+
+    return joined, {i: sorted(others) for i, others in ambiguous.items()}
+
+
+
+def eventFlaresStr(events, pairTest, valueStr, speedStr, pressureStr):
+    """ Report the flares of the event proposed by joinFlares() from the comparison of the flares of different
+        stations, with the values of the first point of each one in time among its stations.
+
+    Arguments:
+        events: [list] Flares of the stations, each a list of flare points.
+        pairTest: [function] Comparison of two flares of different stations in flareReport().
+        valueStr: [function] Formats a value with its uncertainty.
+        speedStr: [function] Formats the speed of a flare point.
+        pressureStr: [function] Formats the dynamic pressure of a flare point.
+
+    Return:
+        [str] The report, which says that the flares are not joined without the uncertainties.
+    """
+
+    out_str = "\n"
+
+    tests = {(i, j): pairTest(events[i], events[j]) for i in range(len(events)) for j in range(len(events)) \
+        if events[i][0]['station_id'] != events[j][0]['station_id']}
+    if any(test[4] is None for test in tests.values()):
+        out_str += "Without the Monte Carlo runs the flares of different stations are not joined.\n"
+        return out_str
+
+    groups, ambiguous = joinFlares(events, lambda i, j: tests[(i, j)][4])
+
+    motion = any(flare.get('p') is not None for event in events for flare in event)
+
+    out_str += "Flares of the event, proposed from the comparison above: two flares of different stations\n"
+    out_str += "are taken as the same flare when they are consistent and each one is the only consistent\n"
+    out_str += "flare of its station for the other. A flare consistent with two or more flares of another\n"
+    out_str += "station is left alone as ambiguous, and so are the flares of a group that would hold two\n"
+    out_str += "flares of one station. The values are those of the first point of the flare in time among\n"
+    out_str += "its stations, the earliest any camera saw it.\n"
+    out_str += " #  t (s)                  Ht (km)               " \
+        + ("{:18s}  {:s}".format("v (km/s)", "p (kPa)") if motion else "") + "\n"
+
+    for k, group in enumerate(groups):
+
+        first = min((events[i][0] for i in group), key=lambda flare: flare['jd'])
+        ht_std = None if first['ht_std'] is None else first['ht_std']/1000
+        motion_str = "{:18s}  {:s}".format(speedStr(first), pressureStr(first)) if motion else ""
+        out_str += "{:2d}  {:21s}  {:20s}  {:s}".format(k + 1, valueStr(first['t_rel'], first['t_std'], \
+            "{:.4f}"), valueStr(first['ht']/1000, ht_std, "{:.3f}"), motion_str).rstrip() + "\n"
+
+        names = ["{:d} {:s}".format(i + 1, events[i][0]['station_id']) for i in group]
+
+        # Flares seen by one station, alone or ambiguous
+        if len(group) == 1:
+            i = group[0]
+            line = "      Flare {:s} only".format(names[0])
+            if i in ambiguous:
+                line += ", ambiguous: it could be flare(s) {:s}".format(", ".join(["{:d} {:s}".format(j + 1, \
+                    events[j][0]['station_id']) for j in ambiguous[i]]))
+            out_str += line + "\n"
+            continue
+
+        # How far apart the stations saw the beginning of the flare, in frames of the slowest camera, and the
+        #   largest distance in time of two of them in the comparison
+        begins = [events[i][0]['t_rel'] for i in group]
+        frame_dt = max(events[i][0]['frame_dt'] for i in group)
+        t_sigma = max(tests[(i, j)][2] for i in group for j in group if tests.get((i, j)) is not None)
+        line = "      Flares {:s}: beginnings {:.1f} frames apart, up to {:.1f} sigma in time".format( \
+            ", ".join(names), (max(begins) - min(begins))/frame_dt, t_sigma)
+
+        # How far apart the pressures at the beginnings are
+        pressures = [events[i][0]['p'] for i in group if events[i][0].get('p') is not None]
+        if len(pressures) > 1:
+            line += ", pressures {:.0f} % apart".format(100*(max(pressures) - min(pressures))/min(pressures))
+
+        out_str += line + "\n"
 
     return out_str
 
