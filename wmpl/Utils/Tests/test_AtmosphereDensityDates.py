@@ -38,7 +38,8 @@ def testAJulianDateForEveryPoint():
 
 
 def testTheDynamicPressureTakesADateForEveryPoint():
-    """ Check that the dynamic pressure takes a Julian date for every point, as for the samples of a trajectory.
+    """ Check that the dynamic pressure takes a Julian date for every point, as for the samples of a
+        trajectory.
     """
 
     lat = np.radians(np.array([45.0, 45.1]))
