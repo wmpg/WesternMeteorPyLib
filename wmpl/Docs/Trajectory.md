@@ -10,6 +10,7 @@ one and what is inside it.
 - [Running the solver](#running-the-solver)
 - [The trajectory pickle](#the-trajectory-pickle)
 - [Loading a pickle in Python](#loading-a-pickle-in-python)
+- [The gravity drop](#the-gravity-drop)
 
 ---
 
@@ -73,3 +74,34 @@ print("a = {:.4f} AU, e = {:.4f}".format(traj.orbit.a, traj.orbit.e))
 
 Once you have the pickle, see [the REBOUND manual](REBOUND.md) for integrating the orbit backwards or
 forwards in time.
+
+## The gravity drop
+
+With the gravity correction on (the default, `-g` turns it off), the solver fits the line of the trajectory
+together with the drop of the meteor below it caused by gravity, from the first point. The line is the
+direction of motion at the first point.
+
+Drag also slows down the velocity which gravity adds across the path, like the rest of the velocity, so a
+decelerating meteor drops less than one at a constant velocity. Its path bends at `dtheta/dt = g_perp/v`, as
+in [the drag fit](DragFit.md). The solver scales the drop at a constant velocity by the ratio of the two,
+which it computes with the velocity of the Jacchia fit of the lag, from the pass before the one with the
+drop. The velocity is held above 3 km/s, where ablation stops, as the exponential of the fit can fall far
+below the velocity of a fireball at its end. At a constant velocity the scale is 1, so meteors which barely
+decelerate are not affected.
+
+For Winchcombe (8.2 s, 13.8 to 3.6 km/s), the drop at the last point is 188 m instead of 245 m, against
+189 m from the bending of the drag fit. The end height moves up by 46 m and the radiant by 10 arcsec. On
+fireballs integrated in 3D with drag and gravity, which slow down to 4-10 km/s, the radiant error of a
+noise-free solution falls from 5-65 arcsec to 0.1-9 arcsec, and the largest error of the positions across
+the path from 4-71 m to 0.4-10 m.
+
+- `Trajectory(..., gravity_decel=False)` keeps the drop at a constant velocity. Trajectories pickled before
+  the option was added keep it too.
+- `traj.gravity_drop_scale` holds the times from the first point and the scale at those times, and
+  `traj.gravityDropFactor(t)` gives the factor of the drop at the time `t` from the first point. The drag
+  fit and the dynamic mass fit apply the same drop as the solver with it.
+- The Jacchia exponential overestimates the deceleration at the end of strongly decelerating fireballs, so
+  there the scale is 0.012-0.024 too small, against a correction of 0.25-0.33 (synthetic fireballs ending
+  at 4-7 km/s).
+- As in the drag fit, the velocity is that of the solver, not relative to the air, and the small change of
+  the bending by the gravity along the path is left out.

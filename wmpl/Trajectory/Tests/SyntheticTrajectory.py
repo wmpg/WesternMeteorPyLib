@@ -153,6 +153,146 @@ class DragMeteor(object):
 
 
 
+# Gravitational parameter of the Earth, WGS84 (m^3/s^2)
+GM_EARTH = 3.986004418e14
+
+
+
+class BentDragMeteor(object):
+    def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0):
+        """ Integrate the motion of a meteor decelerated by drag and bent by gravity in 3D, in ECI coordinates.
+            Drag acts against the ECI velocity and gravity is that of a point mass, so the path only bends by
+            gravity. The ballistic coefficient grows linearly with time during the visible part.
+
+        Arguments:
+            v_init: [float] Velocity at the top of the simulation (m/s).
+            azim: [float] Azimuth of the radiant at the top, +E of due N (deg).
+            elev: [float] Elevation of the radiant at the top (deg).
+            k_beg: [float] Ballistic coefficient before the visible part (m^2/kg).
+            k_end: [float] Ballistic coefficient after the visible part (m^2/kg).
+            t_vis_beg: [float] Time of the beginning of the visible part, from the top (s).
+            t_vis_end: [float] Time of the end of the visible part, from the top (s). It is moved before the
+                end of the integration if the meteor slows down to 1.5 km/s earlier.
+
+        Keyword arguments:
+            dt: [float] Integration step (s). 0.001 s by default.
+            duration: [float] Duration of the integration (s). 20 s by default.
+        """
+
+        self.t_vis_beg = t_vis_beg
+
+        # Compute the top point and the radiant direction
+        lat, lon = np.radians(TOP_LAT), np.radians(TOP_LON)
+        top_eci = np.array(geo2Cartesian(lat, lon, TOP_HT, JDT_REF))
+        ra, dec = altAz2RADec(np.radians(azim), np.radians(elev), JDT_REF, lat, lon)
+        radiant_eci = np.array(raDec2ECI(ra, dec))
+
+        # Tabulate the air density with the distance from the centre of the Earth, along the initial line
+        len_table = np.linspace(0, 400e3, 801)
+        eci_table = top_eci[None, :] - np.outer(len_table, radiant_eci)
+        geo_table = np.array([cartesian2Geo(JDT_REF, *eci) for eci in eci_table])
+        rho_table = getAtmDensity_vect(geo_table[:, 0], geo_table[:, 1], np.maximum(geo_table[:, 2], 0.0), \
+            JDT_REF)
+        r_table = np.linalg.norm(eci_table, axis=1)
+        order = np.argsort(r_table)
+        r_table, log_rho_table = r_table[order], np.log(rho_table[order])
+
+
+        def _acceleration(t, pos, vel):
+
+            # Interpolate the ballistic coefficient linearly in the visible part
+            frac = np.clip((t - t_vis_beg)/(t_vis_end - t_vis_beg), 0.0, 1.0)
+            k = k_beg + frac*(k_end - k_beg)
+
+            r = np.sqrt(pos @ pos)
+            rho = np.exp(np.interp(r, r_table, log_rho_table))
+
+            return -k*rho*np.sqrt(vel @ vel)*vel - GM_EARTH*pos/r**3
+
+
+        # Integrate with the 4th order Runge-Kutta method
+        n = int(duration/dt)
+        self.time = np.arange(n + 1)*dt
+        self.pos = np.zeros((n + 1, 3))
+        self.vel = np.zeros((n + 1, 3))
+        self.pos[0] = top_eci
+        self.vel[0] = -v_init*radiant_eci
+        for i in range(n):
+
+            t, pos, vel = self.time[i], self.pos[i], self.vel[i]
+
+            k1_pos = vel
+            k1_vel = _acceleration(t, pos, vel)
+            k2_pos = vel + dt/2*k1_vel
+            k2_vel = _acceleration(t + dt/2, pos + dt/2*k1_pos, vel + dt/2*k1_vel)
+            k3_pos = vel + dt/2*k2_vel
+            k3_vel = _acceleration(t + dt/2, pos + dt/2*k2_pos, vel + dt/2*k2_vel)
+            k4_pos = vel + dt*k3_vel
+            k4_vel = _acceleration(t + dt, pos + dt*k3_pos, vel + dt*k3_vel)
+
+            self.pos[i + 1] = pos + dt/6*(k1_pos + 2*k2_pos + 2*k3_pos + k4_pos)
+            self.vel[i + 1] = vel + dt/6*(k1_vel + 2*k2_vel + 2*k3_vel + k4_vel)
+
+            # Stop when the meteor has slowed down
+            if np.sqrt(self.vel[i + 1] @ self.vel[i + 1]) < 1500.0:
+                self.time = self.time[:i + 2]
+                self.pos = self.pos[:i + 2]
+                self.vel = self.vel[:i + 2]
+                break
+
+        self.speed = np.linalg.norm(self.vel, axis=1)
+
+        # Keep the visible part within the integration
+        self.t_vis_end = min(t_vis_end, self.time[-1] - 0.05)
+
+
+
+    def eciAtTime(self, time_arr):
+        """ Compute the ECI coordinates at the given times.
+
+        Arguments:
+            time_arr: [float or ndarray] Times relative to the beginning of the visible part (s).
+
+        Return:
+            [ndarray] ECI coordinates (m), one row per point.
+        """
+
+        time_arr = np.atleast_1d(time_arr) + self.t_vis_beg
+
+        return np.column_stack([np.interp(time_arr, self.time, self.pos[:, i]) for i in range(3)])
+
+
+
+    def velocityAtTime(self, time_arr):
+        """ Compute the velocity at the given times.
+
+        Arguments:
+            time_arr: [float or ndarray] Times relative to the beginning of the visible part (s).
+
+        Return:
+            [ndarray] Velocities (m/s).
+        """
+
+        return np.interp(np.atleast_1d(time_arr) + self.t_vis_beg, self.time, self.speed)
+
+
+
+    def radiantAtTime(self, t):
+        """ Compute the direction of the radiant, opposite to the direction of motion, at the given time.
+
+        Arguments:
+            t: [float] Time relative to the beginning of the visible part (s).
+
+        Return:
+            [ndarray] Unit vector of the radiant in ECI coordinates.
+        """
+
+        vel = np.array([np.interp(t + self.t_vis_beg, self.time, self.vel[:, i]) for i in range(3)])
+
+        return -vel/np.sqrt(vel @ vel)
+
+
+
 def stationAzimAlt(eci_points, jds, lat, lon, ele):
     """ Compute the directions of points on a trajectory as seen from a station.
 

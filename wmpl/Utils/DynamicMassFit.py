@@ -206,7 +206,10 @@ def pointOnTrajectory(traj, length, t):
         # The solver measures the drop from the first observation of the meteor
         t0 = min(obs.time_data[0] for obs in traj.observations)
 
-        drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), getattr(traj, 'gravity_factor', 1.0), \
+        # The factor of the drop, scaled for a decelerating meteor as in the solver
+        drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: getattr(traj, 'gravity_factor', 1.0))
+
+        drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), drop_factor(t - t0), \
             getattr(traj, 'v0z', None) or 0.0) - P
 
         # Keep only the component perpendicular to the fitted line

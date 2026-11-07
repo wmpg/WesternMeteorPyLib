@@ -36,9 +36,10 @@ path has bent by a few degrees from the first point. Further on, a dark flight m
 If the trajectory was solved with the gravity correction, the positions in the observed part are dropped from
 the line in the same way as in the trajectory solver, and the heights and the air density are computed on the
 dropped path. The drop is zero at the time of the first point, and the positions above it are on the line.
-The drop of the solver assumes a constant velocity, which overestimates the bending of a decelerating meteor,
-so below the last point the path is continued along the direction bent by theta, and the direction of the
-radiant is bent by theta everywhere.
+The solver scales its drop for the deceleration of the meteor (see Trajectory.gravityDropScale), unless the
+trajectory was solved with gravity_decel off or before the option was added. Its drop then assumes a constant
+velocity, which overestimates the bending of a decelerating meteor. Below the last point the path is continued
+along the direction bent by theta, and the direction of the radiant is bent by theta everywhere.
 
 The fitted K shows how the meteor changed during its flight. If K is constant, the deceleration is only
 driven by the air density and the velocity. For a single body K grows as m**(-1/3) as it ablates, and it
@@ -609,13 +610,16 @@ class DragFit(object):
 
         gravity_factor = getattr(traj, 'gravity_factor', 1.0)
 
+        # Factor of the drop at each time, scaled for a decelerating meteor as in the solver
+        drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: gravity_factor)
+
         # Compute the drop vector at every grid point with a defined time. The drop is zero above the first
         #   point, where the positions are on the line
         line_eci = self._lineEci(self.len_grid)
         drop_grid = np.zeros_like(line_eci)
         for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
             if np.isfinite(t) and (t > t0):
-                drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, gravity_factor, v0z)
+                drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, drop_factor(t - t0), v0z)
 
         # Below the last point, continue the path along the direction bent by gravity
         valid = np.where(np.isfinite(self.time_grid))[0]
