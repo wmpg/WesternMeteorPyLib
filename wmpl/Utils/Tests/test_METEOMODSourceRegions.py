@@ -33,13 +33,14 @@ def _orbit(ia, ii):
 
 
 
-def _load(**kwargs):
-    """ Write the test archive in a temporary directory and load it. """
+def _load(table='download', **kwargs):
+    """ Write the test archive in a temporary directory and load it, with the values of its Table 5 as
+        they are unless told otherwise. """
 
     path = os.path.join(tempfile.mkdtemp(), 'meteomod.tar.gz')
     writeArchive(path, **kwargs)
 
-    return mm.loadMETEOMOD(file_path=path, download=False)
+    return mm.loadMETEOMOD(file_path=path, download=False, table=table)
 
 
 
@@ -260,6 +261,7 @@ def testTheModelGivesTheSeriesTheReportAndTheFigure(tmp_path):
     lines = sourceRegionReportLines(series, first=1)
     text = "\n".join(lines)
     assert "the 3 families of type L, weighted by the meteoroid flux" in text
+    assert "Table 5 of the download" in text
     assert "Massalia(2) (L)" in text
     assert "representative (mc_1)" in text
     assert "Please cite Broz" in text
@@ -267,6 +269,7 @@ def testTheModelGivesTheSeriesTheReportAndTheFigure(tmp_path):
 
     saved = json.loads(json.dumps(sourceRegionSeriesToJSON(series, mode='all')))
     assert saved['weight'] == 'flux'
+    assert saved['table'] == 'download'
     assert saved['types'] == ['L']
     assert saved['flux_1e-9_km-2_yr-1']["20'"] == [200.0, 400.0]
     assert saved['horizon']['nominal']['3'] == pytest.approx(expected['3'])
@@ -291,6 +294,35 @@ def testTheModelGivesTheSeriesTheReportAndTheFigure(tmp_path):
     assert "weighted by N_neo" in neo['warning']
     twice = mm.selectionWarning(meteomod, ['44', "44'"])
     assert "counted twice" in twice
+
+
+
+def testThePublishedTableReplacesTheDownloadWhereTheyDiffer():
+    """ By default the values of Table 5 as published replace those of the download where they differ,
+        here the type of Juno, and say so; the download's are kept with table='download'. """
+
+    path = os.path.join(tempfile.mkdtemp(), 'meteomod.tar.gz')
+    writeArchive(path)
+
+    published = mm.loadMETEOMOD(file_path=path, download=False)
+    download = mm.loadMETEOMOD(file_path=path, download=False, table='download')
+
+    assert published['table'] == 'published'
+    assert published['table_changes'] == ['3']
+    assert published['types']['3'] == "L"
+    assert download['table_changes'] == []
+    assert download['types']['3'] == "L/LL"
+
+    # Juno is no longer an LL family
+    with pytest.raises(ValueError):
+        mm.selectSources(published, types=['LL'])
+
+    model = mm.sourceModel(published, sources=['20', '3'])
+    assert "Table 5 as published" in model['heading']
+    assert model['json']['table_changes'] == ['3']
+
+    with pytest.raises(ValueError):
+        mm.loadMETEOMOD(file_path=path, download=False, table='preprint')
 
 
 
@@ -355,6 +387,17 @@ def testThePublishedArchiveWhenItHasBeenDownloaded():
     assert flux['1128'] == pytest.approx(0.435, abs=0.001)
     assert max(neo, key=neo.get) == '490'
     assert neo['490'] == pytest.approx(0.304, abs=0.001)
+
+    # Hungaria, Baptistina and Juno as published, and as in the download
+    assert meteomod['flux']['434'] == (7.6, 12.0)
+    assert meteomod['n_neo']['434'] == (5.9, 9.4)
+    assert meteomod['flux']['298'] == (11.0, 19.0)
+    assert meteomod['types']['3'] == "L"
+
+    download = mm.loadMETEOMOD(file_path=path, download=False, table='download')
+    assert download['flux']['434'] == (37.0, 59.0)
+    assert download['flux']['298'] == (8.0, 13.0)
+    assert download['types']['3'] == "L/LL"
 
     l_types = mm.selectSources(meteomod, types=['L'])
     novo = mm.sourceRegions(meteomod, 1.451, 0.60866, np.radians(8.755), sources=l_types)['probabilities']

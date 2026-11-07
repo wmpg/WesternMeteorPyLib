@@ -59,6 +59,7 @@ Source regions in METEOMOD (Broz et al. 2024), the 9 families of type CM, weight
 | `--types TYPE [...]` | Compare only the families of these types (`L`, `CM CI`, ...). A family of type L/LL is kept for L and for LL. All families by default. |
 | `--sources NUMBER [...]` | Compare these families, by their number in Table 5 (`20` is Massalia, `"20'"` Massalia(2)). |
 | `--weight {flux,neo}` | `flux`, the meteoroid flux on the Earth, as the model defines it (default); `neo`, the number of bodies in the NEO region, as the authors' `meteomod.py` computes it, to compare. |
+| `--table {published,download}` | The values of Table 5: `published`, as in the A&A paper (default), or `download`, as in the `tab5.tex` of the archive, which the authors' page uses. See [Table 5 of the download and of the paper](#table-5-of-the-download-and-of-the-paper). |
 | `--list` | List the families, their types, maps, N_neo and flux. |
 | `--clones N`, `--seed S` | The mean and the 95% interval over N clones of the orbit, drawn from the trajectory's covariance, as in [NEOMOD](NEOMODSourceRegions.md#within-the-uncertainty-of-the-orbit). |
 | `--model_file FILE` | An archive to read instead of the downloaded one. |
@@ -115,14 +116,19 @@ and Table 5 itself, for three reasons.
   authors' tool for kilometre-sized NEOs, for which N_neo is the right weight. It reads Φ from Table 5
   and does not use it. For a body that hit the Earth, this leaves out the collision probability, which
   differs between the families by a factor of 11: Φ/N_neo is 0.70 for Hygiea and 7.8 for Nysa, in
-  10⁻⁹ km⁻² yr⁻¹ per 10⁸ bodies. The effect, measured:
+  10⁻⁹ km⁻² yr⁻¹ per 10⁸ bodies. The paper says so (Brož et al. 2024a, Sect. 4): "Using Eq. (8)
+  [N_neo] is not sufficient though, because C-type families are found at very different locations. One
+  has to compute collisional probabilities p with the Earth (Table C.4), and estimate the meteoroid flux".
+  For the ordinary chondrites, the Supplementary Information of Brož et al. (2024b) notes that "at least
+  for the most relevant families the fluxes are not so different from populations; with the obvious
+  exception of Phocaea". The effect, measured:
   - Winchcombe among the CM families is from Veritas (0.30) with N_neo, and from Astrid (0.43, Veritas
     0.11) with Φ. Veritas has 270 times more bodies than Astrid but a collision probability 6
     times lower.
-  - Of the 47 meteorites of `wmpl/share/Meteorites_with_Orbits.csv` whose type has families, 3 change
-    their most probable family: Dishchii'bikoh (Juno → Flora), Sutter's Mill (Veritas → König) and
-    Maribo (Theobalda → Astrid).
-  - For others the probability of the first family moves by up to 0.24: Benešov (Eunomia 0.58 → 0.34),
+  - Of the 47 meteorites of `wmpl/share/Meteorites_with_Orbits.csv` whose type has families, 2 change
+    their most probable family, both CM: Sutter's Mill (Veritas → König) and Maribo (Theobalda →
+    Astrid).
+  - For others the probability of the first family moves by up to 0.26: Benešov (Eunomia 0.63 → 0.37),
     Golden (Massalia(2) 0.59 → 0.81) and Grimsby (Koronis(2) 0.43 → 0.64).
   - The L and H chondrites of the examples still come from Massalia(2) and Koronis(2).
 
@@ -133,9 +139,14 @@ and Table 5 itself, for three reasons.
 - **The orbit is not checked.** In `meteomod.py`:
   - a hyperbolic orbit (*a* < 0) indexes the map from its far end, with no message;
   - *a* ≥ 3.5 AU or *i* ≥ 90° stops it with an IndexError;
-  - an orbit outside the NEO region gets the probabilities of its (*a*, *i*) bin.
+  - an orbit outside the NEO region gets the probabilities of its (*a*, *i*) bin;
+  - the eccentricity is read, but neither used nor written to `meteomod.out`.
 
-  Here such orbits get no probabilities, with the reason.
+  Here *e* is used and printed, and such orbits get no probabilities, with the reason.
+- **Reading the files.** `meteomod.py` reads its files from the working directory, so it fails, or reads
+  other files, when run from elsewhere. `read_maps` opens `maps.in` whatever file it is given. An orbit
+  given without a designation stops `read_orbits` with an IndexError. Here the files are read from the
+  archive, wherever it is.
 
 Otherwise the values are those of `meteomod.py`: with `--weight neo` they agree within 6×10⁻¹⁶ with a
 transcription of its `compute_p`.
@@ -144,12 +155,24 @@ transcription of its `compute_p`.
 
 ## Table 5 of the download and of the paper
 
-The values used are those of `tab5.tex` in the archive, which the authors' page uses. The file is dated
-10 October 2024, after the publication. It differs from Table 5 of the paper (arXiv:2406.19727v2, the
-accepted version) for two families:
+The `tab5.tex` of the archive, which the authors' page uses, is dated 10 October 2024, after the
+publication. It differs from Table 5 as published in A&A (the same as arXiv:2406.19727v2) for three
+families:
 
-| Family | Download | Paper |
+| Family | Published (default) | Download (`--table download`) |
 | :--- | :--- | :--- |
+| Hungaria (434) | τ_mb "300?" My, N_neo 5.9–9.4, Φ 7.6–12 | τ_mb 61 My, N_neo 29–46, Φ 37–59 |
+| Baptistina (298) | Φ 11–19 | Φ 8.0–13 |
+| Juno (3) | type L | type L/LL |
+
+By default the published values are used, since the paper is what is cited. The JSON records the table
+(`"table"`) and the families taken from it (`"table_changes"`), and `--list` marks them. In both versions
+Φ/N_neo of Hungaria matches its collision probability in Table C.4. For Baptistina it matches only in the
+published table. Witt (2732) and Brucato (4203), in the paper, are left out: Witt has no map in the
+archive, and Brucato is commented out of its list of families. The middle of each range is used, as the
+authors do.
+
+--- | :--- | :--- |
 | Hungaria (434) | τ_mb 61 My, N_neo 29–46, Φ 37–59 | τ_mb "300?" My, N_neo 5.9–9.4, Φ 7.6–12 |
 | Baptistina (298) | Φ 8.0–13 | Φ 11–19 |
 
@@ -166,6 +189,7 @@ The middle of each range is used, as the authors do.
 | `--meteomod [all\|final]` | The probabilities of the nominal solution and the clones at every output (`all`, the default), or at the end only (`final`). |
 | `--meteomod_types TYPE [...]` | Compare only the families of these types, as `--types` above. |
 | `--meteomod_sources NUMBER [...]` | Compare these families, as `--sources` above. |
+| `--meteomod_table {published,download}` | The values of Table 5, as `--table` above. |
 
 The outputs are those of `--neomod`, under their own names, described in
 [Source regions in NEOMOD](NEOMODSourceRegions.md#along-a-rebound-integration):
@@ -174,8 +198,8 @@ The outputs are those of `--neomod`, under their own names, described in
   horizon and for the representative clone, then the papers to cite;
 - `rebound_meteomod_sources.csv`;
 - `rebound_meteomod_sources.png` (with `all`);
-- the key `"meteomod"` of the JSON, which also holds the weight, the types, and N_neo and Φ of each
-  family compared.
+- the key `"meteomod"` of the JSON, which also holds the weight, the types, the table, and N_neo and Φ
+  of each family compared.
 
 `--neomod` and `--meteomod` can be given together. The figure draws a colour per family when there are 7
 or fewer. With more, it draws the 7 with the largest probabilities of the run and groups the rest as

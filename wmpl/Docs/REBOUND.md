@@ -153,6 +153,7 @@ python -m wmpl.Rebound.REBOUND --help
 | `--meteomod [all\|final]` | The probability that the object came from each asteroid family of METEOMOD (Brož et al. 2024), weighted by the meteoroid flux on the Earth, at every output (`all`, the default) or at the end only (`final`), for the nominal and the clones. See [Source regions in METEOMOD](#source-regions-in-meteomod). |
 | `--meteomod_types TYPE [...]` | Compare only the families of these types for `--meteomod` (`L`, `CM CI`, ...). All families by default. |
 | `--meteomod_sources NUMBER [...]` | Compare these families for `--meteomod`, by their number in Table 5 of Brož et al. (2024a). |
+| `--meteomod_table {published,download}` | The values of Table 5 for `--meteomod`: as published (default), or as in the `tab5.tex` of the archive. |
 | `--replot RESULTS_JSON` | Do not integrate: redraw the figure of an earlier run from its results file. The trajectory pickle is not needed. See [Redrawing the figure](#redrawing-the-figure). |
 | `--out FIGURE_PNG` | With `--replot`, where to save the figure. |
 | `--verbose` | Print the progress of the simulation. |

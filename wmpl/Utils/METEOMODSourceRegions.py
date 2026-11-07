@@ -23,19 +23,30 @@ This module reads the distribution itself, and does not run the authors' meteomo
     - meteomod.py weights the maps by N_neo, not by Phi. It is a copy of neomod.py, the authors' tool for
       NEOs, for which N_neo is the right weight, and it reads Phi from Table 5 without using it. For a
       body that hit the Earth this leaves out the collision probability, which differs between the
-      families by a factor of 11 (Hygiea 0.70, Nysa 7.8 in 1e-9 km^-2 y^-1 per 1e8 bodies). It matters
-      most for the carbonaceous families: with the CM families, Winchcombe is from Veritas (0.30)
+      families by a factor of 11 (Hygiea 0.70, Nysa 7.8 in 1e-9 km^-2 y^-1 per 1e8 bodies). The paper
+      says so: "Using Eq. (8) [N_neo] is not sufficient though, because C-type families are found at
+      very different locations. One has to compute collisional probabilities p with the Earth (Table
+      C.4), and estimate the meteoroid flux" (Broz et al. 2024a, Sect. 4), while for the ordinary
+      chondrites "at least for the most relevant families the fluxes are not so different from
+      populations; with the obvious exception of Phocaea" (Broz et al. 2024b, Supplementary
+      Information). It is what is found: with the CM families, Winchcombe is from Veritas (0.30)
       weighted by N_neo, and from Astrid (0.43, Veritas 0.11) weighted by Phi. Of the 47 meteorites of
-      wmpl/share/Meteorites_with_Orbits.csv whose type has families, 3 change their most probable family
-      (Dishchii'bikoh, Sutter's Mill, Maribo), and the probability of the first family of others moves
-      by up to 0.24 (Benesov, Golden, Grimsby). The L and H chondrites of the examples still come from
+      wmpl/share/Meteorites_with_Orbits.csv whose type has families, 2 change their most probable
+      family, both CM (Sutter's Mill, Maribo), and the probability of the first family of others moves
+      by up to 0.26 (Benesov, Golden, Grimsby). The L and H chondrites of the examples still come from
       Massalia(2) and Koronis(2). weight='neo' gives the script's values, to compare.
     - meteomod.py reads the maps from maps.npz when it is there, a pickled dictionary: loading it would
       run code from a downloaded file. The maps are read here from the text files they were made from
       (map/*/map.out), which give the same maps to the last digit (checked for the 55 of them).
     - meteomod.py does not check the orbit: a < 0 (hyperbolic) indexes the map from its far end without
       a message, a >= 3.5 AU or i >= 90 deg stop it with an IndexError, and an orbit outside the NEO
-      region gets the probabilities of its (a, i) bin. Here such orbits get none, with the reason.
+      region gets the probabilities of its (a, i) bin. It reads the eccentricity without using it or
+      writing it out. Here e is used, an orbit not bound or with q >= 1.3 AU gets no probabilities, and
+      neither does one outside the maps, each with the reason.
+    - meteomod.py reads its files from the working directory, so that it fails, or reads other files,
+      when run from elsewhere; read_maps opens maps.in whatever file it is given; and an orbit given
+      without a designation stops read_orbits with an IndexError. Here the files are read from the
+      archive, wherever it is.
 
 Otherwise the values are those of meteomod.py: with weight='neo' they agree within 6e-16 with a
 transcription of its compute_p, for 36 626 orbits and selections of families, 1000 of the orbits on the
@@ -43,11 +54,13 @@ edges of the bins.
 
 The names and types of the families are those of Table 5 (tab5.tex), as in the paper and on the page:
 maps.in, which gives the map of each family, calls Misa CM and Brasilia CH, which Table 5 calls CI and M.
-The values of Table 5 are those of tab5.tex in the download, which the authors' page uses. It is dated
-after the publication, and differs from the published Table 5 (arXiv:2406.19727v2) for two families:
-Hungaria, N_neo 29-46 and Phi 37-59 against 5.9-9.4 and 7.6-12 (tau_mb 61 My against "300?"), and
-Baptistina, Phi 8.0-13 against 11-19. Witt and Brucato, in the published table, are left out of the
-download. The middle of each range is used, as by the authors.
+The tab5.tex of the download, which the authors' page uses, is dated after the publication, and differs
+from Table 5 as published (A&A 689, A183) for three families: Hungaria, N_neo 29-46 and Phi 37-59
+against 5.9-9.4 and 7.6-12 (tau_mb 61 My against "300?"), Baptistina, Phi 8.0-13 against 11-19, and
+Juno, of type L/LL against L. By default the published values are used (TABLE5_PUBLISHED), the paper
+being what is cited, and table='download' (--table download) uses those of the download. Witt and
+Brucato, in the published table, are left out: Witt has no map in the download, and Brucato is commented
+out of its list of families (maps.in). The middle of each range is used, as by the authors.
 
 What the probabilities assume:
     - The maps are of 1-m bodies, and Phi of 1-m meteoroids. A body much larger, of a size whose
@@ -127,10 +140,23 @@ NEO_Q_MAX = 1.3
 
 # The weights of the families: the meteoroid flux, as the model defines it, or the number of bodies in
 #   the NEO region, as the authors' meteomod.py computes it
-WEIGHTS = {'flux': "meteoroid flux Phi of Table 5", 'neo': "N_neo of Table 5, as the authors' meteomod.py"}
+WEIGHTS = {'flux': "meteoroid flux Phi", 'neo': "N_neo, as the authors' meteomod.py"}
 
 # Sources below this probability everywhere are left out of the printed tables
 PRINT_MIN = 0.005
+
+# The values of Table 5 as published (Broz et al. 2024a, A&A 689, A183), where the tab5.tex of the
+#   download differs: Hungaria (tau_mb "300?" My there, 61 My in the download), Baptistina, and the type of
+#   Juno. Witt and Brucato, in the published table, are not among the families of the download
+TABLE5_PUBLISHED = {
+    '434': {'n_neo': (5.9, 9.4), 'flux': (7.6, 12.0)},
+    '298': {'flux': (11.0, 19.0)},
+    '3': {'type': 'L'},
+    }
+
+# The versions of Table 5: as published, by default, or as in the tab5.tex of the download, which the
+#   authors' page uses
+TABLES = {'published': "Table 5 as published", 'download': "Table 5 of the download"}
 
 # The model, once loaded
 _model_cache = {}
@@ -307,7 +333,7 @@ def readMap(file_obj):
 
 
 
-def loadMETEOMOD(model=METEOMOD, file_path=None, download=True, verbose=True):
+def loadMETEOMOD(model=METEOMOD, file_path=None, download=True, verbose=True, table='published'):
     """ Load METEOMOD from its archive, downloading it first if it is not there. The files are read
         from the archive without extracting it.
 
@@ -317,13 +343,21 @@ def loadMETEOMOD(model=METEOMOD, file_path=None, download=True, verbose=True):
             default.
         download: [bool] Download the file if it is not found. If False, raise instead. True by default.
         verbose: [bool] Print a note when downloading. True by default.
+        table: [str] 'published' for the values of Table 5 as published, where the download differs (see
+            TABLE5_PUBLISHED), 'download' for those of its tab5.tex. 'published' by default.
 
     Return:
-        [dict] 'model' and 'file_path'; 'sources', the family numbers in the order of the authors' list;
+        [dict] 'model' and 'file_path'; 'table', and 'table_changes', the families whose values were taken
+            from the published table; 'sources', the family numbers in the order of the authors' list;
             'names' and 'types', {number: name or type}; 'directories', {number: map directory};
             'maps', (source, bins in a, bins in i), each normalised to 1; 'n_neo' and 'flux',
             {number: (low, high)}.
+
+    Reference: Table 5 of Broz et al. (2024), A&A 689, A183, doi:10.1051/0004-6361/202450532.
     """
+
+    if table not in TABLES:
+        raise ValueError("The table is 'published' or 'download', not {:s}.".format(str(table)))
 
     if file_path is None:
 
@@ -340,8 +374,8 @@ def loadMETEOMOD(model=METEOMOD, file_path=None, download=True, verbose=True):
 
     file_path = os.path.abspath(file_path)
 
-    if file_path in _model_cache:
-        return _model_cache[file_path]
+    if (file_path, table) in _model_cache:
+        return _model_cache[(file_path, table)]
 
     with tarfile.open(file_path, 'r:gz') as archive:
 
@@ -352,9 +386,9 @@ def loadMETEOMOD(model=METEOMOD, file_path=None, download=True, verbose=True):
             return member
 
         families = readMapsIndex(_member('maps.in').read().decode('utf-8', 'replace'))
-        table = readTable5(_member('tab5.tex').read().decode('utf-8', 'replace'))
+        table5 = readTable5(_member('tab5.tex').read().decode('utf-8', 'replace'))
 
-        missing = [number for number, _, _, _ in families if number not in table]
+        missing = [number for number, _, _, _ in families if number not in table5]
         if missing:
             raise ValueError("Table 5 of {:s} has no flux for {:s}.".format(file_path, ", ".join(missing)))
 
@@ -368,7 +402,7 @@ def loadMETEOMOD(model=METEOMOD, file_path=None, download=True, verbose=True):
 
     # The names and types of Table 5, which the paper and the page give, as maps.in differs for two
     #   families (Misa CM and Brasilia CH there, CI and M in the table)
-    names_types = {number: _nameAndType(table[number]['label']) for number in sources}
+    names_types = {number: _nameAndType(table5[number]['label']) for number in sources}
 
     meteomod = {
         'model': model,
@@ -378,11 +412,28 @@ def loadMETEOMOD(model=METEOMOD, file_path=None, download=True, verbose=True):
         'types': {number: names_types[number][1] for number in sources},
         'directories': {number: directory for number, _, _, directory in families},
         'maps': np.array([maps_of[directory] for _, _, _, directory in families]),
-        'n_neo': {number: table[number]['n_neo'] for number in sources},
-        'flux': {number: table[number]['flux'] for number in sources},
+        'n_neo': {number: table5[number]['n_neo'] for number in sources},
+        'flux': {number: table5[number]['flux'] for number in sources},
+        'table': table,
+        'table_changes': [],
         }
 
-    _model_cache[file_path] = meteomod
+    # The values of the published table where the download differs
+    if table == 'published':
+        for number, values in TABLE5_PUBLISHED.items():
+
+            if number not in sources:
+                continue
+
+            for key, value in values.items():
+                field = 'types' if key == 'type' else key
+                if meteomod[field][number] != value:
+                    meteomod[field][number] = value
+                    meteomod['table_changes'].append(number)
+
+        meteomod['table_changes'] = sorted(set(meteomod['table_changes']), key=sources.index)
+
+    _model_cache[(file_path, table)] = meteomod
 
     return meteomod
 
@@ -745,7 +796,8 @@ def headingText(meteomod, sources, weight='flux', types=None):
     else:
         selection = "{:d} families".format(len(sources))
 
-    return "{:s}, weighted by the {:s} (1-m meteoroids)".format(selection, WEIGHTS[weight])
+    return "{:s}, weighted by the {:s} (1-m meteoroids, {:s})".format(selection, WEIGHTS[weight],
+        TABLES[meteomod['table']])
 
 
 
@@ -803,6 +855,8 @@ def sourceModel(meteomod, sources=None, weight='flux', types=None):
         'plot_groups': plot_groups,
         'json': {
             'model_file': os.path.basename(meteomod['file_path']),
+            'table': meteomod['table'],
+            'table_changes': [s for s in meteomod['table_changes'] if s in sources],
             'weight': weight,
             'types': types,
             'warning': warning,
@@ -890,15 +944,20 @@ def formatSourceRegions(meteomod, result, clones=None, types=None):
 def formatSourceList(meteomod):
     """ Lines of text listing the families of the model, their types, maps, N_neo and Phi. """
 
-    lines = ["The families of {:s}, with N_neo [1e8] and Phi [1e-9 km^-2 yr^-1] of Table 5:".format(
-        METEOMOD['name']), ""]
+    lines = ["The families of {:s}, with N_neo [1e8] and Phi [1e-9 km^-2 yr^-1] of {:s}:".format(
+        METEOMOD['name'], TABLES[meteomod['table']]), ""]
     lines.append("  {:<5s} {:<16s} {:<10s} {:<16s} {:>11s} {:>11s}".format("No.", "Family", "Type", "Map",
         "N_neo", "Phi"))
 
     for s in meteomod['sources']:
-        lines.append("  {:<5s} {:<16s} {:<10s} {:<16s} {:>11s} {:>11s}".format(s, meteomod['names'][s],
+        lines.append("  {:<5s} {:<16s} {:<10s} {:<16s} {:>11s} {:>11s}{:s}".format(s, meteomod['names'][s],
             meteomod['types'][s], meteomod['directories'][s], "{:g}-{:g}".format(*meteomod['n_neo'][s]),
-            "{:g}-{:g}".format(*meteomod['flux'][s])))
+            "{:g}-{:g}".format(*meteomod['flux'][s]), "  *" if s in meteomod['table_changes'] else ""))
+
+    if meteomod['table_changes']:
+        lines.append("")
+        lines.append("  * as published, where the tab5.tex of the download differs (--table download to use "
+            "it)")
 
     return lines
 
@@ -943,6 +1002,10 @@ if __name__ == "__main__":
         help="Weight of the families: flux, the meteoroid flux on the Earth, as the model defines it "
             "(default), or neo, the number of bodies in the NEO region, as the authors' meteomod.py "
             "computes it.")
+    selection.add_argument('--table', type=str, choices=sorted(TABLES), default='published', \
+        help="The values of Table 5: published, as in Broz et al. (2024a) (default), or download, as in the "
+            "tab5.tex of the archive, which the authors' page uses. They differ for Hungaria, Baptistina "
+            "and the type of Juno.")
     selection.add_argument('--list', action='store_true', \
         help="List the families, their types, N_neo and flux, and stop.")
 
@@ -976,7 +1039,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
 
-    meteomod = loadMETEOMOD(file_path=cml_args.model_file)
+    meteomod = loadMETEOMOD(file_path=cml_args.model_file, table=cml_args.table)
 
     if cml_args.list:
         for line in formatSourceList(meteomod):
@@ -1079,6 +1142,8 @@ if __name__ == "__main__":
             'reference': METEOMOD['reference'],
             'trajectory': cml_args.traj_path,
             'types': cml_args.types,
+            'table': meteomod['table'],
+            'table_changes': meteomod['table_changes'],
             'weight': cml_args.weight,
             'family_names': sourceNames(meteomod, sources),
             'result': dict(result, incl_deg=np.degrees(result['incl'])),

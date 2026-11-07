@@ -4221,6 +4221,11 @@ if __name__ == "__main__":
                         help="Family numbers for --meteomod, as in Table 5 of Broz et al. (2024), in place of "
                         "--meteomod_types.")
 
+    parser.add_argument("--meteomod_table", type=str, choices=["published", "download"], default=None,
+                        help="The values of Table 5 for --meteomod: published, as in Broz et al. (2024) (the "
+                        "default), or download, as in the tab5.tex of the archive. They differ for Hungaria, "
+                        "Baptistina and the type of Juno.")
+
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
@@ -4372,8 +4377,9 @@ if __name__ == "__main__":
     if (args.neomod_size is not None) and (args.neomod is None):
         parser.error("--neomod_size goes with --neomod.")
 
-    if ((args.meteomod_types is not None) or (args.meteomod_sources is not None)) and (args.meteomod is None):
-        parser.error("--meteomod_types and --meteomod_sources go with --meteomod.")
+    if ((args.meteomod_types is not None) or (args.meteomod_sources is not None)
+            or (args.meteomod_table is not None)) and (args.meteomod is None):
+        parser.error("--meteomod_types, --meteomod_sources and --meteomod_table go with --meteomod.")
 
     # The models hold heliocentric orbits
     if ((args.neomod is not None) or (args.meteomod is not None)) and (reference_frame != "heliocentric"):
@@ -4401,7 +4407,7 @@ if __name__ == "__main__":
         from wmpl.Utils.METEOMODSourceRegions import sourceModel as meteomodSourceModel
 
         try:
-            meteomod = loadMETEOMOD()
+            meteomod = loadMETEOMOD(table=args.meteomod_table or "published")
             meteomod_sources = selectSources(meteomod, types=args.meteomod_types,
                 sources=args.meteomod_sources)
             source_region_models.append(("meteomod", args.meteomod, meteomodSourceModel(meteomod,

@@ -101,6 +101,7 @@ def testEveryOutputIsSavedWithItsReasonAndTheNeomodBeside(runReboundCli):
     meteomod = results["meteomod"]
     assert meteomod["mode"] == "all"
     assert meteomod["weight"] == "flux"
+    assert meteomod["table"] == "published"
     assert len(meteomod["time_days"]) == len(results["nominal"]["time_days"])
     assert all(v is None for values in meteomod["nominal"].values() for v in values)
     assert "doi:10.1051/0004-6361/202450532" in meteomod["reference"]
@@ -129,10 +130,11 @@ def testEveryOutputIsSavedWithItsReasonAndTheNeomodBeside(runReboundCli):
 
 
 def testTheEndOnlyAmongTheFamiliesOfAType(runReboundCli):
-    """ --meteomod final with --meteomod_types gives the last output only, among the families of that
-        type, without a figure. """
+    """ --meteomod final with --meteomod_types and --meteomod_table gives the last output only, among the
+        families of that type, with the values of Table 5 asked for, without a figure. """
 
-    done, run_dir = runReboundCli("--meteomod", "final", "--meteomod_types", "CM")
+    done, run_dir = runReboundCli("--meteomod", "final", "--meteomod_types", "CM", "--meteomod_table",
+        "download")
     assert done.returncode == 0, done.stderr[-1000:]
 
     with open(str(run_dir/"rebound_simulation_results.json")) as f:
@@ -140,6 +142,7 @@ def testTheEndOnlyAmongTheFamiliesOfAType(runReboundCli):
 
     assert meteomod["mode"] == "final"
     assert meteomod["types"] == ["CM"]
+    assert meteomod["table"] == "download"
     assert len(meteomod["time_days"]) == 1
     assert meteomod["sources"]
     assert set(meteomod["family_types"].values()) == {"CM"}
