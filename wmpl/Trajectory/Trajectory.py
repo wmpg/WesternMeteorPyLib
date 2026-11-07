@@ -6210,8 +6210,8 @@ class Trajectory(object):
         Keyword arguments (internal flags, DO NOT SPECIFY MANUALLY!):
             _rerun_timing: [bool] Internal flag. Is it True when everything is recalculated upon estimating 
                 the difference in timings, so it breaks the second trajectory run after updating the values
-                of R.A., Dec, velocity, etc. The second pass also runs with no timing to estimate when the
-                gravity correction is on, as it is the pass that applies the gravity drop.
+                of R.A., Dec, velocity, etc. The second pass also runs without the timing estimation when the
+                gravity correction is on, as it is the pass which applies the gravity drop.
             _rerun_bad_picks: [bool] Internal flag. Is is True when a second pass of trajectory estimation is
                 run with bad picks removed, thus improving the solution.
             _mc_run: [bool] Internal flag. True if the solver is calculating the Carlo Run.
@@ -6622,9 +6622,9 @@ class Trajectory(object):
             return None
 
 
-        # Calculate velocity at each point with updated timings
-        # Timing residuals only exist when the timing was estimated
-        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights,
+        # Calculate velocity at each point with updated timings, and the timing residuals only if the timing
+        #   was estimated
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights, \
             calc_res=(_rerun_timing and self.estimate_timing_vel))
 
 
@@ -6643,9 +6643,9 @@ class Trajectory(object):
                 self.time_diffs_final += self.time_diffs
 
 
-            # After the timing has been estimated, everything needs to be recalculated from scratch. So it does
-            #   for the gravity drop even with no timing to estimate: the first pass fits a straight line,
-            #   because the drop needs the vertical velocity, which comes out of that pass
+            # After the timing has been estimated, everything needs to be recalculated from scratch, and so
+            #   with the gravity correction, as the first pass fits the line without the gravity drop, which
+            #   needs the vertical velocity from that pass
             if self.estimate_timing_vel or self.gravity_correction:
 
 
