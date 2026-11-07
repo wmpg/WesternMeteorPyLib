@@ -3077,7 +3077,8 @@ class Trajectory(object):
 
 
 
-    def calcVelocity(self, state_vect, radiant_eci, observations, weights, calc_res=False, gravity=False):
+    def calcVelocity(self, state_vect, radiant_eci, observations, weights, calc_res=False, gravity=False, \
+        calc_lengths=True):
         """ Calculates point to point velocity for the given solution, as well as the average velocity 
             including all previous points up to the given point.
 
@@ -3094,6 +3095,9 @@ class Trajectory(object):
                 need to be calculated for this to work.
             gravity: [bool] Find the points on the gravity-dropped trajectory, as the line-of-sight fit does
                 when it applies the drop. False by default.
+            calc_lengths: [bool] Compute the lengths along the trail. If False, the lengths of the previous
+                call are kept, e.g. the ones the velocity and the timing offsets were fitted to. True by
+                default.
 
         """
 
@@ -3103,47 +3107,51 @@ class Trajectory(object):
         # Go through observations from all stations
         for obs in observations:
 
-            # List of distances from the first trajectory point on the radiant line
-            first_pt_distances = []
+            # Compute the lengths along the trail, unless the ones from the previous call are kept
+            if calc_lengths:
 
-            # List of distances from the state vector
-            state_vect_dist = []
+                # List of distances from the first trajectory point on the radiant line
+                first_pt_distances = []
 
-            # Go through all individual position measurement from each site
-            for i, (t, stat, meas) in enumerate(zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los)):
+                # List of distances from the state vector
+                state_vect_dist = []
 
-                # Calculate closest points of approach (observed line of sight to radiant line)
-                obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
+                # Go through all individual position measurement from each site
+                for i, (t, stat, meas) in enumerate(zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los)):
 
-                # Find the point on the gravity-dropped trajectory the same way as the line-of-sight fit, and
-                #   move the projected point along the radiant line by the same length
-                if gravity:
+                    # Calculate closest points of approach (observed line of sight to radiant line)
+                    obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
-                    v0z = self.v0z
-                    if v0z is None:
-                        v0z = 0.0
+                    # Find the point on the gravity-dropped trajectory the same way as the line-of-sight fit,
+                    #   and move the projected point along the radiant line by the same length
+                    if gravity:
 
-                    rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa), self.gravity_factor, \
-                        v0z)
-                    _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
-                    rad_cpa = rad_cpa + rad_cpa_dropped - rad_cpa_grav
+                        v0z = self.v0z
+                        if v0z is None:
+                            v0z = 0.0
 
-                # Take the position of the first point as the reference point
-                if i == 0:
-                    ref_point = np.copy(rad_cpa)
+                        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa), \
+                            self.gravity_factor, v0z)
+                        _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
+                        rad_cpa = rad_cpa + rad_cpa_dropped - rad_cpa_grav
 
-                # Calculate the distance from the first observed point to the projected point on the radiant line
-                dist = vectMag(ref_point - rad_cpa)
+                    # Take the position of the first point as the reference point
+                    if i == 0:
+                        ref_point = np.copy(rad_cpa)
+
+                    # Calculate the distance from the first observed point to the projected point on the
+                    #   radiant line
+                    dist = vectMag(ref_point - rad_cpa)
                 
-                first_pt_distances.append(dist)
+                    first_pt_distances.append(dist)
 
-                # Distance from the state vector to the projected point on the radiant line
-                state_vect_dist.append(vectMag(state_vect - rad_cpa))
+                    # Distance from the state vector to the projected point on the radiant line
+                    state_vect_dist.append(vectMag(state_vect - rad_cpa))
 
 
-            # Convert the distances (length along the trail) into a numpy array
-            obs.length = np.array(first_pt_distances)
-            obs.state_vect_dist = np.array(state_vect_dist)
+                # Convert the distances (length along the trail) into a numpy array
+                obs.length = np.array(first_pt_distances)
+                obs.state_vect_dist = np.array(state_vect_dist)
 
 
             ### Calculate average velocity including all points up to the given point ###
@@ -6655,8 +6663,7 @@ class Trajectory(object):
         # Calculate velocity at each point with updated timings, and the timing residuals only if the timing
         #   was estimated
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights, \
-            calc_res=(_rerun_timing and self.estimate_timing_vel), \
-            gravity=(_rerun_timing and self.gravity_correction))
+            calc_res=(_rerun_timing and self.estimate_timing_vel), calc_lengths=False)
 
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
