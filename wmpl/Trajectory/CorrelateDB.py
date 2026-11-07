@@ -235,7 +235,9 @@ class ObservationsDatabase():
                     # check the table exists before trying to copy from it
                     res = self.dbhandle.execute("SELECT count(name) FROM archdb.sqlite_master WHERE name='paired_obs'").fetchall()
                     if res[0][0] > 0:
-                        self.dbhandle.execute('insert or replace into archdb.paired_obs select * from paired_obs where obs_dt < ?', (archdate_jd,))
+                        self.dbhandle.execute('insert or replace into archdb.paired_obs '\
+                                              'select obs_id, jdt_ref, status from paired_obs where obs_dt < ?', 
+                                              (archdate_jd,))
                     self.dbhandle.commit()
                     self.dbhandle.execute("detach database 'archdb'")
                 return self.purgeObsDatabase(archdate_jd=archdate_jd) 
@@ -344,7 +346,8 @@ class ObservationsDatabase():
                     # table is missing so nothing to do
                     log.info(f'  no records in {source_db_path} to merge')
                 else:
-                    self.dbhandle.execute('insert or replace into paired_obs select * from sourcedb.paired_obs')
+                    self.dbhandle.execute('insert or replace into paired_obs ' \
+                                          'select obs_id, jdt_ref, status from sourcedb.paired_obs')
                 self.dbhandle.commit()
                 self.dbhandle.execute("detach database 'sourcedb'")
                 return True
@@ -421,8 +424,8 @@ class TrajectoryDatabase():
                         rend_ele REAL,
                         obs_ids VARCHAR,
                         ign_obs_ids VARCHAR,
-                        cand_id VARCHAR,
-                        status INTEGER) """)
+                        status INTEGER,
+                        cand_id VARCHAR) """)
 
         res = con.execute("SELECT name FROM sqlite_master WHERE name='failed_trajectories'")
         if res.fetchone() is None:
@@ -442,11 +445,29 @@ class TrajectoryDatabase():
                         gravity_factor REAL,
                         obs_ids VARCHAR,
                         ign_obs_ids VARCHAR,
-                        cand_id VARCHAR,
-                        status INTEGER) """)
-                        
+                        status INTEGER,
+                        cand_id VARCHAR) """)
+   
         con.commit()
         self.dbhandle = con
+        # the table structure may change. This updates the structure as needed
+        self.checkAndAddNewCols()
+        return 
+
+    def checkAndAddNewCols(self):
+        cols_to_add = [('cand_id', 'VARCHAR')]
+
+        res = self.dbhandle.execute('select sql from sqlite_schema where name = "trajectories"').fetchall()
+        dbsql = res[0][0]
+        for col in cols_to_add:
+            if col[0] not in dbsql:
+                res = self.dbhandle.execute(f'alter table trajectories add {col[0]} {col[1]}')
+        res = self.dbhandle.execute('select sql from sqlite_schema where name = "failed_trajectories"').fetchall()
+        dbsql = res[0][0]
+        for col in cols_to_add:
+            if col[0] not in dbsql:
+                res = self.dbhandle.execute(f'alter table failed_trajectories add {col[0]} {col[1]}')
+        self.dbhandle.commit()
         return 
 
     def _commitTrajDatabase(self, verbose=False):
@@ -669,18 +690,37 @@ class TrajectoryDatabase():
         trajs: json list of traj_reduced objects
 
         """
+        # explicitly specify columns here to avoid column-order issues
+        traj_fields = ','.join(['jdt_ref', 'traj_id', 'traj_file_path',
+                            'participating_stations','ignored_stations',
+                            'radiant_eci_mini', 'state_vect_mini',
+                            'phase_1_only', 'v_init','gravity_factor',
+                            'v0z', 'v_avg', 'rbeg_jd', 'rend_jd', 
+                            'rbeg_lat', 'rbeg_lon', 'rbeg_ele', 
+                            'rend_lat', 'rend_lon', 'rend_ele',
+                            'obs_ids', 'ign_obs_ids','cand_id'])
 
+        failed_traj_fields = ','.join(['jdt_ref', 'traj_id', 'traj_file_path',
+                         'participating_stations','ignored_stations',
+                         'radiant_eci_mini', 'state_vect_mini',
+                         'phase_1_only', 'v_init','gravity_factor',
+                         'obs_ids', 'ign_obs_ids','cand_id'])
+        
         jdt_start, jdt_end = jdt_range
         sts_test = 'and status=1' if not inc_deleted else ''
 
         table_name = 'failed_trajectories' if failed else 'trajectories'
+        req_fields = failed_traj_fields if failed else traj_fields
+
         if verbose:
             log.info(f'getting trajectories between {jd2Date(jdt_start, dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} and {jd2Date(jdt_end, dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")}')
 
         if not jdt_end:
-            rows = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>=? {sts_test}", (jdt_start,)).fetchall()
+            rows = self.dbhandle.execute(f"SELECT {req_fields} " \
+                                         f"FROM {table_name} WHERE jdt_ref>=? {sts_test}", (jdt_start,)).fetchall()
         else:
-            rows = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>=? and jdt_ref<=? {sts_test}", (jdt_start,jdt_end,)).fetchall()
+            rows = self.dbhandle.execute(f"SELECT {req_fields} FROM {table_name} " \
+                                         f"WHERE jdt_ref>=? and jdt_ref<=? {sts_test}", (jdt_start,jdt_end,)).fetchall()
         trajs = []
         for rw in rows:
             rw = [np.nan if x == 'NaN' else x for x in rw]   
@@ -728,12 +768,15 @@ class TrajectoryDatabase():
 
         jdt_start, jdt_end = jdt_range
         table_name = 'failed_trajectories' if failed else 'trajectories'
+        col_list = ','.join(['jdt_ref', 'traj_id', 'traj_file_path', 'obs_ids', 'ign_obs_ids', 'cand_id'])
         if not jdt_start:
-            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids, cand_id FROM {table_name} where status=1 order by jdt_ref").fetchall()
+            rows = self.dbhandle.execute(f"SELECT {col_list} FROM {table_name} where status=1 order by jdt_ref").fetchall()
         elif not jdt_end:
-            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids, cand_id FROM {table_name} WHERE jdt_ref=? and status=1 order by jdt_ref", (jdt_start,)).fetchall()
+            rows = self.dbhandle.execute(f"SELECT {col_list} FROM {table_name} WHERE jdt_ref=? " \
+                                         "and status=1 order by jdt_ref", (jdt_start,)).fetchall()
         else:
-            rows = self.dbhandle.execute(f"SELECT jdt_ref, traj_id, traj_file_path, obs_ids, ign_obs_ids, cand_id FROM {table_name} WHERE jdt_ref>=? and jdt_ref<=? and status=1 order by jdt_ref", (jdt_start, jdt_end,)).fetchall()
+            rows = self.dbhandle.execute(f"SELECT {col_list} FROM {table_name} WHERE jdt_ref>=? and jdt_ref<=? " \
+                                         "and status=1 order by jdt_ref", (jdt_start, jdt_end,)).fetchall()
         trajs = []
         for rw in rows:
             trajs.append({'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]), 
@@ -1469,13 +1512,37 @@ if __name__ == '__main__':
             trajdb.copyTrajJsonRecords(jsondb.trajectories, dt_range, failed=False)
             trajdb.closeTrajDatabase()
     else:
-        if dbname == 'observations':
-            obsdb = ObservationsDatabase(cml_args.dir_path)
+        if dbname == 'candidates':
+            canddb = CandidateDatabase(cml_args.dir_path)
+            if action == 'describe':
+                res = canddb.dbhandle.execute('pragma table_info(candidates)').fetchall()
+                print('candidates\n==========')
+                for rw in res:
+                    print(rw)
             if action == 'status':
-                cur = obsdb.dbhandle.execute('select * from paired_obs where status=1')
-                print(f'there are {len(cur.fetchall())} paired obs')
-                cur = obsdb.dbhandle.execute('select * from paired_obs where status=0')
-                print(f'and       {len(cur.fetchall())} unpaired obs')
+                res = canddb.dbhandle.execute('select * from candidates where status=1').fetchall()
+                print(f'there are {res[0][0] if res else 0} candidates')
+                res = canddb.dbhandle.execute('select (*) from candidates where status=0').fetchall()
+                print(f'and       {res[0][0] if res else 0} deleted candidates')
+            if action == 'execute':
+                print(stmt)
+                cur = canddb.dbhandle.execute(stmt)
+                for rw in cur.fetchall():
+                    print(rw)
+            canddb.closeCandDatabase()
+
+        elif dbname == 'observations':
+            obsdb = ObservationsDatabase(cml_args.dir_path)
+            if action == 'describe':
+                res = obsdb.dbhandle.execute('pragma table_info(paired_obs)').fetchall()
+                print('paired_obs\n==========')
+                for rw in res:
+                    print(rw)
+            if action == 'status':
+                res = obsdb.dbhandle.execute('select * from paired_obs where status=1').fetchall()
+                print(f'there are {res[0][0] if res else 0} paired obs')
+                res = obsdb.dbhandle.execute('select (*) from paired_obs where status=0').fetchall()
+                print(f'and       {res[0][0] if res else 0} unpaired obs')
             if action == 'execute':
                 print(stmt)
                 cur = obsdb.dbhandle.execute(stmt)
@@ -1485,11 +1552,21 @@ if __name__ == '__main__':
 
         elif dbname == 'trajectories':
             trajdb = TrajectoryDatabase(cml_args.dir_path)
+            if action == 'describe':
+                res = trajdb.dbhandle.execute('pragma table_info(trajectories)').fetchall()
+                print('trajectories\n============')
+                for rw in res:
+                    print(rw)
+                print('\n')
+                res = trajdb.dbhandle.execute('pragma table_info(failed_trajectories)').fetchall()
+                print('failed_trajectories\n===================')
+                for rw in res:
+                    print(rw)
             if action == 'status':
-                cur = trajdb.dbhandle.execute('select * from trajectories where status=1')
-                print(f'there are {len(cur.fetchall())} successful trajectories')
-                cur = trajdb.dbhandle.execute('select * from failed_trajectories')
-                print(f'and       {len(cur.fetchall())} failed trajectories')
+                res = trajdb.dbhandle.execute('select count(*) from trajectories where status=1').fetchall()
+                print(f'there are {res[0][0] if res else 0} successful trajectories')
+                res = trajdb.dbhandle.execute('select count(*) from failed_trajectories').fetchall()
+                print(f'and       {res[0][0] if res else 0} failed trajectories')
             if action == 'execute':
                 print(stmt)
                 cur = trajdb.dbhandle.execute(stmt)
