@@ -1569,7 +1569,8 @@ def unsolvedFragmentReport(solutions, traj, ref_stations=None):
 #   (m), which 0.2 % of the fragments seen from two stations exceeded in fireballs simulated with MetSim
 FRAGMENT_MATCH_LIMIT = 1500.0
 
-# Least distance by which a match must be closer than the next best candidate not to be ambiguous (m)
+# Least distance by which a match must be closer than any other candidate of either fragment not to be
+#   ambiguous (m)
 FRAGMENT_MATCH_MARGIN = 500.0
 
 # Least time two stations must both see a pair of fragments for to compare them (s)
@@ -1645,7 +1646,8 @@ def fragmentMatches(traj, ecsv_paths, fragments):
             lists), distance (the distance along the path of every pair, m, a matrix with a row for every
             fragment of the first station, NaN when they are not seen at the same times) and pairs, the
             matches as (fragment of the first station, fragment of the second, distance (m), distance of the
-            next best candidate of either fragment (m), None if there is none).
+            closest other candidate of either fragment (m), None if there is none). As the pairs are chosen
+            together, that candidate can be closer than the match.
     """
 
     _, input_meteors = loadECSVs(ecsv_paths, no_prepare=True)
@@ -1709,12 +1711,12 @@ def fragmentMatches(traj, ecsv_paths, fragments):
             if not allowed[i, j]:
                 continue
 
-            # The next best candidate of either fragment
+            # The closest other candidate of either fragment
             others = np.concatenate([np.delete(cost[i, :], j), np.delete(cost[:, j], i)])
             others = others[others < not_allowed]
-            next_best = np.min(others) if len(others) else None
+            closest_other = np.min(others) if len(others) else None
 
-            pairs.append((frags_a[i], frags_b[j], distance[i, j], next_best))
+            pairs.append((frags_a[i], frags_b[j], distance[i, j], closest_other))
 
         matches.append({'stations': (station_a, station_b), 'fragments': (frags_a, frags_b), \
             'distance': distance, 'pairs': pairs})
@@ -1745,12 +1747,14 @@ def fragmentMatchReport(matches):
     out_str += "the distance is how far apart along the path the two projections are, which also takes\n"
     out_str += "part of a separation from the path. Fragments more than {:.1f} km apart are not matched,\n" \
         .format(FRAGMENT_MATCH_LIMIT/1000)
-    out_str += "and a match less than {:.1f} km closer than the next best candidate of either fragment is\n" \
+    out_str += "and a match less than {:.1f} km closer than the closest other candidate of either\n" \
         .format(FRAGMENT_MATCH_MARGIN/1000)
-    out_str += "ambiguous. A match of different numbers which is not ambiguous suggests that the stations\n"
-    out_str += "measured the fragments under crossed numbers, and a fragment further than {:.1f} km from\n" \
+    out_str += "fragment is ambiguous. As the pairs are chosen together, that candidate can be closer\n"
+    out_str += "than the match. A match of different numbers which is not ambiguous suggests that the\n"
+    out_str += "stations measured the fragments under crossed numbers, and a fragment further than\n"
+    out_str += "{:.1f} km from the one with its number at the other station may not be the same\n" \
         .format(FRAGMENT_MATCH_LIMIT/1000)
-    out_str += "the one with its number at the other station may not be the same fragment.\n"
+    out_str += "fragment.\n"
 
     for match in matches:
 
@@ -1775,9 +1779,10 @@ def fragmentMatchReport(matches):
 
         out_str += "\n"
         out_str += "{:s} and {:s}\n".format(station_a, station_b)
-        out_str += "  {:>{w}s}  {:>{w}s}  Distance (m)  Next best (m)\n".format(station_a, station_b, w=width)
+        out_str += "  {:>{w}s}  {:>{w}s}  Distance (m)  Closest other (m)\n".format(station_a, station_b, \
+            w=width)
 
-        for frag_a, frag_b, dist, next_best in match['pairs']:
+        for frag_a, frag_b, dist, closest_other in match['pairs']:
 
             notes = []
             if frag_a != frag_b:
@@ -1786,11 +1791,11 @@ def fragmentMatchReport(matches):
                     else " ({:d} at {:s}: {:s})".format(frag_a, station_b, "not seen at the same times" \
                     if np.isnan(same_dist) else distanceStr(same_dist))))
 
-            if (next_best is not None) and (next_best - dist < FRAGMENT_MATCH_MARGIN):
+            if (closest_other is not None) and (closest_other - dist < FRAGMENT_MATCH_MARGIN):
                 notes.append("ambiguous")
 
-            line = "  {:{w}d}  {:{w}d}  {:12.0f}  {:>13s}  {:s}".format(frag_a, frag_b, dist, \
-                "-" if (next_best is None) else "{:.0f}".format(next_best), ", ".join(notes), w=width)
+            line = "  {:{w}d}  {:{w}d}  {:12.0f}  {:>17s}  {:s}".format(frag_a, frag_b, dist, \
+                "-" if (closest_other is None) else "{:.0f}".format(closest_other), ", ".join(notes), w=width)
             out_str += line.rstrip() + "\n"
 
         # The fragments left without a partner, noting those further than the limit from the fragment with
@@ -1819,7 +1824,7 @@ def fragmentMatchReport(matches):
                 note = "not matched, {:d} at {:s} ({:s} away) is matched with {:d}".format(frag, \
                     other_station, distanceStr(dist), other_partners.get(frag, -1))
 
-            out_str += "  {:>{w}s}  {:>{w}s}  {:>12s}  {:>13s}  {:s}\n".format(frag_a_str, frag_b_str, "-", \
+            out_str += "  {:>{w}s}  {:>{w}s}  {:>12s}  {:>17s}  {:s}\n".format(frag_a_str, frag_b_str, "-", \
                 "-", note, w=width)
 
     return out_str
