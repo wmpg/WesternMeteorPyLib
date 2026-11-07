@@ -6210,7 +6210,8 @@ class Trajectory(object):
         Keyword arguments (internal flags, DO NOT SPECIFY MANUALLY!):
             _rerun_timing: [bool] Internal flag. Is it True when everything is recalculated upon estimating 
                 the difference in timings, so it breaks the second trajectory run after updating the values
-                of R.A., Dec, velocity, etc.
+                of R.A., Dec, velocity, etc. The second pass also runs without the timing estimation when the
+                gravity correction is on, as it is the pass which applies the gravity drop.
             _rerun_bad_picks: [bool] Internal flag. Is is True when a second pass of trajectory estimation is
                 run with bad picks removed, thus improving the solution.
             _mc_run: [bool] Internal flag. True if the solver is calculating the Carlo Run.
@@ -6247,9 +6248,21 @@ class Trajectory(object):
             for obs in self.observations:
                 obs.time_data -= t0
 
+                # Offset the excluded time range too, so it still matches the times when the observations are
+                #   reinitialized for the next pass (observations pickled before it was added do not have it)
+                if getattr(obs, 'excluded_time', None) is not None:
+                    obs.excluded_time = [ex_time - t0 for ex_time in obs.excluded_time]
+
 
             # Recompute the reference JD to corresponds with t0
             self.jdt_ref = self.jdt_ref + t0/86400.0
+
+            # Recompute the given RA and Dec for the new reference JD, as they are converted to azimuth and
+            #   elevation at the reference JD when the observations are reinitialized for the next pass
+            if self.meastype == 1:
+                for obs in self.observations:
+                    obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, self.jdt_ref, \
+                        obs.lat, obs.lon)
 
 
         ###################################################################################
@@ -6389,8 +6402,8 @@ class Trajectory(object):
         # Set the initial guess for the state vector and the radiant from the intersecting plane solution
         p0 = np.r_[self.state_vect, self.best_conv_inter.radiant_eci]
 
-        # Perform the minimization of angle deviations. The gravity will only be compensated for after the
-        #   initial estimate of timing differences
+        # Perform the minimization of angle deviations. The gravity will only be compensated for in the second
+        #   pass, which has the vertical velocity from the first
         minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), \
             self.gravity_factor, self.v0z)
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
@@ -6621,9 +6634,10 @@ class Trajectory(object):
             return None
 
 
-        # Calculate velocity at each point with updated timings
-        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights,
-            calc_res=_rerun_timing)
+        # Calculate velocity at each point with updated timings, and the timing residuals only if the timing
+        #   was estimated
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights, \
+            calc_res=(_rerun_timing and self.estimate_timing_vel))
 
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
@@ -6641,8 +6655,10 @@ class Trajectory(object):
                 self.time_diffs_final += self.time_diffs
 
 
-            # After the timing has been estimated, everything needs to be recalculated from scratch
-            if self.estimate_timing_vel:
+            # After the timing has been estimated, everything needs to be recalculated from scratch, and so
+            #   with the gravity correction, as the first pass fits the line without the gravity drop, which
+            #   needs the vertical velocity from that pass
+            if self.estimate_timing_vel or self.gravity_correction:
 
 
                 # If doing a Monte Carlo run, switch back to noisy observations
@@ -6836,12 +6852,12 @@ class Trajectory(object):
             # which needs to have fixed stations and the average velocity should be the reference velocity
 
             # Store the orbit-solve convention so it can be reused when the orbit is recomputed later
-            #   (e.g. by MetSim's saveUpdatedOrbit)
-            self.orbit_los_success = bool(minimize_solution.success)
+            #   (e.g. by MetSim's saveUpdatedOrbit), taking the status of the last pass of the fit
+            self.orbit_los_success = bool(self.los_mini_status)
 
             self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, self.v_avg, self.state_vect_mini, \
-                self.rbeg_jd, stations_fixed=(not minimize_solution.success), \
-                reference_init=minimize_solution.success, v_init_stddev_direct=self.v_init_stddev)
+                self.rbeg_jd, stations_fixed=(not self.orbit_los_success), \
+                reference_init=self.orbit_los_success, v_init_stddev_direct=self.v_init_stddev)
 
             if self.verbose:
                 print(self.orbit.__repr__(v_init_ht=self.v_init_ht))
