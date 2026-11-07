@@ -198,6 +198,10 @@ class ConfigStruct(object):
         #   wmpl.Utils.NEOMODSourceRegions
         self.neomod2_file = os.path.join(abs_path, 'share', 'Nesvorny+_2024_NEOMOD2.dat')
 
+        # Archive of METEOMOD, the meteoroid model of Broz et al. (2024), downloaded on first use by
+        #   wmpl.Utils.METEOMODSourceRegions
+        self.meteomod_file = os.path.join(abs_path, 'share', 'Broz+_2024_METEOMOD.tar.gz')
+
 
         ### SHOWER ASSOCIATION
 

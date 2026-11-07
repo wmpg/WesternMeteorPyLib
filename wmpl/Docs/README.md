@@ -19,6 +19,8 @@ and what the options are for.
   the traditional threshold is too permissive to use.
 - [Source regions in NEOMOD](NEOMODSourceRegions.md) — the probability that a meteoroid or an NEO
   came from each source region of the NEOMOD model, from a trajectory, an orbit or a REBOUND run.
+- [Source regions in METEOMOD](METEOMODSourceRegions.md) — the probability that a meteoroid came
+  from each asteroid family of the METEOMOD model, compared among the families of its type.
 
 Something missing? The tools are all runnable as modules, so `python -m wmpl.<Package>.<Module> --help`
 is usually the fastest answer.

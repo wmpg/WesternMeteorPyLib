@@ -21,6 +21,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [Predictability horizon](#predictability-horizon)
 - [MOID with the planets](#moid-with-the-planets)
 - [Source regions in NEOMOD](#source-regions-in-neomod)
+- [Source regions in METEOMOD](#source-regions-in-meteomod)
 - [What it writes](#what-it-writes)
 - [Worked examples](#worked-examples)
 - [Using it as a library](#using-it-as-a-library)
@@ -149,6 +150,9 @@ python -m wmpl.Rebound.REBOUND --help
 | `--no_moid` | Do not compute the MOID with the planets, which is on by default. See [MOID with the planets](#moid-with-the-planets). With `--replot`, leave it out of the figure. |
 | `--neomod [all\|final]` | The probability that the object came from each source region of the NEOMOD2 model of near-Earth objects, at every output (`all`, the default) or at the end only (`final`), for the nominal and the clones. See [Source regions in NEOMOD](#source-regions-in-neomod). |
 | `--neomod_size H\|MASS\|DIAMETER` | The size of the object for `--neomod`: its H, its mass ending in `kg` or `g`, or its diameter ending in `m`. Without it, the faintest bin of the model (H 27.75-28, bodies smaller than ~9 m). |
+| `--meteomod [all\|final]` | The probability that the object came from each asteroid family of METEOMOD (Brož et al. 2024), weighted by the meteoroid flux on the Earth, at every output (`all`, the default) or at the end only (`final`), for the nominal and the clones. See [Source regions in METEOMOD](#source-regions-in-meteomod). |
+| `--meteomod_types TYPE [...]` | Compare only the families of these types for `--meteomod` (`L`, `CM CI`, ...). All families by default. |
+| `--meteomod_sources NUMBER [...]` | Compare these families for `--meteomod`, by their number in Table 5 of Brož et al. (2024a). |
 | `--replot RESULTS_JSON` | Do not integrate: redraw the figure of an earlier run from its results file. The trajectory pickle is not needed. See [Redrawing the figure](#redrawing-the-figure). |
 | `--out FIGURE_PNG` | With `--replot`, where to save the figure. |
 | `--verbose` | Print the progress of the simulation. |
@@ -571,6 +575,23 @@ in [Source regions in NEOMOD](NEOMODSourceRegions.md).
 
 ---
 
+## Source regions in METEOMOD
+
+`--meteomod` gives the same outputs for METEOMOD, the meteoroid model of Brož et al. (2024): the
+probability that the object came from each of its 52 asteroid families, each weighted by its meteoroid
+flux on the Earth. They go to the report, `rebound_meteomod_sources.csv`, the figure
+`rebound_meteomod_sources.png` and the key `"meteomod"` of the JSON, and can be asked for with
+`--neomod` in the same run. `--meteomod_types` compares the families of the meteorite's type only, as
+for a fall of known type it should be (`--meteomod_types L` for an L chondrite).
+
+The families are weighted by the flux, as the model defines it. The authors' `meteomod.py` weights them
+by their number of bodies in the NEO region, which leaves out the collision probability with the Earth;
+with the CM families it moves Winchcombe from Astrid (0.43) to Veritas (0.30). How the model is read,
+why not with that script, and how it was checked, are in
+[Source regions in METEOMOD](METEOMODSourceRegions.md).
+
+---
+
 ## What it writes
 
 All output goes into the directory containing the input pickle, under **fixed names**. Two runs on
@@ -587,6 +608,8 @@ options.
 | `rebound_parent_bodies.png` | Only with `--parent_bodies`: the same against time, a panel per criterion. |
 | `rebound_neomod_sources.csv` | Only with `--neomod`: the probability of each NEOMOD source at every output time, for the nominal solution and as the mean and 2.5-97.5 percentiles of the clones. |
 | `rebound_neomod_sources.png` | Only with `--neomod` (`all`): the same against time as stacked areas. |
+| `rebound_meteomod_sources.csv` | Only with `--meteomod`: the probability of each METEOMOD family at every output time, for the nominal solution and as the mean and 2.5-97.5 percentiles of the clones. |
+| `rebound_meteomod_sources.png` | Only with `--meteomod` (`all`): the same against time as stacked areas. |
 
 ### The figure
 

@@ -4204,6 +4204,23 @@ if __name__ == "__main__":
                         "19m). The model covers 15 < H < 28. Without it, or for a body smaller than about 9 m, "
                         "the faintest bin of the model is used.")
 
+    parser.add_argument("--meteomod", type=str.lower, nargs="?", const="all", default=None,
+                        choices=["all", "final"],
+                        help="Give the probability that the object came from each asteroid family of METEOMOD, "
+                        "the meteoroid model of Broz et al. (2024), weighted by the meteoroid flux on the Earth "
+                        "(see wmpl.Utils.METEOMODSourceRegions), for the nominal solution and the clones: at "
+                        "every output (all, the default) or at the end of the run only (final). Saved to the "
+                        "report, the JSON and rebound_meteomod_sources.csv (and .png with all). The model "
+                        "file, 19 MB, is downloaded on first use.")
+
+    parser.add_argument("--meteomod_types", type=str, nargs="+", default=None, metavar="TYPE",
+                        help="Types of the meteorite for --meteomod, to compare the families of those types "
+                        "only, e.g. L, or CM CI. All families by default.")
+
+    parser.add_argument("--meteomod_sources", type=str, nargs="+", default=None, metavar="NUMBER",
+                        help="Family numbers for --meteomod, as in Table 5 of Broz et al. (2024), in place of "
+                        "--meteomod_types.")
+
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
@@ -4347,20 +4364,25 @@ if __name__ == "__main__":
 
     ### ###
 
-    ### Source regions in NEOMOD2 (optional), the model loaded before the integration ###
+    ### Source regions in NEOMOD2 and METEOMOD (optional), the models loaded before the integration ###
 
-    neomod_model = None
-    neomod_h = None
+    # (key of the outputs, outputs given, model) of each model of the source regions asked for
+    source_region_models = []
+
     if (args.neomod_size is not None) and (args.neomod is None):
         parser.error("--neomod_size goes with --neomod.")
+
+    if ((args.meteomod_types is not None) or (args.meteomod_sources is not None)) and (args.meteomod is None):
+        parser.error("--meteomod_types and --meteomod_sources go with --meteomod.")
+
+    # The models hold heliocentric orbits
+    if ((args.neomod is not None) or (args.meteomod is not None)) and (reference_frame != "heliocentric"):
+        parser.error("--neomod and --meteomod need the heliocentric frame: drop --geocentric.")
 
     if args.neomod is not None:
 
         from wmpl.Utils.NEOMODSourceRegions import loadNEOMOD, parseBodySize
-
-        # The model holds heliocentric orbits
-        if reference_frame != "heliocentric":
-            parser.error("--neomod needs the heliocentric frame: drop --geocentric.")
+        from wmpl.Utils.NEOMODSourceRegions import sourceModel as neomodSourceModel
 
         try:
             neomod_h = None if args.neomod_size is None else parseBodySize(args.neomod_size)[0]
@@ -4368,9 +4390,24 @@ if __name__ == "__main__":
             parser.error("--neomod_size: {:s}".format(str(e)))
 
         try:
-            neomod_model = loadNEOMOD()
+            source_region_models.append(("neomod", args.neomod, neomodSourceModel(loadNEOMOD(),
+                h_mag=neomod_h)))
         except (IOError, ValueError) as e:
             parser.error("--neomod: {:s}".format(str(e)))
+
+    if args.meteomod is not None:
+
+        from wmpl.Utils.METEOMODSourceRegions import loadMETEOMOD, selectSources
+        from wmpl.Utils.METEOMODSourceRegions import sourceModel as meteomodSourceModel
+
+        try:
+            meteomod = loadMETEOMOD()
+            meteomod_sources = selectSources(meteomod, types=args.meteomod_types,
+                sources=args.meteomod_sources)
+            source_region_models.append(("meteomod", args.meteomod, meteomodSourceModel(meteomod,
+                sources=meteomod_sources, types=args.meteomod_types)))
+        except (IOError, ValueError) as e:
+            parser.error("--meteomod: {:s}".format(str(e)))
 
     ### ###
 
@@ -5294,77 +5331,49 @@ if __name__ == "__main__":
                 str(traj.traj_id) if traj.traj_id is not None
                 else os.path.splitext(os.path.basename(args.pickle_path))[0]))
 
-    ### Source regions in NEOMOD2, at every output or at the end (see wmpl.Utils.NEOMODSourceRegions) ###
+    ### Source regions in NEOMOD2 and METEOMOD, at every output or at the end ###
 
     # Reference: Nesvorny et al. (2024), Icarus 411, 115922, doi:10.1016/j.icarus.2023.115922, and
-    #   Nesvorny et al. (2023), AJ 166, 55, doi:10.3847/1538-3881/ace040
+    #   Nesvorny et al. (2023), AJ 166, 55, doi:10.3847/1538-3881/ace040, for NEOMOD2; Broz et al. (2024),
+    #   A&A 689, A183, doi:10.1051/0004-6361/202450532, and Nature 634, 566, for METEOMOD
 
-    if neomod_model is not None:
+    if source_region_models:
 
-        from wmpl.Utils.NEOMODSourceRegions import sourceRegionSeries, sourceRegionReportLines, \
+        from wmpl.Utils.SourceRegions import reboundSourceRegionSeries, sourceRegionReportLines, \
             sourceRegionSeriesToJSON, writeSourceRegionCSV, plotSourceRegionSeries
 
-        # Every output of the clones that ran the whole span, or the end of those of the confidence
-        #   intervals
-        if args.neomod == "all":
-            neomod_k = slice(None)
-            neomod_clones = [rows for rows in sim_outputs_mc.values() if len(rows) == len(sim_outputs)]
-        else:
-            neomod_k = slice(-1, None)
-            neomod_clones = [sim_outputs_mc[name] for name in ci_names]
-
-        def _neomodElements(rows):
-            return [[row[2].a, row[2].e, row[2].inc] for row in rows[neomod_k]]
-
-        # The nominal and the clones at the output of the predictability horizon, the last one at which
-        #   the measurement still sets the nominal orbit, found as orbitAtHorizon finds it
-        neomod_horizon = None
-        if (horizon is not None) and (horizon.get("horizon_days") is not None):
-            neomod_times = np.array([simTimeToDays(row[0]) for row in sim_outputs])
-            k_h = int(np.argmin(np.abs(neomod_times - horizon["horizon_days"])))
-            neomod_horizon = (neomod_times[k_h], [sim_outputs[k_h][2].a, sim_outputs[k_h][2].e,
-                sim_outputs[k_h][2].inc], [[rows[k_h][2].a, rows[k_h][2].e, rows[k_h][2].inc]
-                for rows in sim_outputs_mc.values() if len(rows) > k_h])
-
-        # The clone that represents the clones at the end, if the run has one (see representativeOrbit)
-        neomod_representative = None
-        neomod_rep = None if horizon is None else horizon.get("representative")
-        if (neomod_rep is not None) \
-                and (len(sim_outputs_mc.get(neomod_rep["clone"], [])) == len(sim_outputs)):
-            neomod_representative = (neomod_rep["clone"],
-                _neomodElements(sim_outputs_mc[neomod_rep["clone"]]))
-
-        neomod_series = sourceRegionSeries(neomod_model,
-            [simTimeToDays(row[0]) for row in sim_outputs[neomod_k]], _neomodElements(sim_outputs),
-            clones=[_neomodElements(rows) for rows in neomod_clones] or None, h_mag=neomod_h,
-            horizon=neomod_horizon, representative=neomod_representative)
-
         # The orbit is heliocentric only once the object has left the Earth
-        neomod_first = (findEarthDepartureIndex(sim_outputs, n_hill=n_hill) or 0) if args.neomod == "all" \
-            else 0
-        neomod_lines = sourceRegionReportLines(neomod_series, first=neomod_first,
-            first_note="leaving the Earth" if neomod_first > 0 else None)
+        sr_departure = findEarthDepartureIndex(sim_outputs, n_hill=n_hill) or 0
+        sr_name = str(traj.traj_id) if traj.traj_id is not None \
+            else os.path.splitext(os.path.basename(args.pickle_path))[0]
+
+    for sr_key, sr_mode, sr_model in source_region_models:
+
+        sr_series = reboundSourceRegionSeries(sr_model, sim_outputs, sim_outputs_mc, ci_names, horizon,
+            sr_mode, simTimeToDays)
+
+        sr_first = sr_departure if sr_mode == "all" else 0
+        sr_lines = sourceRegionReportLines(sr_series, first=sr_first,
+            first_note="leaving the Earth" if sr_first > 0 else None)
 
         print()
-        for line in neomod_lines:
+        for line in sr_lines:
             print("  " + line)
 
         with open(results_txt_path, "a") as f:
-            f.write("\n" + "\n".join(neomod_lines) + "\n")
+            f.write("\n" + "\n".join(sr_lines) + "\n")
 
-        results_json["neomod"] = sourceRegionSeriesToJSON(neomod_series, mode=args.neomod,
-            neomod=neomod_model)
+        results_json[sr_key] = sourceRegionSeriesToJSON(sr_series, mode=sr_mode)
 
-        neomod_csv_path = os.path.join(out_dir, "rebound_neomod_sources.csv")
-        writeSourceRegionCSV(neomod_series, neomod_csv_path)
-        print("  Saved NEOMOD : {:s}".format(neomod_csv_path))
+        sr_csv_path = os.path.join(out_dir, "rebound_{:s}_sources.csv".format(sr_key))
+        writeSourceRegionCSV(sr_series, sr_csv_path)
+        print("  Saved {:s} : {:s}".format(sr_model['label'], sr_csv_path))
 
-        if args.neomod == "all":
-            neomod_png_path = os.path.join(out_dir, "rebound_neomod_sources.png")
-            plotSourceRegionSeries(neomod_series, neomod_png_path, title="Source regions of {:s} in "
-                "NEOMOD2".format(str(traj.traj_id) if traj.traj_id is not None
-                else os.path.splitext(os.path.basename(args.pickle_path))[0]))
-            print("                 {:s}".format(neomod_png_path))
+        if sr_mode == "all":
+            sr_png_path = os.path.join(out_dir, "rebound_{:s}_sources.png".format(sr_key))
+            plotSourceRegionSeries(sr_series, sr_png_path, title="Source regions of {:s} in {:s}".format(
+                sr_name, sr_model['label']))
+            print("  {:s}  {:s}".format(" "*len(sr_model['label']), sr_png_path))
 
     with open(results_json_path, "w") as jf:
         json.dump(results_json, jf, indent=1, default=float)
