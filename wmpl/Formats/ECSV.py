@@ -1752,6 +1752,20 @@ def eventFlaresStr(events, pairTest, valueStr, speedStr, pressureStr):
 
     groups, ambiguous = joinFlares(events, lambda i, j: tests[(i, j)][4])
 
+    def onePointApart(indices):
+        """ Pairs of the given flares of one file with a single point not flagged between them. """
+
+        pairs = []
+        for a in indices:
+            for b in indices:
+                last, first = events[a][-1], events[b][0]
+                if (last.get('row') is not None) and (first.get('row') is not None) \
+                    and (last.get('ecsv_file') == first.get('ecsv_file')) \
+                    and (first['row'] - last['row'] == 2):
+                    pairs.append((a, b))
+
+        return pairs
+
     motion = any(flare.get('p') is not None for event in events for flare in event)
 
     out_str += "Flares of the event, proposed from the comparison above: two flares of different stations\n"
@@ -1783,6 +1797,12 @@ def eventFlaresStr(events, pairTest, valueStr, speedStr, pressureStr):
                 line += ", ambiguous: it could be flare(s) {:s}".format(", ".join(["{:d} {:s}".format(j + 1, \
                     events[j][0]['station_id']) for j in ambiguous[i]]))
             out_str += line + "\n"
+
+            # Two of the flares it could be may be one flare split by a frame left unflagged
+            for a, b in onePointApart(ambiguous.get(i, [])):
+                out_str += ("      Flares {:d} and {:d} of {:s} are one point apart: if they are one " \
+                    + "flare, flag the point between them\n").format(a + 1, b + 1, events[a][0]['station_id'])
+
             continue
 
         # How far apart the stations saw the beginning of the flare, in frames of the slowest camera, and the

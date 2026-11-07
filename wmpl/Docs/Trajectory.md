@@ -108,6 +108,8 @@ the joined flares make one flare of the event. A flare consistent with two or mo
 is left alone as ambiguous, and so are the flares of a group that would hold two flares of one station. Every
 flare of the event gives the values of its first point in time among its stations, how many frames apart its
 stations saw it begin and how far apart their pressures are, which says how much joining them matters.
+When two of the flares an ambiguous flare could be are flares of one station with a single point not flagged
+between them, the report says so: a frame left unflagged inside a flare splits it in two.
 Without the Monte Carlo runs the flares are not joined. In the simulated fireballs, with every camera flagging
 the frames in which the light of the dust of a fragmentation exceeds the rest by 0.25 mag, this joined no
 flares of different fragmentations. Of the fragmentations seen by two or more stations whose flares held only

@@ -96,3 +96,44 @@ def testWithoutUncertaintiesTheFlaresAreNotJoined():
 
     assert "Without the Monte Carlo runs the flares of different stations are not joined." in report
     assert "Flares of the event" not in report
+
+
+
+def rowPoint(station_id, t, row, ecsv_file=None):
+    """ Make a flare point of a 25 fps camera on the given row of its file, as from flareHeights().
+
+    Arguments:
+        station_id: [str] Station ID.
+        t: [float] Time from the reference time (s).
+        row: [int] Position of the point among the points of the main fragment in its file.
+
+    Keyword arguments:
+        ecsv_file: [str] File of the point. None by default, for one file per station.
+
+    Return:
+        [dict] The flare point.
+    """
+
+    flare = flarePoint(station_id, t, 0.04)
+    flare.update(ecsv_file=(station_id + '.ecsv') if (ecsv_file is None) else ecsv_file, row=row)
+
+    return flare
+
+
+
+def testTwoFlaresOnePointApartWhichOneFlareCouldBeAreNoted():
+    """ Check that the report notes two flares of one station with a single point not flagged between them,
+        when a flare of another station could be either, and not when two points are between them or they
+        are in different files.
+    """
+
+    flares = [rowPoint('A', 0.50, 20), rowPoint('A', 0.54, 21), rowPoint('A', 0.58, 22), \
+        rowPoint('B', 0.48, 10), rowPoint('B', 0.52, 11)]
+
+    report = flareReport(flares + [rowPoint('B', 0.60, 13)])
+    assert "1 A only, ambiguous: it could be flare(s) 2 B, 3 B" in report
+    assert "Flares 2 and 3 of B are one point apart: if they are one flare, flag the point between them" \
+        in report
+
+    assert "one point apart" not in flareReport(flares + [rowPoint('B', 0.60, 14)])
+    assert "one point apart" not in flareReport(flares + [rowPoint('B', 0.60, 13, ecsv_file='B_2.ecsv')])
