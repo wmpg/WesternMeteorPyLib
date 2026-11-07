@@ -224,3 +224,77 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
 
 
     return traj
+
+
+
+# Reference Julian date of the straight meteor
+STRAIGHT_JDT_REF = 2461070.9343128
+
+# Geographical coordinates of the beginning of the straight meteor (deg, deg, m)
+STRAIGHT_BEG_LAT = -43.20
+STRAIGHT_BEG_LON = 172.30
+STRAIGHT_BEG_HT = 85000.0
+
+# Duration (s), number of points per station and velocity (m/s) of the straight meteor
+STRAIGHT_DURATION = 2.5
+STRAIGHT_N_POINTS = 40
+STRAIGHT_V_INIT = 30000.0
+
+# Station ID, latitude (deg), longitude (deg) and elevation (m) of the stations seeing the straight meteor
+STRAIGHT_STATIONS = [
+    ('A', -43.60, 172.12, 120.0),
+    ('B', -42.90, 173.20, 200.0),
+    ('C', -43.30, 171.30, 350.0),
+]
+
+
+
+def observeStraightMeteor(noise=1e-4, seed=1, **kwargs):
+    """ Observe a straight, constant-velocity meteor from three stations and make a trajectory object.
+
+    Keyword arguments:
+        noise: [float] Standard deviation of the noise on the azimuth and elevation (radians). 1e-4 by
+            default, about 20 arcsec.
+        seed: [int] Seed of the noise. 1 by default.
+        **kwargs: [dict] Keyword arguments of the Trajectory object, which replace the defaults (no timing
+            offsets above 1 s, no gravity correction, no Monte Carlo, no plots and no saving).
+
+    Return:
+        (traj, begin, radiant_eci):
+            - traj: [Trajectory object] Trajectory object with the observations, not yet solved.
+            - begin: [ndarray] ECI coordinates of the beginning of the meteor (m).
+            - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
+    """
+
+    rng = np.random.default_rng(seed)
+
+    # Compute the beginning point and the radiant
+    lat, lon = np.radians(STRAIGHT_BEG_LAT), np.radians(STRAIGHT_BEG_LON)
+    begin = np.array(geo2Cartesian(lat, lon, STRAIGHT_BEG_HT, STRAIGHT_JDT_REF))
+    ra, dec = altAz2RADec(np.radians(210.0), np.radians(55.0), STRAIGHT_JDT_REF, lat, lon)
+    radiant_eci = np.array(raDec2ECI(ra, dec))
+
+    # Compute the points along the trajectory
+    times = np.linspace(0, STRAIGHT_DURATION, STRAIGHT_N_POINTS)
+    points = begin - np.outer(STRAIGHT_V_INIT*times, radiant_eci)
+
+    traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
+        show_plots=False, save_results=False, verbose=False)
+    traj_kwargs.update(kwargs)
+    traj = Trajectory(STRAIGHT_JDT_REF, **traj_kwargs)
+
+    for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
+
+        jds = STRAIGHT_JDT_REF + times/86400.0
+
+        # Compute the direction of every point as seen from the station
+        azim, elev = stationAzimAlt(points, jds, s_lat, s_lon, ele)
+
+        # Add noise to the measurements
+        azim = azim + rng.normal(0, noise, len(times))/np.cos(elev)
+        elev = elev + rng.normal(0, noise, len(times))
+
+        traj.infillTrajectory(azim, elev, times, np.radians(s_lat), np.radians(s_lon), ele, \
+            station_id=station_id)
+
+    return traj, begin, radiant_eci
