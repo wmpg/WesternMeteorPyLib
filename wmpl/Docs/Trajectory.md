@@ -56,9 +56,13 @@ unless they are also flagged with `trajectory_use` = False. Either way, the solv
 height of every flare point in the terminal and at the end of the saved report. A point used in the
 trajectory is projected on it. A point not used is only a time, as where it was clicked is not a
 measurement (e.g. a saturated flare in which the meteor cannot be seen), and takes the height of the
-trajectory at that time. The report gives the flares of every station (its consecutive flare points),
-with the uncertainties of their times and heights, and how the flares of different stations compare, as
-they need not be the same flare (two cameras can see a fireball flaring at different times). The
+trajectory at that time. The report gives the flares of every station, with the uncertainties of their
+times and heights, and how the flares of different stations compare, as they need not be the same flare
+(two cameras can see a fireball flaring at different times). The flares of a station are its flare points
+in consecutive rows of its file, among the points of the main fragment: to separate two flares, leave a
+point between them that is not flagged. This works in the same way for any frame rate, and when only every
+second frame or fewer were picked. Two flares on consecutive points cannot be told apart, but two cameras
+could not tell them apart either, as the comparison below allows a frame between the same flare. The
 uncertainties come from the Monte Carlo runs and from the duration of the frame the flare was seen in, as
 it happened at any time within it. The times are relative to the clock of the reference station, whose
 time offset is not estimated, so the Monte Carlo runs give it no uncertainty in time, but the frame does.

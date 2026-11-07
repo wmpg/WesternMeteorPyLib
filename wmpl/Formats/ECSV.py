@@ -71,7 +71,9 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
             suffix 0 optional for the main fragment; files without the columns of the fragment are skipped.
         flares: [bool] Only load the points of the main fragment flagged as flares (flare = True), also those
             not used in its trajectory, whose flags are kept in the trajectory_use array of every observation.
-            The minimum number of points of an observation does not apply.
+            The flare_rows array of every observation keeps the position of every flare point among all the
+            points of the main fragment in its file, in time. The minimum number of points of an observation
+            does not apply.
     
     """
 
@@ -167,8 +169,14 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
                 if (fragment) or ('flare' not in header):
                     continue
 
+                # Position of every point among the points of the main fragment in time, sorting the times of
+                #   fixed format as text, to tell apart two flares with a point not flagged between them
+                time_order = np.argsort(np.char.strip(data[:, dt_indx]), kind='stable')
+                row_order = np.empty(len(data), dtype=int)
+                row_order[time_order] = np.arange(len(data))
+
                 flare = np.char.lower(np.char.strip(data[:, header.index('flare')])) == 'true'
-                data, trajectory_use = data[flare], trajectory_use[flare]
+                data, trajectory_use, flare_rows = data[flare], trajectory_use[flare], row_order[flare]
 
             else:
                 data = data[trajectory_use]
@@ -252,6 +260,7 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
             # Flags of the points, in their order sorted by finish()
             if flares:
                 meteor.trajectory_use = trajectory_use[np.argsort(time_data, kind='stable')]
+                meteor.flare_rows = flare_rows[np.argsort(time_data, kind='stable')]
                 meteor_list.append(meteor)
                 continue
 
@@ -1012,7 +1021,8 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
             (the height of the trajectory at the time of the point, from its own points, m), used (in the
             trajectory), frame_dt (time step of the station, s), and the ECI vectors eci (the point on the
             trajectory), stat (the station) and los (the line of sight), and the lat and lon of the point on
-            the trajectory (radians).
+            the trajectory (radians). Also its ecsv_file and row, its position among the points of the main
+            fragment in the file in time (see loadECSVs()), or None if not known.
     """
 
     offsets = appliedTimeOffsets(traj, input_meteors)
@@ -1081,6 +1091,11 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
                 'frame_dt': frame_dts[meteor.ecsv_file], 'eci': np.array(obs.model_eci[i]),
                 'stat': np.array(obs.stat_eci_los[i]), 'los': np.array(obs.meas_eci_los[i]),
                 'lat': obs.model_lat[i], 'lon': obs.model_lon[i]}
+
+            # The position of the point among the points of the main fragment in its file
+            rows = getattr(meteor, 'flare_rows', None)
+            projected[(meteor.ecsv_file, i)].update(ecsv_file=meteor.ecsv_file, \
+                row=(None if rows is None else int(rows[i])))
 
     return projected
 
@@ -1326,16 +1341,18 @@ FLARE_TIME_OFFSET_ERROR = 0.007
 
 
 
-def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
-    """ Report the flare points from flareHeights(): the flares of every station (its flare points no further
-        apart than max_gap), the points, and how the flares of different stations compare, as they need not be 
-        the same: each one against the closest one in time of every other station within match_window.
+def flareReport(flares, match_window=1.0, ref_stations=None):
+    """ Report the flare points from flareHeights(): the flares of every station, the points, and how the
+        flares of different stations compare, as they need not be the same: each one against the closest one
+        in time of every other station within match_window. The flares of a station are its flare points in
+        consecutive rows of its file, among the points of the main fragment, so a point which is not flagged
+        separates two flares, whatever the frame rate of the camera and how often the points were picked.
+        Points whose rows are not known are taken as one flare if they are at most 1.5 frames apart.
 
     Arguments:
         flares: [list] Flare points from flareHeights().
 
     Keyword arguments:
-        max_gap: [float] Largest time between the points of one flare of a station (s), 0.1 by default.
         match_window: [float] Largest time between the flares of two stations compared (s), 1 by default.
         ref_stations: [list] Stations whose clocks the times refer to, from timeReferenceStations(), to say
             so in the report. When the solver estimated the time offsets of the others, the comparison of
@@ -1362,15 +1379,34 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
         return ", v = {:.2f} km/s, p = {:s} kPa".format(flare['v']/1000, valueStr(flare['p']/1000, \
             None if flare.get('p_std') is None else flare['p_std']/1000, "{:.1f}"))
 
-    # Flares of every station: its consecutive flare points
+    def sameFlare(prev, flare):
+        """ Check whether a flare point is in the row after the previous flare point of its file, or without
+            the rows, at most 1.5 frames after it. """
+
+        if (prev.get('row') is None) or (flare.get('row') is None):
+            return (flare['jd'] - prev['jd'])*86400 <= 1.5*flare['frame_dt']
+
+        return (flare.get('ecsv_file') == prev.get('ecsv_file')) and (flare['row'] == prev['row'] + 1)
+
+    # Flares of every station, from the flare points of each of its files in consecutive rows
     events = []
     for station_id in sorted(set(flare['station_id'] for flare in flares)):
-        for flare in [flare for flare in flares if flare['station_id'] == station_id]:
-            if events and (events[-1][0]['station_id'] == station_id) \
-                and ((flare['jd'] - events[-1][-1]['jd'])*86400 <= max_gap):
-                events[-1].append(flare)
-            else:
-                events.append([flare])
+
+        station_flares = [flare for flare in flares if flare['station_id'] == station_id]
+
+        station_events = []
+        for ecsv_file in list(dict.fromkeys(flare.get('ecsv_file') for flare in station_flares)):
+
+            file_events = []
+            for flare in [flare for flare in station_flares if flare.get('ecsv_file') == ecsv_file]:
+                if file_events and sameFlare(file_events[-1][-1], flare):
+                    file_events[-1].append(flare)
+                else:
+                    file_events.append([flare])
+
+            station_events += file_events
+
+        events += sorted(station_events, key=lambda event: event[0]['jd'])
 
     uncertain = any(flare['ht_std'] is not None for flare in flares)
 
@@ -1382,6 +1418,8 @@ def flareReport(flares, max_gap=0.1, match_window=1.0, ref_stations=None):
     out_str += "the trajectory is projected on it. A point not used (trajectory_use = False) is only a\n"
     out_str += "time, as where it was clicked is not a measurement (e.g. a saturated flare in which the\n"
     out_str += "meteor cannot be seen): it takes the height of the trajectory at that time.\n"
+    out_str += "The flares of a station are its flare points in consecutive rows of its file: a point not\n"
+    out_str += "flagged as a flare between two flagged ones separates two flares.\n"
     out_str += timeReferenceStr(ref_stations)
     if uncertain:
         out_str += "Uncertainties (1 sigma) from projecting them on the Monte Carlo runs, and from the duration\n"
