@@ -24,8 +24,8 @@ CLOCK_ERROR = 600.0
 
 
 def _syntheticTrajectory(output_dir, clock_error=None):
-    """ Make the trajectory of a synthetic meteor seen from the three stations of SyntheticTrajectory.py, plus a
-        fourth one, D, solved with the gravity correction and saving its results.
+    """ Make the trajectory of a synthetic meteor seen from the three stations of SyntheticTrajectory.py,
+        plus a fourth one, D, solved with the gravity correction and saving its results.
 
     Arguments:
         output_dir: [str] Output directory.
