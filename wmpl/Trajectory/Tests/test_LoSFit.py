@@ -452,11 +452,11 @@ def testTheLineFitStopsAtItsLimitOfEvaluations():
 
 def testTheLineFitEndsAtTheSameLineFromDifferentStarts():
     """ Check that the fit ends at the same line from the true line and from two lines 300 m and 0.05 deg off
-        it. With these seeds, the Nelder-Mead minimization of the six parameters ended 0.2 and 0.4 arcsec
+        it. With these seeds, the Nelder-Mead minimization of the six parameters ended 0.4 and 0.1 arcsec
         apart.
     """
 
-    for seed in (13, 14):
+    for seed in (14, 18):
 
         traj, begin, radiant = observeStraightMeteor(seed=seed, calc_orbit=False)
 

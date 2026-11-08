@@ -1416,10 +1416,10 @@ def moveStateVector(state_vect, radiant_eci, observations):
 LOS_SIMPLEX_SIZE = 100.0
 
 # Size of the simplex at which a Nelder-Mead minimization of the line-of-sight fit stops (m)
-LOS_SIMPLEX_TOLERANCE = 1e-4
+LOS_SIMPLEX_TOLERANCE = 1e-3
 
 # Largest move of the line by a fresh simplex at which the line-of-sight fit has converged (m)
-LOS_RESTART_TOLERANCE = 1e-3
+LOS_RESTART_TOLERANCE = 1e-2
 
 # Largest number of fresh simplices in the line-of-sight fit
 LOS_MAX_SIMPLICES = 10
@@ -1538,7 +1538,8 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
     Return:
         [OptimizeResult] Result of the last Nelder-Mead minimization, with the point on the line moved to the
             beginning of the meteor, a unit radiant vector, and the iterations and evaluations of all
-            minimizations.
+            minimizations. Its cost is never higher than at the start, which is returned if no minimization
+            lowered it.
     """
 
     observations = args[0]
@@ -1546,7 +1547,11 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
     simplex_size = LOS_SIMPLEX_SIZE
     still_runs = 0
     nit = 0
-    nfev = 0
+
+    # Compute the cost at the start, which the result must not exceed
+    start_params = np.array(params)
+    start_cost = fun(start_params, *args)
+    nfev = 1
 
     for i in range(LOS_MAX_SIMPLICES):
 
@@ -1585,6 +1590,11 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
 
         # Scale the next simplex to the last move
         simplex_size = min(max(10*move, 1.0), LOS_SIMPLEX_SIZE)
+
+    # Keep the start if the minimizations did not lower its cost, which they can miss by rounding
+    if solution.fun > start_cost:
+        params = np.r_[start_params[:3], vectNorm(start_params[3:])]
+        solution.fun = start_cost
 
     # Return the line with the state vector at the beginning of the meteor
     params[:3] = moveStateVector(params[:3], params[3:], observations)
