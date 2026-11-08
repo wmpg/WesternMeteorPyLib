@@ -6819,9 +6819,9 @@ class Trajectory(object):
 
                     if self.verbose:
                         print()
-                        print("---------------------------------------------------------------------------------")
+                        print(81*"-")
                         print("Updating the solution after the timing estimation...")
-                        print("---------------------------------------------------------------------------------")
+                        print(81*"-")
 
                     # Reinitialize the observations with proper timing
                     for obs in temp_observations:

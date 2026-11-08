@@ -251,7 +251,7 @@ STRAIGHT_STATIONS = [
 
 
 def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, elevation=55.0, \
-    gravity_drop=False):
+    gravity_drop=False, begin_ht=STRAIGHT_BEG_HT):
     """ Compute the points of a straight, constant-velocity meteor.
 
     Keyword arguments:
@@ -260,6 +260,7 @@ def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, ele
         elevation: [float] Elevation of the radiant at the beginning of the meteor (deg). 55 by default.
         gravity_drop: [bool] Drop the meteor by gravity with applyGravityDrop, so that it is not a straight
             line anymore. False by default.
+        begin_ht: [float] Height of the beginning of the meteor (m). STRAIGHT_BEG_HT by default.
 
     Return:
         (times, points, begin, radiant_eci):
@@ -271,7 +272,7 @@ def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, ele
 
     # Compute the beginning point and the radiant
     lat, lon = np.radians(STRAIGHT_BEG_LAT), np.radians(STRAIGHT_BEG_LON)
-    begin = np.array(geo2Cartesian(lat, lon, STRAIGHT_BEG_HT, STRAIGHT_JDT_REF))
+    begin = np.array(geo2Cartesian(lat, lon, begin_ht, STRAIGHT_JDT_REF))
     ra, dec = altAz2RADec(np.radians(210.0), np.radians(elevation), STRAIGHT_JDT_REF, lat, lon)
     radiant_eci = np.array(raDec2ECI(ra, dec))
 
@@ -290,7 +291,8 @@ def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, ele
 
 
 def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, \
-    elevation=55.0, gravity_drop=False, clock_offsets=None, **kwargs):
+    elevation=55.0, gravity_drop=False, clock_offsets=None, begin_ht=STRAIGHT_BEG_HT, \
+    stations=STRAIGHT_STATIONS, **kwargs):
     """ Observe a straight, constant-velocity meteor from three stations and make a trajectory object.
 
     Keyword arguments:
@@ -304,6 +306,9 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
             line anymore. False by default.
         clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
             default, when all clocks are exact.
+        begin_ht: [float] Height of the beginning of the meteor (m). STRAIGHT_BEG_HT by default.
+        stations: [list] Station ID, latitude (deg), longitude (deg) and elevation (m) of each station.
+            STRAIGHT_STATIONS by default.
         **kwargs: [dict] Keyword arguments of the Trajectory object, which replace the defaults (no timing
             offsets above 1 s, no gravity correction, no Monte Carlo, no plots and no saving).
 
@@ -321,14 +326,14 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
 
     # Compute the points along the trajectory
     times, points, begin, radiant_eci = straightMeteorPoints(duration=duration, v_init=v_init, \
-        elevation=elevation, gravity_drop=gravity_drop)
+        elevation=elevation, gravity_drop=gravity_drop, begin_ht=begin_ht)
 
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
         show_plots=False, save_results=False, verbose=False)
     traj_kwargs.update(kwargs)
     traj = Trajectory(STRAIGHT_JDT_REF, **traj_kwargs)
 
-    for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
+    for station_id, s_lat, s_lon, ele in stations:
 
         jds = STRAIGHT_JDT_REF + times/86400.0
 
