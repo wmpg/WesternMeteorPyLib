@@ -961,6 +961,95 @@ def gravityDropScale(time_rel, vel):
 
 
 
+@njit
+def angleSumPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, point_factors, state_vect, \
+    radiant_eci, t0, gravity, r0, v0z, weight, angle_sum, weights_sum):
+    """ Add the angles between the lines of sight of one station and the radiant line to a running sum. It
+        is the loop over the points of angleSumMeasurements2Line, compiled with numba, which makes the cost of
+        the line-of-sight fit several times faster. The operations are the same and in the same order as in a
+        loop in Python, so the sum is the same to the last bit.
+
+    Arguments:
+        time_data: [ndarray] Times of the points (s).
+        meas_eci_los: [ndarray] Unit vectors of the lines of sight in ECI, one row per point.
+        stat_eci_los: [ndarray] ECI coordinates of the station at every point (meters), one row per point.
+        ignore_list: [ndarray] Points which are not used are marked with a value other than 0.
+        point_factors: [ndarray] Factor of the gravity drop of every point.
+        state_vect: [ndarray] ECI position of the state vector (meters).
+        radiant_eci: [ndarray] Unit vector of the radiant in ECI.
+        t0: [float] Time of the beginning of the meteor (s).
+        gravity: [bool] If True, the gravity drop is taken into account.
+        r0: [float] Distance of the beginning of the meteor from the centre of the Earth (meters). If NaN, the
+            distance of each point is used.
+        v0z: [float] Initial vertical velocity of the meteor (m/s).
+        weight: [float] Statistical weight of the station.
+        angle_sum: [float] Weighted sum of the angles so far (radians).
+        weights_sum: [float] Sum of the weights so far.
+
+    Return:
+        (angle_sum, weights_sum): [tuple of floats] The sums with the points of this station added.
+
+    """
+
+    # Go through all measured positions
+    for j in range(len(time_data)):
+
+        # Skip the point if it is to be ignored
+        if ignore_list[j]:
+            continue
+
+        stat_eci = stat_eci_los[j]
+        meas_eci = meas_eci_los[j]
+
+        # Get the ECI coordinates of the projection of the measurement line of sight on the radiant line
+        _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
+
+
+        # Take the gravity drop into account
+        #   Note: here we assume that the acceleration due to gravity is fixed at the given height,
+        #   which might cause an offset of a few meters for events longer than 5 seconds
+        if gravity:
+
+            # Calculate the time in seconds from the beginning of the meteor
+            t_rel = time_data[j] - t0
+
+            # Take the distance of the beginning of the meteor, or of the point itself if it is not given
+            r0_point = r0
+            if np.isnan(r0_point):
+                r0_point = vectMag(rad_cpa)
+
+            # If the distance is 0, set it to 1 to avoid a division by zero
+            if r0_point == 0:
+                r0_point = 1.0
+
+            rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, point_factors[j], v0z)
+            _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
+
+
+        # Calculate the unit vector pointing from the station to the point on the trajectory
+        station_ray = rad_cpa - stat_eci
+        station_ray = vectNorm(station_ray)
+
+        # Calculate the angle between the observed LoS as seen from the station and the radiant line
+        cosangle = np.dot(meas_eci, station_ray)
+
+        # Make sure the cosine is within limits, as np.clip does (a NaN stays NaN)
+        if cosangle > 1.0:
+            cosangle = 1.0
+
+        elif cosangle < -1.0:
+            cosangle = -1.0
+
+        # Calculate the angle
+        angle_sum += weight*np.arccos(cosangle)
+
+        weights_sum += weight
+
+
+    return angle_sum, weights_sum
+
+
+
 def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
                               gravity_factor=1.0, v0z=None, r0=None, drop_scale=None):
     """ Sum all angles between the radiant line and measurement lines of sight.
@@ -1018,6 +1107,14 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     # Find the earliest point in time
     t0 = min([obs.time_data[0] for obs in observations])
 
+    # Compute the model point modified due to gravity, assuming zero vertical velocity if it is not given
+    if v0z is None:
+        v0z = 0.0
+
+    # Pass a distance of the beginning which is not given as NaN, then the distance of each point is used
+    if r0 is None:
+        r0 = np.nan
+
     angle_sum = 0.0
     weights_sum = 1e-10
 
@@ -1025,60 +1122,16 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     for i, obs in enumerate(observations):
         
         # Compute the factor of the gravity drop of every point, scaled for a decelerating meteor
-        point_factors = np.full(len(obs.time_data), gravity_factor)
+        point_factors = np.full(len(obs.time_data), gravity_factor, dtype=np.float64)
         if gravity and (drop_scale is not None):
             point_factors = gravity_factor*np.interp(obs.time_data - t0, *drop_scale)
 
-        # Go through all measured positions
-        for t, meas_eci, stat_eci, ignore, point_factor in zip(obs.time_data, obs.meas_eci_los, \
-            obs.stat_eci_los, obs.ignore_list, point_factors):
-
-            # Skip the point if it is to be ignored
-            if ignore:
-                continue
-
-            # Get the ECI coordinates of the projection of the measurement line of sight on the radiant line
-            _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
-
-
-            # Take the gravity drop into account
-            #   Note: here we assume that the acceleration due to gravity is fixed at the given height,
-            #   which might cause an offset of a few meters for events longer than 5 seconds
-            if gravity:
-
-
-                # Calculate the time in seconds from the beginning of the meteor
-                t_rel = t - t0
-
-                # Compute the model point modified due to gravity, assuming zero vertical velocity
-                if v0z is None:
-                    v0z = 0.0
-
-                # Take the distance of the beginning of the meteor, or of the point itself if it is not given
-                r0_point = r0
-                if r0_point is None:
-                    r0_point = vectMag(rad_cpa)
-
-                # If the distance is 0, set it to 1 to avoid a division by zero
-                if r0_point == 0:
-                    r0_point = 1.0
-
-                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, point_factor, v0z)
-                _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
-
-
-
-            # Calculate the unit vector pointing from the station to the point on the trajectory
-            station_ray = rad_cpa - stat_eci
-            station_ray = vectNorm(station_ray)
-
-            # Calculate the angle between the observed LoS as seen from the station and the radiant line
-            cosangle = np.dot(meas_eci, station_ray)
-
-            # Make sure the cosine is within limits and calculate the angle
-            angle_sum += weights[i]*np.arccos(np.clip(cosangle, -1, 1))
-
-            weights_sum += weights[i]
+        # Add the angles of all points of the station (compiled loop)
+        angle_sum, weights_sum = angleSumPoints(np.asarray(obs.time_data, dtype=np.float64), \
+            np.ascontiguousarray(obs.meas_eci_los, dtype=np.float64), \
+            np.ascontiguousarray(obs.stat_eci_los, dtype=np.float64), np.asarray(obs.ignore_list), \
+            point_factors, state_vect, radiant_eci, float(t0), bool(gravity), float(r0), float(v0z), \
+            float(weights[i]), angle_sum, weights_sum)
 
 
     return angle_sum/weights_sum
