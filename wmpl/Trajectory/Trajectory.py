@@ -69,7 +69,7 @@ LEGEND_TEXT_SIZE = 6
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
         excluded_time=None, ignore_list=None, ignore_station=False, magnitudes=None, fov_beg=None, \
-        fov_end=None, obs_id=None, comment=""):
+        fov_end=None, obs_id=None, comment="", radec_jd=None):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -115,6 +115,11 @@ class ObservedPoints(object):
                 the same station.
             comment: [str] A comment about the observations. May be used to store RMS FF file number on which
                 the meteor was observed.
+            radec_jd: [ndarray] Only used with meastype 1. Julian date at which each R.A./Dec. was computed
+                from the camera's azimuth and elevation. None by default, which means they were all
+                computed at jdt_ref, as CAMS does. Give it for data that follows the passage of time during
+                the meteor, as RMS does: otherwise each line of sight is rotated by the Earth's rotation
+                since jdt_ref.
         """
 
         ### INPUT DATA ###
@@ -127,6 +132,11 @@ class ObservedPoints(object):
         self.jdt_ref = jdt_ref
 
         self.time_data = time_data
+
+        # Keep the absolute Julian date at which each R.A./Dec. was computed
+        self.radec_jd = None
+        if radec_jd is not None:
+            self.radec_jd = np.array(radec_jd, dtype=np.float64)
 
 
 
@@ -437,13 +447,20 @@ class ObservedPoints(object):
 
 
     def calcAzimuthal(self):
-        """ Calculate azimuthal coordinates from right ascension and declination. """
+        """ Calculate azimuthal coordinates from right ascension and declination.
 
-        # Let the JD data be fixed to the reference time - this is done because for CAMS data the azimuthal to 
-        # equatorial conversion was done without considering the flow of time during the meteor's appearance.
-        # NOTE: If your data does account for the changing time, then jdt_ref_vect should be:
-        #   jdt_ref_vect = self.JD_data
-        jdt_ref_vect = np.zeros_like(self.ra_data) + self.jdt_ref
+        For CAMS data the azimuthal to equatorial conversion was done without considering the flow of time
+        during the meteor's appearance, so by default the JD is fixed to the reference time. Data that does
+        account for it gives the time of each conversion in radec_jd. That is the time the R.A./Dec. was
+        computed at, not JD_data: the timing offsets estimated later shift JD_data, and the azimuth and
+        elevation the camera measured must stay fixed to the Earth when they do.
+        """
+
+        # Take the time at which the R.A./Dec. were computed
+        if self.radec_jd is None:
+            jdt_ref_vect = np.zeros_like(self.ra_data) + self.jdt_ref
+        else:
+            jdt_ref_vect = self.radec_jd
 
         # Calculate azimuth and elevation
         self.azim_data, self.elev_data = raDec2AltAz_vect(self.ra_data, self.dec_data, jdt_ref_vect, self.lat, 
@@ -2883,7 +2900,8 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment='', ignore_station=False):
+        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment='', ignore_station=False,
+        radec_jd=None):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2913,6 +2931,8 @@ class Trajectory(object):
                 the same station.
             comment: [str] A comment about the observations. May be used to store RMS FF file number on which
                 the meteor was observed.
+            radec_jd: [ndarray] Julian date at which each R.A./Dec. was computed, when meastype is 1. See
+                ObservedPoints. None by default (all at jdt_ref, the CAMS convention).
         Return:
             None
         """
@@ -2968,7 +2988,8 @@ class Trajectory(object):
         # Init a new structure which will contain the observed data from the given site
         obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, 
             meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, ignore_station=ignore_station, 
-            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id, comment=comment)
+            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id, comment=comment,
+            radec_jd=radec_jd)
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -2983,12 +3004,20 @@ class Trajectory(object):
             obs: [ObservedPoints] Instance of ObservedPoints.
 
         Keyword arguments:
-            meastype: [int] Measurement type. If not given, it will be read from the trajectory object.
+            meastype: [int] Measurement type. If not given, it will be read from the trajectory object. Only
+                then are the times at which the R.A./Dec. were computed (radec_jd) kept, as obs.ra_data is
+                recomputed at jdt_ref.
         """
+
+        # Only the original measurements carry the times their R.A./Dec. were computed at
+        radec_jd = None
 
         if meastype is None:
             meas1 = obs.meas1
             meas2 = obs.meas2
+
+            # Observations pickled before radec_jd existed were all computed at jdt_ref
+            radec_jd = getattr(obs, 'radec_jd', None)
 
 
         # If inputs were RA and Dec
@@ -3061,7 +3090,7 @@ class Trajectory(object):
         self.infillTrajectory(meas1, meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
             station_id=obs.station_id, excluded_time=excluded_time, ignore_list=ignore_list, \
             magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id, \
-            comment=obs.comment, ignore_station=obs.ignore_station)
+            comment=obs.comment, ignore_station=obs.ignore_station, radec_jd=radec_jd)
 
 
 
@@ -6299,6 +6328,12 @@ class Trajectory(object):
             #   elevation at the reference JD when the observations are reinitialized for the next pass
             if self.meastype == 1:
                 for obs in self.observations:
+
+                    # R.A. and Dec. computed at each point's own time are converted at those times, not at the
+                    #   reference JD, so they stay as they are
+                    if getattr(obs, 'radec_jd', None) is not None:
+                        continue
+
                     obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, self.jdt_ref, \
                         obs.lat, obs.lon)
 
