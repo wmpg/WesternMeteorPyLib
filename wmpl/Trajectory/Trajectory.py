@@ -751,7 +751,7 @@ def gravityDropReference(observations, state_vect, radiant_eci):
     applyGravityDrop takes r0 to be the distance of the beginning of the meteor from the centre of the Earth,
     and its drop model descends from there with the vertical velocity. This is the point calcLLA and
     calcECIEqAltAz use: the highest of the points on the radiant line closest to the first line of sight of
-    each station which is not ignored.
+    each station, skipping the ignored stations and picks.
 
     Arguments:
         observations: [list] A list of ObservedPoints objects.
@@ -763,16 +763,24 @@ def gravityDropReference(observations, state_vect, radiant_eci):
             of the Earth (meters).
     """
 
-    # Take only the stations which are not ignored, unless all are
-    used_observations = [obs for obs in observations if not obs.ignore_station]
-    if not used_observations:
-        used_observations = observations
+    # Take the first pick which is not ignored of each station which is not ignored
+    first_picks = []
+    for obs in observations:
+
+        used_picks = np.flatnonzero(np.array(obs.ignore_list) == 0)
+
+        if (not obs.ignore_station) and len(used_picks):
+            first_picks.append((obs, used_picks[0]))
+
+    # Take the first picks of all stations if all are ignored
+    if not first_picks:
+        first_picks = [(obs, 0) for obs in observations]
 
     eci_list = []
-    for obs in used_observations:
+    for obs, i in first_picks:
 
         # Calculate closest points of approach (observed line of sight to radiant line)
-        _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, radiant_eci)
+        _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], state_vect, radiant_eci)
         eci_list.append(rad_cpa)
 
     # Find the largest distance from the centre of the Earth
