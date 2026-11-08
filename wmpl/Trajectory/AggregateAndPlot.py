@@ -23,10 +23,10 @@ except ImportError:
 
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
 from wmpl.Trajectory.Trajectory import addTrajectoryID
-from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
+from wmpl.Utils.Math import meanAngle, sphericalPointFromHeadingAndDistance, \
     angleBetweenSphericalCoords, generateMonthyTimeBins
 from wmpl.Utils.OSTools import mkdirP, walkDirsToDepth
-from wmpl.Utils.Physics import calcMass
+from wmpl.Utils.Physics import calcMass, trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import MapColorScheme
@@ -84,47 +84,15 @@ P_0M = 1210
 def computeMass(traj, P_0m):
     """ Compute the mass given the trajectory and a power of a zero magnitude meteor. """
 
-
-    time_mag_arr = []
-    avg_t_diff_max = 0
-    for obs in traj.observations:
-
-        # Skip ignored stations
-        if obs.ignore_station:
-            continue
-
-        # If there are not magnitudes for this site, skip it
-        if obs.absolute_magnitudes is None:
-            continue
-
-        # Compute average time difference
-        avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
-
-        # Exclude magnitudes fainter than mag +8
-        mag_filter = obs.absolute_magnitudes < 8
-
-        # If all magnitudes are fainter than 8, skip the station
-        if not np.any(mag_filter):
-            continue
-
-        for t, mag in zip(obs.time_data[mag_filter], obs.absolute_magnitudes[mag_filter]):
-            if (mag is not None) and (not np.isnan(mag)):
-                time_mag_arr.append([t, mag])
+    # Extract the light curve
+    time_arr, mag_arr, _ = trajectoryLightCurve(traj)
 
     # If there are no magnitudes, return 0
-    if len(time_mag_arr) == 0:
+    if time_arr is None:
         return 0
 
-    # Compute the mass
-    time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
-    time_arr, mag_arr = time_mag_arr.T
-    
-    # Take the brightest magnitudes, which mitigates saturation effects. Note that this assumes that the
-    #   photometric calibration was done well
-    time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='min')
-
     # Compute the photometric mass
-    mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
+    mass = calcMass(time_arr, mag_arr, traj.orbit.v_avg_norot, P_0m=P_0m)
 
 
     return mass
@@ -132,16 +100,36 @@ def computeMass(traj, P_0m):
 
 
 def computePeakMagHt(traj):
-    """ Compute the peak magnitude and peak height. """
+    """ Compute the peak magnitude and peak height. Points without a magnitude (NaN) are skipped.
 
-    # Compute peak magnitude from all stations
-    peak_mags = [np.min(obs.absolute_magnitudes[obs.ignore_list == 0]) for obs in traj.observations 
-        if obs.ignore_station is False]
-    peak_mag = np.min(peak_mags)
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
 
-    # Compute the peak height
-    peak_ht = [obs.model_ht[np.argmin(obs.absolute_magnitudes[obs.ignore_list == 0])] 
-        for obs in traj.observations if obs.ignore_station is False][np.argmin(peak_mags)]
+    Return:
+        (peak_mag, peak_ht): Peak absolute magnitude and its height (m), NaN if no point has a magnitude.
+    """
+
+    peak_mag = np.nan
+    peak_ht = np.nan
+
+    # Find the brightest point of all stations
+    for obs in traj.observations:
+
+        if obs.ignore_station or (obs.absolute_magnitudes is None):
+            continue
+
+        used = obs.ignore_list == 0
+        abs_mags = np.array(obs.absolute_magnitudes, dtype=np.float64)[used]
+        heights = np.array(obs.model_ht)[used]
+
+        finite = np.isfinite(abs_mags)
+        if not np.any(finite):
+            continue
+
+        i_peak = np.argmin(np.where(finite, abs_mags, np.inf))
+        if np.isnan(peak_mag) or (abs_mags[i_peak] < peak_mag):
+            peak_mag = abs_mags[i_peak]
+            peak_ht = heights[i_peak]
 
 
     return peak_mag, peak_ht
