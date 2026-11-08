@@ -98,6 +98,10 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             # Skip the header
             data = data[1:]
 
+            # Skip the rows without the main fragment (fragment 0), i.e. the frames on which only other
+            #   fragments were measured (their columns have a numeric suffix, e.g. azimuth1)
+            data = data[np.char.strip(data[:, azim_indx]) != '']
+
             # Unpack data
             dt_data, azim_data, alt_data, x_data, y_data = data[:, dt_indx], data[:, azim_indx], \
                 data[:, alt_indx], data[:, x_indx], data[:, y_indx]
@@ -110,6 +114,18 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             # Get magnitude data, if any
             if mag_indx is not None:
                 mag_data = data[:, mag_indx].astype(np.float64)
+
+                # SkyFit2 sets the integrated pixel value to 1 if no photometry pixels were chosen, which
+                #   leaves the magnitude at the photometric offset, so these points get no magnitude
+                if 'integrated_pixel_value' in header:
+                    no_photometry = data[:, header.index('integrated_pixel_value')].astype(np.float64) <= 1
+                    mag_data[no_photometry] = np.nan
+
+                    if np.any(no_photometry):
+                        print(("Station {:s}: {:d} of {:d} points were picked without photometry " \
+                            + "(integrated pixel value 1), they have no magnitude").format(station_id, \
+                            int(np.sum(no_photometry)), len(mag_data)))
+
             else:
                 mag_data = np.zeros_like(azim_data) + 10.0
 
