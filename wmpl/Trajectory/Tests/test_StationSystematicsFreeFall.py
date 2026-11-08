@@ -92,6 +92,21 @@ def _residuals(traj, **methods):
 
 
 
+def _fitTimeOrigin(observations):
+    """ The time from which the line-of-sight fit of the solver drops the points: the first time of the used
+        stations (dropTimeOrigin, #202), or of all observations with a solver without it.
+    """
+
+    try:
+        from wmpl.Trajectory.Trajectory import dropTimeOrigin
+
+    except ImportError:
+        return min(obs.time_data[0] for obs in observations)
+
+    return dropTimeOrigin(observations)
+
+
+
 def testTheFreeFallOfTheSolutionDropsTheLine():
     """ A solution with the free fall drops the line by it: a drop of 300 m across the line gives the
         residuals of the line moved by it, without the drop along the vertical.
@@ -128,9 +143,9 @@ def testTheFreeFallOfTheSolutionDropsTheLine():
 
 
 def testTheFreeFallIsTakenAtTheTimesOfTheFit():
-    """ The free fall is taken at the times from the first point of all observations, also of an ignored
-        station which starts earlier, as in the line-of-sight fit, on the radiant line of the solution and
-        with its table.
+    """ The free fall is taken at the times of the line-of-sight fit, also with an ignored station which
+        starts earlier (which does not set them with #202), on the radiant line of the solution and with its
+        table.
     """
 
     traj = _trajectory()
@@ -154,12 +169,13 @@ def testTheFreeFallIsTakenAtTheTimesOfTheFit():
 
     try:
         _residuals(traj, gravityFreeFall=lambda: table, gravityDropPoint=gravityDropPoint)
+        first = t0 - _fitTimeOrigin(traj.observations)
 
     finally:
         traj.observations.pop()
 
     assert len(calls) > 0
-    assert np.isclose(min(calls), 0.3, rtol=0, atol=1e-9)
+    assert np.isclose(min(calls), first, rtol=0, atol=1e-9)
 
 
 

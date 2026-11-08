@@ -88,9 +88,14 @@ def stationSystematicErrors(traj):
     if len(set((obs.lat, obs.lon, obs.ele) for obs in used)) < 3:
         return {}
 
-    # Times from the first point of all observations, also of the ignored stations, as in the line-of-sight
-    #   fit
-    t0 = min(obs.time_data[0] for obs in traj.observations)
+    # Times from the first point of the used stations, as in the line-of-sight fit (dropTimeOrigin, #202),
+    #   or of all observations, also of the ignored stations, with a solver which takes them from all
+    try:
+        from wmpl.Trajectory.Trajectory import dropTimeOrigin
+        t0 = dropTimeOrigin(traj.observations)
+
+    except ImportError:
+        t0 = min(obs.time_data[0] for obs in traj.observations)
     errors = {}
 
     # The free fall of the meteor from the line in solutions which have it (Trajectory.gravityFreeFall)
