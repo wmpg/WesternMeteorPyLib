@@ -16,8 +16,8 @@ from wmpl.Utils.Earth import greatCircleDistance
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenVectors, vectorFromPointDirectionAndAngle, \
     findClosestPoints, generateDatetimeBins, meanAngle, angleBetweenSphericalCoords
 from wmpl.Utils.ShowerAssociation import associateShowerTraj
-from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
-    raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
+from wmpl.Utils.TrajConversions import geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
+    raDec2ECI, datetime2JD, jd2Date, equatorialCoordJ2000ToDate_vect
 
 
 # Grab the logger from the main thread
@@ -438,10 +438,10 @@ class TrajectoryCorrelator(object):
         time_data = np.array([entry.time_rel + time_offset for entry in met.data])
         mag_data = np.array([entry.mag for entry in met.data])
 
-        # If the data is in J2000, precess it to the epoch of date
+        # If the data is in J2000, precess and nutate it to the epoch of date
         if self.data_in_j2000:
             jdt_ref_vect = np.zeros_like(ra_data) + datetime2JD(ref_dt)
-            ra_data, dec_data = equatorialCoordPrecession_vect(J2000_JD.days, jdt_ref_vect, ra_data, dec_data)
+            ra_data, dec_data = equatorialCoordJ2000ToDate_vect(jdt_ref_vect, ra_data, dec_data)
 
 
         # If the two begin and end points are fainter by N magnitudes from the median, ignore them
