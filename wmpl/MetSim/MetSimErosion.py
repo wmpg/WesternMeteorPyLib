@@ -18,10 +18,12 @@ import numpy as np
 import scipy.stats
 import scipy.integrate
 
+from wmpl.Utils.Physics import earthRotationSpeed
+
 
 # Cython init
-import pyximport
-pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from wmpl.Utils.CythonBuild import installPyximport
+installPyximport()
 from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
     ionizationEfficiency, atmDensityPoly
 
@@ -480,6 +482,85 @@ def heightCurvature(h0, zc, l, r_earth):
 
     # Scalar inputs in the per-fragment hot path - math.sqrt/math.cos avoid numpy scalar overhead
     return math.sqrt((h0 + r_earth)**2 - 2*l*math.cos(zc)*(h0 + r_earth) + l**2) - r_earth
+
+
+
+def constantsRelativeToGround(const, v_rotation):
+    """ Convert the initial speed and the zenith angle of the constants from the inertial frame of the
+        trajectory solver to the ground, as MetSim simulates the motion relative to the air.
+
+    The Earth's rotation is horizontal, so the zenith angle is converted keeping the vertical speed.
+    v_rotation is kept in the constants, and SimulationResults adds it back to the simulated lengths and
+    speeds to compare them with the observations.
+
+    Arguments:
+        const: [Constants object] Constants with the inertial v_init and zenith_angle, changed in place.
+        v_rotation: [float] Speed of the Earth's rotation along the path, see Physics.earthRotationSpeed()
+            (m/s).
+
+    Return:
+        const: [Constants object] Constants relative to the ground.
+    """
+
+    v_ground = const.v_init - v_rotation
+    const.zenith_angle = np.arccos(np.clip(const.v_init*np.cos(const.zenith_angle)/v_ground, -1.0, 1.0))
+    const.v_init = v_ground
+    const.v_rotation = v_rotation
+
+    return const
+
+
+
+def constantsToInertial(const):
+    """ Convert the initial speed and the zenith angle of constants relative to the ground back to the
+        inertial frame of the trajectory solver, the inverse of constantsRelativeToGround().
+
+    Arguments:
+        const: [Constants object] Constants relative to the ground with their v_rotation, changed in place.
+
+    Return:
+        const: [Constants object] Constants with the inertial v_init and zenith_angle, and v_rotation 0.
+    """
+
+    v_rotation = getattr(const, 'v_rotation', 0.0)
+    v_inertial = const.v_init + v_rotation
+    const.zenith_angle = np.arccos(np.clip(const.v_init*np.cos(const.zenith_angle)/v_inertial, -1.0, 1.0))
+    const.v_init = v_inertial
+    const.v_rotation = 0.0
+
+    return const
+
+
+
+def loadedConstantsRelativeToGround(const, const_json, traj):
+    """ Convert constants loaded from a JSON file to the ground of the given trajectory.
+
+    Files without v_rotation were saved before MetSim was run relative to the ground, with the inertial
+    v_init and zenith angle of the trajectory, and are converted. Files with v_rotation keep their ground
+    values and take the rotation of the given trajectory.
+
+    Arguments:
+        const: [Constants object] Loaded constants, changed in place.
+        const_json: [dict] Loaded JSON file.
+        traj: [Trajectory object] Trajectory the constants were fitted to.
+
+    Return:
+        const: [Constants object] Constants relative to the ground.
+    """
+
+    v_rotation = earthRotationSpeed(traj)
+
+    # Keep the ground values of constants already relative to the ground, with the rotation of this trajectory
+    if ('v_rotation' in const_json) or ('v_rotation' in const_json.get('const', {})):
+        const.v_rotation = v_rotation
+        return const
+
+    if v_rotation:
+        print("NOTE: The constants file has no v_rotation, so its v_init and zenith angle are taken as " \
+            "inertial and converted to the ground (v_rotation = {:.2f} m/s).".format(v_rotation))
+
+    return constantsRelativeToGround(const, v_rotation)
+
 
 
 def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, 
