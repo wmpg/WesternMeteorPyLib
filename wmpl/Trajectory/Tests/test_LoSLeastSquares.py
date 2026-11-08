@@ -17,8 +17,8 @@ matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import Trajectory, angleResidualsMeasurements2Line, \
     angleSumMeasurements2Line, nelderMeadLine, leastSquaresLine
-from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, observeStraightMeteor, \
-    stationAzimAlt, straightMeteorPoints
+from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
+    observeStraightMeteor, stationAzimAlt, straightMeteorPoints
 from wmpl.Utils.Math import vectNorm
 from wmpl.Utils.TrajConversions import eci2RaDec, raDec2AltAz
 
@@ -92,8 +92,8 @@ def testResidualsAreTheAnglesWithASign():
         assert 0.2 < np.mean(station > 0) < 0.8
 
     # Moving the line across by much more than the noise puts all residuals of a station on one side
-    shifted = angleResidualsMeasurements2Line(traj.observations, state_vect + 2000.0*traj.observations[0].plane_N, \
-        radiant)
+    shifted = angleResidualsMeasurements2Line(traj.observations, \
+        state_vect + 2000.0*traj.observations[0].plane_N, radiant)
     station_a = shifted[:len(traj.observations[0].time_data)]
     assert np.all(np.sign(station_a) == np.sign(station_a[0]))
 
@@ -144,8 +144,8 @@ def testHuberLossResistsOutliers():
     errors = {}
     for los_fit in ['least_squares', 'huber']:
 
-        traj, _, radiant_eci = observeStraightMeteor(noise=noise, seed=3, los_fit=los_fit, filter_picks=False, \
-            estimate_timing_vel=False)
+        traj, _, radiant_eci = observeStraightMeteor(noise=noise, seed=3, los_fit=los_fit, \
+            filter_picks=False, estimate_timing_vel=False)
         _moveAcrossTrack(traj, offsets)
 
         errors[los_fit] = _radiantError(traj.run(), radiant_eci)
@@ -176,7 +176,8 @@ def _observeUnequalNoise(seed, noise_arcsec=(10.0, 40.0, 10.0)):
         monte_carlo=False, show_plots=False, save_results=False, verbose=False, filter_picks=False, \
         los_fit='least_squares')
 
-    for (station_id, s_lat, s_lon, ele), noise in zip(STRAIGHT_STATIONS, np.radians(np.array(noise_arcsec)/3600)):
+    noise_rad = np.radians(np.array(noise_arcsec)/3600)
+    for (station_id, s_lat, s_lon, ele), noise in zip(STRAIGHT_STATIONS, noise_rad):
 
         azim, elev = stationAzimAlt(points, STRAIGHT_JDT_REF + times/86400.0, s_lat, s_lon, ele)
         azim = azim + rng.normal(0, noise, len(azim))/np.cos(elev)
@@ -242,7 +243,8 @@ def testFewerEvaluationsThanNelderMead():
 
 
 def testReportHasTheFormalUncertainty():
-    """ Check that the report gives the formal uncertainty of the least squares fit, and not of the angles. """
+    """ Check that the report gives the formal uncertainty of the least squares fit, and not of the angles.
+    """
 
     for los_fit in ['angles', 'least_squares']:
 
@@ -260,5 +262,6 @@ def testAnglesAreTheDefault():
     traj = Trajectory(2460600.25)
 
     assert traj.lineOfSightMethod()[0] is nelderMeadLine
-    assert Trajectory(2460600.25, los_fit='huber').lineOfSightMethod() == (leastSquaresLine, {'loss': 'huber'})
+    assert Trajectory(2460600.25, los_fit='huber').lineOfSightMethod() == \
+        (leastSquaresLine, {'loss': 'huber'})
     assert traj.losFormalUncertainty() == (None, None)
