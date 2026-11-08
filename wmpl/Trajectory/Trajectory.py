@@ -828,6 +828,15 @@ GRAVITY_DROP_VEL_GROUPS = 500
 #   it up by at most g, here at the surface of the Earth
 GRAVITY_DROP_MAX_ACC = 9.83
 
+# Nodes and weights of the 3-point Gauss-Legendre quadrature on [-1, 1], by which the moments of the motion
+#   along the line are integrated (see freeFallTable)
+GRAVITY_FREE_FALL_GL_NODES = np.array([-np.sqrt(0.6), 0.0, np.sqrt(0.6)])
+GRAVITY_FREE_FALL_GL_WEIGHTS = np.array([5.0/9, 8.0/9, 5.0/9])
+
+# Time by which the table of the motion along the line for the free fall is extended before its first and
+#   after its last time, at the velocity there (s), so every point of the meteor falls within it
+GRAVITY_FREE_FALL_EXTEND = 1000.0
+
 
 
 def segmentedVelocity(time_rel, length, time_eval, max_segments=GRAVITY_DROP_VEL_SEGMENTS, \
@@ -963,7 +972,7 @@ def gravityDropScale(time_rel, vel):
 
 @njit
 def angleSumPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, point_factors, state_vect, \
-    radiant_eci, t0, gravity, r0, v0z, weight, angle_sum, weights_sum):
+    radiant_eci, t0, gravity, r0, v0z, time_tab, vel_tab, len_tab, mom_tab, weight, angle_sum, weights_sum):
     """ Add the angles between the lines of sight of one station and the radiant line to a running sum. It
         is the loop over the points of angleSumMeasurements2Line, compiled with numba, which makes the cost of
         the line-of-sight fit several times faster. The operations are the same and in the same order as in a
@@ -982,6 +991,9 @@ def angleSumPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, point_fac
         r0: [float] Distance of the beginning of the meteor from the centre of the Earth (meters). If NaN, the
             distance of each point is used.
         v0z: [float] Initial vertical velocity of the meteor (m/s).
+        time_tab, vel_tab, len_tab, mom_tab: [ndarrays] Table of the motion along the line for the free fall
+            of the meteor from the line (see freeFallTable and freeFallDrop). If it is empty, the points are
+            dropped along their vertical by applyGravityDrop.
         weight: [float] Statistical weight of the station.
         angle_sum: [float] Weighted sum of the angles so far (radians).
         weights_sum: [float] Sum of the weights so far.
@@ -1013,16 +1025,25 @@ def angleSumPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, point_fac
             # Calculate the time in seconds from the beginning of the meteor
             t_rel = time_data[j] - t0
 
-            # Take the distance of the beginning of the meteor, or of the point itself if it is not given
-            r0_point = r0
-            if np.isnan(r0_point):
-                r0_point = vectMag(rad_cpa)
+            # Drop the point by the free fall of the meteor from the line
+            if len(time_tab) > 0:
+                rad_cpa_grav = freeFallDrop(rad_cpa, t_rel, radiant_eci, time_tab, vel_tab, len_tab, \
+                    mom_tab, point_factors[j])
 
-            # If the distance is 0, set it to 1 to avoid a division by zero
-            if r0_point == 0:
-                r0_point = 1.0
+            # Or along its vertical
+            else:
 
-            rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, point_factors[j], v0z)
+                # Take the distance of the beginning of the meteor, or of the point itself if it is not given
+                r0_point = r0
+                if np.isnan(r0_point):
+                    r0_point = vectMag(rad_cpa)
+
+                # If the distance is 0, set it to 1 to avoid a division by zero
+                if r0_point == 0:
+                    r0_point = 1.0
+
+                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, point_factors[j], v0z)
+
             _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
 
@@ -1044,7 +1065,7 @@ def angleSumPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, point_fac
 
 
 def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
-                              gravity_factor=1.0, v0z=None, r0=None, drop_scale=None):
+                              gravity_factor=1.0, v0z=None, r0=None, drop_scale=None, free_fall=None):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -1067,6 +1088,10 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
         drop_scale: [tuple] Times from the beginning of the meteor (s) and the scale of the gravity drop of a
             decelerating meteor at those times (see Trajectory.calcGravityDropScale). The drop of every point
             is multiplied by the scale at its time. If None, the drop at a constant velocity is used.
+        free_fall: [tuple] Table of the motion along the line (see freeFallTable). If it is given, every point
+            is dropped by the free fall of the meteor from the line (see freeFallDrop), which holds the
+            deceleration, and drop_scale, r0 and v0z are not used. None by default, when the points are
+            dropped along their vertical by applyGravityDrop.
 
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
@@ -1108,6 +1133,12 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     if r0 is None:
         r0 = np.nan
 
+    # The free fall holds the deceleration, so the drop is not scaled with it. Without it, an empty table
+    if free_fall is not None:
+        drop_scale = None
+    else:
+        free_fall = (np.empty(0), np.empty(0), np.empty(0), np.empty((0, 0)))
+
     angle_sum = 0.0
     weights_sum = 1e-10
 
@@ -1124,7 +1155,7 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
             np.ascontiguousarray(obs.meas_eci_los, dtype=np.float64), \
             np.ascontiguousarray(obs.stat_eci_los, dtype=np.float64), np.asarray(obs.ignore_list), \
             point_factors, state_vect, radiant_eci, float(t0), bool(gravity), float(r0), float(v0z), \
-            float(weights[i]), angle_sum, weights_sum)
+            *free_fall, float(weights[i]), angle_sum, weights_sum)
 
 
     return angle_sum/weights_sum
@@ -1133,19 +1164,19 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
-    r0=None, drop_scale=None):
+    r0=None, drop_scale=None, free_fall=None):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
     
     return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity,\
-        gravity_factor=gravity_factor, v0z=v0z, r0=r0, drop_scale=drop_scale)
+        gravity_factor=gravity_factor, v0z=v0z, r0=r0, drop_scale=drop_scale, free_fall=free_fall)
 
 
 
 
 def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False, gravity_factor=1.0, \
-                        v0z=None, r0=None):
+                        v0z=None, r0=None, free_fall=None):
     """ Calculate horizontal and vertical residuals from the radiant line, for the given observed point.
 
     Arguments:
@@ -1161,6 +1192,9 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
         v0z: [float] Initial vertical velocity of the meteor. If None, 0.0 will be used.
         r0: [float] Distance of the beginning of the meteor from the centre of the Earth, for the gravity drop
             (see gravityDropReference). If None, the distance of the point itself is used.
+        free_fall: [tuple] Table of the motion along the line (see freeFallTable). If it is given, the point
+            is dropped by the free fall of the meteor from the line (see freeFallDrop), and r0 and v0z are not
+            used. None by default, when it is dropped along its vertical by applyGravityDrop.
 
     Return:
         (hres, vres): [tuple of floats] residuals in horitontal and vertical direction from the radiant line
@@ -1183,12 +1217,17 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
         # Compute the relative time
         t_rel = 86400*(jd - jdt_ref)
 
-        # Correct the point on the trajectory for gravity
-        if v0z is None:
-            v0z = 0.0
-        if r0 is None:
-            r0 = vectMag(rad_cpa)
-        rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, gravity_factor, v0z)
+        # Correct the point on the trajectory for gravity, by the free fall from the line
+        if free_fall is not None:
+            rad_cpa_grav = freeFallDrop(rad_cpa, t_rel, radiant_eci, *free_fall, gravity_factor)
+
+        # Or along its vertical
+        else:
+            if v0z is None:
+                v0z = 0.0
+            if r0 is None:
+                r0 = vectMag(rad_cpa)
+            rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, gravity_factor, v0z)
 
         # ###########################
 
@@ -2946,6 +2985,206 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
 
 
+@njit
+def freeFallMoments(t, time_tab, vel_tab, len_tab, mom_tab):
+    """ Compute the length travelled along the line and the moments of the motion at the given time, from
+        the table of freeFallTable.
+
+    The velocity is linear in time between the times of the table, and the moments are integrated from the
+    previous time of the table with the 3-point Gauss-Legendre quadrature, exact at a constant velocity.
+
+    Arguments:
+        t: [float] Time from the beginning of the meteor (s).
+        time_tab: [ndarray] Times of the table (s).
+        vel_tab: [ndarray] Velocities of the table (m/s).
+        len_tab: [ndarray] Lengths travelled of the table (m), 0 at the time 0.
+        mom_tab: [ndarray] Moments J_0 to J_4 of the table, one row each (see freeFallTable).
+
+    Return:
+        (length, j0, j1, j2, j3, j4): [tuple of floats] The length travelled (m) and the moments at the
+            time t.
+    """
+
+    # Find the interval of the table, and keep the ends within it
+    i = np.searchsorted(time_tab, t) - 1
+    i = min(max(i, 0), len(time_tab) - 2)
+
+    # Velocity, linear in the interval, and the length travelled
+    dt = t - time_tab[i]
+    slope = (vel_tab[i + 1] - vel_tab[i])/(time_tab[i + 1] - time_tab[i])
+    length = len_tab[i] + dt*(vel_tab[i] + 0.5*slope*dt)
+
+    # Integrate the moments from the time of the table
+    j0, j1, j2, j3, j4 = mom_tab[0, i], mom_tab[1, i], mom_tab[2, i], mom_tab[3, i], mom_tab[4, i]
+    for k in range(3):
+
+        tau = 0.5*dt*(GRAVITY_FREE_FALL_GL_NODES[k] + 1.0)
+        length_node = len_tab[i] + tau*(vel_tab[i] + 0.5*slope*tau)
+        weight = 0.5*dt*GRAVITY_FREE_FALL_GL_WEIGHTS[k]/(vel_tab[i] + slope*tau)
+
+        j0 += weight
+        weight *= length_node
+        j1 += weight
+        weight *= length_node
+        j2 += weight
+        weight *= length_node
+        j3 += weight
+        weight *= length_node
+        j4 += weight
+
+    return length, j0, j1, j2, j3, j4
+
+
+
+@njit
+def freeFallMomentTable(time_tab, vel_tab, len_tab):
+    """ Integrate the moments of the motion along the line interval by interval (see freeFallTable).
+
+    Arguments:
+        time_tab: [ndarray] Times of the table (s).
+        vel_tab: [ndarray] Velocities of the table (m/s).
+        len_tab: [ndarray] Lengths travelled of the table (m), 0 at the time 0.
+
+    Return:
+        mom_tab: [ndarray] Moments J_0 to J_4, one row each, 0 at the time 0.
+    """
+
+    mom_tab = np.zeros((5, len(time_tab)))
+    for i in range(len(time_tab) - 1):
+        _, mom_tab[0, i + 1], mom_tab[1, i + 1], mom_tab[2, i + 1], mom_tab[3, i + 1], mom_tab[4, i + 1] = \
+            freeFallMoments(time_tab[i + 1], time_tab, vel_tab, len_tab, mom_tab)
+
+    # Start the moments at the time 0
+    _, j0, j1, j2, j3, j4 = freeFallMoments(0.0, time_tab, vel_tab, len_tab, mom_tab)
+    mom_tab[0] -= j0
+    mom_tab[1] -= j1
+    mom_tab[2] -= j2
+    mom_tab[3] -= j3
+    mom_tab[4] -= j4
+
+    return mom_tab
+
+
+
+def freeFallTable(time_rel, vel):
+    """ Tabulate the motion along the line for the free fall of the meteor (see freeFallDrop): the times, the
+        velocity and the length travelled from the beginning of the meteor, and the moments of the motion
+
+        J_k(t) = int_0^t l(q)^k/v(q) dq,
+
+    for k from 0 to 4. The table is extended by GRAVITY_FREE_FALL_EXTEND before the first and after the last
+    time, at the velocity there. The velocity is linear between the times.
+
+    Arguments:
+        time_rel: [ndarray] Increasing times from the beginning of the meteor (s), starting at 0. One time
+            gives a constant velocity.
+        vel: [ndarray] Velocity at those times (m/s), the one of drag alone (see calcGravityDropScale).
+
+    Return:
+        (time_tab, vel_tab, len_tab, mom_tab): [tuple of ndarrays] Times (s), velocities (m/s), lengths (m),
+            with the length 0 at the time 0, and the moments J_0 to J_4, one row each.
+    """
+
+    time_rel = np.atleast_1d(np.asarray(time_rel, dtype=np.float64))
+    vel = np.atleast_1d(np.asarray(vel, dtype=np.float64))
+
+    # Extend the table at the velocity of its ends
+    time_tab = np.r_[time_rel[0] - GRAVITY_FREE_FALL_EXTEND, time_rel, \
+        time_rel[-1] + GRAVITY_FREE_FALL_EXTEND]
+    vel_tab = np.r_[vel[0], vel, vel[-1]]
+
+    # Integrate the length, exact for a velocity linear between the times, and start it at the time 0
+    len_tab = np.r_[0.0, np.cumsum(0.5*(vel_tab[1:] + vel_tab[:-1])*np.diff(time_tab))]
+    len_tab -= np.interp(0.0, time_tab, len_tab)
+
+    mom_tab = freeFallMomentTable(time_tab, vel_tab, len_tab)
+
+    return np.ascontiguousarray(time_tab), np.ascontiguousarray(vel_tab), np.ascontiguousarray(len_tab), \
+        np.ascontiguousarray(mom_tab)
+
+
+
+@njit
+def freeFallDrop(eci_coord, t, radiant_eci, time_tab, vel_tab, len_tab, mom_tab, gravity_factor):
+    """ Drop a point of the fitted line by the free fall of the meteor from the line under the gravity of a
+        point mass, in place of the drop along the vertical of the point of applyGravityDrop.
+
+    The meteor moves along the line as in the table of freeFallTable, at the velocity v of drag alone.
+    Gravity adds to its velocity, and drag slows down the added velocity at the same rate as the rest, so the
+    displacement from the line at the time t is
+
+        int_0^t g(b(q)) b(q)/v(q) dq,    b(q) = l(t) - l(q),
+
+    where g(b) is the gravity of the Earth at the distance b back along the line from the point, and l the
+    length travelled. At a constant velocity it is the free fall from the line, int_0^t (t - q) g dq, and in a
+    uniform field it is g times the drop of gravityDropScale. Unlike g*t^2/2 along the vertical of the point,
+    it follows the turn of the vertical along the path with the curvature of the Earth, and the change of g
+    with the height. Its part along the line is the velocity gravity adds along the path.
+
+    Gravity is interpolated by a cubic polynomial in b, through four equally spaced points from the point back
+    to the beginning, so the integral is the sum of its coefficients times the integrals of b^(n + 1)/v,
+    which follow from the moments of the table (see freeFallMoments). The velocity enters only through the
+    moments, which keeps the integral exact where the fitted velocity changes its slope.
+
+    Arguments:
+        eci_coord: [ndarray] (x, y, z) ECI coordinates of the point of the line at the time t (meters).
+        t: [float] Time from the beginning of the meteor (s). Before the beginning the point is not dropped.
+        radiant_eci: [ndarray] Unit vector of the radiant of the line in ECI.
+        time_tab, vel_tab, len_tab, mom_tab: [ndarrays] Table of the motion along the line (see
+            freeFallTable).
+        gravity_factor: [float] Factor by which the drop is multiplied.
+
+    Return:
+        [ndarray] (x, y, z) ECI coordinates of the dropped point (meters).
+    """
+
+    # Define the mass of the Earth, as in applyGravityDrop
+    gm = G*5.9722e24
+
+    length, j0, j1, j2, j3, j4 = freeFallMoments(t, time_tab, vel_tab, len_tab, mom_tab)
+    if (t <= 0) or (length <= 0):
+        return eci_coord.copy()
+
+    # Integrals of b^(n + 1)/v from 0 to t, from the binomial expansion of (l(t) - l(q))^(n + 1)
+    m0 = length*j0 - j1
+    m1 = length**2*j0 - 2*length*j1 + j2
+    m2 = length**3*j0 - 3*length**2*j1 + 3*length*j2 - j3
+    m3 = length**4*j0 - 4*length**3*j1 + 6*length**2*j2 - 4*length*j3 + j4
+
+    # Divide them by the step between the points of the gravity, in which the polynomial is written
+    step = length/3.0
+    m1 /= step
+    m2 /= step**2
+    m3 /= step**3
+
+    # The cubic through the gravity g_j at the four points back along the line to the beginning, in the Newton
+    #   form g_0 + d1*s + d2*s(s - 1)/2 + d3*s(s - 1)(s - 2)/6 with s = b/step and the forward differences d,
+    #   integrated against the moments: the drop is linear in the g_j, with these weights
+    weights = (m0 - 11.0/6*m1 + m2 - m3/6, 3*m1 - 2.5*m2 + m3/2, -1.5*m1 + 2*m2 - m3/2, m1/3 - m2/2 + m3/6)
+
+    drop_x, drop_y, drop_z = 0.0, 0.0, 0.0
+    for j in range(4):
+
+        # Gravity of a point mass at the point
+        x = eci_coord[0] + j*step*radiant_eci[0]
+        y = eci_coord[1] + j*step*radiant_eci[1]
+        z = eci_coord[2] + j*step*radiant_eci[2]
+        r2 = x*x + y*y + z*z
+        factor = weights[j]*gm/(r2*np.sqrt(r2))
+
+        drop_x -= factor*x
+        drop_y -= factor*y
+        drop_z -= factor*z
+
+    dropped = np.empty(3)
+    dropped[0] = eci_coord[0] + gravity_factor*drop_x
+    dropped[1] = eci_coord[1] + gravity_factor*drop_y
+    dropped[2] = eci_coord[2] + gravity_factor*drop_z
+
+    return dropped
+
+
+
 def generateTrajectoryID(traj):
     """ Given trajectory parameters, generate a unique trajectory ID. 
     
@@ -3004,7 +3243,7 @@ class Trajectory(object):
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
-        gravity_decel=True, \
+        gravity_decel=True, gravity_free_fall=True, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0):
         """ Init the Ceplecha trajectory solver.
@@ -3058,6 +3297,10 @@ class Trajectory(object):
                 the velocity which gravity adds across the path (see gravityDropScale). The velocity is fitted
                 to the lengths without a model of the deceleration (see segmentedVelocity). True by default.
                 If False, the drop assumes a constant velocity.
+            gravity_free_fall: [bool] Drop the meteor by its free fall from the line under the gravity of the
+                Earth, along the path, with the velocity of gravity_decel (see freeFallDrop). True by default.
+                If False, every point is dropped by g*t^2/2 along its own vertical (see applyGravityDrop),
+                which leaves out the turn of the vertical along the path with the curvature of the Earth.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
@@ -3197,6 +3440,9 @@ class Trajectory(object):
         # Reduce the gravity drop of a decelerating meteor
         self.gravity_decel = gravity_decel
 
+        # Drop the meteor by its free fall from the line
+        self.gravity_free_fall = gravity_free_fall
+
         # Plot all spatial residuals on one plot
         self.plot_all_spatial_residuals = plot_all_spatial_residuals
 
@@ -3286,6 +3532,10 @@ class Trajectory(object):
         # Times from the beginning of the meteor and the scale of the gravity drop of a decelerating meteor at
         #   those times (see calcGravityDropScale)
         self.gravity_drop_scale = None
+
+        # Times from the beginning of the meteor and the velocity of drag alone at those times, for the free
+        #   fall of a decelerating meteor (see calcGravityDropScale)
+        self.gravity_drop_velocity = None
 
         # Calculated average velocity
         self.v_avg = None
@@ -3550,6 +3800,9 @@ class Trajectory(object):
         # Time of the beginning of the meteor, from which the drop of a decelerating meteor is scaled
         t0 = min([obs.time_data[0] for obs in observations])
 
+        # Motion along the line for the free fall of the meteor from the line
+        free_fall = self.gravityFreeFall()
+
         # Go though observations from all stations
         for obs in observations:
 
@@ -3561,9 +3814,13 @@ class Trajectory(object):
             for t, jd, stat, meas in zip(obs.time_data, obs.JD_data, obs.stat_eci_los, obs.meas_eci_los):
 
                 # Calculate horizontal and vertical residuals
+                drop_factor = self.gravity_factor
+                if free_fall is None:
+                    drop_factor = self.gravityDropFactor(t - t0)
+
                 hres, vres = calcSpatialResidual(self.jdt_ref, jd, state_vect, radiant_eci, stat, meas, \
-                    gravity=self.gravity_correction, gravity_factor=self.gravityDropFactor(t - t0), \
-                    v0z=self.v0z, r0=r0)
+                    gravity=self.gravity_correction, gravity_factor=drop_factor, v0z=self.v0z, r0=r0, \
+                    free_fall=free_fall)
 
                 # Add residuals to the residual list
                 obs.h_residuals.append(hres)
@@ -3618,12 +3875,14 @@ class Trajectory(object):
 
         """
 
-        # Same reference time and beginning point as the line-of-sight fit
+        # Same reference time, beginning point and free fall as the line-of-sight fit
         t0 = min([obs.time_data[0] for obs in observations])
         if gravity:
             r0 = self.gravity_r0
             if r0 is None:
                 _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
+
+            free_fall = self.gravityFreeFall()
 
         # Go through observations from all stations
         for obs in observations:
@@ -3651,8 +3910,7 @@ class Trajectory(object):
                         if v0z is None:
                             v0z = 0.0
 
-                        drop_factor = self.gravityDropFactor(t - t0)
-                        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, r0, drop_factor, v0z)
+                        rad_cpa_grav = self.gravityDropPoint(rad_cpa, t - t0, radiant_eci, r0, v0z, free_fall)
                         _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
                         rad_cpa = rad_cpa + rad_cpa_dropped - rad_cpa_grav
 
@@ -4347,6 +4605,8 @@ class Trajectory(object):
         if v0z is None:
             v0z = 0.0
 
+        free_fall = self.gravityFreeFall()
+
         times = []
         lengths = []
         for obs in observations:
@@ -4362,7 +4622,7 @@ class Trajectory(object):
                 t_rel = obs.time_data[i] - t0
                 _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], state_vect, \
                     radiant_eci)
-                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravityDropFactor(t_rel), v0z)
+                rad_cpa_grav = self.gravityDropPoint(rad_cpa, t_rel, radiant_eci, r0, v0z, free_fall)
                 _, rad_cpa_dropped, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], \
                     rad_cpa_grav, radiant_eci)
 
@@ -4375,8 +4635,9 @@ class Trajectory(object):
 
 
     def calcGravityDropScale(self, observations, state_vect=None, radiant_eci=None):
-        """ Compute the scale of the gravity drop of a decelerating meteor (self.gravity_drop_scale), from the
-            beginning of the meteor to its last used point. The velocity is fitted to the lengths of the used
+        """ Compute the scale of the gravity drop of a decelerating meteor (self.gravity_drop_scale), and the
+            velocity of drag alone for its free fall (self.gravity_drop_velocity), from the beginning of the
+            meteor to its last used point. The velocity is fitted to the lengths of the used
             points along the trajectory without a model of the deceleration (see segmentedVelocity), and is
             held at GRAVITY_DROP_MIN_VEL or above. The scale is None, and the drop assumes a constant
             velocity, if gravity_decel is off, if the points have no lengths or if the fitted velocity is
@@ -4401,9 +4662,11 @@ class Trajectory(object):
         # Trajectories pickled before the option was added keep the drop at a constant velocity
         if not getattr(self, 'gravity_decel', False):
             self.gravity_drop_scale = None
+            self.gravity_drop_velocity = None
             return None
 
         self.gravity_drop_scale = None
+        self.gravity_drop_velocity = None
 
         # Compute the lengths on the given line, dropped by the current drop
         if state_vect is not None:
@@ -4438,6 +4701,7 @@ class Trajectory(object):
         vel = np.maximum(vel, GRAVITY_DROP_MIN_VEL)
 
         self.gravity_drop_scale = (time_rel, gravityDropScale(time_rel, vel))
+        self.gravity_drop_velocity = (time_rel, vel)
 
 
 
@@ -4458,6 +4722,59 @@ class Trajectory(object):
             return self.gravity_factor
 
         return self.gravity_factor*np.interp(t_rel, *drop_scale)
+
+
+
+    def gravityFreeFall(self):
+        """ Tabulate the motion along the line for the free fall of the meteor from the line (see
+            freeFallTable): at the velocity of drag alone if the meteor decelerates (see
+            calcGravityDropScale), else at the initial velocity.
+
+        Return:
+            [tuple] Table of the motion along the line, or None if the points are dropped along their vertical
+                (see applyGravityDrop): if gravity_free_fall is off, as for trajectories pickled before the
+                option was added, or if there is no initial velocity yet.
+        """
+
+        if not getattr(self, 'gravity_free_fall', False):
+            return None
+
+        # The velocity of a decelerating meteor
+        drop_velocity = getattr(self, 'gravity_drop_velocity', None)
+        if drop_velocity is not None:
+            return freeFallTable(*drop_velocity)
+
+        # Or a constant velocity
+        if (self.v_init is None) or (not np.isfinite(self.v_init)) or (self.v_init <= 0):
+            return None
+
+        return freeFallTable([0.0], [self.v_init])
+
+
+
+    def gravityDropPoint(self, eci_coord, t_rel, radiant_eci, r0, v0z, free_fall):
+        """ Drop a point of the fitted line by gravity, as the solver does: by the free fall of the meteor
+            from the line if its table is given (see freeFallDrop), else along the vertical of the point
+            (see applyGravityDrop), scaled for a decelerating meteor (see gravityDropFactor).
+
+        Arguments:
+            eci_coord: [ndarray] (x, y, z) ECI coordinates of the point of the line (meters).
+            t_rel: [float] Time from the beginning of the meteor (s).
+            radiant_eci: [ndarray] Unit vector of the radiant of the line in ECI.
+            r0: [float] Distance of the beginning of the meteor from the centre of the Earth (meters), for the
+                drop along the vertical.
+            v0z: [float] Initial vertical velocity of the meteor (m/s), for the drop along the vertical.
+            free_fall: [tuple] Table of the motion along the line (see gravityFreeFall), or None.
+
+        Return:
+            [ndarray] (x, y, z) ECI coordinates of the dropped point (meters).
+        """
+
+        if free_fall is not None:
+            return freeFallDrop(eci_coord, t_rel, np.ascontiguousarray(radiant_eci, dtype=np.float64), \
+                *free_fall, self.gravity_factor)
+
+        return applyGravityDrop(eci_coord, t_rel, r0, self.gravityDropFactor(t_rel), v0z)
 
 
 
@@ -4482,8 +4799,10 @@ class Trajectory(object):
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
         self.calcV0z(eci0, radiant_eci)
 
-        # Scale of the drop of a decelerating meteor, from the lengths of the points
+        # Scale of the drop of a decelerating meteor, from the lengths of the points, and the motion along the
+        #   line for its free fall
         self.calcGravityDropScale(observations)
+        free_fall = self.gravityFreeFall()
 
         ###########################################
 
@@ -4517,8 +4836,7 @@ class Trajectory(object):
                     t_rel = t - t0
 
                     # Apply the gravity drop
-                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravityDropFactor(t_rel), \
-                        self.v0z)
+                    rad_cpa_grav = self.gravityDropPoint(rad_cpa, t_rel, radiant_eci, r0, self.v0z, free_fall)
 
                     # Re-do the vector points of closest approach. This is really important!
                     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
@@ -4664,8 +4982,10 @@ class Trajectory(object):
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
         self.calcV0z(eci0, radiant_eci)
 
-        # Scale of the drop of a decelerating meteor, from the lengths of the points
+        # Scale of the drop of a decelerating meteor, from the lengths of the points, and the motion along the
+        #   line for its free fall
         self.calcGravityDropScale(observations)
+        free_fall = self.gravityFreeFall()
 
         ####
 
@@ -4699,8 +5019,7 @@ class Trajectory(object):
                     t_rel = t - t0
 
                     # Apply the gravity drop
-                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravityDropFactor(t_rel), \
-                        self.v0z)
+                    rad_cpa_grav = self.gravityDropPoint(rad_cpa, t_rel, radiant_eci, r0, self.v0z, free_fall)
 
                     # Re-do find closest points after gravity drop. This is really important!
                     # The algorithm doesn't care which trajectory point is used to construct the line for the fit,
@@ -7055,11 +7374,16 @@ class Trajectory(object):
         ### LEAST SQUARES SOLUTION ###
         ######################################################################################################
 
+        # Motion along the line for the free fall of the meteor from the line in the pass with the drop, which
+        #   holds the deceleration, so the drop is not scaled with it as well (see freeFallDrop)
+        free_fall = self.gravityFreeFall() if (_rerun_timing and self.gravity_correction) else None
+        drop_scale_fit = self.gravity_drop_scale if (free_fall is None) else None
+
         # Calculate the initial sum and angles deviating from the radiant line
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
              self.best_conv_inter.radiant_eci, weights=weights, \
              gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, \
-             v0z=self.v0z, r0=self.gravity_r0, drop_scale=self.gravity_drop_scale
+             v0z=self.v0z, r0=self.gravity_r0, drop_scale=drop_scale_fit, free_fall=free_fall
              )
 
         if self.verbose:
@@ -7072,7 +7396,7 @@ class Trajectory(object):
         # Perform the minimization of angle deviations. The gravity will only be compensated for in the second
         #   pass, which has the vertical velocity from the first
         minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), \
-            self.gravity_factor, self.v0z, self.gravity_r0, self.gravity_drop_scale)
+            self.gravity_factor, self.v0z, self.gravity_r0, drop_scale_fit, free_fall)
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
             method=nelderMeadLine)
 
@@ -7123,12 +7447,17 @@ class Trajectory(object):
             and minimize_solution.success:
 
             drop_scale = self.gravity_drop_scale
+            drop_velocity = getattr(self, 'gravity_drop_velocity', None)
             self.calcGravityDropScale(self.observations, minimize_solution.x[:3], \
                 vectNorm(minimize_solution.x[3:]))
 
             if (self.gravity_drop_scale is not None) or (drop_scale is not None):
 
-                rescaled_args = minimize_args[:6] + (self.gravity_drop_scale,) + minimize_args[7:]
+                # The free fall with the velocity of drag alone, or the scaled drop along the vertical
+                rescaled_free_fall = self.gravityFreeFall()
+                rescaled_drop = (None, rescaled_free_fall) if (rescaled_free_fall is not None) \
+                    else (self.gravity_drop_scale, None)
+                rescaled_args = minimize_args[:6] + rescaled_drop + minimize_args[8:]
                 rescaled_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
                     args=rescaled_args, method=nelderMeadLine)
 
@@ -7148,6 +7477,7 @@ class Trajectory(object):
                     minimize_solution = rescaled_solution
                 else:
                     self.gravity_drop_scale = drop_scale
+                    self.gravity_drop_velocity = drop_velocity
 
         unbounded_solution = minimize_solution
 
@@ -7176,9 +7506,11 @@ class Trajectory(object):
 
             print('BOUNDS:', bounds)
             print('p0:', p0)
+            free_fall = self.gravityFreeFall() if (_rerun_timing and self.gravity_correction) else None
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
                 weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z, \
-                self.gravity_r0, self.gravity_drop_scale), bounds=bounds, method='SLSQP')
+                self.gravity_r0, (self.gravity_drop_scale if (free_fall is None) else None), free_fall), \
+                bounds=bounds, method='SLSQP')
 
             # Keep the unbounded solution if it converged and the bounded one did not converge or is worse
             if unbounded_solution.success and ((not minimize_solution.success) or \
@@ -7349,6 +7681,7 @@ class Trajectory(object):
                 self.calcGravityDropScale(self.observations)
             else:
                 self.gravity_drop_scale = None
+                self.gravity_drop_velocity = None
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
         ######################################################################################################

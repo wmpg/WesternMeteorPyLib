@@ -59,13 +59,17 @@ def _perpendicularErrors(traj, meteor):
         [ndarray] Distances across the path, of all points of all stations (m).
     """
 
+    # The solver takes its first frame as the reference time, which comes after the beginning of the visible
+    #   part by the phase of the frames
+    t_off = (traj.jdt_ref - JDT_REF)*86400.0
+
     errors = []
     for obs in traj.observations:
 
-        diff = np.array(obs.model_eci) - meteor.eciAtTime(obs.time_data)
+        diff = np.array(obs.model_eci) - meteor.eciAtTime(obs.time_data + t_off)
 
         # Remove the component along the path, which is the timing and not the shape
-        direction = np.array([meteor.radiantAtTime(t) for t in obs.time_data])
+        direction = np.array([meteor.radiantAtTime(t + t_off) for t in obs.time_data])
         diff -= np.sum(diff*direction, axis=1)[:, None]*direction
 
         errors.append(np.linalg.norm(diff, axis=1))
@@ -112,8 +116,8 @@ def _solveFireball(gravity_decel, jacchia_fit=None):
     Return:
         (traj, radiant_error, perp_errors):
             - traj: [Trajectory object] Solved trajectory.
-            - radiant_error: [float] Angle between the solved radiant and the direction of motion at the first
-                point (arcsec).
+            - radiant_error: [float] Angle between the solved radiant and the direction of motion at the
+                solver's first frame (arcsec).
             - perp_errors: [ndarray] Distances of the model points from the truth across the path (m).
     """
 
@@ -144,7 +148,8 @@ def _solveFireball(gravity_decel, jacchia_fit=None):
         finally:
             traj_class.fitJacchiaLag = original
 
-    radiant_error = 3600*np.degrees(np.linalg.norm(traj.radiant_eci_mini - meteor.radiantAtTime(0.0)))
+    t_off = (traj.jdt_ref - JDT_REF)*86400.0
+    radiant_error = 3600*np.degrees(np.linalg.norm(traj.radiant_eci_mini - meteor.radiantAtTime(t_off)))
 
     return traj, radiant_error, _perpendicularErrors(traj, meteor)
 
@@ -513,8 +518,8 @@ def testTheSpeedGravityAddsAlongThePathDoesNotScaleTheDrop():
         for gravity_decel in (False, True):
 
             traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
-                elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
-                filter_picks=False, calc_orbit=False)
+                elevation=30.0, gravity_drop=True, free_fall=True, estimate_timing_vel=False, \
+                gravity_correction=True, filter_picks=False, calc_orbit=False)
 
             # Solve the observations again, ignoring the picks before the given time
             solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \

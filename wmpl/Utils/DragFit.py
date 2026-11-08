@@ -56,6 +56,7 @@ import numpy as np
 import scipy.optimize
 
 from wmpl.Trajectory.Trajectory import applyGravityDrop
+from wmpl.Trajectory.Trajectory import freeFallDrop
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.Physics import ballisticCoeffMass
@@ -613,13 +614,24 @@ class DragFit(object):
         # Factor of the drop at each time, scaled for a decelerating meteor as in the solver
         drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: gravity_factor)
 
+        # Or the free fall of the meteor from the line, as in the solver. Trajectories solved before it was
+        #   added drop the points along their vertical
+        free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
+        radiant_eci = np.ascontiguousarray(self.radiant_eci, dtype=np.float64)
+
         # Compute the drop vector at every grid point with a defined time. The drop is zero above the first
         #   point, where the positions are on the line
         line_eci = self._lineEci(self.len_grid)
         drop_grid = np.zeros_like(line_eci)
         for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
             if np.isfinite(t) and (t > t0):
-                drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, drop_factor(t - t0), v0z)
+
+                if free_fall is not None:
+                    dropped = freeFallDrop(eci, t - t0, radiant_eci, *free_fall, gravity_factor)
+                else:
+                    dropped = applyGravityDrop(eci, t - t0, r0, drop_factor(t - t0), v0z)
+
+                drop_grid[i] = eci - dropped
 
         # Below the last point, continue the path along the direction bent by gravity
         valid = np.where(np.isfinite(self.time_grid))[0]
