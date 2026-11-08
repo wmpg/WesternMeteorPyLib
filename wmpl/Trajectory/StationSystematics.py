@@ -36,7 +36,8 @@ def crossTrackResiduals(state_vect, radiant_eci, stat_eci, meas_eci, drop=None):
 
     Keyword arguments:
         drop: [function] Takes a point on the line and the index of the line of sight, and returns the point
-            dropped by gravity as in the trajectory solver. None by default, for a straight line.
+            dropped by gravity, and moved by drag against the rotating air, as in the trajectory solver. None
+            by default, for a straight line.
 
     Return:
         (residuals, along):
@@ -87,7 +88,9 @@ def stationSystematicErrors(traj):
     if len(set((obs.lat, obs.lon, obs.ele) for obs in used)) < 3:
         return {}
 
-    t0 = min(obs.time_data[0] for obs in used)
+    # Times from the first point of all observations, also of the ignored stations, as in the line-of-sight
+    #   fit
+    t0 = min(obs.time_data[0] for obs in traj.observations)
     errors = {}
 
     for obs in used:
@@ -103,8 +106,16 @@ def stationSystematicErrors(traj):
                 # The drop of a decelerating meteor is scaled in solutions which have the scale
                 drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: traj.gravity_factor)
 
-                return applyGravityDrop(point, obs.time_data[i] - t0, \
+                dropped = applyGravityDrop(point, obs.time_data[i] - t0, \
                     vectMag(point) if (r0 is None) else r0, drop_factor(obs.time_data[i] - t0), traj.v0z)
+
+                # The points of a decelerating meteor are also moved by drag against the rotating air in
+                #   solutions which have the displacement
+                shift_at = getattr(traj, 'airRotationShiftAt', None)
+                if shift_at is not None:
+                    dropped = dropped + shift_at(obs.time_data[i] - t0, traj.radiant_eci_mini)
+
+                return dropped
 
         residuals, along = crossTrackResiduals(traj.state_vect_mini, traj.radiant_eci_mini, \
             obs.stat_eci_los, obs.meas_eci_los, drop=drop)
