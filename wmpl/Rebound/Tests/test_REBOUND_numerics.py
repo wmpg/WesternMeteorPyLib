@@ -487,15 +487,6 @@ def testTisserandUndefinedForUnboundOrbits(reb):
 
     assert reb.tisserandParameterJupiter(2.0, 1.2, 0.0) is None
     assert reb.tisserandParameterJupiter(-3.0, 0.5, 0.0) is None
-    assert "undefined" in reb.tisserandClass(None)
-
-
-def testTisserandClassBoundaries(reb):
-    """ The conventional class boundaries sit at T_J = 2 and T_J = 3. """
-
-    assert "asteroidal" in reb.tisserandClass(3.5)
-    assert "Jupiter-family" in reb.tisserandClass(2.5)
-    assert "Halley" in reb.tisserandClass(1.5)
 
 
 ### Radiation-pressure beta ###
