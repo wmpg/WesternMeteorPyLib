@@ -54,7 +54,7 @@ def testAdditionalFragmentColumns(tmp_path):
     assert len(meteors) == 1
     assert len(meteors[0].time_data) == 5
     assert np.isclose(np.degrees(min(meteors[0].elev_data)), 29.0 - 0.3*6)
-    assert set(meteors[0].mag_data) == {10.0}
+    assert np.all(np.isnan(meteors[0].mag_data))
 
 
 

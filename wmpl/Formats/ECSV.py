@@ -57,6 +57,31 @@ def ecsvFragments(ecsv_paths):
 
 
 
+def parseECSVDatetime(date):
+    """ Parse a time of an ECSV file, in ISO format with or without fractional seconds and a final Z.
+
+    Arguments:
+        date: [str] Time, e.g. 2024-01-01T00:00:10.040000.
+
+    Return:
+        [datetime] The time.
+    """
+
+    date = date.strip()
+    if date.endswith('Z'):
+        date = date[:-1]
+
+    for time_format in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"]:
+        try:
+            return datetime.datetime.strptime(date, time_format)
+
+        except ValueError:
+            continue
+
+    raise ValueError("The time {:s} of the ECSV file is not in ISO format".format(date))
+
+
+
 def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
     """ Load meteor observations from ECSV files. 
     
@@ -94,27 +119,37 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
 
             for line in f:
                 if line.startswith("#"):
-                    line = line.replace('\n', '').replace('\r', '').replace('{', '').replace('}', '')
-                    line = line.split(':')
-                    if len(line) > 1:
 
-                        if "obs_latitude" in line[0]:
-                            station_lat = float(line[1])
+                    # Take the key and the value of a metadata entry, e.g. "# - {obs_latitude: 45.0}", split
+                    #   at the first colon, so that a value with colons (e.g. a path) is kept whole
+                    entry = line.lstrip('#').strip()
+                    if entry.startswith('-'):
+                        entry = entry[1:].strip()
 
-                        if "obs_longitude" in line[0]:
-                            station_lon = float(line[1])
+                    entry = entry.strip('{}').strip()
+                    if ':' not in entry:
+                        continue
 
-                        if "obs_elevation" in line[0]:
-                            station_ele = float(line[1])
+                    key, value = [part.strip() for part in entry.split(':', 1)]
+                    text = value.strip("'").strip('"')
 
-                        if 'image_file' in line[0]:
-                            image_file = line[1].strip().strip("'")
+                    if key == "obs_latitude":
+                        station_lat = float(value)
 
-                        if "camera_id" in line[0]:
-                            station_id = line[1].strip().strip("'")
+                    if key == "obs_longitude":
+                        station_lon = float(value)
 
-                        if (station_id is None) and ("dfn_camera_codename" in line[0]):
-                            station_id = line[1].strip().strip("'")
+                    if key == "obs_elevation":
+                        station_ele = float(value)
+
+                    if key == 'image_file':
+                        image_file = text
+
+                    if key == "camera_id":
+                        station_id = text
+
+                    if (station_id is None) and (key == "dfn_camera_codename"):
+                        station_id = text
                             
 
             if (station_lat is None) or (station_lon is None) or (station_ele is None) \
@@ -211,25 +246,23 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
                             + "(integrated pixel value 1), they have no magnitude").format(station_id, \
                             int(np.sum(no_photometry)), len(mag_data)))
 
+            # Without a magnitude column, the points have no magnitude
             else:
-                mag_data = np.zeros_like(azim_data) + 10.0
+                mag_data = np.zeros_like(azim_data) + np.nan
 
 
-            # Convert time to JD
-            jd_data = []
-            for date in dt_data:
-                dt = datetime.datetime.strptime(date, "%Y-%m-%dT%H:%M:%S.%f")
-                jd_data.append(datetime2JD(dt))
-
-
-            jd_data = np.array(jd_data)
+            # Parse the times
+            dt_list = [parseECSVDatetime(date) for date in dt_data]
 
             # Take the first time as reference time
-            jdt_ref = jd_data[0]
+            jdt_ref = datetime2JD(dt_list[0])
 
+            # Compute relative time from the differences of the times, which keeps their microseconds, unlike
+            #   the differences of their Julian dates
+            time_data = np.array([(dt - dt_list[0]).total_seconds() for dt in dt_list])
 
-            # Compute relative time
-            time_data = (jd_data - jdt_ref)*86400
+            # Compute the Julian date of every point
+            jd_data = jdt_ref + time_data/86400.0
 
 
             # Compute RA/Dec
@@ -282,6 +315,11 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
 
 
     if no_prepare:
+
+        # Take the earliest reference time of the loaded observations
+        if meteor_list:
+            jdt_ref = min([meteor.jdt_ref for meteor in meteor_list])
+
         return jdt_ref, meteor_list
 
     else:
