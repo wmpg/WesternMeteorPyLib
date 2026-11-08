@@ -6902,6 +6902,18 @@ class Trajectory(object):
                 rescaled_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
                     args=rescaled_args, method="Nelder-Mead")
 
+                # Continue it from the beginning of the meteor on the line if it ran out of function
+                #   evaluations, as above
+                for _ in range(LOS_CONTINUE_RUNS):
+
+                    if rescaled_solution.success:
+                        break
+
+                    restart = np.r_[moveStateVector(rescaled_solution.x[:3], rescaled_solution.x[3:], \
+                        self.observations), vectNorm(rescaled_solution.x[3:])]
+                    rescaled_solution = scipy.optimize.minimize(minimizeAngleCost, restart, \
+                        args=rescaled_args, method="Nelder-Mead")
+
                 if rescaled_solution.success:
                     minimize_solution = rescaled_solution
                 else:
