@@ -3,8 +3,8 @@
 The loop over the points of angleSumMeasurements2Line is compiled with numba. It must give the same sum to the
 last bit as the loop in Python which it replaces, so that the solutions do not change. The tests compare the
 cost with that loop, copied here, on lines around a meteor seen from three stations: without and with the
-gravity drop, with a fixed and a free distance of the beginning, a scaled drop, a vertical velocity, weights
-and ignored points.
+gravity drop, with a fixed and a free distance of the beginning, a scaled drop, a vertical velocity, the
+displacement by drag against the rotating air, weights and ignored points.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_AngleSumPoints.py -v
@@ -18,13 +18,14 @@ import matplotlib
 matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import angleSumMeasurements2Line, applyGravityDrop, moveStateVector
+from wmpl.Trajectory.Trajectory import interpAirRotationShift
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.Math import findClosestPoints, vectNorm, vectMag
 
 
 
 def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity=False, gravity_factor=1.0, \
-    v0z=None, r0=None, drop_scale=None):
+    v0z=None, r0=None, drop_scale=None, air_shift=None):
     """ The cost of angleSumMeasurements2Line with the loop over the points in Python, as it was before the
         loop was compiled.
     """
@@ -45,8 +46,12 @@ def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity
         if gravity and (drop_scale is not None):
             point_factors = gravity_factor*np.interp(obs.time_data - t0, *drop_scale)
 
-        for t, meas_eci, stat_eci, ignore, point_factor in zip(obs.time_data, obs.meas_eci_los, \
-            obs.stat_eci_los, obs.ignore_list, point_factors):
+        point_shifts = np.zeros((len(obs.time_data), 3))
+        if gravity and (air_shift is not None):
+            point_shifts = interpAirRotationShift(air_shift, obs.time_data - t0, radiant_eci)
+
+        for t, meas_eci, stat_eci, ignore, point_factor, point_shift in zip(obs.time_data, obs.meas_eci_los, \
+            obs.stat_eci_los, obs.ignore_list, point_factors, point_shifts):
 
             if ignore:
                 continue
@@ -68,6 +73,7 @@ def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity
                     r0_point = 1.0
 
                 rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, point_factor, v0z)
+                rad_cpa_grav = rad_cpa_grav + point_shift
                 _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
             station_ray = vectNorm(rad_cpa - stat_eci)
@@ -105,12 +111,16 @@ def _cases(observations, begin):
     t_end = max(np.max(obs.time_data) for obs in observations) - min(obs.time_data[0] for obs in observations)
     drop_scale = (np.linspace(0, t_end, 20), np.linspace(1.0, 0.7, 20))
 
+    # A displacement by drag against the rotating air of up to about 200 m
+    air_shift = (np.linspace(0, t_end, 20), np.outer(np.linspace(0, 1, 20)**2, [150.0, -100.0, 60.0]))
+
     return [
         dict(),
         dict(gravity=True),
         dict(gravity=True, r0=r0, v0z=0.0, drop_scale=drop_scale),
         dict(gravity=True, r0=r0, v0z=-7500.0, drop_scale=drop_scale, gravity_factor=0.8),
         dict(gravity=True, r0=r0, weights=np.array([1.0, 2.5, 0.5])),
+        dict(gravity=True, r0=r0, v0z=0.0, drop_scale=drop_scale, air_shift=air_shift),
     ]
 
 

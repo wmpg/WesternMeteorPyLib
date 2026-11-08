@@ -7,6 +7,7 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 
 from wmpl.Trajectory.Trajectory import Trajectory, applyGravityDrop
+from wmpl.Trajectory.Trajectory import EARTH_ROTATION_RATE
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import vectMag
 from wmpl.Utils.TrajConversions import altAz2RADec, cartesian2Geo, eci2RaDec, geo2Cartesian, \
@@ -160,10 +161,12 @@ GM_EARTH = 3.986004418e14
 
 
 class BentDragMeteor(object):
-    def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0):
+    def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0, \
+        air_rotation=False):
         """ Integrate the motion of a meteor decelerated by drag and bent by gravity in 3D, in ECI coordinates.
-            Drag acts against the ECI velocity and gravity is that of a point mass, so the path only bends by
-            gravity. The ballistic coefficient grows linearly with time during the visible part.
+            Drag acts against the ECI velocity, or against the velocity relative to the air which rotates with
+            the Earth, and gravity is that of a point mass. The ballistic coefficient grows linearly with time
+            during the visible part.
 
         Arguments:
             v_init: [float] Velocity at the top of the simulation (m/s).
@@ -178,9 +181,13 @@ class BentDragMeteor(object):
         Keyword arguments:
             dt: [float] Integration step (s). 0.001 s by default.
             duration: [float] Duration of the integration (s). 20 s by default.
+            air_rotation: [bool] Take the drag against the velocity relative to the air which rotates with
+                the Earth. False by default, when drag acts against the ECI velocity and the path only bends
+                by gravity.
         """
 
         self.t_vis_beg = t_vis_beg
+        self.air_rotation = air_rotation
 
         # Compute the top point and the radiant direction
         lat, lon = np.radians(TOP_LAT), np.radians(TOP_LON)
@@ -208,7 +215,12 @@ class BentDragMeteor(object):
             r = np.sqrt(pos @ pos)
             rho = np.exp(np.interp(r, r_table, log_rho_table))
 
-            return -k*rho*np.sqrt(vel @ vel)*vel - GM_EARTH*pos/r**3
+            # Take the velocity relative to the air
+            vel_air = vel
+            if air_rotation:
+                vel_air = vel - np.cross(np.array([0.0, 0.0, EARTH_ROTATION_RATE]), pos)
+
+            return -k*rho*np.sqrt(vel_air @ vel_air)*vel_air - GM_EARTH*pos/r**3
 
 
         # Integrate with the 4th order Runge-Kutta method
@@ -332,7 +344,8 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
         noise: [float] Noise of the azimuth and elevation (arcsec). 30 by default.
         fps: [float] Frame rate of the cameras. 25 by default.
         seed: [int] Seed of the noise. 1 by default.
-        kwargs: Passed to the Trajectory object.
+        kwargs: Passed to the Trajectory object. The drag against the rotating air (air_rotation) is
+            corrected only if the meteor was integrated with it, unless it is given.
 
     Return:
         traj: [Trajectory object] Trajectory object with the observations, not yet solved.
@@ -342,6 +355,10 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
 
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
         show_plots=False, save_results=False, verbose=False)
+
+    # Move the line by drag against the rotating air only if the meteor was integrated with it
+    traj_kwargs['air_rotation'] = getattr(meteor, 'air_rotation', False)
+
     traj_kwargs.update(kwargs)
     traj = Trajectory(JDT_REF, **traj_kwargs)
 

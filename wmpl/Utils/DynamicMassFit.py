@@ -215,6 +215,11 @@ def pointOnTrajectory(traj, length, t):
         # Keep only the component perpendicular to the fitted line
         P = P + drop - np.dot(drop, traj.radiant_eci_mini)*traj.radiant_eci_mini
 
+        # Move the point by drag against the rotating air, as in the solver
+        shift_at = getattr(traj, 'airRotationShiftAt', None)
+        if shift_at is not None:
+            P = P + shift_at(t - t0, traj.radiant_eci_mini)
+
     return P
 
 

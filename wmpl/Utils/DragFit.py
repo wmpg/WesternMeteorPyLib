@@ -613,6 +613,9 @@ class DragFit(object):
         # Factor of the drop at each time, scaled for a decelerating meteor as in the solver
         drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: gravity_factor)
 
+        # Displacement of the points by drag against the rotating air, as in the solver
+        shift_at = getattr(traj, 'airRotationShiftAt', None)
+
         # Compute the drop vector at every grid point with a defined time. The drop is zero above the first
         #   point, where the positions are on the line
         line_eci = self._lineEci(self.len_grid)
@@ -620,6 +623,8 @@ class DragFit(object):
         for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
             if np.isfinite(t) and (t > t0):
                 drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, drop_factor(t - t0), v0z)
+                if shift_at is not None:
+                    drop_grid[i] -= shift_at(t - t0, self.radiant_eci)
 
         # Below the last point, continue the path along the direction bent by gravity
         valid = np.where(np.isfinite(self.time_grid))[0]

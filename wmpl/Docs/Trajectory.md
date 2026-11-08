@@ -11,6 +11,7 @@ one and what is inside it.
 - [The trajectory pickle](#the-trajectory-pickle)
 - [Loading a pickle in Python](#loading-a-pickle-in-python)
 - [The gravity drop](#the-gravity-drop)
+- [Drag against the rotating air](#drag-against-the-rotating-air)
 
 ---
 
@@ -117,3 +118,55 @@ arcsec, and the largest error of the positions across the path from 4-71 m to 0.
   a constant deceleration, which then stands for a deceleration concentrated at the end. On such a fireball
   (3.4 s, 57 points, 400 m of scatter), the drop differs from that of the drag fit by up to 2.7 m out of 53 m.
 - As in the drag fit, the velocity is that of the solver, not relative to the air.
+
+## Drag against the rotating air
+
+The air rotates with the Earth, eastwards at up to 465 m/s at the equator and about 330 m/s at 45 deg, in the
+ECI frame the solver works in. Drag acts against the velocity of the meteor relative to the air, not against
+its ECI velocity, so it pulls the velocity of a decelerating meteor across its path towards the velocity of
+the air. In ECI coordinates a decelerating meteor then does not move along a straight line, even without
+gravity: the fireballs below, which slow down to 4-10 km/s, are pulled by 80-600 m. A meteor at a constant
+velocity is not pulled.
+
+With the gravity correction on, the solver also moves the points of its line by this displacement. The
+velocity across the line, `p`, follows `dp/dt = (a/w)*(u_perp - p)`, where `a` is the deceleration by drag,
+`w` the speed relative to the air and `u_perp` the velocity of the air across the line. It is 0 at the first
+point, so the line stays the direction of motion at the first point in ECI coordinates, which the orbit is
+computed from. Like the drop, it depends only on the velocity, which comes from the same fit to the lengths
+of the points, without a model of the deceleration. These are the lengths on the line of the pass with the
+drop, which do not hold the speed gravity adds along the path, so a velocity changed by gravity alone does not
+move the points. The velocity of the air is taken at the points along the line, which changes the
+displacement by 0.9-13 m in the fireballs checked.
+
+In the pass with the drop, after fitting the line with the scaled drop, the solver computes the displacement
+from the lengths of the points on that line and fits the line again with it. The lengths on a line depend on
+the displacement, as moving the line across also moves the points of the lines of sight closest to it along
+the line, so this is repeated until the displacement changes by less than 0.1 m, at most 3 times. On the
+fireballs below, the displacement from the first fit only gives radiant errors of up to 15 arcsec and errors
+of the positions of up to 9.4 m, against 7.4 arcsec and 3.8 m. The median radiant error stays at 2.4 arcsec,
+and the median error of the positions falls from 0.9 to 0.3 m.
+
+- On 20 fireballs integrated in 3D with gravity and drag against the rotating air (5 fireballs of 14-25 km/s
+  slowing down to 4-10 km/s in 3.3-9 s, each coming from 4 azimuths), the radiant error of a noise-free
+  solution falls from 110-735 arcsec (median 360) to 0.5-7.4 arcsec (median 2.4), and the largest error of
+  the positions across the path from 56-390 m to 0.1-3.8 m. The same fireballs integrated with drag against
+  the ECI velocity are solved without the displacement to 0.5-3.5 arcsec and 0.05-1.2 m. The displacement
+  matches the deviation of the integrated paths to 0.02-0.26 m out of 100-600 m, and the rest comes from the
+  velocity fit and the drop.
+- With 10 and 30 arcsec of noise (4 of the fireballs, 5 seeds each), the radiant errors are the same as those
+  of the fireballs integrated without the rotating air and solved without the displacement, with medians of
+  5-10 and 15-38 arcsec, against 170-540 and 220-570 arcsec without the displacement.
+- For Winchcombe (8.2 s, 13.8 to 3.6 km/s), the points move by up to 237 m, the radiant by 154 arcsec and the
+  end height up by 147 m, and the RMS of the angular residuals falls from 153 to 75 arcsec.
+
+- `Trajectory(..., air_rotation=False)` keeps the dropped line. Trajectories pickled before the option was
+  added keep it too, and so do solutions without the gravity correction.
+- `traj.air_rotation_shift` holds the times from the first point and the displacements at those times, and
+  `traj.airRotationShiftAt(t, radiant_eci)` gives the displacement at the time `t` from the first point,
+  across the given line. The drag fit and the dynamic mass fit apply the same displacement as the solver.
+- With the timing offsets estimated, the displacement also moves the lengths, so the offsets and the initial
+  velocity can change too, when the stations see different parts of a fireball.
+- A decelerating meteor needs two more fits of the line in each pass with the drop, and a better fit can
+  reject more picks and solve the trajectory again: Winchcombe takes 4.2 s instead of 1.4 s.
+- Winds, of tens of m/s at the heights of meteors, are not included. They would add to the velocity of the
+  air.
