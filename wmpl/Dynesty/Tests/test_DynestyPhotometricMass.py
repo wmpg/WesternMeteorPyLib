@@ -1,5 +1,5 @@
-""" Tests the photometric mass that ObservationData() estimates from the luminous efficiency lines of the prior
-file.
+""" Tests the photometric mass that ObservationData() estimates from the luminous efficiency lines of the
+    prior file.
 
 With a luminous efficiency model, the mass is computed by calcMass() with the code of the model at the average
 speed, iterated to the mass it gives. The tests run ObservationData() on the example trajectory of the
