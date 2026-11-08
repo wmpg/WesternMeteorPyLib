@@ -71,8 +71,8 @@ def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity
                 _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
             station_ray = vectNorm(rad_cpa - stat_eci)
-            cosangle = np.dot(meas_eci, station_ray)
-            angle_sum += weights[i]*np.arccos(np.clip(cosangle, -1, 1))
+            chord = vectMag(station_ray - meas_eci)
+            angle_sum += weights[i]*2*np.arcsin(min(chord/2, 1.0))
             weights_sum += weights[i]
 
     return angle_sum/weights_sum
@@ -164,13 +164,11 @@ def testIgnoredPointsAndStationsAreLeftOut():
 
 
 def testCosinesOutOfRangeAreClippedAsInPython():
-    """ Cosines above 1 and below -1 are clipped as np.clip does, and a cosine which is not a number stays
-        so.
-    """
+    """ Half chords above 1 are limited to 1 as in Python, and a chord which is not a number stays so. """
 
     observations, begin, radiant_eci = _observations()
 
-    # Lines of sight which are not unit vectors give cosines out of the range
+    # Lines of sight which are not unit vectors give half chords above 1
     observations[0].meas_eci_los = 1.5*observations[0].meas_eci_los
     observations[1].meas_eci_los = -1.5*observations[1].meas_eci_los
 
