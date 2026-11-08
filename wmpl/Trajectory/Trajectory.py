@@ -3392,7 +3392,7 @@ class Trajectory(object):
         _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
 
         # Time of the beginning of the meteor, from which the drop of a decelerating meteor is scaled
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
 
         # Go though observations from all stations
         for obs in observations:
@@ -4182,7 +4182,7 @@ class Trajectory(object):
         """
 
         # Same reference time and beginning point as the line-of-sight fit
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
         r0 = self.gravity_r0
         if r0 is None:
             _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
@@ -4256,7 +4256,7 @@ class Trajectory(object):
         # Or take the lengths calcVelocity computed, with the times from the beginning of the meteor
         else:
 
-            t0 = min([obs.time_data[0] for obs in observations])
+            t0 = dropTimeOrigin(observations)
             used = [obs for obs in observations if (not obs.ignore_station) and np.any(obs.ignore_list == 0) \
                 and (getattr(obs, 'state_vect_dist', None) is not None)]
             if not used:
