@@ -1063,10 +1063,9 @@ def equivalentSphereRadius(mass_kg, density_kgm3):
 
         s = (3*m/(4*pi*rho))^(1/3)
 
-    which is the size radiationPressureBeta needs. Meteor work gives a mass (photometric, or from a
-    MetSim fit) and an assumed bulk density rather than a size, so the conversion belongs here
-    rather than in the user's head. Beta goes as m^(-1/3), so even a factor of 2 in the assumed
-    mass moves it by only 26%.
+    which is the size radiationPressureBeta needs, as meteor work gives a mass (photometric, or from
+    a MetSim fit) and an assumed bulk density. Beta goes as m^(-1/3), so a factor of 2 in the mass
+    moves it by 26%.
 
     Arguments:
         mass_kg: [float] Meteoroid mass in kg.
@@ -2594,7 +2593,8 @@ if __name__ == "__main__":
 
     size_group.add_argument("--mass", type=float, nargs="?", const=0.0, default=None,
                         help="Object mass in kg, used with --density to compute beta. Given without "
-                        "a value, the photometric mass of the trajectory light curve is used.")
+                        "a value, the photometric mass of the trajectory light curve is used, which is "
+                        "only as good as the trajectory's magnitudes.")
 
     parser.add_argument("--density", type=float, default=3000.0,
                         help="Object bulk density in kg/m^3, used with --radius or --mass to compute "
@@ -2681,9 +2681,8 @@ if __name__ == "__main__":
         if args.mass < 0:
             parser.error("--mass must be positive, got {:g} kg.".format(args.mass))
 
-        # --mass without a value: take the photometric mass off the light curve, with the same
-        # zero-magnitude power as the trajectory summaries. The import is local because that module
-        # pulls in the whole plotting stack.
+        # Take the photometric mass of the light curve for --mass without a value, imported here as
+        #   AggregateAndPlot pulls in the whole plotting stack
         if args.mass == 0:
             from wmpl.Trajectory.AggregateAndPlot import computeMass, P_0M
 
