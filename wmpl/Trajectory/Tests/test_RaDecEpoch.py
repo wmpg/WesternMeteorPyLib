@@ -62,7 +62,7 @@ def _radecOfDate(points, jds, lat, lon, ele):
     return np.array(ra), np.array(dec)
 
 
-def _solve(per_point, clock_offsets=None, estimate_timing_vel=False):
+def _solve(per_point, clock_offsets=None, estimate_timing_vel=False, time_shift=0.0):
     """ Solve the trajectory from noise-free R.A./Dec. computed at each point's own time.
 
     Arguments:
@@ -72,12 +72,14 @@ def _solve(per_point, clock_offsets=None, estimate_timing_vel=False):
         clock_offsets: [dict] Station ID -> seconds the station's clock is ahead. Its R.A./Dec. are
             computed at the time its clock shows, as an RMS station's would be.
         estimate_timing_vel: [bool] Passed to Trajectory.
+        time_shift: [float] Seconds from jdt_ref to the first point, the same for all stations. 0 by default.
 
     Return:
         (traj, radiant_eci): solved trajectory and the true radiant unit vector.
     """
 
     points, times, radiant_eci = _trajectory()
+    times = times + time_shift
     clock_offsets = clock_offsets or {}
 
     traj = Trajectory(JDT_REF, meastype=1, max_toffset=1.0, estimate_timing_vel=estimate_timing_vel,
@@ -209,6 +211,18 @@ def test_observations_pickled_before_radec_jd_still_infill():
 
     assert new.observations[0].radec_jd is None
     assert np.allclose(new.observations[0].azim_data, obs.azim_data, rtol=0, atol=1e-12)
+
+
+def testPerPointRaDecInvertsWhenTheFirstPointIsNotAtTheReferenceTime():
+    """ The solver moves jdt_ref to the first point and converts the R.A./Dec. again in the next pass. Those
+        computed at each point's own time do not depend on jdt_ref, so they must be kept as they are:
+        converted again at jdt_ref, they leave 22 m of residual.
+    """
+
+    traj, radiant_eci = _solve(per_point=True, estimate_timing_vel=True, time_shift=0.7)
+
+    assert _worstResidual(traj) < 0.05
+    assert _radiantError(traj, radiant_eci) < 0.05
 
 
 if __name__ == "__main__":
