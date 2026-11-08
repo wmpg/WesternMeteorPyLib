@@ -837,6 +837,12 @@ GRAVITY_FREE_FALL_GL_WEIGHTS = np.array([5.0/9, 8.0/9, 5.0/9])
 #   after its last time, at the velocity there (s), so every point of the meteor falls within it
 GRAVITY_FREE_FALL_EXTEND = 1000.0
 
+# Second zonal harmonic of the gravity of the Earth, its oblateness, and the equatorial radius to which it
+#   refers (m), for the free fall (see freeFallDrop). WGS84: J2 = -sqrt(5) times the normalized C20 of
+#   -0.484166774985e-3 (NIMA 2000, Table 5.3)
+GRAVITY_FREE_FALL_J2 = 1.082626683e-3
+GRAVITY_FREE_FALL_RE = 6378137.0
+
 
 
 def segmentedVelocity(time_rel, length, time_eval, max_segments=GRAVITY_DROP_VEL_SEGMENTS, \
@@ -3106,8 +3112,8 @@ def freeFallTable(time_rel, vel):
 
 @njit
 def freeFallDrop(eci_coord, t, radiant_eci, time_tab, vel_tab, len_tab, mom_tab, gravity_factor):
-    """ Drop a point of the fitted line by the free fall of the meteor from the line under the gravity of a
-        point mass, in place of the drop along the vertical of the point of applyGravityDrop.
+    """ Drop a point of the fitted line by the free fall of the meteor from the line under the gravity of the
+        Earth, in place of the drop along the vertical of the point of applyGravityDrop.
 
     The meteor moves along the line as in the table of freeFallTable, at the velocity v of drag alone.
     Gravity adds to its velocity, and drag slows down the added velocity at the same rate as the rest, so the
@@ -3116,15 +3122,21 @@ def freeFallDrop(eci_coord, t, radiant_eci, time_tab, vel_tab, len_tab, mom_tab,
         int_0^t g(b(q)) b(q)/v(q) dq,    b(q) = l(t) - l(q),
 
     where g(b) is the gravity of the Earth at the distance b back along the line from the point, and l the
-    length travelled. At a constant velocity it is the free fall from the line, int_0^t (t - q) g dq, and in a
-    uniform field it is g times the drop of gravityDropScale. Unlike g*t^2/2 along the vertical of the point,
-    it follows the turn of the vertical along the path with the curvature of the Earth, and the change of g
-    with the height. Its part along the line is the velocity gravity adds along the path.
+    length travelled. Gravity is that of a point mass with the oblateness of the Earth (GRAVITY_FREE_FALL_J2),
+    whose axis is the z axis of the ECI frame of date. At a constant velocity it is the free fall from the
+    line, int_0^t (t - q) g dq, and in a uniform field it is g times the drop of gravityDropScale. Unlike
+    g*t^2/2 along the vertical of the point, it follows the turn of the vertical along the path with the
+    curvature of the Earth, and the change of g with the height. Its part along the line is the velocity
+    gravity adds along the path.
 
     Gravity is interpolated by a cubic polynomial in b, through four equally spaced points from the point back
     to the beginning, so the integral is the sum of its coefficients times the integrals of b^(n + 1)/v,
     which follow from the moments of the table (see freeFallMoments). The velocity enters only through the
     moments, which keeps the integral exact where the fitted velocity changes its slope.
+
+    References:
+        National Imagery and Mapping Agency (2000). Department of Defense World Geodetic System 1984, its
+            definition and relationships with local geodetic systems. NIMA TR8350.2, 3rd edition, amendment 1.
 
     Arguments:
         eci_coord: [ndarray] (x, y, z) ECI coordinates of the point of the line at the time t (meters).
@@ -3165,16 +3177,18 @@ def freeFallDrop(eci_coord, t, radiant_eci, time_tab, vel_tab, len_tab, mom_tab,
     drop_x, drop_y, drop_z = 0.0, 0.0, 0.0
     for j in range(4):
 
-        # Gravity of a point mass at the point
+        # Gravity of a point mass at the point, with the oblateness of the Earth around the z axis
         x = eci_coord[0] + j*step*radiant_eci[0]
         y = eci_coord[1] + j*step*radiant_eci[1]
         z = eci_coord[2] + j*step*radiant_eci[2]
         r2 = x*x + y*y + z*z
         factor = weights[j]*gm/(r2*np.sqrt(r2))
+        oblate = 1.5*GRAVITY_FREE_FALL_J2*GRAVITY_FREE_FALL_RE**2/r2
+        polar = 5.0*z*z/r2
 
-        drop_x -= factor*x
-        drop_y -= factor*y
-        drop_z -= factor*z
+        drop_x -= factor*x*(1.0 + oblate*(1.0 - polar))
+        drop_y -= factor*y*(1.0 + oblate*(1.0 - polar))
+        drop_z -= factor*z*(1.0 + oblate*(3.0 - polar))
 
     dropped = np.empty(3)
     dropped[0] = eci_coord[0] + gravity_factor*drop_x
