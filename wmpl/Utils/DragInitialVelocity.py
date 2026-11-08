@@ -447,12 +447,19 @@ def droppedLengths(traj, obs):
     #   solution has it (Trajectory.airRotationShiftAt)
     shift_at = getattr(traj, 'airRotationShiftAt', None)
 
+    # Same free fall of the meteor from the line as the fit, where the solution has it
+    #   (Trajectory.gravityFreeFall and Trajectory.gravityDropPoint)
+    free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
+
     state_vect, radiant_eci = traj.state_vect_mini, traj.radiant_eci_mini
     lengths = []
     for t, stat, meas in zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los):
         _, rad_cpa, _ = findClosestPoints(stat, meas, state_vect, radiant_eci)
-        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa) if (r0 is None) else r0, \
-            drop_factor(t - t0), v0z)
+        if free_fall is not None:
+            rad_cpa_grav = traj.gravityDropPoint(rad_cpa, t - t0, radiant_eci, r0, v0z, free_fall)
+        else:
+            rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa) if (r0 is None) else r0, \
+                drop_factor(t - t0), v0z)
         if shift_at is not None:
             rad_cpa_grav = rad_cpa_grav + shift_at(t - t0, radiant_eci)
         _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
