@@ -26,8 +26,7 @@ from wmpl.Trajectory.Trajectory import addTrajectoryID
 from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
     angleBetweenSphericalCoords, generateMonthyTimeBins
 from wmpl.Utils.OSTools import mkdirP, walkDirsToDepth
-from wmpl.Utils.Physics import calcMass
-from wmpl.Utils.Physics import trajectoryLightCurve
+from wmpl.Utils.Physics import calcMass, trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import MapColorScheme
@@ -85,15 +84,12 @@ P_0M = 1210
 def computeMass(traj, P_0m):
     """ Compute the mass given the trajectory and a power of a zero magnitude meteor. """
 
-    # The light curve: the magnitudes brighter than +8 of the stations that are not ignored, merged into the
-    #   brightest of points closer than a frame, which mitigates saturation effects (see trajectoryLightCurve())
-    light_curve = trajectoryLightCurve(traj)
+    # Extract the light curve
+    time_arr, mag_arr, _ = trajectoryLightCurve(traj)
 
     # If there are no magnitudes, return 0
-    if light_curve is None:
+    if time_arr is None:
         return 0
-
-    time_arr, mag_arr, _ = light_curve
 
     # Compute the photometric mass
     mass = calcMass(time_arr, mag_arr, traj.orbit.v_avg_norot, P_0m=P_0m)
