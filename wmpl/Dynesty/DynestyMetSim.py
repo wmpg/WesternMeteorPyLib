@@ -59,11 +59,11 @@ except ImportError:
     DYNESTY_FOUND = False
 
 from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
-from wmpl.MetSim.GUI import constantsRelativeToGround, rotationSpeedAlongTrajectory
+from wmpl.MetSim.GUI import constantsRelativeToGround
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
-from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
+from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Pickling import loadPickle
@@ -1957,7 +1957,12 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
     # find the index of m_init in variables
     i_m_init = variables.index('m_init')
-    tau = (calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), P_0m=obs_data.P_0m))*2/(samples_equal[:, i_m_init]*(obs_data.velocities[0] - getattr(obs_data, 'v_rotation', 0.0))**2)*100
+
+    # Compute the luminous efficiency of the samples with the initial speed relative to the ground
+    v_init_ground = obs_data.velocities[0] - getattr(obs_data, 'v_rotation', 0.0)
+    tau = calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), \
+        P_0m=obs_data.P_0m)*2/(samples_equal[:, i_m_init]*v_init_ground**2)*100
+
     # calculate the weights calculate the weighted median and the 95 CI for tau
     # tau_low95, tau_median, tau_high95 = _quantile(tau, [0.025, 0.5, 0.975],  weights=weights)
     tau_median, tau_low95, tau_high95 = _plot_distrib_weighted(
@@ -3847,13 +3852,11 @@ class ObservationData:
             # get the trajectory
             # v_avg = traj.v_avg
             v_init_list.append(traj.orbit.v_init+100)
-            v_rotation_list.append(rotationSpeedAlongTrajectory(traj))
+            v_rotation_list.append(earthRotationSpeed(traj))
         # do the mean of the v_init_list
         self.v_init = np.mean(v_init_list)
 
-        # The Earth's rotation along the path: v_init and the observed lengths and speeds are the solver's inertial
-        #   ones, while the simulations run relative to the ground and give theirs back in the solver's frame (see
-        #   constructConstants())
+        # Average the Earth's rotation along the path, which constructConstants() takes off v_init
         self.v_rotation = np.mean(v_rotation_list)
 
         # sort base on the lag_data['height'] from the biggest to the smallest
@@ -4066,9 +4069,10 @@ class ObservationData:
             print("NOTE: The mass was computing using a constant luminous efficiency",luminous_efficiency,"%")
 
             # Compute the photometric mass
-            photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, tau=luminous_efficiency/100, P_0m=self.P_0m)
+            photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, \
+                tau=luminous_efficiency/100, P_0m=self.P_0m)
 
-            # Recompute the mass with the luminous efficiency model at the average speed relative to the ground,
+            # Recompute the mass with the luminous efficiency model at the average ground-relative speed,
             #   iterated by calcMass() to the mass it gives
             if (lum_eff_type_val is not None) and (lum_eff_type_val != 0):
                 photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, \
@@ -4432,8 +4436,7 @@ class ObservationData:
             const, _ = loadConstants(self.file_name)
             const.dens_co = np.array(const.dens_co)
 
-            # A synthetic meteor is simulated as given, relative to a non-rotating Earth: its lengths and speeds are
-            #   not turned into an inertial frame (see SimulationResults)
+            # Simulate a synthetic meteor on a non-rotating Earth
             const.v_rotation = 0.0
 
             # const_nominal.P_0m = 935
@@ -5878,9 +5881,7 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
         # use the function thaht add them in the const_nominal
         const_nominal = addFragToConst(const_nominal, combined_frag_dic)
 
-    # v_init and the zenith angle are the solver's inertial ones, as the observations: simulate relative to the
-    #   ground, with the lengths and speeds given back in the solver's frame (the saved constants are relative to the
-    #   ground, with their v_rotation)
+    # Convert the sampled inertial v_init and zenith angle to the ground
     constantsRelativeToGround(const_nominal, getattr(real_event, 'v_rotation', 0.0))
 
     if dir_path!="" and file_name!="":
