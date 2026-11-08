@@ -1683,15 +1683,12 @@ def calcMCUncertainties(traj_list, traj_best):
     un.radiant_eci_mini = np.array([rad_x, rad_y, rad_z])
     un.radiant_eci_mini_ci = np.array([rad_x_ci, rad_y_ci, rad_z_ci])
 
-    # Velocity state vector
-    un.vx = abs(traj_best.v_init*traj_best.radiant_eci_mini[0]*(un.v_init/traj_best.v_init
-        + rad_x/traj_best.radiant_eci_mini[0]))
+    # Velocity state vector, from the spread of the velocity vectors of the runs
+    un.vx = np.std([traj.v_init*traj.radiant_eci_mini[0] for traj in traj_list])
     un.vx_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[0] for traj in traj_list], un.ci)
-    un.vy = abs(traj_best.v_init*traj_best.radiant_eci_mini[1]*(un.v_init/traj_best.v_init
-        + rad_y/traj_best.radiant_eci_mini[1]))
+    un.vy = np.std([traj.v_init*traj.radiant_eci_mini[1] for traj in traj_list])
     un.vy_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[1] for traj in traj_list], un.ci)
-    un.vz = abs(traj_best.v_init*traj_best.radiant_eci_mini[2]*(un.v_init/traj_best.v_init
-        + rad_z/traj_best.radiant_eci_mini[2]))
+    un.vz = np.std([traj.v_init*traj.radiant_eci_mini[2] for traj in traj_list])
     un.vz_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[2] for traj in traj_list], un.ci)
 
 
@@ -1894,8 +1891,8 @@ def calcCovMatrices(mc_traj_list):
     """ Calculate the covariance matrix between orbital elements, and initial state vector using all Monte 
         Carlo trajectories. The covariance matrix is weighted by the timing residuals.
 
-        The orbital covariance matrix is calculated for radians and the initial state vector matrix in meters
-        and meters per second.
+        The orbital covariance matrix is calculated with the angles in degrees and the initial state vector
+        matrix in meters and meters per second.
 
     Arguments:
         mc_traj_list: [list] A list of Trajectory objects from Monte Carlo runs.
@@ -1920,7 +1917,6 @@ def calcCovMatrices(mc_traj_list):
 
     # Calculate the weights using timing residuals
     weights = np.min(timing_res_list)/timing_res_list
-    weights = weights
 
     # Extract orbit elements
     e_list = np.array([traj.orbit.e for traj in mc_traj_list])
