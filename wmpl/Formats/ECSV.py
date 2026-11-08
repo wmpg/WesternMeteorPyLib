@@ -11,8 +11,7 @@ import numpy as np
 
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations, writeMiligInputFileMeteorObservation
-from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
-    equatorialCoordPrecession_vect, jd2Date
+from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
 
 
 
@@ -103,6 +102,10 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
             # Skip the header
             data = data[1:]
 
+            # Skip the rows without the main fragment (fragment 0), i.e. the frames on which only other
+            #   fragments were measured (their columns have a numeric suffix, e.g. azimuth1)
+            data = data[np.char.strip(data[:, azim_indx]) != '']
+
             # Unpack data
             dt_data, azim_data, alt_data, x_data, y_data = data[:, dt_indx], data[:, azim_indx], \
                 data[:, alt_indx], data[:, x_indx], data[:, y_indx]
@@ -115,6 +118,18 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
             # Get magnitude data, if any
             if mag_indx is not None:
                 mag_data = data[:, mag_indx].astype(np.float64)
+
+                # SkyFit2 sets the integrated pixel value to 1 if no photometry pixels were chosen, which
+                #   leaves the magnitude at the photometric offset, so these points get no magnitude
+                if 'integrated_pixel_value' in header:
+                    no_photometry = data[:, header.index('integrated_pixel_value')].astype(np.float64) <= 1
+                    mag_data[no_photometry] = np.nan
+
+                    if np.any(no_photometry):
+                        print(("Station {:s}: {:d} of {:d} points were picked without photometry " \
+                            + "(integrated pixel value 1), they have no magnitude").format(station_id, \
+                            int(np.sum(no_photometry)), len(mag_data)))
+
             else:
                 mag_data = np.zeros_like(azim_data) + 10.0
 
@@ -140,8 +155,8 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
             ra_data, dec_data = altAz2RADec_vect(np.radians(azim_data), np.radians(alt_data), jd_data, \
                 np.radians(station_lat), np.radians(station_lon))
 
-            # Precess to J2000
-            ra_data, dec_data = equatorialCoordPrecession_vect(jdt_ref, J2000_JD.days, ra_data, dec_data)
+            # Precess and nutate from the epoch of date to J2000
+            ra_data, dec_data = equatorialCoordDateToJ2000_vect(jdt_ref, ra_data, dec_data)
 
             comment = '{"ff_name":' + f'"{image_file}"' +'}'
 
@@ -300,7 +315,7 @@ def saveECSV(dir_path, meteor_observations,
 
 
             # Precess RA/Dec to J2000
-            ra_J2000, dec_J2000 = equatorialCoordPrecession_vect(meteor.jdt_ref, J2000_JD.days, ra, dec)
+            ra_J2000, dec_J2000 = equatorialCoordDateToJ2000_vect(meteor.jdt_ref, ra, dec)
 
 
             # Add an entry to the ECSV file
