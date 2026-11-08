@@ -188,8 +188,8 @@ def calcDD(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
     theta21 = _clippedAcos(np.sin(beta1)*np.sin(beta2) + np.cos(beta1)*np.cos(beta2) \
         *np.cos(lambda2 - lambda1))
 
-    # Two circular orbits make the eccentricity term 0/0. With floats this raises
-    #   ZeroDivisionError, as it always has; with arrays numpy returns nan for that pair instead
+    # Two circular orbits make the eccentricity term 0/0, which raises ZeroDivisionError for floats and
+    #   gives nan for that pair in arrays
     DD2 = ((e2 - e1)/(e2 + e1))**2 + ((q2 - q1)/(q2 + q1))**2 + (I21/np.pi)**2 \
         + ((e2 + e1)/2.0)**2*(theta21/np.pi)**2
 
