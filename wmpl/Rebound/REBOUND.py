@@ -232,6 +232,9 @@ HILL_RADII_AU = {
 # inside it.
 SUN_ENCOUNTER_AU = 0.2
 
+# Semi-major axis of Jupiter of the Tisserand parameter and the orbital class of the report [AU]
+A_JUPITER_TISSERAND = 5.204267
+
 # Sun passages closer than this count in the WHFast warning, although the Sun is listed out to
 # SUN_ENCOUNTER_AU: WHFast's fixed step fails only much closer in. Measured with _integrateParticles
 # and the default 0.5 d step against IAS15 over 100 yr (the Sun and five planets, gr_full, a = 1.27
@@ -1090,11 +1093,6 @@ def tisserandParameterJupiter(a, e, inc):
     return a_jupiter/a + 2.0*np.cos(inc)*np.sqrt((a/a_jupiter)*(1.0 - e**2))
 
 
-# Semi-major axis of Jupiter of the Tisserand parameter and the orbital class of the report [AU]
-A_JUPITER_TISSERAND = 5.204267
-
-
-
 def borovickaClass(a, e, inc):
     """ Return the meteoroid orbital class of Borovicka et al. (2005) of an orbit, as
     wmpl.Utils.OrbitClassification.classifyBorovicka gives it from the perihelion distance,
@@ -1128,15 +1126,16 @@ def tisserandAndClassSummary(orbits):
     Return:
         [dict] {
             "n": number of orbits,
-            "n_unbound": orbits without a T_J (unbound), left out of its statistics,
+            "n_unbound": orbits without a finite T_J (unbound), left out of its statistics,
             "tisserand_std": 1 sigma of T_J, (97.5% - 2.5%)/(2*1.96), or None without bound orbits,
             "tisserand_95ci": [2.5%, 97.5%] of T_J, or None,
             "classes": {class: fraction of the orbits}, the most frequent first,
         }
     """
 
+    # Leave the unbound and non-finite orbits out of the T_J statistics
     t_j = [tisserandParameterJupiter(o.a, o.e, o.inc) for o in orbits]
-    t_j = np.array([x for x in t_j if x is not None], dtype=float)
+    t_j = np.array([x for x in t_j if (x is not None) and np.isfinite(x)], dtype=float)
 
     classes = {}
     for o in orbits:
