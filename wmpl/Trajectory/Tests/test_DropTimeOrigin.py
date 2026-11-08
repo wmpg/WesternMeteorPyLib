@@ -15,6 +15,8 @@ matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import Trajectory, dropTimeOrigin
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
+from wmpl.Utils.DragFit import DragFit
+from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 
 
 class _Station(object):
@@ -94,3 +96,19 @@ def testStationWithAClockFarOffDoesNotMoveTheDrop():
 
     # The radiant is found, to the difference between the drop of the synthetic meteor and the solver's
     assert np.allclose(traj.radiant_eci_mini, radiant_eci, rtol=0, atol=1e-5)
+
+
+
+def testDragAndDynamicMassFitsDropFromTheSameTime():
+    """ Check that the drag fit drops its grid, and the dynamic mass fit its points, as the solver does when
+        the clock of the station which is not used is 1 s ahead.
+    """
+
+    traj, _ = _solve(1.0)
+    reference, _ = _solve(0.0)
+
+    assert np.allclose(DragFit(traj).drop_grid, DragFit(reference).drop_grid, rtol=0, atol=1e-3)
+
+    for length, t in ((20e3, 1.0), (35e3, 2.5)):
+        assert np.allclose(pointOnTrajectory(traj, length, t), pointOnTrajectory(reference, length, t), rtol=0, \
+            atol=1e-6)
