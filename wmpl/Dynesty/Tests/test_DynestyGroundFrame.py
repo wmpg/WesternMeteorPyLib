@@ -8,7 +8,6 @@ Run with pytest:
 from __future__ import print_function, division, absolute_import
 
 import copy
-import math
 import os
 import tempfile
 import warnings
@@ -75,7 +74,7 @@ def testTheSampledInertialValuesAreSimulatedRelativeToTheGround():
     const = constructConstants(guess, obs, var_names, {})
 
     assert np.isclose(const.v_init, obs.v_init - obs.v_rotation, rtol=0, atol=1e-6)
-    assert np.isclose(const.v_init*math.cos(const.zenith_angle), obs.v_init*math.cos(obs.zenith_angle), \
+    assert np.isclose(const.v_init*np.cos(const.zenith_angle), obs.v_init*np.cos(obs.zenith_angle), \
         rtol=1e-12)
     assert const.v_rotation == obs.v_rotation
 
@@ -121,8 +120,8 @@ def testSavedConstantsAreNotConvertedTwice():
 
 
 def testRunsMadeBeforeTheGroundFrameAreReplayedWithTheInertialSpeed():
-    """ Check that a dynesty run without the ground-frame marker is replayed without rotation and cannot be
-        resumed, and that a run with the marker keeps the rotation of the observations.
+    """ Check that a run without the ground-frame marker cannot be resumed, and that the replay of a run is
+        selected by its frame without changing the rotation of the observations.
     """
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -130,25 +129,22 @@ def testRunsMadeBeforeTheGroundFrameAreReplayedWithTheInertialSpeed():
         dynesty_file = os.path.join(tmp_dir, 'run.dynesty')
         open(dynesty_file, 'w').close()
 
-        # Check that a run without the marker is replayed without rotation
-        obs = SimpleNamespace(v_rotation=-49.6)
-        replayInTheFrameOfTheRun(dynesty_file, obs)
-
-        assert obs.v_rotation == 0.0
-        assert obs.legacy_inertial_frame
-
-        # Check that it cannot be resumed
+        # Check that a run without the marker cannot be resumed
         with pytest.raises(ValueError):
             dynestyMainRun(dynesty_file, SimpleNamespace(v_rotation=-49.6), [], {}, {})
 
         assert not os.path.isfile(groundFrameMarkerPath(dynesty_file))
 
-        # Check that a run with the marker keeps the rotation
-        open(groundFrameMarkerPath(dynesty_file), 'w').close()
-        obs = SimpleNamespace(v_rotation=-49.6)
-        replayInTheFrameOfTheRun(dynesty_file, obs)
+    # Check the replay of an older and of a ground-frame run
+    obs = SimpleNamespace(v_rotation=-49.6)
+    replayInTheFrameOfTheRun(obs, False, 'run.dynesty')
 
-        assert obs.v_rotation == -49.6
+    assert obs.legacy_inertial_frame
+    assert obs.v_rotation == -49.6
+
+    replayInTheFrameOfTheRun(obs, True, 'run.dynesty')
+
+    assert not obs.legacy_inertial_frame
 
 
 
@@ -158,7 +154,6 @@ def testTheConstantsOfALegacyReplayStayInertial():
     """
 
     obs = _observations()
-    obs.v_rotation = 0.0
     obs.legacy_inertial_frame = True
 
     const = constructConstants([obs.v_init, obs.zenith_angle, obs.m_init], obs, \

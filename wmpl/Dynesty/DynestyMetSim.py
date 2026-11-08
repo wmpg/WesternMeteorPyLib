@@ -341,8 +341,12 @@ def plotJSONDataVsObs(obs_data, out_folder, best_noise_lum=0, best_noise_lag=0):
             const_manual, const_json_manual = loadConstants(const_json_file)
             const_manual.dens_co = np.array(const_manual.dens_co)
 
+            # Simulate each fit in the frame it was saved in, whatever the frame of the run
+            obs_data = copy.copy(obs_data)
+            obs_data.legacy_inertial_frame = 'v_rotation' not in const_json_manual
+
             # Convert constants saved relative to the ground to the inertial frame of the observations
-            if 'v_rotation' in const_json_manual:
+            if not obs_data.legacy_inertial_frame:
                 const_manual.v_rotation = getattr(obs_data, 'v_rotation', 0.0)
                 constantsToInertial(const_manual)
             # # Run the simulation
@@ -2329,7 +2333,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
                     "95_CI_upper": np.asarray(upper_95, dtype=np.float32).tolist(),
                     "rho_array": backup_data["rho_array"],
                     "rho_mass_weighted_estimate": {k: float(v) for k, v in backup_data["rho_mass_weighted_estimate"].items()},
-                    "const_backups": backup_data["const_backups"]
+                    "const_backups": backup_data["const_backups"],
+                    "ground_frame": not getattr(obs_data, 'legacy_inertial_frame', False)
                 },
 
                 "best_guess": {
@@ -4875,6 +4880,8 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                     try:
                         dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                         dsampler_results = dsampler.results
+                        ground_frame = os.path.isfile(groundFrameMarkerPath(dynesty_file))
+                        restored_file = dynesty_file
                         
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
@@ -4885,7 +4892,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         backup_dynesty_file = os.path.join(out_folder, f"{base_name}_posterior_backup.pkl.gz")
                         if os.path.isfile(backup_dynesty_file):
                             try:
-                                dsampler_results, _ , _ = restoreBackupDynesty(backup_dynesty_file)
+                                dsampler_results, _ , backup_small = restoreBackupDynesty(backup_dynesty_file)
+                                ground_frame = backup_small['dynesty'].get('ground_frame', False)
+                                restored_file = backup_dynesty_file
                                 print(f"Loaded backup dynesty file: {backup_dynesty_file}")
                             except Exception as e:
                                 with open(log_file_path, "a") as log_file:
@@ -4895,7 +4904,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                             print(f"No backup dynesty file found at: {backup_dynesty_file}\n")
                         
                     try:
-                        replayInTheFrameOfTheRun(dynesty_file, obs_data)
+                        replayInTheFrameOfTheRun(obs_data, ground_frame, restored_file)
                         plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
@@ -4933,6 +4942,8 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                 try:
                     dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                     dsampler_results = dsampler.results
+                    ground_frame = os.path.isfile(groundFrameMarkerPath(dynesty_file))
+                    restored_file = dynesty_file
 
                 except Exception as e:
                     with open(log_file_path, "a") as log_file:
@@ -4943,7 +4954,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                     backup_dynesty_file = os.path.join(out_folder, f"{base_name}_posterior_backup.pkl.gz")
                     if os.path.isfile(backup_dynesty_file):
                         try:
-                            dsampler_results, _ , _ = restoreBackupDynesty(backup_dynesty_file)
+                            dsampler_results, _ , backup_small = restoreBackupDynesty(backup_dynesty_file)
+                            ground_frame = backup_small['dynesty'].get('ground_frame', False)
+                            restored_file = backup_dynesty_file
                             print(f"Loaded backup dynesty file: {backup_dynesty_file}")
                         except Exception as e:
                             with open(log_file_path, "a") as log_file:
@@ -4953,7 +4966,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         print(f"No backup dynesty file found at: {backup_dynesty_file}")
 
                 # dsampler = dynesty oad DynamicNestedSampler by restore(dynesty_file)
-                replayInTheFrameOfTheRun(dynesty_file, obs_data)
+                replayInTheFrameOfTheRun(obs_data, ground_frame, restored_file)
                 plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
 
             else:
@@ -6303,28 +6316,26 @@ def groundFrameMarkerPath(dynesty_file):
 
 
 
-def replayInTheFrameOfTheRun(dynesty_file, obs_data):
-    """ Set the rotation of the observations to 0 for a dynesty run without the ground-frame marker, which
-        was made before MetSim was simulated relative to the ground, so its samples are replayed with the
-        model they were computed with. The constants of the replay keep the inertial values without
-        v_rotation, as they were saved before.
+def replayInTheFrameOfTheRun(obs_data, ground_frame, source):
+    """ Select the model with which the samples of a restored dynesty run are replayed. Runs made before
+        MetSim was simulated relative to the ground are replayed with the inertial speed, and the constants
+        of their replay keep the inertial values without v_rotation, as they were saved before.
 
     Arguments:
-        dynesty_file: [str] Path to the dynesty checkpoint file.
         obs_data: [ObservationData object] Observations, changed in place.
+        ground_frame: [bool] The run was simulated relative to the ground.
+        source: [str] Path of the restored checkpoint or backup, for the note.
 
     Return:
         None
     """
 
-    if os.path.isfile(groundFrameMarkerPath(dynesty_file)) or (not getattr(obs_data, 'v_rotation', 0.0)):
-        return
+    obs_data.legacy_inertial_frame = not ground_frame
 
-    print("NOTE: {:s} was made before MetSim was simulated relative to the ground, so its samples are " \
-        "replayed with the inertial speed. Start a new run for results relative to the ground." \
-        "".format(dynesty_file))
-    obs_data.v_rotation = 0.0
-    obs_data.legacy_inertial_frame = True
+    if not ground_frame:
+        print("NOTE: {:s} was made before MetSim was simulated relative to the ground, so its samples are " \
+            "replayed with the inertial speed. Start a new run for results relative to the ground." \
+            "".format(source))
 
 
 

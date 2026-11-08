@@ -14,7 +14,6 @@ from __future__ import print_function, division, absolute_import
 
 import copy
 import json
-import math
 import os
 import tempfile
 
@@ -48,7 +47,7 @@ def _fireball(v_init, zenith_deg):
     const = Constants()
     const.m_init = 1.0
     const.v_init = v_init
-    const.zenith_angle = math.radians(zenith_deg)
+    const.zenith_angle = np.radians(zenith_deg)
     const.sigma = 0.014/1e6
     const.rho = 3500.0
     const.P_0m = 1500.0
@@ -93,21 +92,21 @@ def testTheConstantsRelativeToTheGroundKeepTheVerticalSpeed():
 
     assert const.v_init == 15000.0
     assert const.v_rotation == 300.0
-    assert np.isclose(const.v_init*math.cos(const.zenith_angle), 15300.0*math.cos(math.radians(45.0)), \
+    assert np.isclose(const.v_init*np.cos(const.zenith_angle), 15300.0*np.cos(np.radians(45.0)), \
         rtol=1e-12)
 
     # Check that the conversion back to the inertial frame inverts it
     const = constantsToInertial(const)
 
     assert np.isclose(const.v_init, 15300.0, rtol=0, atol=1e-9)
-    assert np.isclose(const.zenith_angle, math.radians(45.0), rtol=0, atol=1e-12)
+    assert np.isclose(const.zenith_angle, np.radians(45.0), rtol=0, atol=1e-12)
     assert const.v_rotation == 0.0
 
     # Check that nothing changes without rotation
     const = constantsRelativeToGround(_fireball(15300.0, 45.0), 0.0)
 
     assert const.v_init == 15300.0
-    assert np.isclose(const.zenith_angle, math.radians(45.0), rtol=1e-12)
+    assert np.isclose(const.zenith_angle, np.radians(45.0), rtol=1e-12)
 
 
 
@@ -156,7 +155,7 @@ def testTheInertialValuesReproduceTheMeteorRelativeToTheGround():
 
     # Compute the inertial speed and zenith angle with the same vertical speed
     v_eci = 15000.0 + v_rotation
-    zenith_eci = math.degrees(math.acos(15000.0*math.cos(math.radians(45.0))/v_eci))
+    zenith_eci = np.degrees(np.arccos(15000.0*np.cos(np.radians(45.0))/v_eci))
 
     # Simulate from the inertial values converted to the ground
     const = constantsRelativeToGround(_fireball(v_eci, zenith_eci), v_rotation)
