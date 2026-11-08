@@ -27,6 +27,8 @@ def reb():
 
 
 def _orbit(a, e, inc_deg):
+    """ Make an orbit as the outputs of reboundSimulate hold it. """
+
     return SimpleNamespace(a=a, e=e, inc=np.radians(inc_deg))
 
 
@@ -50,6 +52,8 @@ def testSummaryOfTheClones(reb):
 
 
 def testUnboundClonesHaveNoTisserandButAClass(reb):
+    """ Check that unbound clones are left out of the T_J statistics but have a class.
+    """
 
     orbits = [_orbit(2.2, 0.6, 1.0), _orbit(2.3, 0.6, 1.0), _orbit(-3.0, 1.2, 30.0)]
     s = reb.tisserandAndClassSummary(orbits)
@@ -59,6 +63,8 @@ def testUnboundClonesHaveNoTisserandButAClass(reb):
 
 
 def testReportSaysItIsTheNominalAtTheEndOfTheRun(reb):
+    """ Check that the report says the values are the nominal's at the end of the run.
+    """
 
     clones = reb.tisserandAndClassSummary([_orbit(2.2 + 0.01*k, 0.62, 0.5) for k in range(20)])
     lines = reb._tisserandAndClassReportLines(3.405940, "asteroidal-chondritic", clones)
@@ -71,6 +77,8 @@ def testReportSaysItIsTheNominalAtTheEndOfTheRun(reb):
 
 
 def testReportWithoutClonesOrForAnUnboundNominal(reb):
+    """ Check the report without clones and for an unbound nominal.
+    """
 
     lines = reb._tisserandAndClassReportLines(3.4, "asteroidal-chondritic")
     assert lines == ["Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the " \

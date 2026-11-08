@@ -1082,12 +1082,17 @@ def tisserandParameterJupiter(a, e, inc):
             that the parameter is not defined.
     """
 
-    a_jupiter = 5.204267  # AU
+    a_jupiter = A_JUPITER_TISSERAND
 
     if (a is None) or (a <= 0) or (e is None) or (e >= 1):
         return None
 
     return a_jupiter/a + 2.0*np.cos(inc)*np.sqrt((a/a_jupiter)*(1.0 - e**2))
+
+
+# Semi-major axis of Jupiter of the Tisserand parameter and the orbital class of the report [AU]
+A_JUPITER_TISSERAND = 5.204267
+
 
 
 def borovickaClass(a, e, inc):
@@ -1108,7 +1113,7 @@ def borovickaClass(a, e, inc):
         [str] The class.
     """
 
-    return classifyBorovicka(a*(1.0 - e), e, inc)
+    return classifyBorovicka(a*(1.0 - e), e, inc, a_planet=A_JUPITER_TISSERAND)
 
 
 def tisserandAndClassSummary(orbits):
@@ -1147,8 +1152,19 @@ def tisserandAndClassSummary(orbits):
 
 
 def _tisserandAndClassReportLines(t_j, orbital_class, clones=None):
-    """ Lines of the report on the Tisserand parameter and the orbital class at the end of the run:
-    the nominal's, with the clones' spread (see tisserandAndClassSummary) when there are clones. """
+    """ Make the lines of the report on the Tisserand parameter and the orbital class of the nominal at
+    the end of the run, with the spread of the clones when there are clones.
+
+    Arguments:
+        t_j: [float or None] Tisserand parameter of the nominal, None if it is unbound.
+        orbital_class: [str] Orbital class of the nominal.
+
+    Keyword arguments:
+        clones: [dict] Summary of the clones from tisserandAndClassSummary(). None by default.
+
+    Return:
+        lines: [list] Lines of the report.
+    """
 
     if clones is None:
         lines = ["Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the end "

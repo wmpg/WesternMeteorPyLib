@@ -140,7 +140,8 @@ def testBorovickaLimits():
     """
 
     def orbitWithTisserand(tisserand, a, incl=0.0):
-        # T = a_J/a + 2 cos(i) sqrt((a/a_J)(1 - e^2)), solved for e
+        """ Solve T = a_J/a + 2 cos(i) sqrt((a/a_J)(1 - e^2)) for e. """
+
         root = (tisserand - A_JUPITER/a)/(2.0*np.cos(incl))
         e = np.sqrt(1.0 - root**2*A_JUPITER/a)
         assert abs(float(calcTisserand(a, e, incl)) - tisserand) < 1e-9
@@ -275,3 +276,43 @@ def testClassificationAcceptsArrays():
 
     assert type(classifyNEO(0.7, 0.3)) is str
     assert type(classifyBorovicka(0.7, 0.3, 0.1)) is str
+
+
+
+def testUnboundOrbitsWithALargePerihelionAreHalleyType():
+    """ Check that an unbound orbit is Halley type even where its T_J written in q exceeds 2 or 3.
+    """
+
+    for q, e, i in ((3.0, 1.0, 0.0), (3.0, 1.01, 0.0), (7.0, 1.0, 0.0), (7.0, 1.05, 0.1)):
+
+        assert _tisserandFromPerihelion(q, e, i) > 2.0
+        assert classifyBorovicka(q, e, i) == 'halley-type'
+
+
+
+def testNonFiniteElementsAreUndefined():
+    """ Check that a NaN or infinite element gives 'undefined' instead of a class.
+    """
+
+    assert classifyNEO(0.5, np.nan) == 'undefined'
+    assert classifyNEO(np.nan, 0.5) == 'undefined'
+
+    for q, e, i in ((np.nan, 0.5, 0.1), (0.5, np.nan, 0.1), (0.5, 0.5, np.nan), (np.inf, 0.5, 0.1)):
+        assert classifyBorovicka(q, e, i) == 'undefined'
+
+
+
+def testThePlanetSemiMajorAxisSetsTheTisserandLimit():
+    """ Check that an orbit with T_J just above 3 for one semi-major axis of Jupiter and just below it for
+        another is classified with the given one.
+    """
+
+    a, i = 3.0, 0.0
+
+    # Find the eccentricity giving T_J = 3.00003 with the larger semi-major axis of Jupiter
+    a_jupiter = 5.204267
+    root = (3.00003 - a_jupiter/a)/(2.0*np.cos(i))
+    e = np.sqrt(1.0 - root**2*a_jupiter/a)
+
+    assert classifyBorovicka(_q(a, e), e, i, a_planet=a_jupiter) == 'asteroidal-chondritic'
+    assert classifyBorovicka(_q(a, e), e, i) == 'jupiter-family'
