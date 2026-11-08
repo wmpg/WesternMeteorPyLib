@@ -1136,8 +1136,11 @@ def nutationMatrix(julian_date):
 
     The matrix is N = R1(-eps_true) R3(-delta_psi) R1(eps_mean), as ERFA's numat.
 
-    With the legacy and incorrect conversion (config.legacy_j2000_precession_only), the nutation is left out
-    and this is the identity matrix, so J2000 coordinates are only precessed.
+    With the legacy conversion (config.legacy_j2000_precession_only, set with the WMPL_LEGACY_J2000=1
+    environment variable, which also reaches the processes the solver starts), the nutation is left out and
+    this is the identity matrix, so J2000 coordinates are only precessed. That leaves them on the mean
+    equator and equinox of date, up to ~17 arcsec from WMPL's ECI frame. It is incorrect and is only meant
+    for reproducing solutions made before the nutation was added, never for new solutions.
 
     Arguments:
         julian_date: [float] Julian date.

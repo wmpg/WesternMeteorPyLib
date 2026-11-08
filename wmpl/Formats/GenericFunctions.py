@@ -9,8 +9,9 @@ import numpy as np
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
-from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST, \
-    nutationMatrix, raDec2ECI
+from wmpl.Config import config
+from wmpl.Utils.Earth import calcEquationOfEquinoxes
+from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST
 
 
 
@@ -285,14 +286,15 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
                 # Default to the exponential model
                 velmodel = 3
 
-            # The Gural solver places the cameras with the mean sidereal time, so give it the R.A. and Dec. on
-            #   the mean equator and equinox of date
-            x, y, z = nutationMatrix(jdt_ref).T.dot(np.array(raDec2ECI(meteor.ra_data, meteor.dec_data)))
-            ra_data = np.arctan2(y, x)%(2*np.pi)
-            dec_data = np.arcsin(np.clip(z, -1.0, 1.0))
+            ra_data = meteor.ra_data
 
-            traj.infillTrajectory(ra_data, dec_data, meteor.time_data, meteor.latitude, meteor.longitude, \
-                meteor.height)
+            # The Gural solver places the cameras with the mean sidereal time, so subtract the equation of the
+            #   equinoxes from the R.A. (not with the legacy J2000 conversion, which did not do it)
+            if not config.legacy_j2000_precession_only:
+                ra_data = (ra_data - calcEquationOfEquinoxes(jdt_ref))%(2*np.pi)
+
+            traj.infillTrajectory(ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, \
+                meteor.longitude, meteor.height)
 
 
     # Solve the trajectory

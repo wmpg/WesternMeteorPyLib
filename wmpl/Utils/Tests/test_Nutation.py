@@ -22,7 +22,7 @@ from wmpl.Formats.GenericFunctions import MeteorObservation, prepareObservations
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
     straightMeteorPoints
-from wmpl.Utils.Earth import calcApparentSiderealEarthRotation
+from wmpl.Utils.Earth import calcApparentSiderealEarthRotation, calcEquationOfEquinoxes
 from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.TrajConversions import J2000_JD, nutationMatrix, equatorialCoordJ2000ToDate, \
     equatorialCoordDateToJ2000, equatorialCoordPrecession, jd2DynamicalTimeJD, raDec2ECI, eci2RaDec, \
@@ -82,6 +82,7 @@ def testTheNutationMatchesTheApparentSiderealTime():
     equinox = nutationMatrix(JD).dot(np.array([1.0, 0.0, 0.0]))
 
     assert abs(np.arctan2(equinox[1], equinox[0]) - equation_of_equinoxes) < np.radians(1e-6/3600)
+    assert abs(calcEquationOfEquinoxes(JD) - equation_of_equinoxes) < np.radians(1e-6/3600)
 
 
 
