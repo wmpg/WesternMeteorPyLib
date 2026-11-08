@@ -47,8 +47,8 @@ def testOriginIsTheFirstTimeOfTheUsedStations():
 
 
 def _solve(clock_lead):
-    """ Solve a noise-free straight meteor dropped by gravity, with a fourth station which is not used and whose
-        clock is ahead by the given time.
+    """ Solve a noise-free straight meteor dropped by gravity, with a fourth station which is not used and
+        whose clock is ahead by the given time.
 
     Arguments:
         clock_lead: [float] How far ahead the clock of the station which is not used is (s).
@@ -59,8 +59,8 @@ def _solve(clock_lead):
             - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
     """
 
-    observed, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=3.0, v_init=15000.0, elevation=30.0, \
-        gravity_drop=True)
+    observed, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=3.0, v_init=15000.0, \
+        elevation=30.0, gravity_drop=True)
 
     traj = Trajectory(observed.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
         gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
@@ -81,8 +81,8 @@ def _solve(clock_lead):
 
 def testStationWithAClockFarOffDoesNotMoveTheDrop():
     """ Check that a station which is not used and whose clock is 1 s ahead does not change the solution.
-        When its first time set the origin of the drop, the radiant was 115 arcsec off and the residuals of the
-        used stations reached 22 m.
+        When its first time set the origin of the drop, the radiant was 115 arcsec off and the residuals of
+        the used stations reached 22 m.
     """
 
     traj, radiant_eci = _solve(1.0)
@@ -110,5 +110,5 @@ def testDragAndDynamicMassFitsDropFromTheSameTime():
     assert np.allclose(DragFit(traj).drop_grid, DragFit(reference).drop_grid, rtol=0, atol=1e-3)
 
     for length, t in ((20e3, 1.0), (35e3, 2.5)):
-        assert np.allclose(pointOnTrajectory(traj, length, t), pointOnTrajectory(reference, length, t), rtol=0, \
-            atol=1e-6)
+        assert np.allclose(pointOnTrajectory(traj, length, t), pointOnTrajectory(reference, length, t), \
+            rtol=0, atol=1e-6)
