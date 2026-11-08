@@ -29,7 +29,7 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Physics import averageZenithDistance, calcMass, calcPf, groundDragFit, groundVelocityFit, \
     maxDynamicPressure, photometricMassBorovicka2022, trajectoryLatLon, trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import cartesian2Geo
+from wmpl.Utils.TrajConversions import cartesian2Geo, eci2RaDec, raDec2AltAz
 
 
 # Solved trajectory shipped with the repository (2019-10-23, 67 km/s)
@@ -222,6 +222,41 @@ def testPfFromTheExampleTrajectory():
 
     # Check that the average zenith distance is close to the one at the reference point
     assert abs(np.degrees(zangle - (np.pi/2 - traj.orbit.elevation_apparent_norot))) < 0.5
+
+
+
+def testAnEarthGrazerIsRejected():
+    """ Check that a trajectory whose lowest point is more than 1 km below its end height raises a ValueError,
+        as the heights are sampled only down to the end.
+    """
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
+    traj.htmin_ele = traj.rend_ele - 5000
+
+    with pytest.raises(ValueError):
+        maxDynamicPressure(traj)
+
+
+
+def testTheRadiantOfFixedStationsIsNotDerotated():
+    """ Check that the zenith distance of a solution with fixed stations is the one of its radiant, which is
+        already fixed to the ground, and that the derotation changes it for a moving-station solution.
+    """
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
+    zangle_moving = averageZenithDistance(traj)
+
+    traj.orbit_los_success = False
+    zangle_fixed = averageZenithDistance(traj)
+
+    # Compute the zenith distance of the radiant at the average point
+    lat = (traj.rbeg_lat + traj.rend_lat)/2
+    lon = (traj.rbeg_lon + traj.rend_lon)/2
+    ra, dec = eci2RaDec(traj.radiant_eci_mini)
+    _, elev = raDec2AltAz(ra, dec, traj.jdt_ref, lat, lon)
+
+    assert np.isclose(zangle_fixed, np.pi/2 - elev, rtol=0, atol=1e-12)
+    assert abs(np.degrees(zangle_fixed - zangle_moving)) > 0.01
 
 
 

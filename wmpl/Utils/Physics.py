@@ -631,7 +631,8 @@ def maxDynamicPressure(traj, n_heights=1000, velocity_at=None, velocity_fit='dra
 
     The pressure is evaluated over the whole trajectory, from its beginning to its end height, with the
     velocity fit extrapolated where there are no velocity measurements. The speeds are relative to the ground
-    and the air density is the NRLMSISE one at the reference time of the trajectory.
+    and the air density is the NRLMSISE one at the reference time of the trajectory. A ValueError is raised if
+    the lowest point of the trajectory is more than 1 km below its end height.
 
     Arguments:
         traj: [Trajectory object] Solved trajectory with an orbit and point velocities.
@@ -647,6 +648,13 @@ def maxDynamicPressure(traj, n_heights=1000, velocity_at=None, velocity_fit='dra
         ht_p_max: [float] Height of the maximum (m).
         v_p_max: [float] Speed relative to the ground at the maximum (m/s).
     """
+
+    # Reject trajectories whose lowest point is below the end, as the heights are sampled down to the end
+    htmin_ele = getattr(traj, 'htmin_ele', None)
+    if (htmin_ele is not None) and (htmin_ele < traj.rend_ele - 1000):
+        raise ValueError("The lowest point of the trajectory, at {:.2f} km, is below its end height of " \
+            "{:.2f} km (an Earth-grazer, or stations that disagree), so the maximum dynamic pressure is " \
+            "not computed from it.".format(htmin_ele/1000, traj.rend_ele/1000))
 
     if velocity_at is None:
         velocity_at, _ = groundVelocityFit(traj, velocity_fit=velocity_fit)
@@ -707,7 +715,8 @@ def photometricMassBorovicka2022(traj, velocity_at=None, velocity_fit='drag'):
 
 def averageZenithDistance(traj):
     """ Compute the zenith distance of the ground-fixed radiant at the average point of a trajectory, halfway
-        in height between its beginning and its end (TrajConversions.derotatedRadiantAltAz()).
+        in height between its beginning and its end (TrajConversions.derotatedRadiantAltAz()). The radiant of
+        a solution with fixed stations is already fixed to the ground and is not derotated.
 
     Arguments:
         traj: [Trajectory object] Solved trajectory.
@@ -716,14 +725,20 @@ def averageZenithDistance(traj):
         [float] Zenith distance (radians).
     """
 
-    from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, geo2Cartesian
+    from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, eci2RaDec, geo2Cartesian, raDec2AltAz
 
     lat = (traj.rbeg_lat + traj.rend_lat)/2
     lon = traj.rbeg_lon + ((traj.rend_lon - traj.rbeg_lon + np.pi)%(2*np.pi) - np.pi)/2
     ht = (traj.rbeg_ele + traj.rend_ele)/2
 
-    eci = np.array(geo2Cartesian(lat, lon, ht, traj.jdt_ref))
-    _, elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, eci, traj.jdt_ref, lat, lon)
+    # The radiant of a solution with fixed stations is already fixed to the ground
+    if getattr(traj, 'orbit_los_success', True) is False:
+        ra, dec = eci2RaDec(traj.radiant_eci_mini)
+        _, elev = raDec2AltAz(ra, dec, traj.jdt_ref, lat, lon)
+
+    else:
+        eci = np.array(geo2Cartesian(lat, lon, ht, traj.jdt_ref))
+        _, elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, eci, traj.jdt_ref, lat, lon)
 
     return np.pi/2 - elev
 
