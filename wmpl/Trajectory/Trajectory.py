@@ -750,8 +750,8 @@ def gravityDropReference(observations, state_vect, radiant_eci):
 
     applyGravityDrop takes r0 to be the distance of the beginning of the meteor from the centre of the Earth,
     and its drop model descends from there with the vertical velocity. This is the point calcLLA and
-    calcECIEqAltAz use: the highest of the points on the radiant line closest to each station's first line
-    of sight.
+    calcECIEqAltAz use: the highest of the points on the radiant line closest to the first line of sight of
+    each station which is not ignored.
 
     Arguments:
         observations: [list] A list of ObservedPoints objects.
@@ -763,8 +763,13 @@ def gravityDropReference(observations, state_vect, radiant_eci):
             of the Earth (meters).
     """
 
+    # Take only the stations which are not ignored, unless all are
+    used_observations = [obs for obs in observations if not obs.ignore_station]
+    if not used_observations:
+        used_observations = observations
+
     eci_list = []
-    for obs in observations:
+    for obs in used_observations:
 
         # Calculate closest points of approach (observed line of sight to radiant line)
         _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, radiant_eci)
@@ -779,7 +784,7 @@ def gravityDropReference(observations, state_vect, radiant_eci):
 
 
 
-def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, 
+def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
                               gravity_factor=1.0, v0z=None, r0=None):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
@@ -896,7 +901,7 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 
-def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, 
+def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
     r0=None):
     """ A helper function for minimization of angle deviations. """
 
@@ -908,7 +913,7 @@ def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity
 
 
 
-def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False, gravity_factor=1.0, 
+def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False, gravity_factor=1.0, \
                         v0z=None, r0=None):
     """ Calculate horizontal and vertical residuals from the radiant line, for the given observed point.
 
@@ -6472,7 +6477,7 @@ class Trajectory(object):
         # Calculate the initial sum and angles deviating from the radiant line
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
              self.best_conv_inter.radiant_eci, weights=weights, \
-             gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, 
+             gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, \
              v0z=self.v0z, r0=self.gravity_r0
              )
 
@@ -6559,7 +6564,7 @@ class Trajectory(object):
             print('BOUNDS:', bounds)
             print('p0:', p0)
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
-                weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z, 
+                weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z, \
                 self.gravity_r0), bounds=bounds, method='SLSQP')
 
             # Keep the unbounded solution if it converged and the bounded one did not converge or is worse
@@ -6777,7 +6782,7 @@ class Trajectory(object):
 
                 # Compute the beginning point and the vertical velocity of the gravity pass from this pass
                 if self.gravity_correction:
-                    eci0, self.gravity_r0 = gravityDropReference(self.observations, self.state_vect_mini, 
+                    eci0, self.gravity_r0 = gravityDropReference(self.observations, self.state_vect_mini, \
                         self.radiant_eci_mini)
                     self.calcV0z(eci0, self.radiant_eci_mini)
 

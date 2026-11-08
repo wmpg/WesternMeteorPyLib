@@ -19,6 +19,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
+from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor, worstResidual
 from wmpl.Utils.Math import angleBetweenVectors
 
@@ -94,6 +95,36 @@ def testAShallowSlowMeteorInvertsWithoutTiming():
 
 
 
+def testAnIgnoredStationDoesNotSetTheBeginning():
+    """ Check that an ignored station whose first line of sight is far above the meteor does not set the
+        beginning of the gravity drop. Before, the radiant was 0.36 arcsec off.
+    """
+
+    traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, elevation=30.0, \
+        gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, filter_picks=False, \
+        calc_orbit=False)
+
+    # Raise the first line of sight of station C by 5 deg and ignore the station
+    obs = traj.observations[2]
+    obs.elev_data[0] += np.radians(5.0)
+    obs.ignore_station = True
+
+    # Solve the observations again with station C ignored
+    solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
+        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
+        save_results=False, verbose=False)
+
+    for obs in traj.observations:
+        solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id, ignore_station=obs.ignore_station)
+
+    solved = solved.run()
+
+    # Check the radiant
+    assert 3600*np.degrees(angleBetweenVectors(solved.radiant_eci_mini, radiant_eci)) < 0.05
+
+
+
 
 if __name__ == "__main__":
 
@@ -103,6 +134,6 @@ if __name__ == "__main__":
 
         traj, radiant_error = _solve(duration, v_init, elevation, estimate_timing_vel=estimate_timing_vel)
 
-        print("{:.1f} s, {:.0f} m/s, {:.0f} deg, timing {!s:5}: radiant error {:.3f} arcsec, worst residual " \
-            "{:.3f} m, initial velocity error {:+.3f} m/s".format(duration, v_init, elevation, \
-            estimate_timing_vel, radiant_error, worstResidual(traj), traj.v_init - v_init))
+        print("{:.1f} s, {:.0f} m/s, {:.0f} deg, timing {!s:5}: radiant error {:.3f} arcsec, " \
+            "worst residual {:.3f} m, initial velocity error {:+.3f} m/s".format(duration, v_init, \
+            elevation, estimate_timing_vel, radiant_error, worstResidual(traj), traj.v_init - v_init))
