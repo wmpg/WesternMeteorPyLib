@@ -47,8 +47,7 @@ from wmpl.Config import config
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
     J2000_OBLIQUITY,
-    equatorialCoordPrecession,
-    jd2DynamicalTimeJD,
+    equatorialCoordDateToJ2000,
     eci2RaDec,
     vectMag,
     raDec2ECI
@@ -223,12 +222,21 @@ HILL_RADII_AU = {
 }
 
 # The Sun has no Hill sphere, so a close approach to it is flagged by distance instead: a perihelion
-# passage closer than this is listed with the other close encounters. 0.1 AU is where the thermal
-# processing of meteoroids is established: Na is thermally desorbed at q < 0.1 AU (Kasuga et al.
-# 2006, A&A 453, L17; the Na-free population of Borovicka et al. 2005), asteroids disrupt at
-# q ~ 0.076 AU (Granvik et al. 2016, Nature 530, 303), and it lies inside the sunskirter zone of
-# Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU.
-SUN_ENCOUNTER_AU = 0.1
+# passage closer than this is listed with the other close encounters. 0.2 AU is the limit of the
+# Sun-approaching orbital class of Borovicka et al. (2005, Icarus 174, 15), the one meteor studies
+# use: almost all meteoroids inside it are Na-free or Na-poor (Vojacek et al. 2019, A&A 621, A68,
+# sect. 3.3). Inside 0.1 AU all of them are, the sodium being thermally desorbed (Kasuga et al.
+# 2006, A&A 453, L17), asteroids disrupt at q ~ 0.076 AU (Granvik et al. 2016, Nature 530, 303),
+# and the sunskirter zone of Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU, lies
+# inside it.
+SUN_ENCOUNTER_AU = 0.2
+
+# Sun passages closer than this count in the WHFast warning, although the Sun is listed out to
+# SUN_ENCOUNTER_AU: WHFast's fixed step fails only much closer in. Measured with _integrateParticles
+# and the default 0.5 d step against IAS15 over 100 yr (the Sun and five planets, gr_full, a = 1.27
+# and 2.6 AU, i = 25 deg), the error in a was 9e-4 to 1e-2 at q = 0.07 AU, 5e-6 to 6e-6 at 0.10 AU,
+# 1e-6 to 4e-6 at 0.14 AU and below 7e-7 from 0.17 AU.
+WHFAST_SUN_WARNING_AU = 0.1
 
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
@@ -701,7 +709,7 @@ def formatSunPassageSummary(summary):
         summary: [dict] As returned by sunPassageSummary.
 
     Return:
-        [str] E.g. "Sun      24 perihelion passages < 0.10 AU: q = 0.0441-0.0645 AU (9.5-13.9 R_Sun),
+        [str] E.g. "Sun      24 perihelion passages < 0.20 AU: q = 0.0441-0.0645 AU (9.5-13.9 R_Sun),
             t = +3.1 to +99.6 d".
     """
 
@@ -719,7 +727,8 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
     a close encounter: measured over flybys inside 0.1 Hill radii, the error in the semi-major axis
     afterwards was 0.3% to 200%, where TRACE stayed within 4e-6. The nominal solution and every Monte
     Carlo clone are checked, since a clone can pass much closer to a planet than the nominal
-    solution does.
+    solution does. A Sun passage counts only inside WHFAST_SUN_WARNING_AU, closer than the
+    SUN_ENCOUNTER_AU out to which it is listed.
 
     Arguments:
         diagnostics: [dict] {particle name: diagnostics} as returned by reboundSimulate with
@@ -747,8 +756,12 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
         for enc in diag.get("encounters", []):
 
             # The list already holds every passage; only the ones inside the threshold count (the
-            #   Sun's threshold is fixed, so all of its passages do)
+            #   Sun has no Hill radius, and is tested on its distance below)
             if (enc["n_hill"] is not None) and (enc["n_hill"] >= n_hill):
+                continue
+
+            # The Sun is listed out to SUN_ENCOUNTER_AU, but the fixed step fails only much closer
+            if (enc["body"] == "Sun") and (enc["min_dist_au"] >= WHFAST_SUN_WARNING_AU):
                 continue
 
             # Times run along a signed axis (negative for a backward run), so the comparison is
@@ -765,7 +778,7 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
             "either, so the orbits after them can be wrong (measured: 0.3% to 200% in a after "
             "flybys inside 0.1 R_Hill; an orbit with q = 0.07 AU was ejected within 100 yr at the "
             "default 0.5 d step). Rerun with --integrator trace or ias15.".format(
-                n_encounters, n_hill, SUN_ENCOUNTER_AU))
+                n_encounters, n_hill, WHFAST_SUN_WARNING_AU))
 
 
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
@@ -1178,11 +1191,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
     re = vectMag(eci_pos)
     alpha_e, delta_e = eci2RaDec(eci_pos)
 
-    # Convert the Julian date to dynamical time
-    jd_dyn = jd2DynamicalTimeJD(jd)
-    alpha_ej, delta_ej = equatorialCoordPrecession(
-        jd_dyn, J2000_JD.days, alpha_e, delta_e
-    )
+    alpha_ej, delta_ej = equatorialCoordDateToJ2000(jd, alpha_e, delta_e)
 
     if len(log_file_path):
         log(f"RA precessed to J2000: {alpha_ej}")
@@ -1209,9 +1218,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
     v_inf = vectMag(eci_vel)
     alpha_e_vel, delta_e_vel = eci2RaDec(eci_vel)
-    alpha_ej_vel, delta_ej_vel = equatorialCoordPrecession(
-        jd_dyn, J2000_JD.days, alpha_e_vel, delta_e_vel
-    )
+    alpha_ej_vel, delta_ej_vel = equatorialCoordDateToJ2000(jd, alpha_e_vel, delta_e_vel)
 
     if len(log_file_path):
         log(f"RA of velocity direction precessed to J2000: {alpha_ej_vel}")
@@ -2064,6 +2071,41 @@ def _megnoReportLines(megno):
     return lines
 
 
+
+def integrationEpochs(jd_ref_utc, elapsed_days):
+    """ Compute the start and end epochs of an integration in TDB, the time scale of the ephemeris and
+        of the integration, and in UTC, the time scale of the trajectory reference time (traj.jdt_ref).
+        The end is the start in TDB plus the elapsed days, as adding them to the UTC time would put it
+        about 69 s off.
+
+    Arguments:
+        jd_ref_utc: [float] Julian date of the start in UTC.
+        elapsed_days: [float] Integration time (days), negative for a backward integration.
+
+    Return:
+        [dict] Julian dates "start_jd_utc", "start_jd_tdb", "final_jd_tdb" and "final_jd_utc", and the
+            UTC times as ISO strings, "start_utc" and "final_utc".
+    """
+
+    # Import astropy here, as the module imports it only when REBOUND is found
+    import astropy.time
+
+    # Convert the start to TDB, add the elapsed days and convert the end back to UTC
+    start = astropy.time.Time(jd_ref_utc, format='jd', scale='utc')
+    start_tdb = start.tdb.jd
+    final = astropy.time.Time(start_tdb + elapsed_days, format='jd', scale='tdb').utc
+
+    return {
+        "start_jd_utc": float(jd_ref_utc),
+        "start_jd_tdb": float(start_tdb),
+        "final_jd_tdb": float(start_tdb + elapsed_days),
+        "final_jd_utc": float(final.jd),
+        "start_utc": start.iso,
+        "final_utc": final.iso,
+    }
+
+
+
 def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
@@ -2559,9 +2601,9 @@ if __name__ == "__main__":
     
     # State the integration span up front, so it is visible while the integration is running and
     # not only in the summary printed at the end
+    start_epochs = integrationEpochs(traj.jdt_ref, 0.0)
     print("Integrating {:.2f} days {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
-        sim_days, direction, traj.jdt_ref,
-        astropy.time.Time(traj.jdt_ref, format='jd', scale='utc').iso))
+        sim_days, direction, start_epochs["start_jd_tdb"], start_epochs["start_utc"]))
 
     # Run the simulation for the given number of days from the epoch of the trajectory
     t_run_start = time.time()
@@ -2679,11 +2721,9 @@ if __name__ == "__main__":
     # Extract the final time in days
     final_sim_days = sim_outputs[-1][0]/(2*np.pi)*365.25
 
-    # Compute the final epoch
-    final_epoch_jd = traj.jdt_ref + final_sim_days
-
-    # Convert the epoch to UTC
-    time_utc = astropy.time.Time(final_epoch_jd, format='jd', scale='utc')
+    # Compute the start and final epochs in TDB, the time scale of the integration, and in UTC
+    epochs = integrationEpochs(traj.jdt_ref, final_sim_days)
+    final_epoch_jd = epochs["final_jd_tdb"]
 
     ###
 
@@ -2755,8 +2795,8 @@ if __name__ == "__main__":
     print("  Forces       : {:s}".format(
         "gravity + GR + Earth J2/J4" if beta is None
         else "gravity + GR + Earth J2/J4 + radiation (beta = {:.3e})".format(beta)))
-    print("  Start epoch  : {:.6f} JD (TDB)".format(traj.jdt_ref))
-    print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, time_utc.iso))
+    print("  Start epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(epochs["start_jd_tdb"], epochs["start_utc"]))
+    print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, epochs["final_utc"]))
     if len(sim_outputs_mc):
         print("  Monte Carlo  : {:d} realizations on {:d} core(s), seed {:d}".format(
             len(sim_outputs_mc), n_cpu, random_seed))
@@ -2955,7 +2995,7 @@ if __name__ == "__main__":
             f.write("*** state before the impact, not a surviving orbit.\n\n")
 
         f.write("Orbital elements {:.2f} days {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
-            achieved_days, direction, traj.jdt_ref,
+            achieved_days, direction, epochs["start_jd_tdb"],
             "" if abs(achieved_days - sim_days) <= 1e-6
             else " (requested {:.2f} days, stopped early)".format(sim_days)))
         f.write("a    = {:>10.6f}{:s} {:s}\n".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
@@ -3402,9 +3442,11 @@ if __name__ == "__main__":
             "ephemeris": "horizons" if args.horizons else "local_de430",
             "n_outputs": args.outputs,
             "beta": beta,
-            "start_epoch_jd_tdb": traj.jdt_ref,
+            "start_epoch_jd_tdb": epochs["start_jd_tdb"],
+            "start_epoch_jd_utc": epochs["start_jd_utc"],
             "final_epoch_jd_tdb": final_epoch_jd,
-            "final_epoch_utc": time_utc.iso,
+            "final_epoch_jd_utc": epochs["final_jd_utc"],
+            "final_epoch_utc": epochs["final_utc"],
             "mc_runs": len(sim_outputs_mc),
             "random_seed": random_seed,
             "runtime_s": sim_wall,

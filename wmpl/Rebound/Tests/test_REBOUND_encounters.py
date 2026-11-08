@@ -228,10 +228,12 @@ def testACloseSunPassageIsAnEncounter(reb):
     assert sun[0]["min_dist_au"] == pytest.approx(0.05, rel=1e-2)
     assert (sun[0]["hill_radius_au"] is None) and (sun[0]["n_hill"] is None)
 
-    diag = reb._integrateParticles(_sunTask(0.15))["diagnostics"]["obj"]
+    # Outside 0.2 AU the perihelion comes ~26 days after the release
+    task = dict(_sunTask(0.25), times=list(np.linspace(0.0, 40.0*DAY, 41)))
+    diag = reb._integrateParticles(task)["diagnostics"]["obj"]
 
     assert "Sun" not in [enc["body"] for enc in diag["encounters"]]
-    assert diag["min_dist_au"]["Sun"] == pytest.approx(0.15, rel=1e-2)
+    assert diag["min_dist_au"]["Sun"] == pytest.approx(0.25, rel=1e-2)
 
 
 def testSunMinimumIsNotLimitedByTheIntegratorStep(reb):
@@ -338,7 +340,7 @@ def testSunPassageSummaryCollapsesOnlyRepeatedPassages(reb):
 
     line = reb.formatSunPassageSummary(summary)
     assert line.startswith("Sun ")
-    assert "4 perihelion passages < 0.10 AU" in line
+    assert "4 perihelion passages < 0.20 AU" in line
     assert "q = 0.0400-0.0600 AU" in line
     assert "t = +1.0 to +13.0 d" in line
 
@@ -385,3 +387,60 @@ def testCloneSummaryIsEmptyWithoutEncounters(reb):
 
     assert reb.cloneEncounterSummary({}) == {}
     assert reb.cloneEncounterSummary({"mc_0": {}, "mc_1": {"encounters": []}}) == {}
+
+
+
+### The Sun-approaching limit of the encounter list and of the WHFast warning ###
+
+def testTheSunIsListedInsideTheSunApproachingLimit(reb):
+    """ Check that a Geminid-like passage at q = 0.14 AU, inside the Sun-approaching limit of 0.2 AU of
+        Borovicka et al. (2005), is listed, and that one at 0.25 AU is not.
+    """
+
+    assert reb.SUN_ENCOUNTER_AU == 0.2
+
+    encounters = reb.encountersFromMinDistances({"Sun": 0.14}, {"Sun": -400.0})
+
+    assert [e["body"] for e in encounters] == ["Sun"]
+    assert encounters[0]["min_dist_au"] == 0.14
+
+    assert reb.encountersFromMinDistances({"Sun": 0.25}, {"Sun": -400.0}) == []
+
+
+
+def _sunDiagnostics(q_au, t_from=-50.0, t_passage=-900.0):
+    """ Make the diagnostics of a particle with one Sun passage, after WHFast took over.
+
+    Arguments:
+        q_au: [float] Distance of the Sun passage (AU).
+
+    Keyword arguments:
+        t_from: [float] Time at which WHFast took over (days). -50 by default.
+        t_passage: [float] Time of the Sun passage (days). -900 by default.
+
+    Return:
+        [dict] Diagnostics of the particle, as returned by reboundSimulate.
+    """
+
+    return {"fixed_step_from_days": t_from,
+            "min_dist_au": {"Sun": q_au},
+            "min_time_days": {"Sun": t_passage},
+            "encounters": [{"body": "Sun", "min_dist_au": q_au, "time_days": t_passage,
+                            "hill_radius_au": None, "n_hill": None, "index": None}]}
+
+
+
+def testWhfastWarningCountsOnlySunPassagesInsideItsOwnLimit(reb):
+    """ Check that a Sun passage between 0.1 and 0.2 AU, which is listed but which WHFast handles, raises no
+        warning, and that one inside 0.1 AU does, with the warning quoting that limit.
+    """
+
+    assert reb.WHFAST_SUN_WARNING_AU == 0.1 < reb.SUN_ENCOUNTER_AU
+
+    assert reb.whfastEncounterWarning({"obj": _sunDiagnostics(0.14)}) is None
+    assert reb.whfastEncounterWarning({"obj": _sunDiagnostics(0.1)}) is None
+
+    warning = reb.whfastEncounterWarning({"obj": _sunDiagnostics(0.07), "mc_0": _sunDiagnostics(0.14)})
+
+    assert "1 close encounter" in warning
+    assert "Sun < 0.10 AU" in warning
