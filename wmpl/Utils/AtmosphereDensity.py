@@ -25,7 +25,7 @@ MSIS_VERSION_ENV = "WMPL_MSIS_VERSION"
 MSIS_JD_ENV = "WMPL_MSIS_JD"
 MSIS_SPACE_WEATHER_ENV = "WMPL_MSIS_SPACE_WEATHER"
 
-# MSIS version of all density evaluations, "2.1" (NRLMSIS 2.1) by default, or "2.0" or "00" (NRLMSISE-00)
+# MSIS version of the density, "2.1" by default, "2.0" or "00" for NRLMSISE-00
 MSIS_VERSION = os.environ.get(MSIS_VERSION_ENV, "2.1")
 
 # Julian date used instead of the one of the input data, if set
@@ -42,7 +42,7 @@ CONSTANT_AP = 4.0
 # Names of the MSIS versions
 MSIS_MODEL_NAMES = {"00": "NRLMSISE-00", "2.0": "NRLMSIS 2.0", "2.1": "NRLMSIS 2.1"}
 
-# Height range and step of the atmosphere density tables of MetSim (m), covering the whole simulation
+# Height range and step of the density tables of MetSim (m)
 ATM_TABLE_HT_MIN = 0.0
 ATM_TABLE_HT_MAX = 200000.0
 ATM_TABLE_STEP = 500.0
@@ -50,9 +50,8 @@ ATM_TABLE_STEP = 500.0
 # Time limit of the download of the space weather file (s)
 SPACE_WEATHER_TIMEOUT = 20
 
-# State of the space weather file in this process, which is downloaded at most twice, to get it and to refresh
-#   it for a date it only predicts
-SPACE_WEATHER_STATE = {'checked': False, 'refreshed': False, 'available': False, 'end': None, \
+# State of the space weather file in this process, downloaded at most once and refreshed at most once
+SPACE_WEATHER_STATE = {'checked': False, 'refreshed': False, 'available': False, 'start': None, 'end': None, \
     'predicted_start': None, 'warned': set()}
 
 
@@ -203,8 +202,9 @@ def downloadSpaceWeather():
 
 
 def readSpaceWeatherRange():
-    """ Read the end of the space weather file and the first date of its predicted values into
-        SPACE_WEATHER_STATE.
+    """ Read the first and last day of the daily values of the space weather file and the first day it only
+        predicts into SPACE_WEATHER_STATE, skipping the monthly predictions and the rows with missing values
+        as pymsis does.
 
     Return:
         None
@@ -215,6 +215,7 @@ def readSpaceWeatherRange():
     if not SPACE_WEATHER_STATE['available']:
         return
 
+    first_date = None
     last_date = None
     predicted_start = None
 
@@ -222,10 +223,13 @@ def readSpaceWeatherRange():
         for line in f:
 
             columns = line.split(',')
-            if (len(columns) < 27) or (not columns[0][:1].isdigit()):
+            if (len(columns) < 27) or (not columns[0][:1].isdigit()) or ("PRM" in line) \
+                or (",,,,,,,," in line):
                 continue
 
             last_date = np.datetime64(columns[0][:10])
+            if first_date is None:
+                first_date = last_date
             if (predicted_start is None) and (columns[26].strip() == 'PRD'):
                 predicted_start = last_date
 
@@ -233,7 +237,8 @@ def readSpaceWeatherRange():
         SPACE_WEATHER_STATE['available'] = False
         return
 
-    # Each row covers its whole day
+    # Leave out the first days, whose ap history is missing, and include the whole last day
+    SPACE_WEATHER_STATE['start'] = first_date + np.timedelta64(3, 'D')
     SPACE_WEATHER_STATE['end'] = last_date + np.timedelta64(1, 'D')
     SPACE_WEATHER_STATE['predicted_start'] = predicted_start if predicted_start is not None \
         else SPACE_WEATHER_STATE['end']
@@ -256,14 +261,15 @@ def updateSpaceWeather(dt_max):
     if not state['checked']:
         state['checked'] = True
 
-        if not spaceWeatherFile().is_file():
+        if (not spaceWeatherFile().is_file()) and (not os.environ.get('PYMSIS_SPACE_WEATHER_FILE')):
             state['refreshed'] = True
             downloadSpaceWeather()
 
         readSpaceWeatherRange()
 
-    # Refresh the file once if it does not have the measured values of the date
-    if state['available'] and (not state['refreshed']) and (dt_max >= state['predicted_start']):
+    # Refresh the default file once for a date it only predicts
+    if state['available'] and (not state['refreshed']) and (dt_max >= state['predicted_start']) \
+        and (not os.environ.get('PYMSIS_SPACE_WEATHER_FILE')):
         state['refreshed'] = True
 
         if downloadSpaceWeather():
@@ -276,8 +282,9 @@ def spaceWeatherArrays(dt_arr):
 
     With the real space weather, the measured F10.7 of the previous day, its 81-day average and the ap
     indices are taken from the CelesTrak file of pymsis, which is downloaded once with a time limit. The
-    values the file only predicts are used and labelled 'predicted'. Without the file, or past its end,
-    the constant values are used with a warning.
+    values the file only predicts are used and labelled 'predicted'. The centred 81-day average of the last
+    40 measured days also includes predictions, but they are labelled 'real'. Without the file, or outside
+    its daily values, the constant values are used with a warning.
 
     Arguments:
         dt_arr: [ndarray] Dates (datetime64, UTC).
@@ -306,17 +313,25 @@ def spaceWeatherArrays(dt_arr):
             "are used.")
         return f107, f107a, ap, source
 
-    # Take the values of the dates inside the file, so that pymsis does not download it again
-    inside = dt_arr < SPACE_WEATHER_STATE['end']
+    # Use the file only inside its daily values, so that pymsis does not download it
+    inside = (dt_arr >= SPACE_WEATHER_STATE['start']) & (dt_arr < SPACE_WEATHER_STATE['end'])
     if not np.all(inside):
-        warnSpaceWeather('end', "The space weather file ends on {:s}, so the constant values are used " \
-            "after it.".format(str(SPACE_WEATHER_STATE['end'])))
+        warnSpaceWeather('range', "The space weather file has daily values from {:s} to {:s}, so the " \
+            "constant values are used outside them.".format(str(SPACE_WEATHER_STATE['start']), \
+            str(SPACE_WEATHER_STATE['end'])))
 
     if np.any(inside):
 
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            f107_in, f107a_in, ap_in = pymsis.utils.get_f107_ap(dt_arr[inside])
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                f107_in, f107a_in, ap_in = pymsis.utils.get_f107_ap(dt_arr[inside])
+
+        except Exception as e:
+            warnSpaceWeather('read', "The space weather could not be read ({:s}), so the constant values " \
+                "are used.".format(repr(e)))
+
+            return f107, f107a, ap, source
 
         # Keep the constant values where the file has none
         valid = np.isfinite(f107_in) & np.isfinite(f107a_in) & np.all(np.isfinite(ap_in), axis=1)
@@ -680,7 +695,7 @@ def getMSISVariable(lat, lon, height, jd, variable):
     if MSIS_JD is not None:
         jd = MSIS_JD
 
-    # Broadcast the inputs to a common shape, so that pymsis evaluates them point by point
+    # Broadcast the inputs to a common shape
     lat, lon, height, jd = np.broadcast_arrays(np.degrees(lat), np.degrees(lon), height, jd)
     values = np.full(lat.size, np.nan)
 
@@ -697,8 +712,7 @@ def getMSISVariable(lat, lon, height, jd, variable):
 
         f107, f107a, ap, _ = spaceWeatherArrays(dt_arr)
 
-        # Take the requested variable out of the 11 the model returns, with inputs of equal length for one row
-        #   per point
+        # Compute one row per point, giving all inputs the same length
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             values[finite] = calculate(dt_arr, lon.ravel()[finite], lat.ravel()[finite], \

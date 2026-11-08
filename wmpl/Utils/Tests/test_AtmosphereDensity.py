@@ -19,14 +19,11 @@ import os
 import numpy as np
 import pytest
 
-pytest.importorskip('wmpl.PythonNRLMSISE00.nrlmsise_00')
+import pymsis.utils
 
-from wmpl.PythonNRLMSISE00.nrlmsise_00 import gtd7
-from wmpl.PythonNRLMSISE00.nrlmsise_00_header import nrlmsise_input, nrlmsise_flags, nrlmsise_output
-import wmpl.Utils.AtmosphereDensity as AtmosphereDensity
 from wmpl.Utils.AtmosphereDensity import MSIS_JD_ENV, MSIS_VERSION_ENV, addAtmosphereArguments, atmDensPoly, \
     atmDensityTableInfo, fitAtmPoly, getAtmDensity, getAtmDensity_vect, getAtmTemperature, getMSISVersion, \
-    setAtmosphere, spaceWeather, spaceWeatherArrays, SPACE_WEATHER_STATE
+    msisModelName, setAtmosphere, spaceWeather, spaceWeatherArrays, SPACE_WEATHER_STATE
 from wmpl.Utils.TrajConversions import datetime2JD
 
 
@@ -72,9 +69,24 @@ def keepSpaceWeatherState(monkeypatch):
 
 
 def referenceMSIS(height, dt=DT_REF):
-    """ Compute the total mass density (kg/m^3) and temperature (K) at the reference location with the
-        bundled NRLMSISE-00 port.
+    """ Compute the total mass density and temperature at the reference location with the bundled
+        NRLMSISE-00 port.
+
+    Arguments:
+        height: [float] Height (m).
+
+    Keyword arguments:
+        dt: [datetime] Date and time (UTC). DT_REF by default.
+
+    Return:
+        (density, temperature): [tuple] Mass density (kg/m^3) and temperature (K).
     """
+
+    nrlmsise_00 = pytest.importorskip('wmpl.PythonNRLMSISE00.nrlmsise_00')
+    header = pytest.importorskip('wmpl.PythonNRLMSISE00.nrlmsise_00_header')
+    gtd7 = nrlmsise_00.gtd7
+    nrlmsise_input, nrlmsise_flags, nrlmsise_output = header.nrlmsise_input, header.nrlmsise_flags, \
+        header.nrlmsise_output
 
     inp = nrlmsise_input()
     flags = nrlmsise_flags()
@@ -206,7 +218,7 @@ def testTheMeasuredSpaceWeatherIsUsedAndRecorded():
     assert 60 < f107a < 80
 
     info = atmDensityTableInfo(LAT, LON, JD_REF)
-    assert info['model'] == AtmosphereDensity.msisModelName()
+    assert info['model'] == msisModelName()
     assert info['space_weather'] == 'real'
     assert info['f107'] == f107
 
@@ -233,8 +245,8 @@ def testWithoutTheSpaceWeatherFileTheConstantValuesAreUsedAndItIsDownloadedOnce(
         downloads.append(1)
         raise OSError("offline")
 
-    monkeypatch.setenv('PYMSIS_SPACE_WEATHER_FILE', str(tmp_path/'missing.csv'))
-    monkeypatch.setattr(AtmosphereDensity.pymsis.utils, 'download_f107_ap', failingDownload)
+    monkeypatch.setitem(spaceWeather.__globals__, 'spaceWeatherFile', lambda: tmp_path/'missing.csv')
+    monkeypatch.setattr(pymsis.utils, 'download_f107_ap', failingDownload)
     keepSpaceWeatherState(monkeypatch)
     SPACE_WEATHER_STATE['checked'] = False
     SPACE_WEATHER_STATE['refreshed'] = False
@@ -251,7 +263,8 @@ def testWithoutTheSpaceWeatherFileTheConstantValuesAreUsedAndItIsDownloadedOnce(
 
 def testPredictedAndMissingDatesAreLabelled(monkeypatch):
     """ Check that dates the space weather file only predicts are labelled 'predicted', after one refresh,
-        and that dates past its end get the constant values.
+        and that dates outside its daily values, before 1957 or in its monthly predictions, get the
+        constant values without more downloads.
     """
 
     f107, f107a, ap, source = spaceWeather(JD_REF)
@@ -266,21 +279,29 @@ def testPredictedAndMissingDatesAreLabelled(monkeypatch):
         downloads.append(1)
         raise OSError("not refreshed in the test")
 
-    monkeypatch.setattr(AtmosphereDensity.pymsis.utils, 'download_f107_ap', noDownload)
+    monkeypatch.setattr(pymsis.utils, 'download_f107_ap', noDownload)
     keepSpaceWeatherState(monkeypatch)
     SPACE_WEATHER_STATE['refreshed'] = False
 
     predicted_start = SPACE_WEATHER_STATE['predicted_start']
     end = SPACE_WEATHER_STATE['end']
     dates = np.array([np.datetime64('2020-04-20T16:15'), predicted_start + np.timedelta64(12, 'h'), \
-        end + np.timedelta64(400, 'D')])
+        end + np.timedelta64(30, 'D'), np.datetime64('1950-01-01')])
 
     _, _, _, sources = spaceWeatherArrays(dates)
 
     assert sources[0] == 'real'
     assert sources[2] == 'constant'
+    assert sources[3] == 'constant'
     if predicted_start < end:
         assert sources[1] == 'predicted'
+
+    assert len(downloads) == 1
+
+    # Check that the densities of the dates outside the daily values are computed
+    for date in (end + np.timedelta64(30, 'D'), np.datetime64('1950-01-01')):
+        jd = datetime2JD(date.astype('datetime64[s]').astype(datetime.datetime))
+        assert np.isfinite(getAtmDensity(LAT, LON, 100000.0, jd))
 
     assert len(downloads) == 1
 
@@ -314,6 +335,12 @@ def testABadAtmosphereTimeIsAParserError():
 def childAtmosphere(_):
     """ Return the model and a density as seen by a process started by multiprocessing, the density also
         depending on the date.
+
+    Arguments:
+        _: [int] Unused argument of the pool map.
+
+    Return:
+        (version, density): [tuple] MSIS version and the density at 85 km (kg/m^3).
     """
 
     return getMSISVersion(), getAtmDensity(LAT, LON, 85000.0, JD_REF)
