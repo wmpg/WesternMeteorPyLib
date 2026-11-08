@@ -1826,7 +1826,8 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Run the ablation simulation using the meteoroid parameters hardcoded in this file.")
+    arg_parser = argparse.ArgumentParser(description="Run the ablation simulation using the meteoroid " \
+        "parameters hardcoded in this file.")
 
     # Add the atmosphere model options
     addAtmosphereArguments(arg_parser)

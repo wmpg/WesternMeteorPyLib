@@ -66,7 +66,8 @@ def addAtmosphereArguments(arg_parser):
 
     arg_parser.add_argument('--atm', metavar='MSIS_VERSION', type=str, default="2.1", \
         choices=['00', '2.0', '2.1'], \
-        help="MSIS atmosphere model: 2.1 for NRLMSIS 2.1 (default), 2.0 for NRLMSIS 2.0 or 00 for NRLMSISE-00.")
+        help="MSIS atmosphere model: 2.1 for NRLMSIS 2.1 (default), 2.0 for NRLMSIS 2.0 or 00 for " \
+        "NRLMSISE-00.")
 
     arg_parser.add_argument('--atmtime', metavar='ATM_TIME', type=str, default=None, \
         help="UTC date and time at which the atmosphere is evaluated. Format: YYYYMMDD-HHMMSS. By " \
@@ -74,8 +75,8 @@ def addAtmosphereArguments(arg_parser):
 
     arg_parser.add_argument('--atmsw', metavar='SPACE_WEATHER', type=str, default="real", \
         choices=['real', 'constant'], \
-        help="Solar and geomagnetic activity given to the MSIS model: real for the measured F10.7 and Ap of " \
-        "the date (default, downloaded once from CelesTrak), constant for F10.7 = 150 and Ap = 4.")
+        help="Solar and geomagnetic activity given to the MSIS model: real for the measured F10.7 and Ap " \
+        "of the date (default, downloaded once from CelesTrak), constant for F10.7 = 150 and Ap = 4.")
 
     return arg_parser
 
