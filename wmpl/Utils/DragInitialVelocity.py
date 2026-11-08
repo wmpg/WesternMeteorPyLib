@@ -420,7 +420,8 @@ def droppedLengths(traj, obs):
     """ Lengths of the points of an observation from the solver's state vector along the radiant line, measured on
         the trajectory with the gravity drop the line of sight fit applied, where angleSumMeasurements2Line finds
         them, and keeping the drop: the motion MetSim follows, with gravity along the path too. The solver's own
-        lengths may be those of the line without the drop.
+        lengths may be those of the line without the drop. The points are also moved by the displacement by
+        drag against the rotating air of the fit, where the solution has it.
 
     Arguments:
         traj: [Trajectory] Solved trajectory whose lines of sight were fitted with the gravity drop.
@@ -442,12 +443,18 @@ def droppedLengths(traj, obs):
     r0 = getattr(traj, 'gravity_r0', None)
     drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: traj.gravity_factor)
 
+    # Same displacement of a decelerating meteor by drag against the rotating air as the fit, where the
+    #   solution has it (Trajectory.airRotationShiftAt)
+    shift_at = getattr(traj, 'airRotationShiftAt', None)
+
     state_vect, radiant_eci = traj.state_vect_mini, traj.radiant_eci_mini
     lengths = []
     for t, stat, meas in zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los):
         _, rad_cpa, _ = findClosestPoints(stat, meas, state_vect, radiant_eci)
         rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa) if (r0 is None) else r0, \
             drop_factor(t - t0), v0z)
+        if shift_at is not None:
+            rad_cpa_grav = rad_cpa_grav + shift_at(t - t0, radiant_eci)
         _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
         lengths.append(abs(np.dot(state_vect - rad_cpa_dropped, radiant_eci)))
 
