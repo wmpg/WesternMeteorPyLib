@@ -65,7 +65,8 @@ from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, sav
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
+    ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -1879,8 +1880,6 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
     constjson_bestfit.__dict__['lum_eff_type'] = obs_data.lum_eff_type
     constjson_bestfit.__dict__['disruption_on'] = obs_data.disruption_on
     constjson_bestfit.__dict__['dens_co'] = obs_data.dens_co
-    constjson_bestfit.__dict__['atm_table_ht'] = getattr(obs_data, 'atm_table_ht', None)
-    constjson_bestfit.__dict__['atm_table_log10_rho'] = getattr(obs_data, 'atm_table_log10_rho', None)
     constjson_bestfit.__dict__['dt'] = obs_data.dt
     constjson_bestfit.__dict__['h_kill'] = obs_data.h_kill
     constjson_bestfit.__dict__['v_kill'] = obs_data.v_kill
@@ -3974,9 +3973,13 @@ class ObservationData:
             # Fit the polynomial describing the density
             self.dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
 
-            # Tabulate the density, the simulation uses the table instead of the polynomial
-            self.atm_table_ht, self.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, 
-                dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
+            # Tabulate the density over the whole simulation, used instead of the polynomial
+            atm_ht_max = max(ATM_TABLE_HT_MAX, dens_fit_ht_beg)
+            self.atm_table_ht, self.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, \
+                ATM_TABLE_HT_MIN, atm_ht_max, jd_dat)
+            self.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, jd_dat, height_max=atm_ht_max)
+            self.atm_density_model = 'table'
+
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4523,6 +4526,8 @@ class ObservationData:
             self.dens_co = np.array(self.const.dens_co) 
             self.atm_table_ht = getattr(self.const, 'atm_table_ht', None)
             self.atm_table_log10_rho = getattr(self.const, 'atm_table_log10_rho', None)
+            self.atm_density_info = getattr(self.const, 'atm_density_info', None)
+            self.atm_density_model = getattr(self.const, 'atm_density_model', 'polynomial')
 
             # Compute absolute magnitudes
             absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)
@@ -5850,10 +5855,11 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
     # Assign the density coefficients
     const_nominal.dens_co = dens_co
 
-    # Assign the density table (used instead of the polynomial), observation data saved before the table was 
-    #   introduced don't have it and keep using the polynomial
+    # Assign the density model and table, where observations saved without them use the legacy polynomial
+    const_nominal.atm_density_model = getattr(real_event, 'atm_density_model', 'polynomial')
     const_nominal.atm_table_ht = getattr(real_event, 'atm_table_ht', None)
     const_nominal.atm_table_log10_rho = getattr(real_event, 'atm_table_log10_rho', None)
+    const_nominal.atm_density_info = getattr(real_event, 'atm_density_info', None)
 
     # # Turn on plotting of LCs of individual fragments 
     # const_nominal.fragmentation_show_individual_lcs = True

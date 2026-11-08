@@ -19,6 +19,7 @@ import numpy as np
 import scipy.stats
 import scipy.integrate
 
+from wmpl.Utils.AtmosphereDensity import atmColumnTable
 from wmpl.Utils.Physics import earthRotationSpeed
 
 
@@ -75,9 +76,14 @@ class Constants(object):
         self.dens_co = np.array([6.96795507e+01, -4.14779163e+03, 9.64506379e+04, -1.16695944e+06, \
             7.62346229e+06, -2.55529460e+07, 3.45163318e+07])
 
-        # Tabulated atmosphere density, heights (m) and log10 of the density (kg/m^3), used instead of dens_co
+        # Atmosphere density model, 'table' or the legacy 'polynomial' of constants saved without this flag,
+        #   which is inaccurate by up to tens of percent at 80 to 120 km
+        self.atm_density_model = 'table'
+
+        # Tabulated atmosphere density, heights (m) and log10 of the density (kg/m^3), and its provenance
         self.atm_table_ht = None
         self.atm_table_log10_rho = None
+        self.atm_density_info = None
         
         # Radius of the Earth (m)
         self.r_earth = 6_371_008.7714
@@ -777,10 +783,11 @@ def getErosionCoeff(const, h):
         return 0
 
 
-def atmDensityTable(ht, table_ht, table_log10_rho):
+def atmDensityTableScalar(ht, table_ht, table_log10_rho):
     """ Compute the atmosphere density from a tabulated profile, interpolating log10 of the density linearly
         in height, which is an exponential atmosphere between the table points. Outside the table, the end
-        segments are extrapolated.
+        segments are extrapolated. This is the scalar version of AtmosphereDensity.atmDensTable() for the
+        simulation loop, where indexing lists is faster than numpy.
 
     Arguments:
         ht: [float] Height (m).
@@ -805,9 +812,26 @@ def atmDensityTable(ht, table_ht, table_log10_rho):
     return 10**(log10_rho_0 + (ht - ht_0)*(table_log10_rho[i + 1] - log10_rho_0)/(table_ht[i + 1] - ht_0))
 
 
+def usesAtmDensityTable(const):
+    """ Check whether the simulation takes the atmosphere density from the table of the constants, which it
+        does if the density model is 'table' and the table is given. Constants without the model are legacy
+        ones and use the polynomial.
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+
+    Return:
+        [bool] True if the table is used.
+    """
+
+    return (getattr(const, 'atm_density_model', 'polynomial') == 'table') \
+        and (getattr(const, 'atm_table_ht', None) is not None)
+
+
+
 def atmDensity(ht, const):
-    """ Compute the atmosphere density from the tabulated profile of the constants if they have one, or from
-        the density polynomial otherwise.
+    """ Compute the atmosphere density from the tabulated profile of the constants if they use it, or from
+        the density polynomial otherwise (see usesAtmDensityTable()).
 
     Arguments:
         ht: [float] Height (m).
@@ -817,12 +841,10 @@ def atmDensity(ht, const):
         [float] Atmosphere density (kg/m^3).
     """
 
-    # Read the table with getattr for Constants pickled before it existed
-    table_ht = getattr(const, 'atm_table_ht', None)
-    if table_ht is None:
+    if not usesAtmDensityTable(const):
         return atmDensityPoly(ht, const.dens_co)
 
-    return atmDensityTable(ht, table_ht, const.atm_table_log10_rho)
+    return atmDensityTableScalar(ht, const.atm_table_ht, const.atm_table_log10_rho)
 
 
 def prepareAtmDensityTable(const):
@@ -836,19 +858,25 @@ def prepareAtmDensityTable(const):
         None
     """
 
-    if getattr(const, 'atm_table_ht', None) is None:
+    if not usesAtmDensityTable(const):
         return
+
+    if getattr(const, 'atm_table_log10_rho', None) is None:
+        raise ValueError("atm_table_ht is given without atm_table_log10_rho")
 
     table_ht = [float(ht) for ht in const.atm_table_ht]
     table_log10_rho = [float(lr) for lr in const.atm_table_log10_rho]
 
+    if not (np.all(np.isfinite(table_ht)) and np.all(np.isfinite(table_log10_rho))):
+        raise ValueError("The atmosphere density table has non-finite values")
+
     if len(table_ht) < 2:
-        raise ValueError("The atmosphere density table needs at least 2 points, got {:d}".format(
+        raise ValueError("The atmosphere density table needs at least 2 points, got {:d}".format( \
             len(table_ht)))
 
     if len(table_ht) != len(table_log10_rho):
-        raise ValueError("atm_table_ht and atm_table_log10_rho have different lengths ({:d} vs {:d})".format(
-            len(table_ht), len(table_log10_rho)))
+        raise ValueError("atm_table_ht and atm_table_log10_rho have different lengths ({:d} vs {:d})" \
+            "".format(len(table_ht), len(table_log10_rho)))
 
     if any(ht_next <= ht_prev for ht_prev, ht_next in zip(table_ht[:-1], table_ht[1:])):
         raise ValueError("atm_table_ht must be strictly ascending")
@@ -940,8 +968,11 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     mass_total_active = 0.0
 
     # Read the atmosphere density table once, not for every fragment
-    atm_table_ht = getattr(const, 'atm_table_ht', None)
-    atm_table_log10_rho = getattr(const, 'atm_table_log10_rho', None)
+    if usesAtmDensityTable(const):
+        atm_table_ht = const.atm_table_ht
+        atm_table_log10_rho = const.atm_table_log10_rho
+    else:
+        atm_table_ht = None
 
     # Go through all active fragments
     for frag in fragments:
@@ -954,7 +985,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         if atm_table_ht is None:
             rho_atm = atmDensityPoly(frag.h, const.dens_co)
         else:
-            rho_atm = atmDensityTable(frag.h, atm_table_ht, atm_table_log10_rho)
+            rho_atm = atmDensityTableScalar(frag.h, atm_table_ht, atm_table_log10_rho)
 
         # Compute the mass loss of the fragment due to ablation
         mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
@@ -1711,10 +1742,16 @@ def energyReceivedBeforeErosion(const, lam=1.0):
 
     """
 
-    # Integrate atmosphere density from the beginning of simulation to beginning of erosion.
+    # Integrate atmosphere density from the beginning of simulation to beginning of erosion, exactly with the
+    #   table
     prepareAtmDensityTable(const)
-    dens_integ = scipy.integrate.quad(atmDensity, const.erosion_height_start, const.h_init, \
-        args=(const,))[0]
+    if usesAtmDensityTable(const):
+        dens_integ = float(atmColumnTable(const.erosion_height_start, const.h_init, const.atm_table_ht, \
+            const.atm_table_log10_rho))
+
+    else:
+        dens_integ = scipy.integrate.quad(atmDensityPoly, const.erosion_height_start, const.h_init, \
+            args=(const.dens_co,))[0]
 
     # Compute the energy per unit cross-section
     es = 1/2*lam*(const.v_init**2)*dens_integ/np.cos(const.zenith_angle)
@@ -1755,7 +1792,7 @@ if __name__ == "__main__":
         )
 
     # Tabulate the atmosphere density for the same location, time and heights
-    const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(np.radians(45.3), np.radians(18.1), 
+    const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(np.radians(45.3), np.radians(18.1), \
         70000, 180000, date2JD(2020, 4, 20, 16, 15, 0))
 
 

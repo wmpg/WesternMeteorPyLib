@@ -1,10 +1,8 @@
 """ Tests for the tabulated atmosphere density profile used by MetSimErosion.
 
-The ablation simulation used to take the air density only from a 6th degree polynomial fitted to log10 of
-the MSIS density (fitAtmPoly). Over the wide height ranges used for fireballs (e.g. 14 - 180 km) the
-polynomial misses the model by tens of percent at 80 - 120 km. The density can now be given as a table of
-log10(density), interpolated linearly in height (getAtmDensityTable), which the simulation uses instead of
-the polynomial when it is present. These tests check:
+The simulation takes the air density from a table of log10 of the MSIS density (getAtmDensityTable),
+interpolated linearly in height, if the constants have the 'table' density model, and from the legacy 6th
+degree polynomial (fitAtmPoly) otherwise. These tests check:
 
     - the table grid and its values at the nodes
     - the table follows the MSIS model between the nodes, far closer than the polynomial
@@ -14,7 +12,8 @@ the polynomial when it is present. These tests check:
       objects created before the table existed)
     - tables given as numpy arrays (e.g. after a JSON load) are converted, invalid tables are rejected
     - the energy received before erosion integrates the table
-    - the table survives the GUI JSON save/load round trip
+    - the table survives the GUI JSON save/load round trip, and old JSON files load with the polynomial
+    - the legacy flag selects the polynomial, and DynestyMetSim takes the model of its observations
 
 Run with pytest:
     python -m pytest wmpl/MetSim/Tests/test_MetSimAtmosphereTable.py -v
@@ -138,11 +137,11 @@ def testScalarAndVectorInterpolationAgree():
         np.linspace(10000, 190000, 97)])
 
     rho_vect = atmDensTable(ht, TABLE_HT, TABLE_LOG10_RHO)
-    rho_scalar = np.array([MetSimErosion.atmDensityTable(h, TABLE_HT, TABLE_LOG10_RHO) for h in ht])
+    rho_scalar = np.array([MetSimErosion.atmDensityTableScalar(h, TABLE_HT, TABLE_LOG10_RHO) for h in ht])
     assert np.allclose(rho_scalar, rho_vect, rtol=1e-12, atol=0)
 
     # Exact at the nodes
-    assert np.isclose(MetSimErosion.atmDensityTable(TABLE_HT[50], TABLE_HT, TABLE_LOG10_RHO),
+    assert np.isclose(MetSimErosion.atmDensityTableScalar(TABLE_HT[50], TABLE_HT, TABLE_LOG10_RHO),
         10**TABLE_LOG10_RHO[50], rtol=1e-12)
 
     # Outside the table, the end segment continues as an exponential
@@ -263,18 +262,22 @@ def testInvalidTableRejected():
 
 
 def testEnergyReceivedUsesTable():
-    """ The energy received before erosion integrates the tabulated density when there is a table. """
+    """ Check that the energy received before erosion integrates the tabulated density exactly when there is a
+        table.
+    """
 
     const = _makeConstants((TABLE_HT, TABLE_LOG10_RHO))
     const.erosion_height_start = 100000.0
 
     es, _ = MetSimErosion.energyReceivedBeforeErosion(const)
 
-    dens_integ = scipy.integrate.quad(lambda h: atmDensTable(h, TABLE_HT, TABLE_LOG10_RHO),
-        const.erosion_height_start, const.h_init, limit=200)[0]
+    # Check against quadrature of the table, segment by segment
+    dens_integ = sum(scipy.integrate.quad(lambda h: atmDensTable(h, TABLE_HT, TABLE_LOG10_RHO), h_0, h_1)[0] \
+        for h_0, h_1 in zip(TABLE_HT[:-1], TABLE_HT[1:]) \
+        if (h_0 >= const.erosion_height_start) and (h_1 <= const.h_init))
     es_ref = 0.5*const.v_init**2*dens_integ/np.cos(const.zenith_angle)
 
-    assert np.isclose(es, es_ref, rtol=1e-6)
+    assert np.isclose(es, es_ref, rtol=1e-9)
 
     # The polynomial gives a different energy, so the table was used
     es_poly, _ = MetSimErosion.energyReceivedBeforeErosion(_makeConstants())
@@ -297,12 +300,92 @@ def testGuiJsonRoundTrip():
     assert const_json['atm_table_log10_rho'] == TABLE_LOG10_RHO
     assert const_loaded.atm_table_ht == TABLE_HT
 
-    # A JSON without the table (saved before the table existed) loads with the table off
+    assert const_loaded.atm_density_model == 'table'
+
+    # Check that a JSON saved before the density model existed loads with the legacy polynomial
     with tempfile.TemporaryDirectory() as dir_path:
         const_old = _makeConstants()
         del const_old.atm_table_ht
         del const_old.atm_table_log10_rho
+        del const_old.atm_density_model
         saveConstants(const_old, dir_path, "const.json")
         const_loaded, _ = loadConstants(os.path.join(dir_path, "const.json"))
 
     assert const_loaded.atm_table_ht is None
+    assert const_loaded.atm_density_model == 'polynomial'
+
+
+
+def testTheLegacyFlagSelectsThePolynomial():
+    """ Check that constants with a table and the legacy 'polynomial' model, as an old JSON loaded by the GUI
+        which also builds the table, run exactly as without the table, and with 'table' do not.
+    """
+
+    const_legacy = _makeConstants((TABLE_HT, TABLE_LOG10_RHO))
+    const_legacy.atm_density_model = 'polynomial'
+
+    _, ht_legacy, _, lum_legacy = _runMain(const_legacy)
+    _, ht_poly, _, lum_poly = _runMain(_makeConstants())
+    _, ht_table, _, lum_table = _runMain(_makeConstants((TABLE_HT, TABLE_LOG10_RHO)))
+
+    assert np.array_equal(ht_legacy, ht_poly)
+    assert np.array_equal(lum_legacy, lum_poly)
+
+    n = min(len(lum_table), len(lum_poly))
+    assert np.max(np.abs(lum_table[:n] - lum_poly[:n])) > 0.01*np.max(lum_poly)
+
+    # Check that the energy before erosion also follows the flag
+    const_legacy.erosion_height_start = 100000.0
+    const_poly = _makeConstants()
+    const_poly.erosion_height_start = 100000.0
+
+    assert MetSimErosion.energyReceivedBeforeErosion(const_legacy)[0] \
+        == MetSimErosion.energyReceivedBeforeErosion(const_poly)[0]
+
+
+
+def testAHalfSetOrNonFiniteTableIsRejected():
+    """ Check that a table with heights but no densities, or with non-finite values, raises a ValueError.
+    """
+
+    const = _makeConstants((TABLE_HT, TABLE_LOG10_RHO))
+    const.atm_table_log10_rho = None
+
+    with pytest.raises(ValueError):
+        MetSimErosion.runSimulation(const)
+
+    log10_rho = list(TABLE_LOG10_RHO)
+    log10_rho[10] = np.nan
+
+    with pytest.raises(ValueError):
+        MetSimErosion.runSimulation(_makeConstants((TABLE_HT, log10_rho)))
+
+
+
+def testDynestyTakesTheModelAndTableOfTheObservations():
+    """ Check that DynestyMetSim builds its constants with the density model and table of the observations,
+        and with the legacy polynomial for observations saved without them.
+    """
+
+    from types import SimpleNamespace
+
+    from wmpl.Dynesty.DynestyMetSim import constructConstants
+
+    real_event = SimpleNamespace(dens_co=np.array(DENS_CO), dt=0.005, P_0m=935, disruption_on=False, \
+        lum_eff_type=0, h_kill=60000.0, v_kill=3000.0, v_rotation=0.0, atm_density_model='table', \
+        atm_table_ht=TABLE_HT, atm_table_log10_rho=TABLE_LOG10_RHO, atm_density_info={'model': 'NRLMSISE-00'})
+
+    const = constructConstants([20000.0, 0.7, 1e-3], real_event, ['v_init', 'zenith_angle', 'm_init'], {})
+
+    assert const.atm_density_model == 'table'
+    assert const.atm_table_ht == TABLE_HT
+    assert const.atm_density_info == {'model': 'NRLMSISE-00'}
+
+    # Check the observations saved without the model and table
+    for name in ('atm_density_model', 'atm_table_ht', 'atm_table_log10_rho', 'atm_density_info'):
+        delattr(real_event, name)
+
+    const = constructConstants([20000.0, 0.7, 1e-3], real_event, ['v_init', 'zenith_angle', 'm_init'], {})
+
+    assert const.atm_density_model == 'polynomial'
+    assert not MetSimErosion.usesAtmDensityTable(const)

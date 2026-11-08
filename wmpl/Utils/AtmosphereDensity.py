@@ -8,7 +8,19 @@ import scipy.optimize
 
 from wmpl.PythonNRLMSISE00.nrlmsise_00_header import *
 from wmpl.PythonNRLMSISE00.nrlmsise_00 import *
+from wmpl.Utils.Math import expSegmentIntegral
 from wmpl.Utils.TrajConversions import jd2Date, jd2LST
+
+
+# Solar and geomagnetic activity given to NRLMSISE-00, the recommended values below 80 km
+NRLMSISE_F107A = 150
+NRLMSISE_F107 = 150
+NRLMSISE_AP = 4
+
+# Height range and step of the atmosphere density tables of MetSim (m), covering the whole simulation
+ATM_TABLE_HT_MIN = 0.0
+ATM_TABLE_HT_MAX = 200000.0
+ATM_TABLE_STEP = 500.0
 
 
 
@@ -76,7 +88,7 @@ def atmDensPoly(ht, dens_co):
 
 def fitAtmPoly(lat, lon, height_min, height_max, jd):
     """ Fits a 6th degree polynomial (7 coefficients) on the log10 of the atmosphere mass density profile at
-        the given location, time, and for the given height range. See getAtmDensityTable() for a more 
+        the given location, time, and for the given height range. See getAtmDensityTable() for a more
         accurate tabulated profile.
 
     Arguments:
@@ -125,7 +137,7 @@ def getAtmDensityTable(lat, lon, height_min, height_max, jd, step=500):
         jd: [float] Julian date.
 
     Keyword arguments:
-        step: [float] Maximum height step of the table in meters. The range is split into equal steps no 
+        step: [float] Maximum height step of the table in meters. The range is split into equal steps no
             larger than this. 500 m by default.
 
     Return:
@@ -135,7 +147,7 @@ def getAtmDensityTable(lat, lon, height_min, height_max, jd, step=500):
     """
 
     if height_max <= height_min:
-        raise ValueError("height_max ({:.1f} m) must be above height_min ({:.1f} m)".format(height_max, 
+        raise ValueError("height_max ({:.1f} m) must be above height_min ({:.1f} m)".format(height_max, \
             height_min))
 
     # Generate a height array with equal steps no larger than the requested step
@@ -147,6 +159,32 @@ def getAtmDensityTable(lat, lon, height_min, height_max, jd, step=500):
 
     # Return lists of floats, which are JSON serializable and fast to index in the simulation
     return [float(ht) for ht in table_ht], [float(lr) for lr in table_log10_rho]
+
+
+
+def atmDensityTableInfo(lat, lon, jd, height_min=ATM_TABLE_HT_MIN, height_max=ATM_TABLE_HT_MAX, \
+    step=ATM_TABLE_STEP):
+    """ Describe the atmosphere model and inputs of a density table, to be saved with the simulation
+        constants so that the atmosphere of a fit can be reproduced.
+
+    Arguments:
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
+        jd: [float] Julian date.
+
+    Keyword arguments:
+        height_min: [float] Bottom of the table (m). ATM_TABLE_HT_MIN by default.
+        height_max: [float] Top of the table (m). ATM_TABLE_HT_MAX by default.
+        step: [float] Maximum height step of the table (m). ATM_TABLE_STEP by default.
+
+    Return:
+        [dict] Model, location (deg), Julian date, height range and step (m), and the solar and geomagnetic
+            activity given to the model.
+    """
+
+    return {'model': 'NRLMSISE-00', 'lat': float(np.degrees(lat)), 'lon': float(np.degrees(lon)), \
+        'jd': float(jd), 'ht_min': float(height_min), 'ht_max': float(height_max), 'step': float(step), \
+        'f107a': NRLMSISE_F107A, 'f107': NRLMSISE_F107, 'ap': NRLMSISE_AP}
 
 
 
@@ -174,25 +212,6 @@ def atmDensTable(ht, table_ht, table_log10_rho):
     frac = (ht - table_ht[i])/(table_ht[i + 1] - table_ht[i])
 
     return 10**(table_log10_rho[i] + frac*(table_log10_rho[i + 1] - table_log10_rho[i]))
-
-
-
-def expSegmentIntegral(rho_0, scale, dh):
-    """ Integrate rho_0*exp(scale*x) for x from 0 to dh, stably when scale*dh is near 0.
-
-    Arguments:
-        rho_0: [float or ndarray] Density at the bottom of the segment (kg/m^3).
-        scale: [float or ndarray] Exponential scale of the segment (1/m).
-        dh: [float or ndarray] Height above the bottom of the segment (m).
-
-    Return:
-        [float or ndarray] Air column (kg/m^2).
-    """
-
-    x = np.asarray(scale*dh, dtype=np.float64)
-    x_safe = np.where(x == 0, 1.0, x)
-
-    return rho_0*dh*np.where(x == 0, 1.0, np.expm1(x_safe)/x_safe)
 
 
 
@@ -360,13 +379,13 @@ def getAtmDensity(lat, lon, height, jd):
     # should be set to 150., 150., and 4. respectively.
 
     # 81 day average of 10.7 cm radio flux (centered on DOY)
-    inp.f107A = 150
+    inp.f107A = NRLMSISE_F107A
 
     # Daily 10.7 cm radio flux for previous day
-    inp.f107 = 150
+    inp.f107 = NRLMSISE_F107
 
     # Magnetic index (daily)
-    inp.ap = 4
+    inp.ap = NRLMSISE_AP
 
     ##########################################################################################################
 
@@ -463,9 +482,9 @@ if __name__ == "__main__":
     plt.semilogx(atmDensPoly(heights, dens_co), heights/1000, label="Poly fit")
 
     # Tabulate the density and plot the interpolated table
-    table_ht, table_log10_rho = getAtmDensityTable(np.radians(lat), np.radians(lon), 1000*height_min, 
+    table_ht, table_log10_rho = getAtmDensityTable(np.radians(lat), np.radians(lon), 1000*height_min, \
         1000*height_max, jd)
-    plt.semilogx(atmDensTable(heights, table_ht, table_log10_rho), heights/1000, linestyle='dashed', 
+    plt.semilogx(atmDensTable(heights, table_ht, table_log10_rho), heights/1000, linestyle='dashed', \
         label="Table")
 
     plt.legend()

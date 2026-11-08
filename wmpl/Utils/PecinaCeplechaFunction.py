@@ -14,8 +14,8 @@ HT_CEILING = 180
 
 
 def airColumn(dens_interp, ht_low, ht_high):
-    """ Integrate the air density between two heights. 
-    
+    """ Integrate the air density between two heights.
+
     Arguments:
         dens_interp: [func] Function which takes the height in meters and returns the air density in kg/m^3.
             If it provides the exact column (e.g. AtmDensityTableInterp), it is used instead of quadrature.
