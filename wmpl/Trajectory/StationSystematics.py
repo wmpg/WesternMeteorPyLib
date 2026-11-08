@@ -93,6 +93,9 @@ def stationSystematicErrors(traj):
     t0 = min(obs.time_data[0] for obs in traj.observations)
     errors = {}
 
+    # The free fall of the meteor from the line in solutions which have it (Trajectory.gravityFreeFall)
+    free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
+
     for obs in used:
 
         # Drop the line by gravity as the solver did, from each point's distance to the centre of the Earth
@@ -103,11 +106,18 @@ def stationSystematicErrors(traj):
 
                 r0 = getattr(traj, 'gravity_r0', None)
 
-                # The drop of a decelerating meteor is scaled in solutions which have the scale
-                drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: traj.gravity_factor)
+                # The free fall from the line, as the solver drops the points
+                if free_fall is not None:
+                    dropped = traj.gravityDropPoint(point, obs.time_data[i] - t0, traj.radiant_eci_mini, r0, \
+                        traj.v0z, free_fall)
 
-                dropped = applyGravityDrop(point, obs.time_data[i] - t0, \
-                    vectMag(point) if (r0 is None) else r0, drop_factor(obs.time_data[i] - t0), traj.v0z)
+                # Or the drop along the vertical, scaled for a decelerating meteor in solutions which have the
+                #   scale
+                else:
+                    drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: traj.gravity_factor)
+
+                    dropped = applyGravityDrop(point, obs.time_data[i] - t0, \
+                        vectMag(point) if (r0 is None) else r0, drop_factor(obs.time_data[i] - t0), traj.v0z)
 
                 # The points of a decelerating meteor are also moved by drag against the rotating air in
                 #   solutions which have the displacement
