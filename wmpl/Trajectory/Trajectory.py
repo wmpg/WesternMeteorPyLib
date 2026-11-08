@@ -916,10 +916,10 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
             station_ray = vectNorm(station_ray)
 
             # Calculate the angle between the observed LoS as seen from the station and the radiant line
-            cosangle = np.dot(meas_eci, station_ray)
-
-            # Make sure the cosine is within limits and calculate the angle
-            angle_sum += weights[i]*np.arccos(np.clip(cosangle, -1, 1))
+            #   from the chord between the two unit vectors, which unlike the arccos of their dot product
+            #   stays precise for the small angles at the minimum
+            chord = vectMag(station_ray - meas_eci)
+            angle_sum += weights[i]*2*np.arcsin(min(chord/2, 1.0))
 
             weights_sum += weights[i]
 

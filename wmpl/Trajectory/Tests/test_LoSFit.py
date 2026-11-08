@@ -5,7 +5,8 @@ bounded solution was taken, and running out of function evaluations, after which
 by the intersecting planes. A fit which stops in a distant minimum after the timing was estimated must be
 minimized again from the solution of the pass before. The optional restarts of the Nelder-Mead minimization
 (los_restarts) are also tested. The tests solve a noisy straight trajectory seen from three stations, with
-scipy.optimize.minimize replaced to record or alter the minimizations of the fit.
+scipy.optimize.minimize replaced to record or alter the minimizations of the fit. The angles from the line are
+tested to be precise when they are small, as they are at the minimum.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_LoSFit.py -v
@@ -24,6 +25,7 @@ import matplotlib
 matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import stateVectorDiverged
+from wmpl.Trajectory.Trajectory import angleSumMeasurements2Line
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.Math import angleBetweenVectors, vectNorm
 
@@ -370,6 +372,34 @@ def testAFailedRestartDoesNotReplaceAConvergedSolution():
 
 
 
+def testSmallAnglesFromTheLineArePrecise():
+    """ Check that the angles between the lines of sight and the line are precise down to 1e-9 rad, where the
+        arccos of the dot product has an error of up to 1.5e-8 rad. The minimum of the cost has a few angles
+        near zero, where that error makes the cost rough.
+    """
+
+    station = np.array([4.0e6, 3.0e6, 3.5e6])
+    state_vect = station + np.array([1.0e5, -2.0e4, 6.0e4])
+    radiant = vectNorm(np.array([0.3, 0.5, -0.8]))
+
+    # Lines of sight to points on the line, tilted by a known small angle out of the plane of the station
+    #   and the line
+    angles = np.array([1e-9, 3e-9, 1e-8, 3e-8, 1e-7, 1e-6])
+    meas = []
+    for i, ang in enumerate(angles):
+        ray = vectNorm(state_vect - 5000.0*i*radiant - station)
+        meas.append(np.cos(ang)*ray + np.sin(ang)*vectNorm(np.cross(ray, radiant)))
+
+    obs = SimpleNamespace(time_data=np.arange(len(angles))*0.1, meas_eci_los=np.array(meas), \
+        stat_eci_los=np.array([station]*len(angles)), ignore_list=np.zeros(len(angles), dtype=int), \
+        ignore_station=False)
+
+    angle_sum = angleSumMeasurements2Line([obs], state_vect, radiant)
+
+    assert abs(angle_sum - np.mean(angles))/np.mean(angles) < 1e-6
+
+
+
 
 if __name__ == "__main__":
 
@@ -379,7 +409,8 @@ if __name__ == "__main__":
         testALineWhichWanderedOffAlongItselfIsContinuedFromTheMeteor, \
         testABoundedSolutionIsOnlyTakenIfItIsBetter, testAFailedBoundedSolutionIsNotTaken, \
         testAFitInADistantMinimumIsMinimizedAgainFromThePreviousSolution, testNoRestartByDefault, \
-        testEachRestartStartsFromThePreviousSolution, testAFailedRestartDoesNotReplaceAConvergedSolution]
+        testEachRestartStartsFromThePreviousSolution, testAFailedRestartDoesNotReplaceAConvergedSolution, \
+        testSmallAnglesFromTheLineArePrecise]
 
     for test in test_list:
         test()
