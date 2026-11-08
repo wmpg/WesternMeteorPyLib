@@ -133,6 +133,7 @@ def getRotMatrix(v1, v2):
     return R
 
 
+
 def rotationMatrixX(angle):
     """ Rotation matrix of the coordinate frame about the X axis.
 
@@ -148,6 +149,7 @@ def rotationMatrixX(angle):
     return np.array([[1, 0, 0], [0, c, s], [0, -s, c]])
 
 
+
 def rotationMatrixZ(angle):
     """ Rotation matrix of the coordinate frame about the Z axis.
 
@@ -161,6 +163,7 @@ def rotationMatrixZ(angle):
     c, s = np.cos(angle), np.sin(angle)
 
     return np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+
 
 
 def angleBetweenVectors(a, b):

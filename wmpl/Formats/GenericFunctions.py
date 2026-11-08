@@ -9,7 +9,8 @@ import numpy as np
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
-from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST
+from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST, \
+    nutationMatrix, raDec2ECI
 
 
 
@@ -284,8 +285,14 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
                 # Default to the exponential model
                 velmodel = 3
 
-            traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
-                meteor.longitude, meteor.height)
+            # The Gural solver places the cameras with the mean sidereal time, so give it the R.A. and Dec. on
+            #   the mean equator and equinox of date
+            x, y, z = nutationMatrix(jdt_ref).T.dot(np.array(raDec2ECI(meteor.ra_data, meteor.dec_data)))
+            ra_data = np.arctan2(y, x)%(2*np.pi)
+            dec_data = np.arcsin(np.clip(z, -1.0, 1.0))
+
+            traj.infillTrajectory(ra_data, dec_data, meteor.time_data, meteor.latitude, meteor.longitude, \
+                meteor.height)
 
 
     # Solve the trajectory
