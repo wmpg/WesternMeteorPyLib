@@ -3380,6 +3380,9 @@ class Trajectory(object):
                 # List of distances from the state vector
                 state_vect_dist = []
 
+                # Direction of motion along the radiant line
+                motion_dir = -vectNorm(radiant_eci)
+
                 # Go through all individual position measurement from each site
                 for i, (t, stat, meas) in enumerate(zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los)):
 
@@ -3403,13 +3406,13 @@ class Trajectory(object):
                         ref_point = np.copy(rad_cpa)
 
                     # Calculate the distance from the first observed point to the projected point on the
-                    #   radiant line
-                    dist = vectMag(ref_point - rad_cpa)
+                    #   radiant line, negative if the point is before it
+                    dist = np.dot(rad_cpa - ref_point, motion_dir)
                 
                     first_pt_distances.append(dist)
 
                     # Distance from the state vector to the projected point on the radiant line
-                    state_vect_dist.append(vectMag(state_vect - rad_cpa))
+                    state_vect_dist.append(np.dot(rad_cpa - state_vect, motion_dir))
 
 
                 # Convert the distances (length along the trail) into a numpy array
@@ -3418,49 +3421,34 @@ class Trajectory(object):
 
 
             ### Calculate average velocity including all points up to the given point ###
-            velocities_prev_point = []
-            for i, (t, l) in enumerate(zip(obs.time_data, obs.length)):
 
-                # For the first 4 points compute the velocity using the first 4 points
-                if i < 4:
-                    time_part = obs.time_data[:4]
-                    len_part = obs.length[:4]
+            # Take the last point of the line fitted for every point: the first 4 points for the first 4
+            #   points, otherwise all points up to the current point
+            last_ind = np.minimum(np.maximum(np.arange(len(obs.time_data)), 3), len(obs.time_data) - 1)
 
-                # Otherwise include all points up to the current point
-                else:
-                    time_part = obs.time_data[: i+1]
-                    len_part = obs.length[: i+1]
+            # Drop the points with NaNs or infs, and take the times and lengths from the first good point to
+            #   keep the sums precise
+            good = np.isfinite(obs.time_data) & np.isfinite(obs.length)
+            time_rel = np.zeros(len(obs.time_data))
+            len_rel = np.zeros(len(obs.time_data))
+            if np.any(good):
+                time_rel[good] = obs.time_data[good] - obs.time_data[good][0]
+                len_rel[good] = obs.length[good] - obs.length[good][0]
 
-                # If there are NaNs or infs, drop them
-                filter_mask = np.logical_not(np.isnan(time_part) | np.isinf(time_part) | np.isnan(len_part) \
-                    | np.isinf(len_part))
+            # Fit a line through time vs. length with the cumulative sums of the least squares line fit
+            n_sum = np.cumsum(good)[last_ind]
+            t_sum = np.cumsum(time_rel)[last_ind]
+            l_sum = np.cumsum(len_rel)[last_ind]
+            tt_sum = np.cumsum(time_rel**2)[last_ind]
+            tl_sum = np.cumsum(time_rel*len_rel)[last_ind]
+            denom = n_sum*tt_sum - t_sum**2
 
-                time_part = time_part[filter_mask]
-                len_part = len_part[filter_mask]
+            # Use NaN if there are no good points to estimate the velocity on
+            with np.errstate(divide='ignore', invalid='ignore'):
+                velocities_prev_point = np.where((n_sum > 1) & (denom > 0), \
+                    (n_sum*tl_sum - t_sum*l_sum)/denom, np.nan)
 
-                if len(time_part) > 1:
-
-                    # Fit a line through time vs. length data
-                    try:
-                        popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
-
-                    # Check for this fit error, which happens extremely rarely:
-                    # RuntimeError: Optimal parameters not found: gtol=0.000000 is too small, func(x) is 
-                    # orthogonal to the columns of the Jacobian to machine precision.
-                    except RuntimeError:
-                        print("A velocity fit failed with a RuntimeError, skipping this iteration.")
-                        popt = [np.nan]
-
-                    velocities_prev_point.append(popt[0])
-
-                else:
-
-                    # If there are no good points to estimate the velocity on, use NaN
-                    velocities_prev_point.append(np.nan)
-
-
-
-            obs.velocities_prev_point = np.array(velocities_prev_point)
+            obs.velocities_prev_point = velocities_prev_point
 
 
             ### ###
@@ -3485,11 +3473,11 @@ class Trajectory(object):
             # Calculate the time differences from point to point
             time_diffs = obs.time_data - time_shifted
 
-            # Replace zeros in time by machine precision value to avoid division by zero errors
-            time_diffs[time_diffs == 0] = np.finfo(np.float64).eps
-
-            # Calculate velocity for every point
-            obs.velocities = dists_diffs/time_diffs
+            # Calculate velocity for every point, NaN if there is no time between the points (the first
+            #   velocity is always 0)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                obs.velocities = np.where(time_diffs == 0, np.nan, dists_diffs/time_diffs)
+            obs.velocities[0] = 0.0
 
             ### ###
 
@@ -3574,7 +3562,7 @@ class Trajectory(object):
 
                 all_times.append(t)
                 all_state_vect_dists.append(sv_dist)
-                all_inv_weights.append(1.0/w)
+                all_inv_weights.append(1.0/np.sqrt(w))
 
 
         # If there are less than 4 points, don't estimate the initial velocity this way!
@@ -3583,7 +3571,8 @@ class Trajectory(object):
             print('Using automated velocity estimation with the sliding fit...')
             return None, None
 
-        # Fit a line through the time vs. state vector distance data
+        # Fit a line through the time vs. state vector distance data, with the weight of each station as the
+        #   inverse of its variance
         line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
             sigma=all_inv_weights)
 
@@ -3610,16 +3599,21 @@ class Trajectory(object):
 
             if velocity_fit is None:
 
+                # Take the points which are not ignored, or all points if fewer than 4 are used
+                used = obs.ignore_list == 0
+                if np.count_nonzero(used) < 4:
+                    used = np.ones(len(obs.time_data), dtype=bool)
+
                 # Fit a line to the first part of the points
-                init_part_size = int(self.v_init_part*len(obs.time_data))
+                init_part_size = int(self.v_init_part*np.count_nonzero(used))
 
                 # If the size is smaller than 4 points, take all point
                 if init_part_size < 4:
-                    init_part_size = len(obs.time_data)
+                    init_part_size = np.count_nonzero(used)
 
                 # Cut the length and time to the first quarter
-                quart_length = obs.length[:init_part_size]
-                quart_time = obs.time_data[:init_part_size]
+                quart_length = obs.length[used][:init_part_size]
+                quart_time = obs.time_data[used][:init_part_size]
 
                 # Fit a line to the data, estimate the velocity and its standard deviation
                 try:
@@ -3658,8 +3652,14 @@ class Trajectory(object):
             # Initial parameters
             p0 = np.zeros(2)
 
+            # Take the points which are not ignored, or all points if fewer than 4 are used
+            used = obs.ignore_list == 0
+            if np.count_nonzero(used) < 4:
+                used = np.ones(len(obs.time_data), dtype=bool)
+
             try:
-                obs.jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, obs.time_data, obs.lag, p0=p0)
+                obs.jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, obs.time_data[used], \
+                    obs.lag[used], p0=p0)
 
             # If the maximum number of iterations have been reached, skip Jacchia fitting
             except RuntimeError:
@@ -3673,9 +3673,9 @@ class Trajectory(object):
 
 
         # Get the time and lag points from all sites
-        time_all = np.hstack([obs.time_data[obs.ignore_list == 0] for obs in self.observations \
+        time_all = np.hstack([obs.time_data[obs.ignore_list == 0] for obs in observations \
             if not obs.ignore_station])
-        lag_all = np.hstack([obs.lag[obs.ignore_list == 0] for obs in self.observations \
+        lag_all = np.hstack([obs.lag[obs.ignore_list == 0] for obs in observations \
             if not obs.ignore_station])
         time_lag = np.c_[time_all, lag_all]
 
@@ -3702,9 +3702,9 @@ class Trajectory(object):
 
     def estimateTimingAndVelocity(self, observations, weights, estimate_timing_vel=True):
         """ Estimates time offsets between the stations by matching time vs. distance from state vector. 
-            The initial velocity is calculated by ineratively fitting a line from the beginning to 20% of the 
-            total trajectory, and up to the 80% of the total trajectory. The fit with the lowest standard
-            deviation is chosen to represent the initial velocity.
+            The initial velocity is calculated by iteratively fitting a line to the first part of the points
+            of all stations, from v_init_part to 80% of the points, starting at one of the first 4 points. The
+            fit with the lowest standard deviation is chosen to represent the initial velocity.
 
         Arguments:
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
@@ -3713,7 +3713,8 @@ class Trajectory(object):
 
         Keyword arguments:
             estimate_timing_vel: [bool] If True (default), the time differences and the velocity will be 
-                estimated, otherwise the velocity will be estimated as the medial velocity.
+                estimated, otherwise the velocity will be estimated as the median velocity of the used
+                stations.
 
         Return:
             (fit_success, velocity_fit, v_init_mini, time_diffs, observations): [tuple]
@@ -3726,8 +3727,13 @@ class Trajectory(object):
 
         """
 
-        # Take the initial velocity as the median velocity between all sites
-        v_init_list = np.array([obs.v_init for obs in observations if obs.v_init is not None])
+        # Take the initial velocity as the median velocity between all used sites, or all sites if none is
+        #   used
+        v_init_obs = [obs for obs in observations if (obs.v_init is not None) and (not obs.ignore_station)]
+        if not v_init_obs:
+            v_init_obs = [obs for obs in observations if obs.v_init is not None]
+
+        v_init_list = np.array([obs.v_init for obs in v_init_obs])
         v_init = np.median(v_init_list)
         vel_stddev = 0
 
@@ -3741,7 +3747,7 @@ class Trajectory(object):
             self.timing_res = timingResiduals(np.zeros(1), observations, fixed_time_dict, weights=weights)
 
             # Compute the standard deviation of the median velocity from the fits of individual stations
-            vel_stddev = medianStddev([obs.v_init_stddev for obs in observations if obs.v_init is not None])
+            vel_stddev = medianStddev([obs.v_init_stddev for obs in v_init_obs])
 
             return True, np.zeros(2), v_init, vel_stddev, time_diffs, observations
 
@@ -3931,16 +3937,21 @@ class Trajectory(object):
                     velocity_fit = fit_params.x
 
                     ### Compute the standard deviation of the velocity fit
-                    
-                    jac = fit_params.jac
-                    jac_dot = jac.T.dot(jac)
 
-                    # Make sure the Jacobian matrix is not singular
-                    if np.linalg.det(jac_dot) == 0:
+                    # Take the weighted least squares covariance of the line, scaled by the variance of its
+                    #   residuals
+                    design = np.c_[times_part, np.ones_like(times_part)]*np.sqrt(weights_list_path)[:, None]
+                    line_residuals = lineFuncLS(velocity_fit, times_part, state_vect_dist_part, \
+                        weights_list_path)
+                    normal = design.T.dot(design)
+                    dof = len(times_part) - 2
+
+                    # Make sure the matrix is not singular and there are more points than parameters
+                    if (dof <= 0) or (np.linalg.cond(normal) > 1.0/np.finfo(np.float64).eps):
                         velocity_stddev = 0
                     else:
-                        vel_cov = np.linalg.inv(jac_dot)
-                        velocity_stddev = np.sqrt(np.diagonal(vel_cov))[0]
+                        vel_cov = np.linalg.inv(normal)*np.sum(line_residuals**2)/dof
+                        velocity_stddev = np.sqrt(vel_cov[0, 0])
 
                     ###
 
@@ -3979,8 +3990,8 @@ class Trajectory(object):
                 vel_intercept, vel_cov = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init_mini, \
                     intercept), times, state_vect_dist, p0=[0])
 
-                # Compute the fit standard deviation
-                vel_stddev = np.sqrt(np.diagonal(vel_cov))[0]
+                # Compute the standard deviation of the median velocity from the fits of individual stations
+                vel_stddev = medianStddev([obs.v_init_stddev for obs in v_init_obs])
 
                 # Construct a velocity fit vector
                 velocity_fit = [v_init_mini, vel_intercept[0]]
