@@ -435,15 +435,24 @@ N_DASHES = 6
 
 
 
-def trajectoryToKML(traj, output_kml_path):
-    """ Save a 3D KML with the projected points, the lines of sight, the residuals and the stations.
+def trajectoryToKML(traj, output_kml_path, measured=False, sample_step=100.0):
+    """ Save a 3D KML with the trajectory of the drag fit, the vertical plane and the stations, and optionally
+        the measured points.
 
-    The vertical plane spans the first and the last observed point. Every folder is split by station, and the
-    ignored points are skipped.
+    The trajectory is sampled from the drag fit (SampleTrajectoryPositions.sampleTrajectory()), which gives
+    smooth times and speeds and the path bent by gravity. The measured layers add the projected point of
+    every frame on the solved line, the line of sight to it and the residual. The vertical plane spans the
+    first and the last observed point. The measured folders are split by station, and the ignored points are
+    skipped. If the drag model cannot be fitted, the measured layers are saved instead.
 
     Arguments:
         traj: [Trajectory object] Solved trajectory.
         output_kml_path: [str] Path of the KML file.
+
+    Keyword arguments:
+        measured: [bool] Add the projected points, the lines of sight and the residuals of the measurements.
+            False by default.
+        sample_step: [float] Height step of the samples of the drag fit (m). 100 m by default.
 
     Return:
         output_kml_path: [str] Path of the KML file.
@@ -456,13 +465,54 @@ def trajectoryToKML(traj, output_kml_path):
 
     colors = plt.get_cmap('tab10').colors
 
+    # Sample the trajectory of the drag fit
+    try:
+        traj_samples = sampleTrajectory(traj, -1, -1, sample_step)
+        drag_fit = traj_samples.drag_fit
+
+    except ValueError as e:
+        print("WARNING: The drag model could not be fitted ({:s}), so the KML gives the measured points " \
+            "instead.".format(str(e)))
+        traj_samples = None
+        drag_fit = None
+        measured = True
+
     # Make the folders
     kml = simplekml.Kml(name=traj.file_name)
-    folder_plane = kml.newfolder(name="1. Vertical Plane")
-    folder_points = kml.newfolder(name="2. Projected Points")
-    folder_rays = kml.newfolder(name="3. Lines of Sight")
-    folder_res = kml.newfolder(name="4. Residuals")
-    folder_stations = kml.newfolder(name="5. Stations")
+    folder_names = ["Vertical Plane"]
+    if traj_samples is not None:
+        folder_names.append("Drag Fit Trajectory")
+    if measured:
+        folder_names += ["Projected Points", "Lines of Sight", "Residuals"]
+    folder_names.append("Stations")
+    folders = {name: kml.newfolder(name="{:d}. {:s}".format(i + 1, name)) for i, name \
+        in enumerate(folder_names)}
+
+    # Draw the trajectory of the drag fit as a line through its samples
+    if traj_samples is not None:
+
+        sample_coords = [(np.degrees(lon), np.degrees(lat), ht) for lat, lon, ht \
+            in zip(traj_samples.lat, traj_samples.lon, traj_samples.ele_geo)]
+
+        line = folders["Drag Fit Trajectory"].newlinestring(name="Drag fit", coords=sample_coords)
+        line.altitudemode = simplekml.AltitudeMode.absolute
+        line.style.linestyle.color = 'ff00ffff'
+        line.style.linestyle.width = 3
+
+        # Add the samples with their times and speeds, without labels
+        folder_samples = folders["Drag Fit Trajectory"].newfolder(name="Samples")
+        for t, coords, vel, vel_norot in zip(traj_samples.t_est, sample_coords, traj_samples.vel, \
+            traj_samples.vel_norot):
+
+            point = folder_samples.newpoint(coords=[coords])
+            point.altitudemode = simplekml.AltitudeMode.absolute
+            point.style.iconstyle.color = 'ff00ffff'
+            point.style.iconstyle.scale = 0.3
+            point.style.iconstyle.icon.href = WEB_ICON + "id=304&scale=4"
+            point.style.labelstyle.scale = 0
+            point.description = "t = {:.4f} s<br>Alt = {:.3f} km<br>v = {:.3f} km/s<br>" \
+                "v ground = {:.3f} km/s<br>Lat {:.5f}, Lon {:.5f}".format(t, coords[2]/1000, vel/1000, \
+                vel_norot/1000, coords[1], coords[0])
 
     for i, obs in enumerate(traj.observations):
 
@@ -470,19 +520,28 @@ def trajectoryToKML(traj, output_kml_path):
         color = colors[i%len(colors)]
         color_kml = kmlColor(color)
         color_ray = kmlColor(color, 130)
-        folder_points_stat = folder_points.newfolder(name=station_id)
-        folder_rays_stat = folder_rays.newfolder(name=station_id)
-        folder_res_stat = folder_res.newfolder(name=station_id)
         used = np.where(obs.ignore_list == 0)[0]
 
         # Add the station on the ground
-        stat = folder_stations.newpoint(name=station_id, coords=[(np.degrees(obs.lon), np.degrees(obs.lat), \
-            obs.ele)])
+        stat = folders["Stations"].newpoint(name=station_id, coords=[(np.degrees(obs.lon), \
+            np.degrees(obs.lat), obs.ele)])
         stat.altitudemode = simplekml.AltitudeMode.clamptoground
         stat.style.iconstyle.icon.href = WEB_ICON + "color={:02x}{:02x}{:02x}&id=2000&scale=4".format( \
             *[int(round(c*255)) for c in color[:3]])
         stat.description = "Lat {:.5f}, Lon {:.5f}, Elev {:.0f} m, {:d} frames".format(np.degrees(obs.lat), \
             np.degrees(obs.lon), obs.ele, len(used))
+
+        if not measured:
+            continue
+
+        folder_points_stat = folders["Projected Points"].newfolder(name=station_id)
+        folder_rays_stat = folders["Lines of Sight"].newfolder(name=station_id)
+        folder_res_stat = folders["Residuals"].newfolder(name=station_id)
+
+        # Compute the speeds of the drag fit at the heights of the points
+        vel_drag = np.full(len(obs.time_data), np.nan)
+        if drag_fit is not None:
+            vel_drag[used] = drag_fit.velocityAtHeight(np.asarray(obs.model_ht)[used])
 
         for k in used:
 
@@ -495,10 +554,13 @@ def trajectoryToKML(traj, output_kml_path):
             model_coords = (np.degrees(obs.model_lon[k]), np.degrees(obs.model_lat[k]), obs.model_ht[k])
             meas_coords = (np.degrees(obs.meas_lon[k]), np.degrees(obs.meas_lat[k]), obs.meas_ht[k])
 
+            # Give the speed of the drag fit and the point-to-point speed
+            vel_str = "N/A"
+            if np.isfinite(vel_drag[k]):
+                vel_str = "{:.3f} km/s (drag fit)".format(vel_drag[k]/1000)
+
             if obs.velocities is not None:
-                vel_str = "{:.3f} km/s".format(obs.velocities[k]/1000)
-            else:
-                vel_str = "N/A"
+                vel_str += "<br>v point = {:.3f} km/s".format(obs.velocities[k]/1000)
 
             # Add the projected point on the trajectory, without a label
             point = folder_points_stat.newpoint(coords=[model_coords])
@@ -533,9 +595,9 @@ def trajectoryToKML(traj, output_kml_path):
             residual.style.linestyle.width = 2
 
     # Add the vertical plane as an extruded line, as a polygon hides what is behind it
-    wall = folder_plane.newlinestring(name="Vertical plane", coords=[(np.degrees(traj.rbeg_lon), \
-        np.degrees(traj.rbeg_lat), traj.rbeg_ele), (np.degrees(traj.rend_lon), np.degrees(traj.rend_lat), \
-        traj.rend_ele)])
+    plane_coords = [(np.degrees(traj.rbeg_lon), np.degrees(traj.rbeg_lat), traj.rbeg_ele), \
+        (np.degrees(traj.rend_lon), np.degrees(traj.rend_lat), traj.rend_ele)]
+    wall = folders["Vertical Plane"].newlinestring(name="Vertical plane", coords=plane_coords)
     wall.altitudemode = simplekml.AltitudeMode.absolute
     wall.extrude = 1
     wall.tessellate = 1
@@ -547,7 +609,7 @@ def trajectoryToKML(traj, output_kml_path):
 
     # Warn if the KML may be too large for Google Earth Web
     n_frames = sum(int(np.sum(obs.ignore_list == 0)) for obs in traj.observations)
-    if n_frames > MAX_FRAMES_WEB:
+    if measured and (n_frames > MAX_FRAMES_WEB):
         print("WARNING: The KML has {:d} frames, so it may not load in Google Earth Web, which is limited " \
             "to 10000 map elements. It should open in Google Earth Pro.".format(n_frames))
 
@@ -576,8 +638,10 @@ if __name__ == "__main__":
         help="Path to the trajectory pickle file.")
 
     arg_parser.add_argument('-k', '--kml', action='store_true', \
-        help="Save the 3D KML (*_3D.kml) with the projected points, lines of sight and residuals instead " \
-        "of the simple one.")
+        help="Save the 3D KML (*_3D.kml) with the trajectory of the drag fit instead of the simple one.")
+
+    arg_parser.add_argument('-m', '--measured', action='store_true', \
+        help="Add the projected points, lines of sight and residuals of the measurements to the 3D KML.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -593,7 +657,8 @@ if __name__ == "__main__":
 
         # Generate the KML
         if cml_args.kml:
-            trajectoryToKML(traj, cml_args.traj_path.replace('_trajectory.pickle', '') + '_3D.kml')
+            trajectoryToKML(traj, cml_args.traj_path.replace('_trajectory.pickle', '') + '_3D.kml', \
+                measured=cml_args.measured)
 
         else:
             generateTrajectoryKML(traj, os.path.dirname(cml_args.traj_path))

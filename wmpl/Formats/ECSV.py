@@ -473,5 +473,6 @@ if __name__ == "__main__":
         show_jacchia=cml_args.jacchia,
         estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
         fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, \
-        enable_OSM_plot=cml_args.enableOSM, save_kml=cml_args.kml)
+        enable_OSM_plot=cml_args.enableOSM, save_kml=(cml_args.kml or cml_args.kmlmeas), \
+        kml_measured=cml_args.kmlmeas)
 

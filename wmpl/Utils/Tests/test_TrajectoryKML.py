@@ -30,11 +30,12 @@ KML_NS = '{http://www.opengis.net/kml/2.2}'
 
 
 
-def _solvedKML(ignore_first=0):
+def _solvedKML(ignore_first=0, measured=True):
     """ Solve the straight meteor and parse its KML.
 
     Keyword arguments:
         ignore_first: [int] Number of first picks of the first station to ignore. 0 by default.
+        measured: [bool] Add the measured layers. True by default.
 
     Return:
         traj: [Trajectory object] Solved trajectory.
@@ -49,7 +50,7 @@ def _solvedKML(ignore_first=0):
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
-        kml_path = trajectoryToKML(traj, os.path.join(tmp_dir, 'test_3D.kml'))
+        kml_path = trajectoryToKML(traj, os.path.join(tmp_dir, 'test_3D.kml'), measured=measured)
         root = ET.parse(kml_path).getroot()
 
     # Collect the top folders and their station folders
@@ -64,20 +65,20 @@ def _solvedKML(ignore_first=0):
 
 
 def testTheKMLHasAPlacemarkForEveryUsedFrame():
-    """ Check that the KML has the five folders, and per station a projected point, a line of sight and a
-        residual for every frame that is not ignored, and a station placemark.
+    """ Check that the KML with the measurements has the six folders, and per station a projected point, a
+        line of sight and a residual for every frame that is not ignored, and a station placemark.
     """
 
     traj, folders = _solvedKML(ignore_first=3)
 
-    assert sorted(name for name in folders) == ["1. Vertical Plane", "2. Projected Points", \
-        "3. Lines of Sight", "4. Residuals", "5. Stations"]
+    assert sorted(name for name in folders) == ["1. Vertical Plane", "2. Drag Fit Trajectory", \
+        "3. Projected Points", "4. Lines of Sight", "5. Residuals", "6. Stations"]
 
     for obs in traj.observations:
 
         n_used = int(np.sum(obs.ignore_list == 0))
 
-        for name in ("2. Projected Points", "3. Lines of Sight", "4. Residuals"):
+        for name in ("3. Projected Points", "4. Lines of Sight", "5. Residuals"):
             assert len(folders[name][obs.station_id].findall(KML_NS + 'Placemark')) == n_used, name
 
     # Check that the ignored picks are skipped
@@ -85,8 +86,34 @@ def testTheKMLHasAPlacemarkForEveryUsedFrame():
     assert int(np.sum(obs.ignore_list == 0)) == len(obs.time_data) - 3
 
     # Check the stations and the plane
-    assert len(folders["5. Stations"][None].findall(KML_NS + 'Placemark')) == len(traj.observations)
+    assert len(folders["6. Stations"][None].findall(KML_NS + 'Placemark')) == len(traj.observations)
     assert len(folders["1. Vertical Plane"][None].findall(KML_NS + 'Placemark')) == 1
+
+
+
+def testTheDefaultKMLShowsTheTrajectoryOfTheDragFit():
+    """ Check that the default KML has the trajectory of the drag fit, sampled every 100 m in height from the
+        beginning to the end, without the measured layers.
+    """
+
+    traj, folders = _solvedKML(measured=False)
+
+    assert sorted(name for name in folders) == ["1. Vertical Plane", "2. Drag Fit Trajectory", "3. Stations"]
+
+    # Check the number of samples and the line through them
+    n_samples = len(np.arange(traj.rend_ele, traj.rbeg_ele + 100.0, 100.0))
+    samples = folders["2. Drag Fit Trajectory"]["Samples"].findall(KML_NS + 'Placemark')
+    line = folders["2. Drag Fit Trajectory"][None].findall(KML_NS + 'Placemark')
+
+    assert abs(len(samples) - n_samples) <= 1
+    assert len(line) == 1
+
+    # Check the speed of the samples of the meteor at a constant 30 km/s
+    for placemark in samples:
+        description = placemark.find(KML_NS + 'description').text
+        vel = float(description.split("<br>v = ")[1].split(" km/s")[0])
+
+        assert abs(vel - traj.v_init/1000) < 0.05
 
 
 
@@ -98,7 +125,7 @@ def testTheResidualsAreTheDistancesToTheProjectedPoints():
     traj, folders = _solvedKML()
 
     for obs in traj.observations:
-        for placemark in folders["4. Residuals"][obs.station_id].findall(KML_NS + 'Placemark'):
+        for placemark in folders["5. Residuals"][obs.station_id].findall(KML_NS + 'Placemark'):
 
             # The name ends with the residual in meters
             residual = float(placemark.find(KML_NS + 'name').text.split(': ')[-1].split(' m')[0])
@@ -113,3 +140,23 @@ def testTheKMLColor():
 
     assert kmlColor((1.0, 0.5, 0.0)) == 'ff0080ff'
     assert kmlColor((0.0, 0.0, 1.0), alpha=130) == '82ff0000'
+
+
+
+def testThePointsGiveTheSpeedOfTheDragFit():
+    """ Check that the projected points of the meteor at a constant 30 km/s give the speed of the drag fit
+        within 50 m/s, and the point-to-point speed.
+    """
+
+    traj, folders = _solvedKML()
+
+    for obs in traj.observations:
+        for placemark in folders["3. Projected Points"][obs.station_id].findall(KML_NS + 'Placemark'):
+
+            description = placemark.find(KML_NS + 'description').text
+
+            assert "(drag fit)" in description
+            assert "v point = " in description
+
+            vel_drag = float(description.split("v = ")[1].split(" km/s (drag fit)")[0])
+            assert abs(vel_drag - traj.v_init/1000) < 0.05

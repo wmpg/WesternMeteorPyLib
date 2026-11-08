@@ -2618,7 +2618,7 @@ class Trajectory(object):
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
-        save_kml=False):
+        save_kml=False, kml_measured=False):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2685,8 +2685,10 @@ class Trajectory(object):
                 restart brings it closer, at about 40% more CPU time per solution, but it does not change the
                 error against the truth, which the noise sets. Only use it when the last fraction of an
                 arcsecond matters, e.g. when comparing solutions of the same event.
-            save_kml: [bool] Save a 3D KML of the solution with the original picks (*_3D.kml), see
-                Utils.TrajectoryKML.trajectoryToKML(). False by default.
+            save_kml: [bool] Save a 3D KML of the solution with the original picks (*_3D.kml) with the
+                trajectory of the drag fit, see Utils.TrajectoryKML.trajectoryToKML(). False by default.
+            kml_measured: [bool] Add the projected points, lines of sight and residuals of the measurements to
+                the 3D KML. False by default.
 
         """
 
@@ -2793,8 +2795,9 @@ class Trajectory(object):
         # Save results to disk if true
         self.save_results = save_results
 
-        # Save a 3D KML with the results
+        # Save a 3D KML with the results, optionally with the measurements
         self.save_kml = save_kml
+        self.kml_measured = kml_measured
 
         # Apply the correction for gravity when estimating the trajectory
         self.gravity_correction = gravity_correction
@@ -7085,7 +7088,8 @@ class Trajectory(object):
                 # Save the 3D KML
                 if getattr(self, 'save_kml', False):
                     from wmpl.Utils.TrajectoryKML import trajectoryToKML
-                    trajectoryToKML(self, os.path.join(self.output_dir, self.file_name + '_3D.kml'))
+                    trajectoryToKML(self, os.path.join(self.output_dir, self.file_name + '_3D.kml'), \
+                        measured=getattr(self, 'kml_measured', False))
 
                 # Save trajectory report with original points
                 self.saveReport(self.output_dir, self.file_name + '_report.txt', \
