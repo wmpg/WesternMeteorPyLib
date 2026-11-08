@@ -19,7 +19,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import Trajectory, angleSumMeasurements2Line
+from wmpl.Trajectory.Trajectory import Trajectory, angleSumMeasurements2Line, gravityDropReference
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor, worstResidual
 from wmpl.Utils.Math import angleBetweenVectors
 
@@ -183,6 +183,28 @@ def testIgnoredLeadingPicksDoNotShiftTheDrop():
         v0z=solved.v0z, r0=solved.gravity_r0)
 
     assert 3600*np.degrees(cost) < 0.01
+
+
+
+def testOnePoorFirstPickDoesNotSetTheBeginning():
+    """ Check that the first pick of one station, pointing 20 km up the trajectory and not ignored, does not
+        set the beginning of the gravity drop, as the median of the stations is taken. Before, the beginning
+        was 10 km too high.
+    """
+
+    traj, begin, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
+        elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
+        filter_picks=False, calc_orbit=False)
+
+    # Point the first line of sight of station C 20 km up the trajectory
+    obs = traj.observations[2]
+    los = begin + 20000.0*radiant_eci - obs.stat_eci_los[0]
+    obs.meas_eci_los[0] = los/np.linalg.norm(los)
+
+    # Compute the beginning from the true line
+    _, r0 = gravityDropReference(traj.observations, begin, radiant_eci, v_init=15000.0)
+
+    assert abs(r0 - np.linalg.norm(begin)) < 100.0
 
 
 

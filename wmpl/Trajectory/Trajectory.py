@@ -749,10 +749,11 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     """ Compute the beginning point of the trajectory, from which the gravity drop is computed.
 
     applyGravityDrop takes r0 to be the distance of the beginning of the meteor from the centre of the Earth,
-    and its drop model descends from there with the vertical velocity, from the earliest time. This is the
-    point calcLLA and calcECIEqAltAz use: the highest of the points on the radiant line closest to the first
-    line of sight of each station, skipping the ignored stations and picks. When the picks before it are
-    ignored, it is moved back along the radiant line to the earliest time with the initial velocity.
+    and its drop model descends from there with the vertical velocity, from the earliest time. Each station
+    gives the point on the radiant line closest to its first line of sight, skipping the ignored stations and
+    picks. With the initial velocity, each point is moved back along the radiant line to the earliest time,
+    and the median of the points is taken, so one station with a poor first pick does not set it. Without
+    it, the highest point is taken.
 
     Arguments:
         observations: [list] A list of ObservedPoints objects.
@@ -781,25 +782,31 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     if not first_picks:
         first_picks = [(obs, 0) for obs in observations]
 
-    eci_list = []
+    radiant_eci = vectNorm(radiant_eci)
+
+    # Find the earliest time, from which the drop is computed
+    t0 = min([obs.time_data[0] for obs in observations])
+
+    dist_list = []
     for obs, i in first_picks:
 
         # Calculate closest points of approach (observed line of sight to radiant line)
         _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], state_vect, radiant_eci)
-        eci_list.append(rad_cpa)
 
-    # Find the largest distance from the centre of the Earth
-    max_dist_indx = np.argmax([vectMag(r) for r in eci_list])
+        # Compute the distance of the point along the radiant line, moved back to the earliest time
+        dist = np.dot(rad_cpa - state_vect, radiant_eci)
+        if v_init is not None:
+            dist += v_init*(obs.time_data[i] - t0)
 
-    eci0 = eci_list[max_dist_indx]
+        dist_list.append(dist)
 
-    # Move the point back along the radiant line to the earliest time, from which the drop is computed
+    # Take the median of the points, or the highest one without the initial velocity
     if v_init is not None:
+        dist0 = np.median(dist_list)
+    else:
+        dist0 = max(dist_list)
 
-        obs, i = first_picks[max_dist_indx]
-        t0 = min([obs_t.time_data[0] for obs_t in observations])
-
-        eci0 = eci0 + v_init*(obs.time_data[i] - t0)*vectNorm(radiant_eci)
+    eci0 = state_vect + dist0*radiant_eci
 
     return eci0, vectMag(eci0)
 
