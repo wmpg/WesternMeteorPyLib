@@ -126,7 +126,7 @@ python -m wmpl.Rebound.REBOUND --help
 | `--integrator {ias15,whfast,trace}` | Which integrator to use. Default: `ias15`. See [Choosing an integrator](#choosing-an-integrator). |
 | `--dt DAYS` | Timestep in days for `whfast` and `trace`. Default: `0.5`. Must be positive. Ignored by `ias15`. |
 | `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. |
-| `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
+| `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if none of `--beta`, `--radius` and `--mass` is given. |
 | `--mass [KG]` | Object mass in kg. With `--density`, beta is computed from it. Without a value, the photometric mass of the light curve is used. |
 | `--density KG_M3` | Bulk density in kg/m³, used with `--radius` or `--mass`. Default: `3000`. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
@@ -231,8 +231,10 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --mass --density 3000
 ```
 
 The mass is turned into the radius of the sphere of that mass and density, `s = (3m/(4πρ))^(1/3)`.
-Since beta goes as `m^(-1/3)`, the assumed density and luminous efficiency matter less than they
-look: a factor of 2 in the mass moves beta by 26%.
+At a fixed mass, beta goes as `m^(-1/3)*rho^(-2/3)`. The mass, and through it the luminous efficiency
+of a photometric mass, enters as a cube root, so a factor of 2 in it changes beta by a factor of 1.26.
+The density enters more strongly: halving it raises beta by a factor of 1.59. `--mass 0` is the same
+as `--mass` without a value.
 
 For a spherical grain, `beta = 5.7425e-4*Q_pr/(rho*s)` with the density in kg/m³ and the radius in m.
 A 1 µm grain at 3000 kg/m³ gives beta = 0.19; a 1 cm meteoroid of the same density gives 1.9e-5. In

@@ -1064,8 +1064,8 @@ def equivalentSphereRadius(mass_kg, density_kgm3):
         s = (3*m/(4*pi*rho))^(1/3)
 
     which is the size radiationPressureBeta needs, as meteor work gives a mass (photometric, or from
-    a MetSim fit) and an assumed bulk density. Beta goes as m^(-1/3), so a factor of 2 in the mass
-    moves it by 26%.
+    a MetSim fit) and an assumed bulk density. At a fixed mass beta goes as m^(-1/3)*rho^(-2/3), so a
+    factor of 2 in the mass changes it by a factor of 1.26.
 
     Arguments:
         mass_kg: [float] Meteoroid mass in kg.
@@ -2589,7 +2589,8 @@ if __name__ == "__main__":
 
     size_group.add_argument("--radius", type=float, default=None,
                         help="Object radius in metres, used with --density to compute beta and "
-                        "include radiation forces. Purely gravitational if not given.")
+                        "include radiation forces. Purely gravitational if none of --beta, --radius "
+                        "and --mass is given.")
 
     size_group.add_argument("--mass", type=float, nargs="?", const=0.0, default=None,
                         help="Object mass in kg, used with --density to compute beta. Given without "
@@ -2676,19 +2677,21 @@ if __name__ == "__main__":
 
     ### Non-gravitational forces (off by default, as they need the object's size) ###
     beta = args.beta
+    if ((args.mass is not None) or (args.radius is not None)) and (not (args.density > 0)):
+        parser.error("--density must be positive, got {:g} kg/m^3.".format(args.density))
+
     if args.mass is not None:
 
-        if args.mass < 0:
+        if (args.mass < 0) or (not np.isfinite(args.mass)):
             parser.error("--mass must be positive, got {:g} kg.".format(args.mass))
 
-        # Take the photometric mass of the light curve for --mass without a value, imported here as
-        #   AggregateAndPlot pulls in the whole plotting stack
+        # Use the photometric mass of the light curve if --mass was given without a value
         if args.mass == 0:
             from wmpl.Trajectory.AggregateAndPlot import computeMass, P_0M
 
             args.mass = computeMass(traj, P_0M)
-            if not args.mass:
-                parser.error("The trajectory has no photometry, so --mass needs a value in kg.")
+            if (not args.mass) or (not np.isfinite(args.mass)) or (args.mass < 0):
+                parser.error("The trajectory has no usable photometry, so --mass needs a value in kg.")
             print("Photometric mass: {:.4g} kg (P_0m = {:g} W, tau = 0.7%).".format(args.mass, P_0M))
 
         args.radius = equivalentSphereRadius(args.mass, args.density)
