@@ -23,7 +23,7 @@ except ImportError:
 
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
 from wmpl.Trajectory.Trajectory import addTrajectoryID
-from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
+from wmpl.Utils.Math import meanAngle, sphericalPointFromHeadingAndDistance, \
     angleBetweenSphericalCoords, generateMonthyTimeBins
 from wmpl.Utils.OSTools import mkdirP, walkDirsToDepth
 from wmpl.Utils.Physics import calcMass, trajectoryLightCurve
