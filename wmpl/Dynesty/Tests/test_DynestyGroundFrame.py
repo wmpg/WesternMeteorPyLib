@@ -10,11 +10,15 @@ from __future__ import print_function, division, absolute_import
 import copy
 import math
 import os
+import tempfile
 import warnings
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
-from wmpl.Dynesty.DynestyMetSim import ObservationData, constructConstants, runSimulationDynesty
+from wmpl.Dynesty.DynestyMetSim import ObservationData, constructConstants, dynestyMainRun, \
+    groundFrameMarkerPath, replayInTheFrameOfTheRun, runSimulationDynesty
 from wmpl.MetSim.MetSimErosion import constantsToInertial
 from wmpl.Utils.Pickling import loadPickle
 
@@ -113,3 +117,34 @@ def testSavedConstantsAreNotConvertedTwice():
 
     assert np.isclose(const.v_init, saved.v_init, rtol=0, atol=1e-6)
     assert np.isclose(const.zenith_angle, saved.zenith_angle, rtol=0, atol=1e-12)
+
+
+
+def testRunsMadeBeforeTheGroundFrameAreReplayedWithTheInertialSpeed():
+    """ Check that a dynesty run without the ground-frame marker is replayed without rotation and cannot be
+        resumed, and that a run with the marker keeps the rotation of the observations.
+    """
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        dynesty_file = os.path.join(tmp_dir, 'run.dynesty')
+        open(dynesty_file, 'w').close()
+
+        # Check that a run without the marker is replayed without rotation
+        obs = SimpleNamespace(v_rotation=-49.6)
+        replayInTheFrameOfTheRun(dynesty_file, obs)
+
+        assert obs.v_rotation == 0.0
+
+        # Check that it cannot be resumed
+        with pytest.raises(ValueError):
+            dynestyMainRun(dynesty_file, SimpleNamespace(v_rotation=-49.6), [], {}, {})
+
+        assert not os.path.isfile(groundFrameMarkerPath(dynesty_file))
+
+        # Check that a run with the marker keeps the rotation
+        open(groundFrameMarkerPath(dynesty_file), 'w').close()
+        obs = SimpleNamespace(v_rotation=-49.6)
+        replayInTheFrameOfTheRun(dynesty_file, obs)
+
+        assert obs.v_rotation == -49.6

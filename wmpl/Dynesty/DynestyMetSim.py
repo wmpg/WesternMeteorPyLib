@@ -4895,6 +4895,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                             print(f"No backup dynesty file found at: {backup_dynesty_file}\n")
                         
                     try:
+                        replayInTheFrameOfTheRun(dynesty_file, obs_data)
                         plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
@@ -4952,6 +4953,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         print(f"No backup dynesty file found at: {backup_dynesty_file}")
 
                 # dsampler = dynesty oad DynamicNestedSampler by restore(dynesty_file)
+                replayInTheFrameOfTheRun(dynesty_file, obs_data)
                 plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
 
             else:
@@ -6281,6 +6283,43 @@ def priorDynesty(cube, bounds, flags_dict):
     return x
 
 
+def groundFrameMarkerPath(dynesty_file):
+    """ Compute the path of the file that marks a dynesty run as simulated relative to the ground.
+
+    Arguments:
+        dynesty_file: [str] Path to the dynesty checkpoint file.
+
+    Return:
+        [str] Path of the marker file.
+    """
+
+    return dynesty_file + '.ground_frame'
+
+
+
+def replayInTheFrameOfTheRun(dynesty_file, obs_data):
+    """ Set the rotation of the observations to 0 for a dynesty run without the ground-frame marker, which
+        was made before MetSim was simulated relative to the ground, so its samples are replayed with the
+        model they were computed with.
+
+    Arguments:
+        dynesty_file: [str] Path to the dynesty checkpoint file.
+        obs_data: [ObservationData object] Observations, changed in place.
+
+    Return:
+        None
+    """
+
+    if os.path.isfile(groundFrameMarkerPath(dynesty_file)) or (not getattr(obs_data, 'v_rotation', 0.0)):
+        return
+
+    print("NOTE: {:s} was made before MetSim was simulated relative to the ground, so its samples are " \
+        "replayed with the inertial speed. Start a new run for results relative to the ground." \
+        "".format(dynesty_file))
+    obs_data.v_rotation = 0.0
+
+
+
 def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_core=1, output_folder="", 
                     base_name="",log_file_path="", pool_MPI=None, save_backup=True):
     """ Main function to run the Dynesty nested sampling.
@@ -6305,6 +6344,19 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
     """
 
     print("Starting dynesty run...")  
+
+    # Refuse to resume a run made before MetSim was simulated relative to the ground
+    marker_file = groundFrameMarkerPath(dynesty_file)
+    if os.path.exists(dynesty_file) and (not os.path.isfile(marker_file)) \
+        and getattr(obs_data, 'v_rotation', 0.0):
+
+        raise ValueError("{:s} was made before MetSim was simulated relative to the ground and cannot be " \
+            "resumed. Start a new run.".format(dynesty_file))
+
+    # Mark the run as simulated relative to the ground
+    with open(marker_file, 'w') as f:
+        f.write("MetSim simulated relative to the ground\n")
+
     # get variable names
     var_names = list(flags_dict.keys())
     # get the number of parameters
@@ -6393,6 +6445,7 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
     if output_folder != os.path.dirname(dynesty_file):
         print("Copying dynesty file to output folder...")
         shutil.copy(dynesty_file, output_folder)
+        shutil.copy(marker_file, output_folder)
         print("dynesty file copied to:", output_folder)
     
     plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, output_folder, base_name, log_file_path, n_core, save_backup=save_backup, finish_run=True)
