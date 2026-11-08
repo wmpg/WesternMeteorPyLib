@@ -19,7 +19,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
+from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor, timingOffsets
 from wmpl.Utils.Math import lineFunc
 
 
@@ -41,27 +41,12 @@ def _solve(clock_offsets=None):
         traj: [Trajectory object] Solved trajectory.
     """
 
+    # The pick filtering is off, as on noise-free data it rejects picks by the numerical noise
     traj, _, _ = observeStraightMeteor(noise=0.0, duration=DURATION, v_init=V_INIT, elevation=ELEVATION, \
         gravity_drop=True, clock_offsets=clock_offsets, estimate_timing_vel=True, gravity_correction=True, \
-        calc_orbit=False)
+        filter_picks=False, calc_orbit=False)
 
     return traj.run()
-
-
-
-def _offsets(traj):
-    """ Compute the estimated timing offsets relative to station A.
-
-    Arguments:
-        traj: [Trajectory object] Solved trajectory.
-
-    Return:
-        [dict] Timing offset per station ID (s).
-    """
-
-    offsets = dict(zip([obs.station_id for obs in traj.observations], traj.time_diffs_final))
-
-    return {station_id: offset - offsets['A'] for station_id, offset in offsets.items()}
 
 
 
@@ -70,7 +55,7 @@ def testExactClocksGetNoOffset():
         estimated on B and -0.33 ms on C.
     """
 
-    offsets = _offsets(_solve())
+    offsets = timingOffsets(_solve())
 
     assert abs(offsets['B']) < 5e-5
     assert abs(offsets['C']) < 5e-5
@@ -81,7 +66,7 @@ def testAClockOffsetIsRecovered():
     """ Check that a clock of B 0.3 s ahead is recovered. Before the fix, it was recovered as 302.32 ms.
     """
 
-    offsets = _offsets(_solve(clock_offsets={'B': 0.3}))
+    offsets = timingOffsets(_solve(clock_offsets={'B': 0.3}))
 
     assert abs(offsets['B'] + 0.3) < 5e-5
 
@@ -116,4 +101,4 @@ if __name__ == "__main__":
 
     # Print the timing offsets and the initial velocity error with exact clocks
     traj = _solve()
-    print("offsets {}  initial velocity error {:+.3f} m/s".format(_offsets(traj), traj.v_init - V_INIT))
+    print("offsets {}  initial velocity error {:+.3f} m/s".format(timingOffsets(traj), traj.v_init - V_INIT))

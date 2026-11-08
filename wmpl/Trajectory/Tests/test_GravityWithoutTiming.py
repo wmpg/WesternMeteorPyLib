@@ -24,7 +24,7 @@ import matplotlib
 matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import Trajectory
-from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
+from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor, worstResidual
 from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.TrajConversions import altAz2RADec_vect
 
@@ -55,20 +55,6 @@ def _solve(duration, v_init, elevation, estimate_timing_vel, gravity_correction=
 
 
 
-def _worstResidual(traj):
-    """ Compute the largest spatial residual over all stations.
-
-    Arguments:
-        traj: [Trajectory object] Solved trajectory.
-
-    Return:
-        [float] Largest spatial residual (m).
-    """
-
-    return max(np.max(np.hypot(obs.h_residuals, obs.v_residuals)) for obs in traj.observations)
-
-
-
 def testGravityIsAppliedWithoutTimingEstimation():
     """ Check that a slow, shallow 5 s meteor is recovered without the timing estimation. Without the
         gravity pass, the worst residual was 67.4 m and the radiant was 295.8 arcsec off.
@@ -76,7 +62,7 @@ def testGravityIsAppliedWithoutTimingEstimation():
 
     traj, radiant_eci = _solve(5.0, 15000.0, 30.0, estimate_timing_vel=False)
 
-    assert _worstResidual(traj) < 1.0
+    assert worstResidual(traj) < 1.0
     assert 3600*np.degrees(angleBetweenVectors(traj.radiant_eci_mini, radiant_eci)) < 1.5
 
 
@@ -205,5 +191,5 @@ if __name__ == "__main__":
         traj, radiant_eci = _solve(5.0, 15000.0, 30.0, estimate_timing_vel)
 
         print("estimate_timing_vel={!s:5}  worst residual {:8.3f} m  radiant error {:7.2f} arcsec".format( \
-            estimate_timing_vel, _worstResidual(traj), \
+            estimate_timing_vel, worstResidual(traj), \
             3600*np.degrees(angleBetweenVectors(traj.radiant_eci_mini, radiant_eci))))
