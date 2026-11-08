@@ -495,26 +495,46 @@ class ObservedPoints(object):
 
 
     def planeFit(self):
-        """ Fits a plane through station position and observed points. """
+        """ Fits a plane through station position and observed points. The plane goes through the station and
+            its normal is the direction most perpendicular to the lines of sight, the right singular vector of
+            their smallest singular value.
+        """
 
-        # Add meteor line of sight positions and station positions to single arrays.
-        #   Only use non-ignored points
-        x_data = np.append(self.x_eci[self.ignore_list == 0], 0)
-        y_data = np.append(self.y_eci[self.ignore_list == 0], 0)
-        z_data = np.append(self.z_eci[self.ignore_list == 0], 0)
+        # Take the unit vectors of the lines of sight, only of the non-ignored points
+        meas_eci = self.meas_eci[self.ignore_list == 0]
 
-        A = np.c_[x_data, y_data, np.ones(x_data.shape[0])]
+        # Use all points if fewer than 2 are used
+        if len(meas_eci) < 2:
+            meas_eci = self.meas_eci
 
-        # Fit a linear plane through the data points, return plane params (form: aX + bY + d = Z)
-        C,_,_,_ = scipy.linalg.lstsq(A, z_data)
-
-        # Calculate the plane normal
-        N = np.array([C[0], C[1], -1.0])
+        # Calculate the plane normal as the direction with the smallest projections of the lines of sight
+        _, _, vh = np.linalg.svd(meas_eci)
+        N = vh[-1]
 
         # Norm the normal vector to unit length
         N = vectNorm(N)
 
         return N
+
+
+
+def observedAngularLength(obs):
+    """ Compute the angle between the first and the last used line of sight of a station.
+
+    Arguments:
+        obs: [ObservedPoints] Observations from a station.
+
+    Return:
+        [float] Angular length of the observed track (radians).
+    """
+
+    # Take the used points, or all points if fewer than 2 are used
+    meas_eci = obs.meas_eci[obs.ignore_list == 0]
+    if len(meas_eci) < 2:
+        meas_eci = obs.meas_eci
+
+    # Compute the angle from the chord between the unit vectors, which is precise also for short tracks
+    return 2*np.arcsin(min(vectMag(meas_eci[-1] - meas_eci[0])/2, 1.0))
 
 
 
@@ -532,10 +552,10 @@ class PlaneIntersection(object):
         self.obs2 = obs2
 
         # Calculate the observed angular length of the track from the first station
-        obsangle1 = np.arccos(np.dot(self.obs1.meas_eci[0], self.obs1.meas_eci[-1]))
+        obsangle1 = observedAngularLength(self.obs1)
 
         # Calculate the observed angular length of the track from the second station
-        obsangle2 = np.arccos(np.dot(self.obs2.meas_eci[0], self.obs2.meas_eci[-1]))
+        obsangle2 = observedAngularLength(self.obs2)
 
 
         ### Calculate the angle between the pair of planes (convergence angle) ###
@@ -1387,9 +1407,13 @@ def moveStateVector(state_vect, radiant_eci, observations):
     nonignored_observations = [obstmp for obstmp in observations if not obstmp.ignore_station]
     for obs in nonignored_observations:
 
+        # Take the first point which is not ignored
+        used_picks = np.flatnonzero(np.array(obs.ignore_list) == 0)
+        first = used_picks[0] if len(used_picks) else 0
+
         # Calculate closest points of approach (observed line of sight to radiant line) of the first point
         # on the trajectory across all stations
-        _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, 
+        _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[first], obs.meas_eci_los[first], state_vect, 
             radiant_eci)
 
         rad_cpa_list.append(rad_cpa)
