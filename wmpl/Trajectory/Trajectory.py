@@ -745,18 +745,23 @@ def numStationsNotIgnored(observations):
 
 
 
-def gravityDropReference(observations, state_vect, radiant_eci):
+def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     """ Compute the beginning point of the trajectory, from which the gravity drop is computed.
 
     applyGravityDrop takes r0 to be the distance of the beginning of the meteor from the centre of the Earth,
-    and its drop model descends from there with the vertical velocity. This is the point calcLLA and
-    calcECIEqAltAz use: the highest of the points on the radiant line closest to the first line of sight of
-    each station, skipping the ignored stations and picks.
+    and its drop model descends from there with the vertical velocity, from the earliest time. This is the
+    point calcLLA and calcECIEqAltAz use: the highest of the points on the radiant line closest to the first
+    line of sight of each station, skipping the ignored stations and picks. When the picks before it are
+    ignored, it is moved back along the radiant line to the earliest time with the initial velocity.
 
     Arguments:
         observations: [list] A list of ObservedPoints objects.
         state_vect: [ndarray] (x, y, z) ECI coordinates of a point on the radiant line (meters).
         radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+
+    Keyword arguments:
+        v_init: [float] Initial velocity (m/s), used to move the point back to the earliest time. None by
+            default, when it is not moved.
 
     Return:
         (eci0, r0): [tuple] ECI coordinates of the beginning point (meters), and its distance from the centre
@@ -787,6 +792,14 @@ def gravityDropReference(observations, state_vect, radiant_eci):
     max_dist_indx = np.argmax([vectMag(r) for r in eci_list])
 
     eci0 = eci_list[max_dist_indx]
+
+    # Move the point back along the radiant line to the earliest time, from which the drop is computed
+    if v_init is not None:
+
+        obs, i = first_picks[max_dist_indx]
+        t0 = min([obs_t.time_data[0] for obs_t in observations])
+
+        eci0 = eci0 + v_init*(obs.time_data[i] - t0)*vectNorm(radiant_eci)
 
     return eci0, vectMag(eci0)
 
@@ -3125,7 +3138,7 @@ class Trajectory(object):
         """
 
         # The same beginning point for the gravity drop as the line-of-sight fit
-        _, r0 = gravityDropReference(observations, state_vect, radiant_eci)
+        _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
 
         # Go though observations from all stations
         for obs in observations:
@@ -3199,7 +3212,7 @@ class Trajectory(object):
         if gravity:
             r0 = self.gravity_r0
             if r0 is None:
-                _, r0 = gravityDropReference(observations, state_vect, radiant_eci)
+                _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
 
         # Go through observations from all stations
         for obs in observations:
@@ -3914,7 +3927,7 @@ class Trajectory(object):
         t0 = min([obs.time_data[0] for obs in observations])
 
         # Beginning point for the gravity drop, and the vertical velocity
-        eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci)
+        eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
         self.calcV0z(eci0, radiant_eci)
 
         ###########################################
@@ -4092,7 +4105,7 @@ class Trajectory(object):
         t0 = min([obs.time_data[0] for obs in observations])
 
         # Beginning point for the gravity drop, and the vertical velocity
-        eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci)
+        eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
         self.calcV0z(eci0, radiant_eci)
 
         ####
@@ -6791,7 +6804,7 @@ class Trajectory(object):
                 # Compute the beginning point and the vertical velocity of the gravity pass from this pass
                 if self.gravity_correction:
                     eci0, self.gravity_r0 = gravityDropReference(self.observations, self.state_vect_mini, \
-                        self.radiant_eci_mini)
+                        self.radiant_eci_mini, v_init=self.v_init)
                     self.calcV0z(eci0, self.radiant_eci_mini)
 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated

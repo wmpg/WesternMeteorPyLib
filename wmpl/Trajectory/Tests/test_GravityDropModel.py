@@ -19,7 +19,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import Trajectory
+from wmpl.Trajectory.Trajectory import Trajectory, angleSumMeasurements2Line
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor, worstResidual
 from wmpl.Utils.Math import angleBetweenVectors
 
@@ -153,6 +153,36 @@ def testAnIgnoredPickDoesNotSetTheBeginning():
 
     # Check the radiant
     assert 3600*np.degrees(angleBetweenVectors(solved.radiant_eci_mini, radiant_eci)) < 0.05
+
+
+
+def testIgnoredLeadingPicksDoNotShiftTheDrop():
+    """ Check that the beginning of the gravity drop is moved back to the earliest time when the picks of
+        the first 2 s of every station are ignored, as the drop is computed from the earliest time. The cost
+        of the line-of-sight fit is checked at the true line, as Nelder-Mead does not always reach it (see
+        #154). Before, it was 0.27 arcsec there.
+    """
+
+    traj, begin, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
+        elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
+        filter_picks=False, calc_orbit=False)
+
+    # Solve the observations again with the picks of the first 2 s ignored
+    solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
+        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
+        save_results=False, verbose=False)
+
+    for obs in traj.observations:
+        solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id, ignore_list=(obs.time_data < 2.0).astype(np.uint8))
+
+    solved = solved.run()
+
+    # Compute the cost of the gravity pass at the true line
+    cost = angleSumMeasurements2Line(solved.observations, begin, radiant_eci, gravity=True, \
+        v0z=solved.v0z, r0=solved.gravity_r0)
+
+    assert 3600*np.degrees(cost) < 0.01
 
 
 
