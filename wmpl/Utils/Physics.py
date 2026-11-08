@@ -408,6 +408,7 @@ def calcKB(lat, lon, ht_beg, jd, v, zenith_angle, gmn_correction=False):
     return kb
 
 
+
 def trajectoryLightCurve(traj, mag_limit=8.0):
     """ Extract the light curve of a solved trajectory, as AggregateAndPlot.computeMass() takes it for the
         photometric mass.
@@ -467,6 +468,7 @@ def trajectoryLightCurve(traj, mag_limit=8.0):
     return time_arr, mag_arr, ht_arr
 
 
+
 def earthRotationSpeed(traj):
     """ Compute the speed of the Earth's rotation along a trajectory, the difference between the inertial
         initial speed and the one relative to the ground, as Orbit takes it for v_avg_norot.
@@ -483,6 +485,7 @@ def earthRotationSpeed(traj):
         return 0.0
 
     return traj.orbit.v_init - v_init_norot
+
 
 
 def groundAlphaBetaFit(traj):
@@ -532,6 +535,7 @@ def groundAlphaBetaFit(traj):
     return velocityAt
 
 
+
 def groundDragFit(traj):
     """ Compute the speeds of a solved trajectory relative to the ground from its drag fit (DragFit.DragFit).
 
@@ -563,6 +567,7 @@ def groundDragFit(traj):
     return velocityAt
 
 
+
 # Fits of the speed of a trajectory relative to the ground, by name
 GROUND_VELOCITY_FITS = {'drag': groundDragFit, 'alphabeta': groundAlphaBetaFit}
 
@@ -570,6 +575,7 @@ GROUND_VELOCITY_FITS = {'drag': groundDragFit, 'alphabeta': groundAlphaBetaFit}
 GROUND_VELOCITY_FIT_NAMES = {
     'drag': "the drag fit of the trajectory (wmpl.Utils.DragFit) to the lengths and times of its points",
     'alphabeta': "a robust alpha-beta fit (fitAlphaBeta(method='robust')) of the observed speeds"}
+
 
 
 def groundVelocityFit(traj, velocity_fit='drag'):
@@ -606,6 +612,7 @@ def groundVelocityFit(traj, velocity_fit='drag'):
     return GROUND_VELOCITY_FITS[velocity_fit](traj), velocity_fit
 
 
+
 def trajectoryLatLon(traj, hts):
     """ Interpolate the latitudes and longitudes along a trajectory at the given heights.
 
@@ -625,6 +632,7 @@ def trajectoryLatLon(traj, hts):
     return lats, lons
 
 
+
 def maxDynamicPressure(traj, n_heights=1000, velocity_at=None, velocity_fit='drag'):
     """ Compute the maximum dynamic pressure p = rho*v^2 along a solved trajectory, as Borovicka et al. (2022,
         Paper I) give it for the European Fireball Network.
@@ -632,7 +640,8 @@ def maxDynamicPressure(traj, n_heights=1000, velocity_at=None, velocity_fit='dra
     The pressure is evaluated over the whole trajectory, from its beginning to its end height, with the
     velocity fit extrapolated where there are no velocity measurements. The speeds are relative to the ground
     and the air density is the NRLMSISE one at the reference time of the trajectory. A ValueError is raised if
-    the lowest point of the trajectory is more than 1 km below its end height.
+    the lowest point of the trajectory is more than 1 km below its end height, or if the velocity fit does not
+    cover the whole trajectory.
 
     Arguments:
         traj: [Trajectory object] Solved trajectory with an orbit and point velocities.
@@ -664,11 +673,18 @@ def maxDynamicPressure(traj, n_heights=1000, velocity_at=None, velocity_fit='dra
     lats, lons = trajectoryLatLon(traj, hts)
 
     vels = velocity_at(hts, lats, lons)
+
+    # Check that the velocity fit covers the whole trajectory
+    if not np.all(np.isfinite(vels)):
+        raise ValueError("The velocity fit does not cover the trajectory between {:.2f} and {:.2f} km." \
+            "".format(np.min(hts[~np.isfinite(vels)])/1000, np.max(hts[~np.isfinite(vels)])/1000))
+
     pressures = getAtmDensity_vect(lats, lons, hts, traj.jdt_ref)*vels**2
 
-    i_max = np.nanargmax(pressures)
+    i_max = np.argmax(pressures)
 
     return pressures[i_max], hts[i_max], vels[i_max]
+
 
 
 def photometricMassBorovicka2022(traj, velocity_at=None, velocity_fit='drag'):
@@ -713,6 +729,7 @@ def photometricMassBorovicka2022(traj, velocity_at=None, velocity_fit='drag'):
     return calcMass(time_arr, mag_arr, vel_arr, tau='rc2001', P_0m=1500.0, lum_eff_mass=1.0, v_init=None)
 
 
+
 def averageZenithDistance(traj):
     """ Compute the zenith distance of the ground-fixed radiant at the average point of a trajectory, halfway
         in height between its beginning and its end (TrajConversions.derotatedRadiantAltAz()). The radiant of
@@ -741,6 +758,7 @@ def averageZenithDistance(traj):
         _, elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, eci, traj.jdt_ref, lat, lon)
 
     return np.pi/2 - elev
+
 
 
 def calcPf(p_max=None, zangle=None, mass=None, v_0=None, traj=None, velocity_fit='drag'):

@@ -238,6 +238,23 @@ def testAnEarthGrazerIsRejected():
 
 
 
+def testAVelocityFitThatDoesNotCoverTheTrajectoryIsRejected():
+    """ Check that a velocity fit which leaves the bottom of the trajectory uncovered raises a ValueError
+        instead of giving the maximum pressure of the rest.
+    """
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
+    velocity_at = groundDragFit(traj)
+    ht_cut = (traj.rbeg_ele + traj.rend_ele)/2
+
+    def partialFit(hts, lats, lons):
+        return np.where(np.asarray(hts) > ht_cut, velocity_at(hts, lats, lons), np.nan)
+
+    with pytest.raises(ValueError):
+        maxDynamicPressure(traj, velocity_at=partialFit)
+
+
+
 def testTheRadiantOfFixedStationsIsNotDerotated():
     """ Check that the zenith distance of a solution with fixed stations is the one of its radiant, which is
         already fixed to the ground, and that the derotation changes it for a moving-station solution.
