@@ -16,8 +16,8 @@ from wmpl.Utils.Earth import greatCircleDistance
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenVectors, vectorFromPointDirectionAndAngle, \
     findClosestPoints, generateDatetimeBins, meanAngle, angleBetweenSphericalCoords
 from wmpl.Utils.ShowerAssociation import associateShowerTraj
-from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
-    raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
+from wmpl.Utils.TrajConversions import geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
+    raDec2ECI, datetime2JD, jd2Date, equatorialCoordJ2000ToDate_vect
 
 
 # Grab the logger from the main thread
@@ -219,10 +219,17 @@ class TrajectoryConstraints(object):
 
 
 class TrajectoryCorrelator(object):
-    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, enableOSM=False):
+    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, enableOSM=False, \
+        radec_per_point=True):
         """ Correlates meteor trajectories using meteor data given to it through a data handle. A data handle
         is a class instance with a common interface between e.g. files on the disk in various formats or 
         meteors in a database.
+
+        Keyword arguments:
+            radec_per_point: [bool] Convert the R.A./Dec. of each point to azimuth/elevation at the time of
+                that point, at which RMS computes them. True by default. False is incorrect and only for
+                reproducing solutions from before this option existed: it converts them all at the reference
+                time, which rotates each line of sight by the Earth's rotation since then.
         """
 
         self.dh = data_handle
@@ -238,6 +245,9 @@ class TrajectoryCorrelator(object):
 
         # enable OS style ground maps if true
         self.enableOSM = enableOSM
+
+        # Indicate that the R.A./Dec. were computed at the time of each point
+        self.radec_per_point = radec_per_point
 
     def trajectoryRangeCheck(self, traj_reduced, platepar):
         """ Check that the trajectory is within the range limits. 
@@ -438,10 +448,10 @@ class TrajectoryCorrelator(object):
         time_data = np.array([entry.time_rel + time_offset for entry in met.data])
         mag_data = np.array([entry.mag for entry in met.data])
 
-        # If the data is in J2000, precess it to the epoch of date
+        # If the data is in J2000, precess and nutate it to the epoch of date
         if self.data_in_j2000:
             jdt_ref_vect = np.zeros_like(ra_data) + datetime2JD(ref_dt)
-            ra_data, dec_data = equatorialCoordPrecession_vect(J2000_JD.days, jdt_ref_vect, ra_data, dec_data)
+            ra_data, dec_data = equatorialCoordJ2000ToDate_vect(jdt_ref_vect, ra_data, dec_data)
 
 
         # If the two begin and end points are fainter by N magnitudes from the median, ignore them
@@ -466,10 +476,17 @@ class TrajectoryCorrelator(object):
         comment = json.dumps(comment_dict, sort_keys=True).replace('\n', '').replace('\r', '')
 
 
+        # Take the time at which each R.A./Dec. was computed
+        radec_jd = None
+        if self.radec_per_point:
+            radec_jd = datetime2JD(ref_dt) + time_data/86400.0
+
+
         # Init the observation object
         obs = ObservedPoints(datetime2JD(ref_dt), ra_data, dec_data, time_data, np.radians(pp.lat), 
             np.radians(pp.lon), pp.elev, meastype=1, station_id=pp.station_code, magnitudes=mag_data, 
-            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end, comment=comment)
+            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end, comment=comment, \
+            radec_jd=radec_jd)
 
         return obs
 
