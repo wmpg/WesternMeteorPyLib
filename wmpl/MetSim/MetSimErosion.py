@@ -848,8 +848,9 @@ def atmDensity(ht, const):
 
 
 def prepareAtmDensityTable(const):
-    """ Check the tabulated atmosphere density profile of the constants, if any, and store it as lists of
-        floats, which are faster to index in the simulation loop than numpy arrays.
+    """ Check the atmosphere density model and the tabulated profile of the constants, if any, and store the
+        table as lists of floats, which are faster to index in the simulation loop than numpy arrays.
+        Constants without a table get the 'polynomial' model, which they run on.
 
     Arguments:
         const: [Constants object] Simulation constants, changed in place.
@@ -857,6 +858,15 @@ def prepareAtmDensityTable(const):
     Return:
         None
     """
+
+    atm_density_model = getattr(const, 'atm_density_model', 'polynomial')
+    if atm_density_model not in ('table', 'polynomial'):
+        raise ValueError("atm_density_model must be 'table' or 'polynomial', not {:s}".format( \
+            repr(atm_density_model)))
+
+    # Record the polynomial as the model of constants without a table, which run on it
+    if getattr(const, 'atm_table_ht', None) is None:
+        const.atm_density_model = 'polynomial'
 
     if not usesAtmDensityTable(const):
         return

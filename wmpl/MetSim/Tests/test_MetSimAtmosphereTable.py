@@ -133,7 +133,7 @@ def testScalarAndVectorInterpolationAgree():
     """ The scalar engine interpolation equals the vectorized utility at the nodes, between them and outside
     the table (where the end segments are extrapolated). """
 
-    ht = np.concatenate([[5000.0, HT_MIN, 14321.0, 95123.4, 100000.0, HT_MAX, 200000.0],
+    ht = np.concatenate([[5000.0, HT_MIN, 14321.0, 95123.4, 100000.0, HT_MAX, 200000.0], \
         np.linspace(10000, 190000, 97)])
 
     rho_vect = atmDensTable(ht, TABLE_HT, TABLE_LOG10_RHO)
@@ -141,12 +141,12 @@ def testScalarAndVectorInterpolationAgree():
     assert np.allclose(rho_scalar, rho_vect, rtol=1e-12, atol=0)
 
     # Exact at the nodes
-    assert np.isclose(MetSimErosion.atmDensityTableScalar(TABLE_HT[50], TABLE_HT, TABLE_LOG10_RHO),
+    assert np.isclose(MetSimErosion.atmDensityTableScalar(TABLE_HT[50], TABLE_HT, TABLE_LOG10_RHO), \
         10**TABLE_LOG10_RHO[50], rtol=1e-12)
 
     # Outside the table, the end segment continues as an exponential
     slope_top = (TABLE_LOG10_RHO[-1] - TABLE_LOG10_RHO[-2])/(TABLE_HT[-1] - TABLE_HT[-2])
-    assert np.isclose(np.log10(atmDensTable(HT_MAX + 10000.0, TABLE_HT, TABLE_LOG10_RHO)),
+    assert np.isclose(np.log10(atmDensTable(HT_MAX + 10000.0, TABLE_HT, TABLE_LOG10_RHO)), \
         TABLE_LOG10_RHO[-1] + slope_top*10000.0, rtol=1e-12)
 
     # The dispatcher picks the table if there is one, the polynomial otherwise
@@ -165,11 +165,11 @@ def testTableColumnExact():
     ht = np.array([10000.0, 50000.0, 95123.4])
     assert np.array_equal(dens_interp(ht), atmDensTable(ht, TABLE_HT, TABLE_LOG10_RHO))
 
-    for ht_low, ht_high in [(70000.0, 180000.0), (14000.0, 30000.0), (95123.4, 95400.0), (10000.0, 20000.0),
+    for ht_low, ht_high in [(70000.0, 180000.0), (14000.0, 30000.0), (95123.4, 95400.0), (10000.0, 20000.0), \
             (170000.0, 190000.0)]:
 
         # Integrate segment by segment so quad never straddles a kink of the piecewise profile
-        nodes = np.unique(np.concatenate([[ht_low, ht_high],
+        nodes = np.unique(np.concatenate([[ht_low, ht_high], \
             [h for h in TABLE_HT if ht_low < h < ht_high]]))
         column_quad = sum(scipy.integrate.quad(dens_interp, a, b, epsrel=1e-12)[0]
             for a, b in zip(nodes[:-1], nodes[1:]))
@@ -185,7 +185,7 @@ def testTableColumnExact():
     # Pecina-Ceplecha integrates with the exact column when it is available, quadrature otherwise
     from wmpl.Utils.PecinaCeplechaFunction import airColumn
     assert airColumn(dens_interp, 80000.0, HT_MAX) == float(dens_interp.column(80000.0, HT_MAX))
-    assert np.isclose(airColumn(lambda h: 10**(-5 - h/20000.0), 80000.0, 100000.0),
+    assert np.isclose(airColumn(lambda h: 10**(-5 - h/20000.0), 80000.0, 100000.0), \
         20000.0/np.log(10)*(10**(-9.0) - 10**(-10.0)), rtol=1e-8)
 
 
@@ -248,11 +248,11 @@ def testNumpyTableIsConverted():
 def testInvalidTableRejected():
     """ Tables that are too short, have mismatched columns or are not ascending raise a ValueError. """
 
-    bad_tables = [
-        ([100000.0], [-6.0]),
-        ([90000.0, 100000.0, 110000.0], [-5.0, -6.0]),
-        ([110000.0, 100000.0, 90000.0], [-7.0, -6.0, -5.0]),
-        ([90000.0, 90000.0, 110000.0], [-5.0, -5.0, -7.0]),
+    bad_tables = [ \
+        ([100000.0], [-6.0]), \
+        ([90000.0, 100000.0, 110000.0], [-5.0, -6.0]), \
+        ([110000.0, 100000.0, 90000.0], [-7.0, -6.0, -5.0]), \
+        ([90000.0, 90000.0, 110000.0], [-5.0, -5.0, -7.0]), \
     ]
 
     for table in bad_tables:
@@ -359,6 +359,26 @@ def testAHalfSetOrNonFiniteTableIsRejected():
 
     with pytest.raises(ValueError):
         MetSimErosion.runSimulation(_makeConstants((TABLE_HT, log10_rho)))
+
+
+
+def testTheModelIsCheckedAndRecorded():
+    """ Check that an unknown density model raises a ValueError, and that constants without a table record
+        the polynomial they run on.
+    """
+
+    const = _makeConstants((TABLE_HT, TABLE_LOG10_RHO))
+    const.atm_density_model = 'Table'
+
+    with pytest.raises(ValueError):
+        MetSimErosion.runSimulation(const)
+
+    const = _makeConstants()
+    assert const.atm_density_model == 'table'
+
+    MetSimErosion.runSimulation(const)
+
+    assert const.atm_density_model == 'polynomial'
 
 
 

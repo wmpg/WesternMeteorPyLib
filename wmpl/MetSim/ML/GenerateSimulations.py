@@ -390,6 +390,9 @@ class ErosionSimContainer(object):
         # Init simulation constants
         self.const = Constants()
         self.const.dens_co = self.params.dens_co
+
+        # Use the polynomial atmosphere, on which the pretrained networks were trained
+        self.const.atm_density_model = 'polynomial'
         self.const.P_0M = self.params.P_0M
 
         # Set tau to CAMO faint meteor model

@@ -121,7 +121,7 @@ def fitAtmPoly(lat, lon, height_min, height_max, jd):
 
 
 
-def getAtmDensityTable(lat, lon, height_min, height_max, jd, step=500):
+def getAtmDensityTable(lat, lon, height_min, height_max, jd, step=ATM_TABLE_STEP):
     """ Tabulate log10 of the atmosphere mass density of the MSIS model (getAtmDensity()) at the given
         location and time on a uniform height grid.
 
@@ -138,7 +138,7 @@ def getAtmDensityTable(lat, lon, height_min, height_max, jd, step=500):
 
     Keyword arguments:
         step: [float] Maximum height step of the table in meters. The range is split into equal steps no
-            larger than this. 500 m by default.
+            larger than this. ATM_TABLE_STEP by default.
 
     Return:
         (table_ht, table_log10_rho):
