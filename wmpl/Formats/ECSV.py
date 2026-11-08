@@ -270,13 +270,7 @@ def saveECSV(dir_path, meteor_observations,
 # - {name: altitude, datatype: float64}
 # - {name: x_image, unit: pix, datatype: float64}
 # - {name: y_image, unit: pix, datatype: float64}
-# - {name: integrated_pixel_value, datatype: int64}
-# - {name: background_pixel_value, datatype: int64}
-# - {name: saturated_pixels, datatype: bool}
 # - {name: mag_data, datatype: float64}
-# - {name: err_minus_mag, datatype: float64}
-# - {name: err_plus_mag, datatype: float64}
-# - {name: snr, datatype: float64}
 # delimiter: ','
 # meta: !!omap
 """
@@ -335,7 +329,7 @@ def saveECSV(dir_path, meteor_observations,
             f.write(out_str)
 
 
-        print("ESCV file saved to:", ecsv_path)
+        print("ECSV file saved to:", ecsv_path)
             
 
 

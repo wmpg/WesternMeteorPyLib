@@ -12,6 +12,7 @@ from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Config import config
 from wmpl.Utils.Earth import calcEquationOfEquinoxes
 from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST
+from wmpl.Utils.TrajConversions import altAz2RADec_vect
 
 
 
@@ -68,9 +69,9 @@ class MeteorObservation(object):
         Arguments:
             frame_n: [float] Frame number from the reference time.
             x: [float] X image coordinate.
-            y: [float] X image coordinate.
-            azim: [float] Azimuth, J2000 in degrees.
-            elev: [float] Elevation angle, J2000 in degrees.
+            y: [float] Y image coordinate.
+            azim: [float] Azimuth +E of due N in degrees.
+            elev: [float] Elevation angle in degrees.
             ra: [float] Right ascension, J2000 in degrees.
             dec: [float] Declination, J2000 in degrees.
             mag: [float] Visual magnitude.
@@ -213,8 +214,13 @@ def prepareObservations(meteor_list):
             meteor.ra_data = ra_prec
             meteor.dec_data = dec_prec
 
-            # Convert preccesed Ra, Dec to altitude and azimuth
-            meteor.azim_data, meteor.elev_data = raDec2AltAz_vect(meteor.ra_data, meteor.dec_data, jdt_ref,
+            # Convert precessed Ra, Dec to altitude and azimuth, at the time each of them was computed if they
+            #   were computed at the time of their point
+            azel_jd = jdt_ref
+            if getattr(meteor, 'radec_per_point', False):
+                azel_jd = jdt_ref + meteor.time_data/86400.0
+
+            meteor.azim_data, meteor.elev_data = raDec2AltAz_vect(meteor.ra_data, meteor.dec_data, azel_jd,
                 meteor.latitude, meteor.longitude)
 
             meteor_list_epoch_of_date.append(meteor)
@@ -288,22 +294,21 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
 
         elif solver.lower().startswith('gural'):
 
-            # Extract velocity model is given
-            try:
-                velmodel = int(solver[-1])
-
-            except: 
-                # Default to the exponential model
-                velmodel = 3
-
             ra_data = meteor.ra_data
+            dec_data = meteor.dec_data
+
+            # The Gural solver takes all R.A./Dec. at the reference time, so compute the ones computed at the
+            #   time of their point again at the reference time, from their azimuth and elevation
+            if getattr(meteor, 'radec_per_point', False):
+                ra_data, dec_data = altAz2RADec_vect(meteor.azim_data, meteor.elev_data, jdt_ref, \
+                    meteor.latitude, meteor.longitude)
 
             # The Gural solver places the cameras with the mean sidereal time, so subtract the equation of the
             #   equinoxes from the R.A. (not with the legacy J2000 conversion, which did not do it)
             if not config.legacy_j2000_precession_only:
                 ra_data = (ra_data - calcEquationOfEquinoxes(jdt_ref))%(2*np.pi)
 
-            traj.infillTrajectory(ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, \
+            traj.infillTrajectory(ra_data, dec_data, meteor.time_data, meteor.latitude, \
                 meteor.longitude, meteor.height)
 
 
