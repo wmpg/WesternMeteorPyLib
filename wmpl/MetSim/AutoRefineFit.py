@@ -14,7 +14,8 @@ import scipy.optimize
 from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants, loadedConstantsRelativeToGround
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants, loadedConstantsRelativeToGround, \
+    atmDensityDescription
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
     ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX
 from wmpl.Utils.Math import meanAngle
@@ -755,6 +756,9 @@ if __name__ == "__main__":
     const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, ATM_TABLE_HT_MIN, \
         atm_ht_max, traj.jdt_ref)
     const.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, traj.jdt_ref, height_max=atm_ht_max)
+
+    # Print the atmosphere the simulation uses
+    print(atmDensityDescription(const))
 
     ### ###
 

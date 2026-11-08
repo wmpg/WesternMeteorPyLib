@@ -12,7 +12,6 @@ References:
 from __future__ import print_function, division, absolute_import
 
 
-import bisect
 import math
 
 import numpy as np
@@ -27,7 +26,7 @@ from wmpl.Utils.Physics import earthRotationSpeed
 from wmpl.Utils.CythonBuild import installPyximport
 installPyximport()
 from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
-    ionizationEfficiency, atmDensityPoly
+    ionizationEfficiency, atmDensityPoly, atmDensityTable, AtmDensityTableCy
 
 
 ### DEFINE CONSTANTS
@@ -783,35 +782,6 @@ def getErosionCoeff(const, h):
         return 0
 
 
-def atmDensityTableScalar(ht, table_ht, table_log10_rho):
-    """ Compute the atmosphere density from a tabulated profile, interpolating log10 of the density linearly
-        in height, which is an exponential atmosphere between the table points. Outside the table, the end
-        segments are extrapolated. This is the scalar version of AtmosphereDensity.atmDensTable() for the
-        simulation loop, where indexing lists is faster than numpy.
-
-    Arguments:
-        ht: [float] Height (m).
-        table_ht: [list] Table heights (m), ascending.
-        table_log10_rho: [list] log10 of the densities (kg/m^3) at the table heights.
-
-    Return:
-        [float] Atmosphere density (kg/m^3).
-
-    """
-
-    # Find the table segment, with if-chains as this is called for every fragment on every time step
-    i = bisect.bisect_right(table_ht, ht) - 1
-    if i < 0:
-        i = 0
-    elif i > len(table_ht) - 2:
-        i = len(table_ht) - 2
-
-    ht_0 = table_ht[i]
-    log10_rho_0 = table_log10_rho[i]
-
-    return 10**(log10_rho_0 + (ht - ht_0)*(table_log10_rho[i + 1] - log10_rho_0)/(table_ht[i + 1] - ht_0))
-
-
 def usesAtmDensityTable(const):
     """ Check whether the simulation takes the atmosphere density from the table of the constants, which it
         does if the density model is 'table' and the table is given. Constants without the model are legacy
@@ -844,13 +814,77 @@ def atmDensity(ht, const):
     if not usesAtmDensityTable(const):
         return atmDensityPoly(ht, const.dens_co)
 
-    return atmDensityTableScalar(ht, const.atm_table_ht, const.atm_table_log10_rho)
+    return atmDensityTable(ht, *atmDensityTableArrays(const))
+
+
+
+def atmDensityDescription(const):
+    """ Describe the atmosphere density model of the constants for the terminal.
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+
+    Return:
+        [str] Description of the model, with its inputs for a table.
+    """
+
+    if not usesAtmDensityTable(const):
+        return "Atmosphere density: legacy 6th degree polynomial, inaccurate by up to tens of percent at " \
+            "80 to 120 km"
+
+    info = getattr(const, 'atm_density_info', None)
+    if not info:
+        return "Atmosphere density: table of {:d} points, {:.1f} to {:.1f} km".format( \
+            len(const.atm_table_ht), const.atm_table_ht[0]/1000, const.atm_table_ht[-1]/1000)
+
+    return "Atmosphere density: {:s} table, {:.1f} to {:.1f} km every {:.0f} m, lat {:.4f} deg, " \
+        "lon {:.4f} deg, JD {:.6f}, F10.7 {:g}, F10.7A {:g}, Ap {:g}".format(info['model'], \
+        info['ht_min']/1000, info['ht_max']/1000, info['step'], info['lat'], info['lon'], info['jd'], \
+        info['f107'], info['f107a'], info['ap'])
+
+
+
+def atmDensityTableArrays(const):
+    """ Convert the atmosphere density table of the constants to the contiguous arrays of the Cython
+        interpolator (MetSimErosionCyTools.atmDensityTable()).
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+
+    Return:
+        (table_ht, table_log10_rho): [tuple] Arrays of the heights (m) and log10 of the densities, or None if
+            the constants do not use the table.
+    """
+
+    if not usesAtmDensityTable(const):
+        return None
+
+    return np.ascontiguousarray(const.atm_table_ht, dtype=np.float64), \
+        np.ascontiguousarray(const.atm_table_log10_rho, dtype=np.float64)
+
+
+
+def atmDensityTableCy(const):
+    """ Make the Cython density table of the constants for the simulation loop (AtmDensityTableCy).
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+
+    Return:
+        [AtmDensityTableCy object] Density table, or None if the constants do not use the table.
+    """
+
+    atm_table = atmDensityTableArrays(const)
+    if atm_table is None:
+        return None
+
+    return AtmDensityTableCy(*atm_table)
 
 
 def prepareAtmDensityTable(const):
     """ Check the atmosphere density model and the tabulated profile of the constants, if any, and store the
-        table as lists of floats, which are faster to index in the simulation loop than numpy arrays.
-        Constants without a table get the 'polynomial' model, which they run on.
+        table as lists of floats, which can be saved to JSON. Constants without a table get the 'polynomial'
+        model, which they run on.
 
     Arguments:
         const: [Constants object] Simulation constants, changed in place.
@@ -906,7 +940,7 @@ def killFragment(const, frag):
         const.main_mass_exhaustion_ht = frag.h
 
 
-def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
+def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm_table=None):
     """ Perform single body ablation of all fragments using the 4th order Runge-Kutta method. 
 
     Arguments:
@@ -916,6 +950,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     Keyword arguments:
         compute_wake: [bool] If True, the wake profile will be computed. False by default.
         wake_heights_queue: [list] A list of heights at which the wake should be computed. None by default.
+        atm_table: [AtmDensityTableCy object] Atmosphere density table from atmDensityTableCy(), to avoid
+            converting the table on every time step. None by default, in which case it is made from the
+            constants.
 
     Return:
         ...
@@ -977,12 +1014,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     #   post-loop scan of the whole fragment list
     mass_total_active = 0.0
 
-    # Read the atmosphere density table once, not for every fragment
-    if usesAtmDensityTable(const):
-        atm_table_ht = const.atm_table_ht
-        atm_table_log10_rho = const.atm_table_log10_rho
-    else:
-        atm_table_ht = None
+    # Take the atmosphere density table once, not for every fragment
+    if atm_table is None:
+        atm_table = atmDensityTableCy(const)
 
     # Go through all active fragments
     for frag in fragments:
@@ -992,10 +1026,10 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             continue
 
         # Get atmosphere density for the given height
-        if atm_table_ht is None:
+        if atm_table is None:
             rho_atm = atmDensityPoly(frag.h, const.dens_co)
         else:
-            rho_atm = atmDensityTableScalar(frag.h, atm_table_ht, atm_table_log10_rho)
+            rho_atm = atm_table.density(frag.h)
 
         # Compute the mass loss of the fragment due to ablation
         mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
@@ -1610,8 +1644,9 @@ def runSimulation(const, compute_wake=False):
     if const.erosion_mass_min > const.erosion_mass_max:
         const.erosion_mass_min, const.erosion_mass_max = const.erosion_mass_max, const.erosion_mass_min
 
-    # Check the atmosphere density table and convert it to lists for fast indexing
+    # Check the atmosphere density table, and convert it once to the arrays of the Cython interpolator
     prepareAtmDensityTable(const)
+    atm_table = atmDensityTableCy(const)
 
     ###
 
@@ -1677,7 +1712,8 @@ def runSimulation(const, compute_wake=False):
             tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel, \
             leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press, \
             mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, \
-            wake = ablateAll(fragments, const, compute_wake=compute_wake, wake_heights_queue=wake_heights_queue)
+            wake = ablateAll(fragments, const, compute_wake=compute_wake, \
+            wake_heights_queue=wake_heights_queue, atm_table=atm_table)
         
         # Track the bottom height of the main fragment
         if main_height > 0:

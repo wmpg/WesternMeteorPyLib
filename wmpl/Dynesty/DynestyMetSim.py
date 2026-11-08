@@ -60,7 +60,7 @@ except ImportError:
 
 from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin, \
-    constantsRelativeToGround, constantsToInertial
+    constantsRelativeToGround, constantsToInertial, atmDensityDescription
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
@@ -3980,6 +3980,9 @@ class ObservationData:
             self.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, jd_dat, height_max=atm_ht_max)
             self.atm_density_model = 'table'
 
+            # Print the atmosphere the simulations use
+            print(atmDensityDescription(self))
+
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4528,6 +4531,9 @@ class ObservationData:
             self.atm_table_log10_rho = getattr(self.const, 'atm_table_log10_rho', None)
             self.atm_density_info = getattr(self.const, 'atm_density_info', None)
             self.atm_density_model = getattr(self.const, 'atm_density_model', 'polynomial')
+
+            # Print the atmosphere the simulations use
+            print(atmDensityDescription(self))
 
             # Compute absolute magnitudes
             absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)

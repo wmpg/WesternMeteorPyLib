@@ -6,7 +6,7 @@ degree polynomial (fitAtmPoly) otherwise. These tests check:
 
     - the table grid and its values at the nodes
     - the table follows the MSIS model between the nodes, far closer than the polynomial
-    - the scalar engine interpolation and the vectorized utility agree, also outside the table
+    - the Cython engine interpolation and the vectorized utility agree, also outside the table
     - the exact air column of the table matches the numerical integral (used by the Pecina-Ceplecha fit)
     - the simulation actually uses the table, and falls back to the polynomial without one (incl. Constants
       objects created before the table existed)
@@ -30,7 +30,7 @@ import scipy.integrate
 
 import wmpl.MetSim.MetSimErosion as MetSimErosion
 from wmpl.Utils.AtmosphereDensity import AtmDensityTableInterp, atmColumnTable, atmDensPoly, atmDensTable, \
-    fitAtmPoly, getAtmDensity, getAtmDensityTable
+    atmDensityTableInfo, fitAtmPoly, getAtmDensity, getAtmDensityTable
 from wmpl.Utils.TrajConversions import date2JD
 
 
@@ -46,6 +46,9 @@ HT_MAX = 180000.0
 # Shared table and polynomial, computed once
 TABLE_HT, TABLE_LOG10_RHO = getAtmDensityTable(LAT, LON, HT_MIN, HT_MAX, JD)
 DENS_CO = fitAtmPoly(LAT, LON, HT_MIN, HT_MAX, JD)
+
+# Contiguous arrays of the table for the Cython interpolator
+TABLE_ARRAYS = (np.array(TABLE_HT), np.array(TABLE_LOG10_RHO))
 
 
 
@@ -130,18 +133,18 @@ def testTableFollowsMsis():
 
 
 def testScalarAndVectorInterpolationAgree():
-    """ The scalar engine interpolation equals the vectorized utility at the nodes, between them and outside
+    """ The Cython engine interpolation equals the vectorized utility at the nodes, between them and outside
     the table (where the end segments are extrapolated). """
 
     ht = np.concatenate([[5000.0, HT_MIN, 14321.0, 95123.4, 100000.0, HT_MAX, 200000.0], \
         np.linspace(10000, 190000, 97)])
 
     rho_vect = atmDensTable(ht, TABLE_HT, TABLE_LOG10_RHO)
-    rho_scalar = np.array([MetSimErosion.atmDensityTableScalar(h, TABLE_HT, TABLE_LOG10_RHO) for h in ht])
+    rho_scalar = np.array([MetSimErosion.atmDensityTable(h, *TABLE_ARRAYS) for h in ht])
     assert np.allclose(rho_scalar, rho_vect, rtol=1e-12, atol=0)
 
     # Exact at the nodes
-    assert np.isclose(MetSimErosion.atmDensityTableScalar(TABLE_HT[50], TABLE_HT, TABLE_LOG10_RHO), \
+    assert np.isclose(MetSimErosion.atmDensityTable(TABLE_HT[50], *TABLE_ARRAYS), \
         10**TABLE_LOG10_RHO[50], rtol=1e-12)
 
     # Outside the table, the end segment continues as an exponential
@@ -409,3 +412,20 @@ def testDynestyTakesTheModelAndTableOfTheObservations():
 
     assert const.atm_density_model == 'polynomial'
     assert not MetSimErosion.usesAtmDensityTable(const)
+
+
+
+def testTheAtmosphereIsDescribed():
+    """ Check that the terminal description names the legacy polynomial or the table with its inputs.
+    """
+
+    assert "legacy 6th degree polynomial" in MetSimErosion.atmDensityDescription(_makeConstants())
+
+    const = _makeConstants((TABLE_HT, TABLE_LOG10_RHO))
+    assert "table of" in MetSimErosion.atmDensityDescription(const)
+
+    const.atm_density_info = atmDensityTableInfo(LAT, LON, JD, height_min=HT_MIN, height_max=HT_MAX)
+    description = MetSimErosion.atmDensityDescription(const)
+
+    assert "NRLMSISE-00 table, 14.0 to 180.0 km every 500 m" in description
+    assert "Ap 4" in description

@@ -30,7 +30,7 @@ from wmpl.Formats.Met import loadMet
 from wmpl.Formats.ECSV import loadECSVs
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin, \
-    constantsRelativeToGround, loadedConstantsRelativeToGround, usesAtmDensityTable
+    constantsRelativeToGround, loadedConstantsRelativeToGround, usesAtmDensityTable, atmDensityDescription
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, getAtmDensityTable, \
@@ -3046,6 +3046,9 @@ class MetSimGUI(QMainWindow):
 
         print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
             self.dens_fit_ht_end/1000, self.dens_fit_ht_beg/1000))
+
+        # Print the atmosphere the simulation uses
+        print(atmDensityDescription(self.const))
 
         ### ###
 
