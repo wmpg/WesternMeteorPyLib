@@ -2862,7 +2862,9 @@ def airRotationShift(time_rel, vel, eci0, radiant_eci):
 
 def interpAirRotationShift(air_shift, time_rel, radiant_eci):
     """ Interpolate the displacement by drag against the rotating air at the given times, and keep its part
-        across the given line, so it does not move the points along it.
+        across the given line, so it does not move the points along it. After the last time of the
+        displacement, as at picks after the last one used, it goes on with the velocity across the line at
+        that time.
 
     Arguments:
         air_shift: [tuple] Times from the beginning of the meteor (s) and the displacements at those times
@@ -2878,6 +2880,12 @@ def interpAirRotationShift(air_shift, time_rel, radiant_eci):
     time_rel = np.atleast_1d(np.asarray(time_rel, dtype=np.float64))
 
     shift = np.column_stack([np.interp(time_rel, time_grid, shift_grid[:, i]) for i in range(3)])
+
+    # Go on with the velocity across the line after the last time, which np.interp would hold
+    after = time_rel > time_grid[-1]
+    if np.any(after) and (len(time_grid) > 1):
+        vel_end = (shift_grid[-1] - shift_grid[-2])/(time_grid[-1] - time_grid[-2])
+        shift[after] += np.outer(time_rel[after] - time_grid[-1], vel_end)
 
     # Remove the part along the line
     radiant_eci = vectNorm(np.asarray(radiant_eci, dtype=np.float64))

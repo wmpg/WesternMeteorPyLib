@@ -206,6 +206,34 @@ def testTheShiftIsAcrossTheLine():
 
 
 
+def testTheShiftGoesOnAfterTheLastPoint():
+    """ Check that after the last time of the displacement, as at picks after the last one used, the
+        displacement goes on with the velocity across the line at that time, instead of stopping there.
+    """
+
+    meteor = _fireball()
+    time_rel, vel_drag, eci0, radiant_eci, _, _ = _acrossPath(meteor)
+    shift_full = airRotationShift(time_rel, vel_drag, eci0, radiant_eci)
+
+    # The displacement up to 0.1 s before the end, evaluated over the last 0.1 s
+    used = time_rel <= time_rel[-1] - 0.1
+    after = time_rel[~used]
+    air_shift = (time_rel[used], shift_full[used])
+
+    truth = interpAirRotationShift((time_rel, shift_full), after, radiant_eci)
+    shift = interpAirRotationShift(air_shift, after, radiant_eci)
+    held = interpAirRotationShift(air_shift, np.full(len(after), time_rel[used][-1]), radiant_eci)
+
+    assert np.max(np.linalg.norm(shift - truth, axis=1)) < 1.0
+    assert np.max(np.linalg.norm(held - truth, axis=1)) > 5.0
+
+    # Before the last time, it is the interpolated displacement
+    before = time_rel[used][::50]
+    assert np.allclose(interpAirRotationShift(air_shift, before, radiant_eci), \
+        interpAirRotationShift((time_rel, shift_full), before, radiant_eci), rtol=0, atol=1e-9)
+
+
+
 def testTheShiftGivesTheDeviationOfAnIntegratedFireball():
     """ Check that the displacement, with the part of gravity, gives the deviation from the initial line of a
         fireball integrated in 3D with drag against the rotating air, to 0.03 m out of 84 m. Taking the air
@@ -412,6 +440,7 @@ if __name__ == "__main__":
 
     # Run all tests
     test_list = [testTheShiftIsZeroAtAConstantVelocity, testTheShiftIsAcrossTheLine, \
+        testTheShiftGoesOnAfterTheLastPoint, \
         testTheShiftGivesTheDeviationOfAnIntegratedFireball, testTheSolverRecoversAFireballInTheRotatingAir, \
         testTheLengthsAreTakenOnTheMovedLine, testAFitWhichRunsOutOfEvaluationsIsContinued, \
         testNoShiftWithoutTheOptionOrInOldPickles, testAMeteorWithoutDecelerationIsNotMoved, \
