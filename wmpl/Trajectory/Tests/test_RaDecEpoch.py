@@ -1,219 +1,209 @@
-""" Tests for the epoch at which R.A./Dec. measurements are converted to azimuth and elevation.
+""" Tests for the time at which R.A./Dec. measurements are converted to azimuth and elevation.
 
-With meastype 1, ObservedPoints converts R.A./Dec. to azimuth/elevation and back to R.A./Dec. at each
-point's own time. By default the first conversion is done at jdt_ref, which inverts data whose R.A./Dec.
-were all computed at that one time, as CAMS does. Data computed at each point's own time, as RMS does,
-needs radec_jd: without it each line of sight is rotated by the Earth's rotation since jdt_ref.
+With meastype 1, ObservedPoints converts the R.A./Dec. to azimuth/elevation, and back to R.A./Dec. at the time
+of each point. By default the first conversion is done at jdt_ref, which inverts R.A./Dec. that were all
+computed at that one time, as CAMS does. R.A./Dec. computed at the time of each point, as RMS does, need
+radec_jd: without it, each line of sight is rotated by the Earth's rotation since jdt_ref.
 
-The tests generate a straight, constant-velocity trajectory in ECI, observe it from three stations without
-noise, and check that the solver returns it.
+The tests observe the straight meteor of SyntheticTrajectory from three stations without noise, and check that
+the solver recovers it.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_RaDecEpoch.py -v
 """
 
+from __future__ import print_function, division, absolute_import
+
 import numpy as np
 
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import Trajectory
-from wmpl.Utils.TrajConversions import altAz2RADec, eci2RaDec, geo2Cartesian, raDec2AltAz_vect, raDec2ECI
+from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
+    observeStraightMeteor, stationAzimAlt, straightMeteorPoints
+from wmpl.Utils.Math import angleBetweenVectors
+from wmpl.Utils.TrajConversions import altAz2RADec_vect
 
 
-JDT_REF = 2461070.9343128
-DURATION = 2.5
-N_POINTS = 40
-V_INIT = 30000.0
-
-# (station_id, lat, lon, elevation) in degrees and metres
-STATIONS = [
-    ("A", -43.60, 172.12, 120.0),
-    ("B", -42.90, 173.20, 200.0),
-    ("C", -43.30, 171.30, 350.0),
-]
+# Seconds by which the clock of station B is ahead in the tests of the timing offsets. It is behind, so its
+#   first time is before the reference time, and the solver moves the reference time to it
+CLOCK_OFFSET = -0.3
 
 
-def _trajectory():
-    """ Straight constant-velocity trajectory, ECI coordinates of each point and its relative time. """
 
-    lat, lon, ht = np.radians(-43.20), np.radians(172.30), 85000.0
-    begin = np.array(geo2Cartesian(lat, lon, ht, JDT_REF))
-
-    # Radiant at 210 deg azimuth, 55 deg elevation from the beginning point
-    ra, dec = altAz2RADec(np.radians(210.0), np.radians(55.0), JDT_REF, lat, lon)
-    direction = -np.array(raDec2ECI(ra, dec))
-
-    times = np.linspace(0, DURATION, N_POINTS)
-
-    return begin + np.outer(V_INIT*times, direction), times, -direction
-
-
-def _radecOfDate(points, jds, lat, lon, ele):
-    """ R.A./Dec. of date of each point, each computed at its own time. """
-
-    ra, dec = [], []
-    for point, jd in zip(points, jds):
-        station = np.array(geo2Cartesian(np.radians(lat), np.radians(lon), ele, jd))
-        r, d = eci2RaDec(point - station)
-        ra.append(r)
-        dec.append(d)
-
-    return np.array(ra), np.array(dec)
-
-
-def _solve(per_point, clock_offsets=None, estimate_timing_vel=False):
-    """ Solve the trajectory from noise-free R.A./Dec. computed at each point's own time.
-
-    Arguments:
-        per_point: [bool] Give the solver radec_jd.
+def _solve(per_point=True, cams=False, clock_offsets=None, **kwargs):
+    """ Solve the noise-free straight meteor from R.A./Dec. measurements.
 
     Keyword arguments:
-        clock_offsets: [dict] Station ID -> seconds the station's clock is ahead. Its R.A./Dec. are
-            computed at the time its clock shows, as an RMS station's would be.
-        estimate_timing_vel: [bool] Passed to Trajectory.
+        per_point: [bool] Give the solver the time at which each R.A./Dec. was computed (radec_jd). True by
+            default.
+        cams: [bool] Compute all R.A./Dec. at the reference time, as CAMS does, instead of at the time of each
+            point, as RMS does. False by default.
+        clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. The camera
+            measures the azimuth and elevation, which are converted to R.A./Dec. at the time its clock shows.
+            None by default, when all clocks are exact.
+        **kwargs: [dict] Keyword arguments of the Trajectory object, which replace the defaults (no timing
+            estimation, no gravity correction, no pick filtering, no Monte Carlo, no plots and no saving).
 
     Return:
-        (traj, radiant_eci): solved trajectory and the true radiant unit vector.
+        (traj, radiant_eci):
+            - traj: [Trajectory object] Solved trajectory.
+            - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
     """
 
-    points, times, radiant_eci = _trajectory()
-    clock_offsets = clock_offsets or {}
+    if clock_offsets is None:
+        clock_offsets = {}
 
-    traj = Trajectory(JDT_REF, meastype=1, max_toffset=1.0, estimate_timing_vel=estimate_timing_vel,
-        gravity_correction=False, monte_carlo=False, calc_orbit=False, show_plots=False,
-        save_results=False, verbose=False)
+    times, points, _, radiant_eci = straightMeteorPoints()
 
-    for station_id, lat, lon, ele in STATIONS:
+    # The pick filtering is off, as on noise-free data it rejects picks by the numerical noise
+    traj_kwargs = dict(meastype=1, max_toffset=1.0, estimate_timing_vel=False, gravity_correction=False, \
+        filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False, \
+        verbose=False)
+    traj_kwargs.update(kwargs)
+    traj = Trajectory(STRAIGHT_JDT_REF, **traj_kwargs)
 
+    for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
+
+        # Compute the direction of every point as seen from the station
+        azim, elev = stationAzimAlt(points, STRAIGHT_JDT_REF + times/86400.0, s_lat, s_lon, ele)
+
+        # Convert the directions to R.A./Dec. at the time the clock of the station shows
         recorded = times + clock_offsets.get(station_id, 0.0)
+        radec_jd = STRAIGHT_JDT_REF + recorded/86400.0
 
-        ra, dec = _radecOfDate(points, JDT_REF + times/86400.0, lat, lon, ele)
+        if cams:
+            radec_jd = np.zeros_like(recorded) + STRAIGHT_JDT_REF
 
-        # The camera measures azimuth and elevation; its clock decides the time they are converted at
-        if station_id in clock_offsets:
-            azim, elev = raDec2AltAz_vect(ra, dec, JDT_REF + times/86400.0, np.radians(lat), np.radians(lon))
-            ra, dec = np.array([altAz2RADec(a, e, JDT_REF + t/86400.0, np.radians(lat), np.radians(lon))
-                for a, e, t in zip(azim, elev, recorded)]).T
+        ra, dec = altAz2RADec_vect(azim, elev, radec_jd, np.radians(s_lat), np.radians(s_lon))
 
-        radec_jd = JDT_REF + recorded/86400.0 if per_point else None
+        if not per_point:
+            radec_jd = None
 
-        traj.infillTrajectory(ra, dec, recorded, np.radians(lat), np.radians(lon), ele, station_id=station_id,
-            radec_jd=radec_jd)
+        traj.infillTrajectory(ra, dec, recorded, np.radians(s_lat), np.radians(s_lon), ele, \
+            station_id=station_id, radec_jd=radec_jd)
 
     return traj.run(), radiant_eci
 
 
+
 def _worstResidual(traj):
-    """ Largest spatial residual over all stations, in metres. """
+    """ Compute the largest spatial residual over all stations.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        [float] Largest spatial residual (m).
+    """
 
     return max(np.max(np.hypot(obs.h_residuals, obs.v_residuals)) for obs in traj.observations)
 
 
-def _radiantError(traj, radiant_eci):
-    """ Angle between the solved and the true radiant, in arcseconds. """
 
-    return 3600*np.degrees(np.arccos(np.clip(np.dot(traj.radiant_eci_mini, radiant_eci), -1, 1)))
+def _radiantError(radiant_eci, radiant_ref):
+    """ Compute the angle between two radiants.
 
+    Arguments:
+        radiant_eci: [ndarray] Radiant unit vector in ECI coordinates.
+        radiant_ref: [ndarray] Reference radiant unit vector in ECI coordinates.
 
-def test_per_point_radec_inverts_exactly():
-    """ Without radec_jd the same data leaves 22 m of residual and 53 arcsec of radiant error. """
-
-    traj, radiant_eci = _solve(per_point=True)
-
-    assert _worstResidual(traj) < 0.01
-    assert _radiantError(traj, radiant_eci) < 0.01
-
-
-def test_the_default_still_inverts_data_computed_at_the_reference_time():
-    """ CAMS-style data: azimuth/elevation converted to R.A./Dec. all at jdt_ref. """
-
-    points, times, radiant_eci = _trajectory()
-
-    traj = Trajectory(JDT_REF, meastype=1, estimate_timing_vel=False, gravity_correction=False,
-        monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False, verbose=False)
-
-    for station_id, lat, lon, ele in STATIONS:
-        jds = JDT_REF + times/86400.0
-        ra, dec = _radecOfDate(points, jds, lat, lon, ele)
-        azim, elev = raDec2AltAz_vect(ra, dec, jds, np.radians(lat), np.radians(lon))
-        ra, dec = np.array([altAz2RADec(a, e, JDT_REF, np.radians(lat), np.radians(lon))
-            for a, e in zip(azim, elev)]).T
-        traj.infillTrajectory(ra, dec, times, np.radians(lat), np.radians(lon), ele, station_id=station_id)
-
-    traj = traj.run()
-
-    assert _worstResidual(traj) < 0.01
-    assert _radiantError(traj, radiant_eci) < 0.01
-
-
-def _solveAzimuthal(clock_offsets):
-    """ The same observations given as the azimuth/elevation the cameras measured (meastype 2). """
-
-    points, times, radiant_eci = _trajectory()
-
-    traj = Trajectory(JDT_REF, meastype=2, max_toffset=1.0, estimate_timing_vel=True,
-        gravity_correction=False, monte_carlo=False, calc_orbit=False, show_plots=False,
-        save_results=False, verbose=False)
-
-    for station_id, lat, lon, ele in STATIONS:
-        jds = JDT_REF + times/86400.0
-        ra, dec = _radecOfDate(points, jds, lat, lon, ele)
-        azim, elev = raDec2AltAz_vect(ra, dec, jds, np.radians(lat), np.radians(lon))
-        traj.infillTrajectory(azim, elev, times + clock_offsets.get(station_id, 0.0), np.radians(lat),
-            np.radians(lon), ele, station_id=station_id)
-
-    return traj.run(), radiant_eci
-
-
-def test_a_corrected_clock_moves_the_line_of_sight_with_the_earth():
-    """ The timing fit shifts time_data; the azimuth/elevation the camera measured must not move with it.
-
-    So per-point R.A./Dec. must solve exactly as the azimuth/elevation they came from. Converting at the
-    shifted times instead of radec_jd would hold station B's lines of sight still in the sky while the
-    station turns with the Earth, by 0.3 s.
+    Return:
+        [float] Angle between the radiants (arcsec).
     """
 
-    clock_offsets = {"B": 0.3}
-    traj, radiant_eci = _solve(per_point=True, clock_offsets=clock_offsets, estimate_timing_vel=True)
-    reference, _ = _solveAzimuthal(clock_offsets)
-
-    def relative_offset(solved):
-        offsets = dict(zip([obs.station_id for obs in solved.observations], solved.time_diffs_final))
-
-        # Relative to A, as the solver may take any station as the reference
-        return offsets["B"] - offsets["A"]
-
-    # The timing fit's own precision: it recovers the 0.3 s to 44 microseconds either way
-    assert abs(relative_offset(traj) + 0.3) < 1e-4
-
-    assert abs(relative_offset(traj) - relative_offset(reference)) < 1e-6
-    assert 3600*np.degrees(np.arccos(np.clip(np.dot(traj.radiant_eci_mini, reference.radiant_eci_mini),
-        -1, 1))) < 0.01
+    return 3600*np.degrees(angleBetweenVectors(radiant_eci, radiant_ref))
 
 
-def test_observations_pickled_before_radec_jd_still_infill():
-    """ An ObservedPoints from an older pickle has no radec_jd, and was computed at jdt_ref. """
 
-    points, times, _ = _trajectory()
-    station_id, lat, lon, ele = STATIONS[0]
-    ra, dec = _radecOfDate(points, JDT_REF + times/86400.0, lat, lon, ele)
+def _offsetOfB(traj):
+    """ Compute the estimated timing offset of station B relative to station A, as the solver may take any
+        station as the reference.
 
-    old = Trajectory(JDT_REF, meastype=1, verbose=False)
-    old.infillTrajectory(ra, dec, times, np.radians(lat), np.radians(lon), ele, station_id=station_id)
-    obs = old.observations[0]
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        [float] Timing offset of B relative to A (s).
+    """
+
+    offsets = dict(zip([obs.station_id for obs in traj.observations], traj.time_diffs_final))
+
+    return offsets['B'] - offsets['A']
+
+
+
+def testPerPointRaDecInverts():
+    """ Check that R.A./Dec. computed at the time of each point are inverted when radec_jd is given. Without
+        it, the worst residual is 22.4 m and the radiant is 52.4 arcsec off.
+    """
+
+    traj, radiant_eci = _solve()
+
+    assert _worstResidual(traj) < 0.01
+    assert _radiantError(traj.radiant_eci_mini, radiant_eci) < 0.01
+
+
+
+def testCamsRaDecStillInvert():
+    """ Check that R.A./Dec. all computed at the reference time, as CAMS does, are still inverted when
+        radec_jd is not given.
+    """
+
+    traj, radiant_eci = _solve(per_point=False, cams=True)
+
+    assert _worstResidual(traj) < 0.01
+    assert _radiantError(traj.radiant_eci_mini, radiant_eci) < 0.01
+
+
+
+def testACorrectedClockKeepsTheLinesOfSightFixedToTheEarth():
+    """ Check that per-point R.A./Dec. of a station whose clock is off solve as the azimuth and elevation they
+        were computed from (meastype 2). The timing estimation shifts the times of the station, but the
+        azimuth and elevation its camera measured must stay fixed to the Earth. Converting at the shifted
+        times instead of radec_jd would hold its lines of sight still in the sky while the station turns. The
+        R.A./Dec. must not be recomputed at the new reference time either, which put the radiant 53 arcsec
+        off.
+    """
+
+    traj, _ = _solve(clock_offsets={'B': CLOCK_OFFSET}, estimate_timing_vel=True)
+
+    reference, _, _ = observeStraightMeteor(noise=0.0, clock_offsets={'B': CLOCK_OFFSET}, \
+        estimate_timing_vel=True, filter_picks=False, calc_orbit=False)
+    reference = reference.run()
+
+    # The timing estimation recovers the clock offset to 44 microseconds either way
+    assert abs(_offsetOfB(traj) + CLOCK_OFFSET) < 1e-4
+
+    assert abs(_offsetOfB(traj) - _offsetOfB(reference)) < 1e-6
+    assert _radiantError(traj.radiant_eci_mini, reference.radiant_eci_mini) < 0.05
+
+
+
+def testObservationsPickledBeforeRadecJdStillInfill():
+    """ Check that observations from older pickles, which have no radec_jd and were all computed at jdt_ref,
+        are infilled as before.
+    """
+
+    traj, _ = _solve(per_point=False, cams=True)
+
+    obs = traj.observations[0]
     del obs.radec_jd
 
-    new = Trajectory(JDT_REF, meastype=1, verbose=False)
+    new = Trajectory(STRAIGHT_JDT_REF, meastype=1, verbose=False)
     new.infillWithObs(obs)
 
     assert new.observations[0].radec_jd is None
     assert np.allclose(new.observations[0].azim_data, obs.azim_data, rtol=0, atol=1e-12)
 
 
+
+
 if __name__ == "__main__":
 
+    # Print the worst residual and the radiant error with and without radec_jd
     for per_point in (False, True):
-        traj, radiant_eci = _solve(per_point)
-        print("radec_jd given: {!s:5}  worst residual {:8.3f} m  radiant error {:7.2f} arcsec".format(
-            per_point, _worstResidual(traj), _radiantError(traj, radiant_eci)))
+        traj, radiant_eci = _solve(per_point=per_point)
+        print("radec_jd given: {!s:5}  worst residual {:8.3f} m  radiant error {:7.2f} arcsec".format(\
+            per_point, _worstResidual(traj), _radiantError(traj.radiant_eci_mini, radiant_eci)))

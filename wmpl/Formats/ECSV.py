@@ -29,9 +29,9 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
     Keyword arguments:
         no_prepare: [bool] If True, only load the observations, do not prepare them for the solver.
         radec_per_point: [bool] Have the solver convert each point's R.A./Dec. back to azimuth/altitude at
-            that point's own time, at which they were computed from the file. True by default. False
-            reproduces solutions from before this option existed, which converted them all at the reference
-            time and rotated each line of sight by the Earth's rotation since then.
+            that point's own time, at which they were computed from the file. True by default. False is
+            incorrect and only for reproducing solutions from before this option existed: it converts them
+            all at the reference time, which rotates each line of sight by the Earth's rotation since then.
     
     """
 
@@ -369,7 +369,7 @@ if __name__ == "__main__":
         help="Write the observations to a MILIG input file and exit. The MILIG_PATH argument is the path to the output file.")
 
     arg_parser.add_argument('--radec_at_ref', \
-        help="Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed. Only to reproduce older solutions: it rotates each line of sight by the Earth's rotation since the reference time.", \
+        help="Legacy and incorrect, only to reproduce older solutions. Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed, which rotates each line of sight by the Earth's rotation since the reference time.", \
         action="store_true")
 
     # Parse the command line arguments

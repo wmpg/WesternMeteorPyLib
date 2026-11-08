@@ -133,8 +133,11 @@ class ObservedPoints(object):
 
         self.time_data = time_data
 
-        # Absolute, so it does not move when the timing offsets shift time_data or jdt_ref changes
-        self.radec_jd = None if radec_jd is None else np.array(radec_jd, dtype=np.float64)
+        # Julian date at which each R.A./Dec. was computed. It is absolute, so it does not move when the timing
+        #   offsets shift time_data or jdt_ref changes
+        self.radec_jd = None
+        if radec_jd is not None:
+            self.radec_jd = np.array(radec_jd, dtype=np.float64)
 
 
 
@@ -6306,11 +6309,13 @@ class Trajectory(object):
             self.jdt_ref = self.jdt_ref + t0/86400.0
 
             # Recompute the given RA and Dec for the new reference JD, as they are converted to azimuth and
-            #   elevation at the reference JD when the observations are reinitialized for the next pass
+            #   elevation at the reference JD when the observations are reinitialized for the next pass. Those
+            #   computed at each point's own time are converted at radec_jd, which does not change
             if self.meastype == 1:
                 for obs in self.observations:
-                    obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, self.jdt_ref, \
-                        obs.lat, obs.lon)
+                    if obs.radec_jd is None:
+                        obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, \
+                            self.jdt_ref, obs.lat, obs.lon)
 
 
         ###################################################################################
