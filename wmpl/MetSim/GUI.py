@@ -221,6 +221,7 @@ class SimulationResults(object):
             np.savetxt(f, out_arr, fmt='%.5e', delimiter=',', newline='\n', header=header, comments="# ")
 
 
+
 def constantsRelativeToGround(const, v_rotation):
     """ Convert the initial speed and the zenith angle of the constants from the inertial frame of the
         trajectory solver to the ground, as MetSim simulates the motion relative to the air.

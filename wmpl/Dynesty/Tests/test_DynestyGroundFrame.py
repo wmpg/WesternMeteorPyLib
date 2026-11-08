@@ -84,8 +84,8 @@ def testTheSampledInertialValuesAreSimulatedRelativeToTheGround():
 
 
 def testSavedConstantsAreNotConvertedTwice():
-    """ Check that constants saved relative to the ground, converted back to the inertial frame as
-        plotJSONDataVsObs() does, are simulated with the saved speed and zenith angle.
+    """ Check that constants saved relative to the ground, converted back to the inertial frame of the
+        observations as plotJSONDataVsObs() does, are simulated with the saved speed and zenith angle.
     """
 
     obs = _observations()
@@ -94,8 +94,21 @@ def testSavedConstantsAreNotConvertedTwice():
     # Make constants relative to the ground, as they are saved
     saved = constructConstants([obs.v_init, obs.zenith_angle, obs.m_init], obs, var_names, {})
 
-    # Convert a copy back to the inertial frame and construct the constants again
-    inertial = constantsToInertial(copy.deepcopy(saved))
+    # Convert a copy back to the inertial frame of the observations and construct the constants again
+    inertial = copy.deepcopy(saved)
+    inertial.v_rotation = obs.v_rotation
+    inertial = constantsToInertial(inertial)
+    const = constructConstants([inertial.v_init, inertial.zenith_angle, obs.m_init], obs, var_names, {})
+
+    assert np.isclose(const.v_init, saved.v_init, rtol=0, atol=1e-6)
+    assert np.isclose(const.zenith_angle, saved.zenith_angle, rtol=0, atol=1e-12)
+
+    # Check that a model saved with another rotation, as a synthetic meteor, keeps its ground values
+    saved.v_rotation = 300.0
+    obs.v_rotation = 0.0
+    inertial = copy.deepcopy(saved)
+    inertial.v_rotation = obs.v_rotation
+    inertial = constantsToInertial(inertial)
     const = constructConstants([inertial.v_init, inertial.zenith_angle, obs.m_init], obs, var_names, {})
 
     assert np.isclose(const.v_init, saved.v_init, rtol=0, atol=1e-6)

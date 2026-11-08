@@ -341,8 +341,9 @@ def plotJSONDataVsObs(obs_data, out_folder, best_noise_lum=0, best_noise_lag=0):
             const_manual, const_json_manual = loadConstants(const_json_file)
             const_manual.dens_co = np.array(const_manual.dens_co)
 
-            # Convert constants saved relative to the ground to the inertial frame of the sampled values
+            # Convert constants saved relative to the ground to the inertial frame of the observations
             if 'v_rotation' in const_json_manual:
+                const_manual.v_rotation = getattr(obs_data, 'v_rotation', 0.0)
                 constantsToInertial(const_manual)
             # # Run the simulation
             # frag_main, results_list, wake_results = runSimulation(const_manual, compute_wake=False)
