@@ -65,9 +65,8 @@ from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 # Text size of image legends
 LEGEND_TEXT_SIZE = 6
 
-# With timing_reruns, the pass that follows the timing estimate is repeated while it moves any station's
-#   clock by more than this many seconds. The stations move with the Earth at up to 465 m/s: 1e-5 s is at
-#   most 5 mm
+# Change of a station's clock (s) above which timing_reruns repeats the pass after the timing estimate,
+#   at most 5 mm of station motion with the Earth at 465 m/s
 TIMING_RERUN_TOLERANCE = 1e-5
 
 
@@ -6795,8 +6794,8 @@ class Trajectory(object):
             #   needs the vertical velocity from that pass
             if self.estimate_timing_vel or self.gravity_correction:
 
-                # Repeated with timing_reruns while the recalculation moves the clocks. getattr for
-                #   trajectories pickled before the option existed
+                # Repeat the pass with timing_reruns while it moves the clocks (trajectories pickled before
+                #   the option existed do not have it)
                 for _ in range(1 + getattr(self, "timing_reruns", 0)):
 
                     # If doing a Monte Carlo run, switch back to noisy observations
@@ -6841,7 +6840,7 @@ class Trajectory(object):
                     # values up to this point
                     self.run(_rerun_timing=True, _prev_toffsets=self.time_diffs, _orig_obs=_orig_obs)
 
-                    # Done once a pass leaves the clocks where it found them, or cannot estimate them
+                    # Stop once a pass leaves the clocks where it found them or cannot estimate them
                     if (not self.timing_minimization_successful) \
                         or (np.max(np.abs(self.time_diffs)) <= TIMING_RERUN_TOLERANCE):
                         break

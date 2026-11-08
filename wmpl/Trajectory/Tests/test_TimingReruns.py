@@ -24,8 +24,7 @@ from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor, wor
 from wmpl.Utils.Math import angleBetweenVectors
 
 
-# Station ID, latitude (deg), longitude (deg) and elevation (m). A sees the meteor 7 deg off its line of
-#   flight
+# Station ID, latitude (deg), longitude (deg) and elevation (m), with A 7 deg off the line of flight
 STATIONS = [
     ('A', -42.565, 172.781, 310.0),
     ('B', -42.995, 173.312, 95.0),
