@@ -428,6 +428,7 @@ def _pairArrays(pairs):
         (orbit1, orbit2): [tuple] Each orbit as a (q, e, i, O, w) tuple of arrays.
     """
 
+    # Make an array of every element of both orbits
     columns = [np.array(c) for c in zip(*pairs)]
 
     return tuple(columns[:5]), tuple(columns[5:])
@@ -443,16 +444,19 @@ def testElementCriteriaAcceptArrays():
     pairs = _orbitPairs()
     orbit1, orbit2 = _pairArrays(pairs)
 
+    # Make sure some pairs have the nodes more than 180 deg apart
     assert np.any(np.abs(orbit2[3] - orbit1[3]) > np.pi), \
         "no test pair exercised the |O2 - O1| > 180 deg branch"
 
     for key, label, func in ELEMENT_CRITERIA:
 
+        # Compare all pairs in one call
         vector = func(orbit1, orbit2)
 
         assert np.shape(vector) == (len(pairs),), \
             "{:s} did not return one value per pair".format(label)
 
+        # Compare the pairs one by one
         scalar = np.array([func(p[:5], p[5:]) for p in pairs])
 
         assert np.allclose(vector, scalar, rtol=ARRAY_SCALAR_RTOL, atol=0.0), \
@@ -466,6 +470,7 @@ def testElementCriteriaBroadcastOneOrbitAgainstMany():
         search makes, agrees with comparing the orbit with each entry in turn.
     """
 
+    # Take the second orbits of the pairs as the catalogue, and the first orbit of the first pair
     pairs = _orbitPairs()[:500]
     _, catalogue = _pairArrays(pairs)
 
@@ -473,11 +478,13 @@ def testElementCriteriaBroadcastOneOrbitAgainstMany():
 
     for key, label, func in ELEMENT_CRITERIA:
 
+        # Compare the orbit with the whole catalogue in one call
         vector = func(orbit, catalogue)
 
         assert np.shape(vector) == (len(pairs),), \
             "{:s} did not broadcast one orbit against the catalogue".format(label)
 
+        # Compare the orbit with each entry in turn
         scalar = np.array([func(orbit, p[5:]) for p in pairs])
 
         assert np.allclose(vector, scalar, rtol=ARRAY_SCALAR_RTOL, atol=0.0), \
@@ -493,6 +500,7 @@ def testElementCriteriaReturnScalarsForScalars():
 
     for key, label, func in ELEMENT_CRITERIA:
 
+        # Compare one pair given as floats
         value = func(pair[:5], pair[5:])
 
         assert isinstance(value, float) and np.ndim(value) == 0, \
@@ -506,9 +514,11 @@ def testDDCircularOrbitsFailPerPairInArrays():
         one circular pair cannot spoil a whole catalogue.
     """
 
+    # Make two circular orbits
     circular_1 = (1.0, 0.0, math.radians(5.0), math.radians(30.0), math.radians(0.0))
     circular_2 = (1.2, 0.0, math.radians(7.0), math.radians(35.0), math.radians(0.0))
 
+    # Compare them as floats
     try:
         calcDD(*(circular_1 + circular_2))
         raise AssertionError("expected D_D to raise for two circular orbits given as floats")
@@ -516,6 +526,7 @@ def testDDCircularOrbitsFailPerPairInArrays():
     except ZeroDivisionError:
         pass
 
+    # Compare them in arrays, as the fourth of ten pairs
     pairs = _orbitPairs()[:10]
     pairs[3] = circular_1 + circular_2
 
@@ -534,10 +545,12 @@ def testSemiMajorAxisForCriteriaTakesArrays():
         array.
     """
 
+    # Check a parabolic and an elliptic orbit given as floats
     assert _semiMajorAxisForCriteria(1.0, 1.0) == np.inf
     assert np.ndim(_semiMajorAxisForCriteria(1.0, 0.5)) == 0
     assert _semiMajorAxisForCriteria(1.0, 0.5) == 2.0
 
+    # Check an elliptic, a parabolic and a hyperbolic orbit in arrays
     q = np.array([1.0, 0.5, 0.2])
     e = np.array([0.5, 1.0, 1.2])
 
