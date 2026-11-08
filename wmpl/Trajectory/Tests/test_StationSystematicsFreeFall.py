@@ -171,7 +171,8 @@ def testWithoutAFreeFallTheErrorsDoNotChange():
     def gravityDropPoint(point, t_rel, radiant_eci, r0, v0z, free_fall):
         raise AssertionError('The free fall is off')
 
-    errors, _ = _residuals(traj)
+    # The errors of the drop along the vertical, also where the solver has the free fall (#195)
+    errors, _ = _residuals(traj, gravityFreeFall=lambda: None)
     errors_off, _ = _residuals(traj, gravityFreeFall=lambda: None, gravityDropPoint=gravityDropPoint)
 
     assert errors_off == errors

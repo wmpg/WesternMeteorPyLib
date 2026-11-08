@@ -157,8 +157,11 @@ def testTheDisplacementIsTakenAtTheTimesOfTheFit():
         factor_calls.append(t_rel)
         return traj.gravity_factor
 
+    # The factor is that of the drop along the vertical, which solutions without the free fall of the meteor
+    #   from the line keep (#195)
     traj.observations.append(earlier)
     traj.gravityDropFactor = dropFactor
+    traj.gravityFreeFall = lambda: None
 
     try:
         _errors(traj, shiftAt)
@@ -166,6 +169,7 @@ def testTheDisplacementIsTakenAtTheTimesOfTheFit():
     finally:
         traj.observations.pop()
         del traj.gravityDropFactor
+        del traj.gravityFreeFall
 
     assert len(shift_calls) > 0
     assert np.isclose(min(shift_calls), 0.3, rtol=0, atol=1e-9)
