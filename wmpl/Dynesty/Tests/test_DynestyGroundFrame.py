@@ -7,6 +7,7 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import math
 import os
 import warnings
@@ -14,6 +15,7 @@ import warnings
 import numpy as np
 
 from wmpl.Dynesty.DynestyMetSim import ObservationData, constructConstants, runSimulationDynesty
+from wmpl.MetSim.GUI import constantsToInertial
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -78,3 +80,23 @@ def testTheSampledInertialValuesAreSimulatedRelativeToTheGround():
 
     assert abs(obs.v_rotation) > 10
     assert abs(sr.leading_frag_vel_arr[0] - obs.v_init) < 0.1
+
+
+
+def testSavedConstantsAreNotConvertedTwice():
+    """ Check that constants saved relative to the ground, converted back to the inertial frame as
+        plotJSONDataVsObs() does, are simulated with the saved speed and zenith angle.
+    """
+
+    obs = _observations()
+    var_names = ['v_init', 'zenith_angle', 'm_init']
+
+    # Make constants relative to the ground, as they are saved
+    saved = constructConstants([obs.v_init, obs.zenith_angle, obs.m_init], obs, var_names, {})
+
+    # Convert a copy back to the inertial frame and construct the constants again
+    inertial = constantsToInertial(copy.deepcopy(saved))
+    const = constructConstants([inertial.v_init, inertial.zenith_angle, obs.m_init], obs, var_names, {})
+
+    assert np.isclose(const.v_init, saved.v_init, rtol=0, atol=1e-6)
+    assert np.isclose(const.zenith_angle, saved.zenith_angle, rtol=0, atol=1e-12)

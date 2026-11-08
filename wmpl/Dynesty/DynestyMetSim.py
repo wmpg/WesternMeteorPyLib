@@ -59,7 +59,7 @@ except ImportError:
     DYNESTY_FOUND = False
 
 from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
-from wmpl.MetSim.GUI import constantsRelativeToGround
+from wmpl.MetSim.GUI import constantsRelativeToGround, constantsToInertial
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
@@ -338,8 +338,12 @@ def plotJSONDataVsObs(obs_data, out_folder, best_noise_lum=0, best_noise_lag=0):
         const_json_file = os.path.join(out_folder, const_json_name)
         try:
             # Load the constants from the JSON files
-            const_manual, _ = loadConstants(const_json_file)
+            const_manual, const_json_manual = loadConstants(const_json_file)
             const_manual.dens_co = np.array(const_manual.dens_co)
+
+            # Convert constants saved relative to the ground to the inertial frame of the sampled values
+            if 'v_rotation' in const_json_manual:
+                constantsToInertial(const_manual)
             # # Run the simulation
             # frag_main, results_list, wake_results = runSimulation(const_manual, compute_wake=False)
             # simulation_manual_MetSim_object = SimulationResults(const_manual, frag_main, results_list, wake_results)

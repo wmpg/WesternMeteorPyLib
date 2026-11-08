@@ -20,8 +20,8 @@ import tempfile
 
 import numpy as np
 
-from wmpl.MetSim.GUI import SimulationResults, constantsRelativeToGround, loadConstants, \
-    loadedConstantsRelativeToGround, saveConstants
+from wmpl.MetSim.GUI import SimulationResults, constantsRelativeToGround, constantsToInertial, \
+    loadConstants, loadedConstantsRelativeToGround, saveConstants
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation
 from wmpl.Utils.Physics import earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle
@@ -86,7 +86,7 @@ def _onHeights(sr, h_grid):
 
 def testTheConstantsRelativeToTheGroundKeepTheVerticalSpeed():
     """ Check that the conversion takes the rotation off the speed, keeps the vertical speed and stores the
-        rotation, and that it changes nothing without rotation.
+        rotation, that constantsToInertial() inverts it, and that it changes nothing without rotation.
     """
 
     const = constantsRelativeToGround(_fireball(15300.0, 45.0), 300.0)
@@ -95,6 +95,13 @@ def testTheConstantsRelativeToTheGroundKeepTheVerticalSpeed():
     assert const.v_rotation == 300.0
     assert np.isclose(const.v_init*math.cos(const.zenith_angle), 15300.0*math.cos(math.radians(45.0)), \
         rtol=1e-12)
+
+    # Check that the conversion back to the inertial frame inverts it
+    const = constantsToInertial(const)
+
+    assert np.isclose(const.v_init, 15300.0, rtol=0, atol=1e-9)
+    assert np.isclose(const.zenith_angle, math.radians(45.0), rtol=0, atol=1e-12)
+    assert const.v_rotation == 0.0
 
     # Check that nothing changes without rotation
     const = constantsRelativeToGround(_fireball(15300.0, 45.0), 0.0)

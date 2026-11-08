@@ -247,6 +247,27 @@ def constantsRelativeToGround(const, v_rotation):
 
 
 
+def constantsToInertial(const):
+    """ Convert the initial speed and the zenith angle of constants relative to the ground back to the
+        inertial frame of the trajectory solver, the inverse of constantsRelativeToGround().
+
+    Arguments:
+        const: [Constants object] Constants relative to the ground with their v_rotation, changed in place.
+
+    Return:
+        const: [Constants object] Constants with the inertial v_init and zenith_angle, and v_rotation 0.
+    """
+
+    v_rotation = getattr(const, 'v_rotation', 0.0)
+    v_inertial = const.v_init + v_rotation
+    const.zenith_angle = np.arccos(np.clip(const.v_init*np.cos(const.zenith_angle)/v_inertial, -1.0, 1.0))
+    const.v_init = v_inertial
+    const.v_rotation = 0.0
+
+    return const
+
+
+
 def loadedConstantsRelativeToGround(const, const_json, traj):
     """ Convert constants loaded from a JSON file without v_rotation to the ground. Such files were saved
         before MetSim was run relative to the ground, with the inertial v_init and zenith angle of the
