@@ -219,10 +219,17 @@ class TrajectoryConstraints(object):
 
 
 class TrajectoryCorrelator(object):
-    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, enableOSM=False):
+    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, enableOSM=False, \
+        radec_per_point=True):
         """ Correlates meteor trajectories using meteor data given to it through a data handle. A data handle
         is a class instance with a common interface between e.g. files on the disk in various formats or 
         meteors in a database.
+
+        Keyword arguments:
+            radec_per_point: [bool] Convert the R.A./Dec. of each point to azimuth/elevation at the time of
+                that point, at which RMS computes them. True by default. False is incorrect and only for
+                reproducing solutions from before this option existed: it converts them all at the reference
+                time, which rotates each line of sight by the Earth's rotation since then.
         """
 
         self.dh = data_handle
@@ -238,6 +245,9 @@ class TrajectoryCorrelator(object):
 
         # enable OS style ground maps if true
         self.enableOSM = enableOSM
+
+        # Indicate that the R.A./Dec. were computed at the time of each point
+        self.radec_per_point = radec_per_point
 
     def trajectoryRangeCheck(self, traj_reduced, platepar):
         """ Check that the trajectory is within the range limits. 
@@ -466,10 +476,17 @@ class TrajectoryCorrelator(object):
         comment = json.dumps(comment_dict, sort_keys=True).replace('\n', '').replace('\r', '')
 
 
+        # Take the time at which each R.A./Dec. was computed
+        radec_jd = None
+        if self.radec_per_point:
+            radec_jd = datetime2JD(ref_dt) + time_data/86400.0
+
+
         # Init the observation object
         obs = ObservedPoints(datetime2JD(ref_dt), ra_data, dec_data, time_data, np.radians(pp.lat), 
             np.radians(pp.lon), pp.elev, meastype=1, station_id=pp.station_code, magnitudes=mag_data, 
-            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end, comment=comment)
+            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end, comment=comment, \
+            radec_jd=radec_jd)
 
         return obs
 

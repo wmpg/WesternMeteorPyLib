@@ -6,7 +6,7 @@ computed at that one time, as CAMS does. R.A./Dec. computed at the time of each 
 radec_jd: without it, each line of sight is rotated by the Earth's rotation since jdt_ref.
 
 The tests observe the straight meteor of SyntheticTrajectory from three stations without noise, and check that
-the solver recovers it.
+the solver recovers it. The trajectory correlator gives radec_jd for the R.A./Dec. of RMS.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_RaDecEpoch.py -v
@@ -14,17 +14,20 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+from types import SimpleNamespace
+
 import numpy as np
 
 import matplotlib
 matplotlib.use('Agg')
 
+from wmpl.Trajectory.CorrelateEngine import TrajectoryConstraints, TrajectoryCorrelator
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
     observeStraightMeteor, stationAzimAlt, straightMeteorPoints, timingOffsets, \
     worstResidual
 from wmpl.Utils.Math import angleBetweenVectors
-from wmpl.Utils.TrajConversions import altAz2RADec_vect
+from wmpl.Utils.TrajConversions import altAz2RADec_vect, datetime2JD, jd2Date
 
 
 # Seconds by which the clock of station B is ahead in the tests of the timing offsets. It is behind, so its
@@ -183,6 +186,60 @@ def testObservationsPickledBeforeRadecJdStillInfill():
 
     assert new.observations[0].radec_jd is None
     assert np.allclose(new.observations[0].azim_data, obs.azim_data, rtol=0, atol=1e-12)
+
+
+
+
+def _correlatorObservation(radec_per_point):
+    """ Make the observation of the straight meteor from station A as the trajectory correlator does, from
+        R.A./Dec. computed at the time of each point, as RMS does.
+
+    Arguments:
+        radec_per_point: [bool] Passed to TrajectoryCorrelator.
+
+    Return:
+        (obs, azim, elev):
+            - obs: [ObservedPoints] Observation made by the correlator.
+            - azim: [ndarray] True azimuths of the points, +E of due N (rad).
+            - elev: [ndarray] True elevations of the points (rad).
+    """
+
+    times, points, _, _ = straightMeteorPoints()
+    station_id, s_lat, s_lon, ele = STRAIGHT_STATIONS[0]
+
+    # Compute the R.A./Dec. at the time of each point, from the reference time as the correlator reads it
+    reference_dt = jd2Date(STRAIGHT_JDT_REF, dt_obj=True)
+    jds = datetime2JD(reference_dt) + times/86400.0
+    azim, elev = stationAzimAlt(points, jds, s_lat, s_lon, ele)
+    ra, dec = altAz2RADec_vect(azim, elev, jds, np.radians(s_lat), np.radians(s_lon))
+
+    # Make the meteor and the platepar the correlator takes
+    data = [SimpleNamespace(ra=np.degrees(r), dec=np.degrees(d), time_rel=t, mag=0.0) \
+        for r, d, t in zip(ra, dec, times)]
+    met = SimpleNamespace(reference_dt=reference_dt, data=data, fov_beg=None, fov_end=None, ff_name=None)
+    pp = SimpleNamespace(lat=s_lat, lon=s_lon, elev=ele, station_code=station_id)
+
+    correlator = TrajectoryCorrelator(None, TrajectoryConstraints(), 0.4, data_in_j2000=False, \
+        radec_per_point=radec_per_point)
+
+    return correlator.initObservationsObject(met, pp), azim, elev
+
+
+
+def testTheCorrelatorConvertsTheRaDecOfEachPointAtItsTime():
+    """ Check that the trajectory correlator converts the R.A./Dec. of each point back to the azimuth and
+        elevation they were computed from, and that the legacy conversion at the reference time, which is
+        incorrect, still rotates the lines of sight.
+    """
+
+    obs, azim, elev = _correlatorObservation(True)
+
+    assert np.max(np.abs(obs.azim_data - azim)*np.cos(elev)) < np.radians(0.001/3600)
+    assert np.max(np.abs(obs.elev_data - elev)) < np.radians(0.001/3600)
+
+    obs, azim, elev = _correlatorObservation(False)
+
+    assert np.max(np.hypot((obs.azim_data - azim)*np.cos(elev), obs.elev_data - elev)) > np.radians(10/3600)
 
 
 
