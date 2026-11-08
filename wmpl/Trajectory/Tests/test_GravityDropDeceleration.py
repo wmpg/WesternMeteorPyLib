@@ -535,9 +535,11 @@ def testTheSpeedGravityAddsAlongThePathDoesNotScaleTheDrop():
 
             errors.append(3600*np.degrees(angleBetweenVectors(solved.radiant_eci_mini, radiant_eci)))
 
-        # Check the radiant with the scale, against the truth and against the solution without it
+        # Check the radiant with the scale, against the truth and against the solution without it. The margin
+        #   of the second check is above the precision of the line-of-sight fit, whose tolerances (#194) leave
+        #   the fits about 0.01 arcsec apart on this meteor
         assert errors[1] < radiant_limit
-        assert errors[1] < errors[0] + 0.01
+        assert errors[1] < max(errors[0], 0.01) + 0.01
 
 
 
