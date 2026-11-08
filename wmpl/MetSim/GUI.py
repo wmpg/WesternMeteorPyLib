@@ -3031,7 +3031,7 @@ class MetSimGUI(QMainWindow):
         if self.dens_fit_ht_end < 14000:
             self.dens_fit_ht_end = 14000
 
-        # Fit the polynomial describing the density and tabulate the density (the simulation uses the table)
+        # Fit the polynomial of the density and tabulate the density, which the simulation uses
         dens_co, atm_table = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
         self.const.dens_co = dens_co
         self.const.atm_table_ht, self.const.atm_table_log10_rho = atm_table
@@ -3170,7 +3170,8 @@ class MetSimGUI(QMainWindow):
         lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
 
         dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
-        atm_table = getAtmDensityTable(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
+        atm_table = getAtmDensityTable(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, \
+            self.traj.jdt_ref)
 
         return dens_co, atm_table
     
@@ -5360,7 +5361,7 @@ class MetSimGUI(QMainWindow):
         self.mpw.canvas.axes.semilogx(atm_densities, height_arr/1000, \
             label="NRLMSISE-00", color='k')
 
-        # Plot the density table used by the simulation (if any)
+        # Plot the density table used by the simulation
         if getattr(self.const, 'atm_table_ht', None) is not None:
             atm_densities_table = atmDensTable(height_arr, self.const.atm_table_ht, 
                 self.const.atm_table_log10_rho)

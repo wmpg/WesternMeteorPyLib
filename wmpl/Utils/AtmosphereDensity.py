@@ -37,12 +37,12 @@ def atmDensPoly6th(ht, dens_co):
 
 
 def atmDensPoly(ht, dens_co):
-    """ Compute the atmosphere density using a 6th degree polynomial (7 coefficients) in log10 of the density.
-        This is used in the ablation simulation for faster execution. 
+    """ Compute the atmosphere density using a 6th degree polynomial (7 coefficients) in log10 of the
+        density.
 
-        Note that the polynomial deviates from the MSIS model by up to tens of percent at 80 - 120 km when it is
-        fitted over a wide height range (e.g. 14 - 180 km for fireballs), use the tabulated profile from
-        getAtmDensityTable() instead when accuracy matters.
+    The polynomial deviates from the MSIS model by up to tens of percent at 80 to 120 km when it is fitted
+    over a wide height range, e.g. 14 to 180 km for fireballs. The tabulated profile of getAtmDensityTable()
+    follows the model to better than 0.5%.
 
     Arguments:
         ht: [float] Height above sea level (m).
@@ -110,11 +110,12 @@ def fitAtmPoly(lat, lon, height_min, height_max, jd):
 
 
 def getAtmDensityTable(lat, lon, height_min, height_max, jd, step=500):
-    """ Tabulate the log10 of the atmosphere mass density of the MSIS model (as given by getAtmDensity) at the
-        given location and time on a uniform height grid. The ablation simulation interpolates log10(density) 
-        linearly between the table points (see atmDensTable), which with the default 500 m step reproduces the 
-        model to better than 0.5% in density and 0.02% in the air column above any height, between 0 and 
-        180 km (measured for NRLMSISE-00 and NRLMSIS 2.0 and 2.1).
+    """ Tabulate log10 of the atmosphere mass density of the MSIS model (getAtmDensity()) at the given
+        location and time on a uniform height grid.
+
+    The ablation simulation interpolates log10 of the density linearly between the table points (see
+    atmDensTable()). With the default step of 500 m this reproduces the model to better than 0.5% in the
+    density and 0.02% in the air column above any height between 0 and 180 km.
 
     Arguments:
         lat: [float] Latitude in radians.
@@ -144,15 +145,15 @@ def getAtmDensityTable(lat, lon, height_min, height_max, jd, step=500):
     # Get atmosphere densities from the MSIS model
     table_log10_rho = np.log10([getAtmDensity(lat, lon, ht, jd) for ht in table_ht])
 
-    # Return plain lists of floats, which are JSON serializable and fast to index in the simulation
+    # Return lists of floats, which are JSON serializable and fast to index in the simulation
     return [float(ht) for ht in table_ht], [float(lr) for lr in table_log10_rho]
 
 
 
 def atmDensTable(ht, table_ht, table_log10_rho):
-    """ Compute the atmosphere density from a tabulated profile, interpolating log10(density) linearly in 
-        height (i.e. an exponential atmosphere between the table points). Outside the table, the first/last
-        segment is extrapolated. Works on scalars and numpy arrays.
+    """ Compute the atmosphere density from a tabulated profile, interpolating log10 of the density linearly
+        in height, which is an exponential atmosphere between the table points. Outside the table, the end
+        segments are extrapolated. Works on scalars and numpy arrays.
 
     Arguments:
         ht: [float or ndarray] Height above sea level (m).
@@ -176,8 +177,17 @@ def atmDensTable(ht, table_ht, table_log10_rho):
 
 
 
-def _expSegmentIntegral(rho_0, scale, dh):
-    """ Integral of rho_0*exp(scale*x) for x from 0 to dh, stable when scale*dh is near 0. """
+def expSegmentIntegral(rho_0, scale, dh):
+    """ Integrate rho_0*exp(scale*x) for x from 0 to dh, stably when scale*dh is near 0.
+
+    Arguments:
+        rho_0: [float or ndarray] Density at the bottom of the segment (kg/m^3).
+        scale: [float or ndarray] Exponential scale of the segment (1/m).
+        dh: [float or ndarray] Height above the bottom of the segment (m).
+
+    Return:
+        [float or ndarray] Air column (kg/m^2).
+    """
 
     x = np.asarray(scale*dh, dtype=np.float64)
     x_safe = np.where(x == 0, 1.0, x)
@@ -186,9 +196,19 @@ def _expSegmentIntegral(rho_0, scale, dh):
 
 
 
-def _atmTableSegments(table_ht, table_log10_rho):
-    """ Exponential segments of a density table: heights, densities and exponential scale (1/m) of every
-        segment, and the air column (kg/m^2) from the bottom of the table up to every table point.
+def atmTableSegments(table_ht, table_log10_rho):
+    """ Compute the exponential segments of a density table.
+
+    Arguments:
+        table_ht: [list] Table heights (m), ascending.
+        table_log10_rho: [list] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        (table_ht, rho, scale, column_cum):
+            - table_ht: [ndarray] Table heights (m).
+            - rho: [ndarray] Densities at the table heights (kg/m^3).
+            - scale: [ndarray] Exponential scale of every segment (1/m).
+            - column_cum: [ndarray] Air column from the bottom of the table up to every table point (kg/m^2).
     """
 
     table_ht = np.asarray(table_ht, dtype=np.float64)
@@ -196,14 +216,22 @@ def _atmTableSegments(table_ht, table_log10_rho):
     rho = np.exp(ln_rho)
 
     scale = np.diff(ln_rho)/np.diff(table_ht)
-    column_cum = np.concatenate([[0.0], np.cumsum(_expSegmentIntegral(rho[:-1], scale, np.diff(table_ht)))])
+    column_cum = np.concatenate([[0.0], np.cumsum(expSegmentIntegral(rho[:-1], scale, np.diff(table_ht)))])
 
     return table_ht, rho, scale, column_cum
 
 
 
-def _atmTableColumnFromBottom(ht, segments):
-    """ Air column (kg/m^2) from the bottom of the table up to the given height (negative below the table).
+def atmTableColumnFromBottom(ht, segments):
+    """ Compute the air column from the bottom of the table up to the given height, negative below the
+        table.
+
+    Arguments:
+        ht: [float or ndarray] Height (m).
+        segments: [tuple] Segments of the table from atmTableSegments().
+
+    Return:
+        [float or ndarray] Air column (kg/m^2).
     """
 
     table_ht, rho, scale, column_cum = segments
@@ -211,14 +239,14 @@ def _atmTableColumnFromBottom(ht, segments):
     i = np.searchsorted(table_ht, ht, side='right') - 1
     i = np.clip(i, 0, len(table_ht) - 2)
 
-    return column_cum[i] + _expSegmentIntegral(rho[i], scale[i], ht - table_ht[i])
+    return column_cum[i] + expSegmentIntegral(rho[i], scale[i], ht - table_ht[i])
 
 
 
 def atmColumnTable(ht_low, ht_high, table_ht, table_log10_rho):
-    """ Air mass column (kg/m^2) between two heights from a tabulated density profile, i.e. the integral of
-        atmDensTable over the height. The profile is exponential between the table points, so the integral is
-        exact (no numerical quadrature), and the end segments are extrapolated outside the table.
+    """ Compute the air mass column between two heights from a tabulated density profile, the integral of
+        atmDensTable() over the height. The profile is exponential between the table points, so the integral
+        is exact, and the end segments are extrapolated outside the table.
 
     Arguments:
         ht_low: [float or ndarray] Lower height (m).
@@ -230,18 +258,17 @@ def atmColumnTable(ht_low, ht_high, table_ht, table_log10_rho):
         column: [float or ndarray] Air mass column in kg/m^2 (negative if ht_low is above ht_high).
     """
 
-    segments = _atmTableSegments(table_ht, table_log10_rho)
+    segments = atmTableSegments(table_ht, table_log10_rho)
 
-    return _atmTableColumnFromBottom(ht_high, segments) - _atmTableColumnFromBottom(ht_low, segments)
+    return atmTableColumnFromBottom(ht_high, segments) - atmTableColumnFromBottom(ht_low, segments)
 
 
 
 class AtmDensityTableInterp(object):
     def __init__(self, table_ht, table_log10_rho):
-        """ Callable atmosphere density from a tabulated profile (see atmDensTable), which also gives the exact
-            air column between two heights. Use it in place of a density function when the code integrates 
-            the density, as the exact column is much faster and more accurate than numerical quadrature of the
-            piecewise profile.
+        """ Callable atmosphere density from a tabulated profile (see atmDensTable()), which also gives the
+            exact air column between two heights. Use it in place of a density function when the code
+            integrates the density, as the exact column is faster and more accurate than quadrature.
 
         Arguments:
             table_ht: [list] Table heights (m), ascending.
@@ -251,20 +278,20 @@ class AtmDensityTableInterp(object):
         self.table_ht = np.asarray(table_ht, dtype=np.float64)
         self.table_log10_rho = np.asarray(table_log10_rho, dtype=np.float64)
 
-        self.segments = _atmTableSegments(self.table_ht, self.table_log10_rho)
+        self.segments = atmTableSegments(self.table_ht, self.table_log10_rho)
 
 
     def __call__(self, ht):
-        """ Atmosphere density (kg/m^3) at the given height(s) in meters. """
+        """ Compute the atmosphere density (kg/m^3) at the given heights (m). """
 
         return atmDensTable(ht, self.table_ht, self.table_log10_rho)
 
 
     def column(self, ht_low, ht_high):
-        """ Air mass column (kg/m^2) between the given heights in meters (see atmColumnTable). """
+        """ Compute the air mass column (kg/m^2) between the given heights (m), see atmColumnTable(). """
 
-        return _atmTableColumnFromBottom(ht_high, self.segments) \
-            - _atmTableColumnFromBottom(ht_low, self.segments)
+        return atmTableColumnFromBottom(ht_high, self.segments) \
+            - atmTableColumnFromBottom(ht_low, self.segments)
 
 
     

@@ -16,16 +16,17 @@ the polynomial when it is present. These tests check:
     - the energy received before erosion integrates the table
     - the table survives the GUI JSON save/load round trip
 
-Run under pytest, or directly:
-
-    python -m wmpl.MetSim.Tests.test_MetSimAtmosphereTable
+Run with pytest:
+    python -m pytest wmpl/MetSim/Tests/test_MetSimAtmosphereTable.py -v
 """
 
+from __future__ import print_function, division, absolute_import
+
 import os
-import sys
 import tempfile
 
 import numpy as np
+import pytest
 import scipy.integrate
 
 import wmpl.MetSim.MetSimErosion as MetSimErosion
@@ -46,6 +47,7 @@ HT_MAX = 180000.0
 # Shared table and polynomial, computed once
 TABLE_HT, TABLE_LOG10_RHO = getAtmDensityTable(LAT, LON, HT_MIN, HT_MAX, JD)
 DENS_CO = fitAtmPoly(LAT, LON, HT_MIN, HT_MAX, JD)
+
 
 
 def _makeConstants(table=None):
@@ -71,6 +73,7 @@ def _makeConstants(table=None):
     return const
 
 
+
 def _runMain(const):
     """ Run the simulation and return the time, height, velocity and luminosity of the main fragment. """
 
@@ -81,7 +84,8 @@ def _runMain(const):
     return results[:, 0], results[:, 17], results[:, 19], results[:, 1]
 
 
-def test_table_grid():
+
+def testTableGrid():
     """ The table spans the requested range in equal steps no larger than requested, holds plain floats,
     and stores log10 of the MSIS density at the nodes. """
 
@@ -101,16 +105,17 @@ def test_table_grid():
     for i in [0, 100, len(TABLE_HT) - 1]:
         assert TABLE_LOG10_RHO[i] == np.log10(getAtmDensity(LAT, LON, TABLE_HT[i], JD))
 
-    try:
+    # Check that an empty height range raises a ValueError
+    with pytest.raises(ValueError):
         getAtmDensityTable(LAT, LON, 80000.0, 80000.0, JD)
-        assert False, "An empty height range must raise"
-    except ValueError:
-        pass
 
 
-def test_table_follows_msis():
-    """ Between the nodes the table stays within 0.5% of the MSIS model over the whole fireball range, while the
-    polynomial fitted to the same range misses it by more than 10% somewhere at 80 - 120 km. """
+
+def testTableFollowsMsis():
+    """ Check that between the nodes the table stays within 0.5% of the MSIS model over the whole fireball
+        range, while the polynomial fitted to the same range misses it by more than 10% somewhere at 80 to
+        120 km.
+    """
 
     # Node midpoints are the worst case of the interpolation
     ht = 0.5*(np.array(TABLE_HT[:-1]) + np.array(TABLE_HT[1:]))
@@ -124,7 +129,8 @@ def test_table_follows_msis():
     assert err_poly[meteor_band].max() > 0.10, err_poly[meteor_band].max()
 
 
-def test_scalar_and_vector_interpolation_agree():
+
+def testScalarAndVectorInterpolationAgree():
     """ The scalar engine interpolation equals the vectorized utility at the nodes, between them and outside
     the table (where the end segments are extrapolated). """
 
@@ -150,7 +156,8 @@ def test_scalar_and_vector_interpolation_agree():
         MetSimErosion.atmDensityPoly(95123.4, np.array(DENS_CO))
 
 
-def test_table_column_exact():
+
+def testTableColumnExact():
     """ The exact air column of the table equals the numerical integral of the interpolated density, also
     across the table ends, and the callable table gives the same density as atmDensTable. """
 
@@ -183,7 +190,8 @@ def test_table_column_exact():
         20000.0/np.log(10)*(10**(-9.0) - 10**(-10.0)), rtol=1e-8)
 
 
-def test_simulation_uses_table():
+
+def testSimulationUsesTable():
     """ A table sampled from the polynomial itself reproduces the polynomial run, and the MSIS table
     changes the run - so the simulation reads the table, not dens_co. """
 
@@ -205,7 +213,8 @@ def test_simulation_uses_table():
     assert np.max(np.abs(lum_msis[:n] - lum_poly[:n])) > 0.01*np.max(lum_poly)
 
 
-def test_constants_without_table_attribute():
+
+def testConstantsWithoutTableAttribute():
     """ Constants created before the table existed (e.g. unpickled, without the attributes) still run, on the
     polynomial, exactly as Constants with the table set to None. """
 
@@ -221,7 +230,8 @@ def test_constants_without_table_attribute():
     assert np.array_equal(lum_old, lum_new)
 
 
-def test_numpy_table_is_converted():
+
+def testNumpyTableIsConverted():
     """ A table given as numpy arrays is converted to lists of floats and gives the same run as lists. """
 
     const_np = _makeConstants((np.array(TABLE_HT), np.array(TABLE_LOG10_RHO)))
@@ -235,7 +245,8 @@ def test_numpy_table_is_converted():
     assert np.array_equal(lum_np, lum_list)
 
 
-def test_invalid_table_rejected():
+
+def testInvalidTableRejected():
     """ Tables that are too short, have mismatched columns or are not ascending raise a ValueError. """
 
     bad_tables = [
@@ -246,14 +257,12 @@ def test_invalid_table_rejected():
     ]
 
     for table in bad_tables:
-        try:
+        with pytest.raises(ValueError):
             MetSimErosion.runSimulation(_makeConstants(table))
-            assert False, "Table {} must be rejected".format(table)
-        except ValueError:
-            pass
 
 
-def test_energy_received_uses_table():
+
+def testEnergyReceivedUsesTable():
     """ The energy received before erosion integrates the tabulated density when there is a table. """
 
     const = _makeConstants((TABLE_HT, TABLE_LOG10_RHO))
@@ -272,7 +281,8 @@ def test_energy_received_uses_table():
     assert not np.isclose(es, es_poly, rtol=1e-3)
 
 
-def test_gui_json_round_trip():
+
+def testGuiJsonRoundTrip():
     """ The GUI saves the table to the constants JSON and loads it back unchanged, also from numpy arrays. """
 
     from wmpl.MetSim.GUI import loadConstants, saveConstants
@@ -296,21 +306,3 @@ def test_gui_json_round_trip():
         const_loaded, _ = loadConstants(os.path.join(dir_path, "const.json"))
 
     assert const_loaded.atm_table_ht is None
-
-
-
-if __name__ == "__main__":
-
-    tests = [obj for name, obj in sorted(globals().items()) if name.startswith("test_") and callable(obj)]
-
-    n_failed = 0
-    for test in tests:
-        try:
-            test()
-            print("PASS", test.__name__)
-        except Exception as e:
-            n_failed += 1
-            print("FAIL", test.__name__, repr(e))
-
-    print("{:d}/{:d} passed".format(len(tests) - n_failed, len(tests)))
-    sys.exit(1 if n_failed else 0)
