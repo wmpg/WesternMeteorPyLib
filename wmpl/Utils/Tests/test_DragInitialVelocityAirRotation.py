@@ -33,7 +33,7 @@ def _trajectory(time_data=(0.0, 0.5, 1.0), **attributes):
     meas = np.array([vectNorm(np.array([0.2, 1.0, 0.1*i])) for i in range(3)])
 
     obs = SimpleNamespace(time_data=np.array(time_data), stat_eci_los=np.array([station]*3), \
-        meas_eci_los=meas)
+        meas_eci_los=meas, ignore_station=False)
 
     traj = SimpleNamespace(observations=[obs], v0z=0.0, gravity_factor=0.0, \
         state_vect_mini=np.array([6400e3, 100e3, 0.0]), radiant_eci_mini=vectNorm(np.array([0.3, 0.1, 1.0])))

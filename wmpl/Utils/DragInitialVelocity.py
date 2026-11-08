@@ -434,8 +434,15 @@ def droppedLengths(traj, obs):
     # Imported here, as the trajectory solver imports this module
     from wmpl.Trajectory.Trajectory import applyGravityDrop
 
-    # Same reference time and vertical velocity as the line of sight fit
-    t0 = min([o.time_data[0] for o in traj.observations])
+    # Same reference time and vertical velocity as the line of sight fit: the first time of the used stations
+    #   where the solver takes it (dropTimeOrigin, #202), else of all observations
+    try:
+        from wmpl.Trajectory.Trajectory import dropTimeOrigin
+        t0 = dropTimeOrigin(traj.observations)
+
+    except ImportError:
+        t0 = min([o.time_data[0] for o in traj.observations])
+
     v0z = traj.v0z if traj.v0z is not None else 0.0
 
     # Same beginning point of the drop and factor of the drop as the fit, where the solution has them (the
