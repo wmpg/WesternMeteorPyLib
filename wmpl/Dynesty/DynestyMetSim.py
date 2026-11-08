@@ -5123,6 +5123,10 @@ def setupDynestyOutputDir(out_folder, obs_data, bounds, flags_dict, fixed_values
         shutil.copy(dynesty_file, out_folder)
         print("dynesty file copied to output folder:", dynesty_file_in_output_path)
 
+        # Copy the ground-frame marker with the checkpoint
+        if os.path.isfile(groundFrameMarkerPath(dynesty_file)):
+            shutil.copy(groundFrameMarkerPath(dynesty_file), out_folder)
+
     if os.path.isfile(report_txt):
         # copy the report file to the output folder if not already there
         report_txt_in_output_path = os.path.join(out_folder,os.path.basename(report_txt))
@@ -6281,6 +6285,7 @@ def priorDynesty(cube, bounds, flags_dict):
         i_prior += 1
 
     return x
+
 
 
 def groundFrameMarkerPath(dynesty_file):
