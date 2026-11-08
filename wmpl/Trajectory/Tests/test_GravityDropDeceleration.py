@@ -23,6 +23,7 @@ from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MAX_ACC, GRAVITY_DROP_MIN_VE
     gravityDropScale, segmentedVelocity
 from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDragMeteor, observeMeteor, \
     observeStraightMeteor
+from wmpl.Utils.Math import angleBetweenVectors
 
 
 # Fireball of the tests: 18 km/s at 45 deg, slowing down to about 10 km/s in 3.3 s
@@ -475,7 +476,8 @@ def testTheScaleDoesNotUseTheJacchiaFit():
 
 def testAMeteorWithoutDecelerationIsNotScaled():
     """ Check that a straight meteor at a constant velocity keeps the drop at a constant velocity, without
-        noise and with about 20 arcsec of noise.
+        noise and with about 20 arcsec of noise. With noise, the lengths show no change of velocity, and the
+        solution is the same as without the scale.
     """
 
     for kwargs in (dict(noise=0.0), dict(seed=1), dict(seed=2)):
@@ -484,6 +486,52 @@ def testAMeteorWithoutDecelerationIsNotScaled():
         traj.run()
 
         assert (traj.gravity_drop_scale is None) or (np.min(traj.gravity_drop_scale[1]) > 0.999)
+
+        if 'seed' in kwargs:
+
+            unscaled, _, _ = observeStraightMeteor(gravity_correction=True, gravity_decel=False, **kwargs)
+            unscaled.run()
+
+            assert traj.gravity_drop_scale is None
+            assert np.array_equal(traj.state_vect_mini, unscaled.state_vect_mini)
+            assert np.array_equal(traj.radiant_eci_mini, unscaled.radiant_eci_mini)
+
+
+
+def testTheSpeedGravityAddsAlongThePathDoesNotScaleTheDrop():
+    """ Check that a noise-free meteor at a constant velocity, dropped by gravity, is solved as well with the
+        scale as without it, also when the picks of the first 2 s are ignored. Gravity also speeds the meteor
+        up along its path, which does not bend it, and the lengths on the straight line of the first pass
+        hold that speed: when they gave the scale, the radiant was 0.10 arcsec off, and 0.71 arcsec with the
+        first picks ignored, against 0.004 and 0.003 arcsec without the scale.
+    """
+
+    for ignore_before in (0.0, 2.0):
+
+        errors = []
+        for gravity_decel in (False, True):
+
+            traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
+                elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
+                filter_picks=False, calc_orbit=False)
+
+            # Solve the observations again, ignoring the picks before the given time
+            solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
+                gravity_correction=True, gravity_decel=gravity_decel, filter_picks=False, monte_carlo=False, \
+                calc_orbit=False, show_plots=False, save_results=False, verbose=False)
+
+            for obs in traj.observations:
+                solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, \
+                    obs.ele, station_id=obs.station_id, \
+                    ignore_list=(obs.time_data < ignore_before).astype(np.uint8))
+
+            solved = solved.run()
+
+            errors.append(3600*np.degrees(angleBetweenVectors(solved.radiant_eci_mini, radiant_eci)))
+
+        # Check the radiant with the scale, against the truth and against the solution without it
+        assert errors[1] < 0.02
+        assert errors[1] < errors[0] + 0.01
 
 
 
@@ -497,7 +545,8 @@ if __name__ == "__main__":
         testTheVelocityIsHeldAboveWhereAblationStops, testTheVelocityFollowsAFragmentingFireball, \
         testNoChangeOfVelocityIsFoundAtAConstantVelocity, testAChangeOfVelocityByGravityAloneIsFollowed, \
         testFewNoisyPointsDoNotMakeTheVelocityOscillate, \
-        testTheScaleDoesNotUseTheJacchiaFit, testAMeteorWithoutDecelerationIsNotScaled]
+        testTheScaleDoesNotUseTheJacchiaFit, testAMeteorWithoutDecelerationIsNotScaled, \
+        testTheSpeedGravityAddsAlongThePathDoesNotScaleTheDrop]
 
     for test in test_list:
         test()
