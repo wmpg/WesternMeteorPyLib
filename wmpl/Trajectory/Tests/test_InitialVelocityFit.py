@@ -134,7 +134,8 @@ def testIgnoredPicksDoNotSetTheStationVelocity():
         return _edit
 
     clean = _observe(points, times, estimate_timing_vel=False, filter_picks=False).run()
-    ignored = _observe(points, times, edit=_corrupt(True), estimate_timing_vel=False, filter_picks=False).run()
+    ignored = _observe(points, times, edit=_corrupt(True), estimate_timing_vel=False, \
+        filter_picks=False).run()
 
     v_clean = clean.observations[0].v_init
     v_ignored = ignored.observations[0].v_init
@@ -145,7 +146,8 @@ def testIgnoredPicksDoNotSetTheStationVelocity():
     # The Jacchia fit of the station also leaves them out
     obs = ignored.observations[0]
     used = obs.ignore_list == 0
-    jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, obs.time_data[used], obs.lag[used], p0=np.zeros(2))
+    jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, obs.time_data[used], obs.lag[used], \
+        p0=np.zeros(2))
     assert np.allclose(obs.jacchia_fit, np.abs(jacchia_fit), rtol=1e-9, atol=1e-12)
 
 
