@@ -2,40 +2,39 @@
 
 from __future__ import print_function, division, absolute_import
 
+import argparse
 import datetime
 import os
+import socket
 import warnings
+from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize
-from pymsis import calculate, Variable
+import pymsis
 import pymsis.utils
+from pymsis import calculate, Variable
 
 from wmpl.Utils.Math import expSegmentIntegral
 from wmpl.Utils.TrajConversions import jd2Date, datetime2JD
 
 
-# setAtmosphere() also keeps the choice in these environment variables, which every process started from this
-#   one inherits, as a process started by multiprocessing with "spawn" imports this module afresh
+# Environment variables that pass the atmosphere choice on to processes started with "spawn"
 MSIS_VERSION_ENV = "WMPL_MSIS_VERSION"
 MSIS_JD_ENV = "WMPL_MSIS_JD"
 MSIS_SPACE_WEATHER_ENV = "WMPL_MSIS_SPACE_WEATHER"
 
-# MSIS version used for all atmosphere density evaluations, "2.1" (NRLMSIS 2.1) by default, "2.0" or "00" for
-#   NRLMSISE-00
+# MSIS version of all density evaluations, "2.1" (NRLMSIS 2.1) by default, or "2.0" or "00" (NRLMSISE-00)
 MSIS_VERSION = os.environ.get(MSIS_VERSION_ENV, "2.1")
 
-# Julian date used instead of the one passed to getAtmDensity, only set when the date cannot be taken from the
-#   input data
+# Julian date used instead of the one of the input data, if set
 MSIS_JD = float(os.environ[MSIS_JD_ENV]) if os.environ.get(MSIS_JD_ENV) else None
 
-# Solar and geomagnetic activity given to the model, "real" for the measured F10.7 and Ap of the date or
-#   "constant" for the values below
+# Solar and geomagnetic activity, "real" for the measured values of the date or "constant"
 MSIS_SPACE_WEATHER = os.environ.get(MSIS_SPACE_WEATHER_ENV, "real")
 
-# Constant solar and geomagnetic activity, the recommended values below 80 km, also used when the measured
-#   values are not available
+# Constant solar and geomagnetic activity, the recommended values below 80 km
 CONSTANT_F107A = 150.0
 CONSTANT_F107 = 150.0
 CONSTANT_AP = 4.0
@@ -48,8 +47,33 @@ ATM_TABLE_HT_MIN = 0.0
 ATM_TABLE_HT_MAX = 200000.0
 ATM_TABLE_STEP = 500.0
 
-# Whether the warning about missing space weather was printed, to print it only once
-SPACE_WEATHER_WARNED = [False]
+# Time limit of the download of the space weather file (s)
+SPACE_WEATHER_TIMEOUT = 20
+
+# State of the space weather file in this process, which is downloaded at most twice, to get it and to refresh
+#   it for a date it only predicts
+SPACE_WEATHER_STATE = {'checked': False, 'refreshed': False, 'available': False, 'end': None, \
+    'predicted_start': None, 'warned': set()}
+
+
+
+def atmTimeArgument(text):
+    """ Check the date and time of --atmtime for the command line parser.
+
+    Arguments:
+        text: [str] Date and time as YYYYMMDD-HHMMSS.
+
+    Return:
+        text: [str] The same date and time.
+    """
+
+    try:
+        datetime.datetime.strptime(text, "%Y%m%d-%H%M%S")
+
+    except ValueError:
+        raise argparse.ArgumentTypeError("{:s} is not a date and time as YYYYMMDD-HHMMSS".format(repr(text)))
+
+    return text
 
 
 
@@ -69,14 +93,14 @@ def addAtmosphereArguments(arg_parser):
         help="MSIS atmosphere model: 2.1 for NRLMSIS 2.1 (default), 2.0 for NRLMSIS 2.0 or 00 for " \
         "NRLMSISE-00.")
 
-    arg_parser.add_argument('--atmtime', metavar='ATM_TIME', type=str, default=None, \
+    arg_parser.add_argument('--atmtime', metavar='ATM_TIME', type=atmTimeArgument, default=None, \
         help="UTC date and time at which the atmosphere is evaluated. Format: YYYYMMDD-HHMMSS. By " \
         "default the reference time of the input data is used, e.g. of the trajectory pickle.")
 
     arg_parser.add_argument('--atmsw', metavar='SPACE_WEATHER', type=str, default="real", \
         choices=['real', 'constant'], \
         help="Solar and geomagnetic activity given to the MSIS model: real for the measured F10.7 and Ap " \
-        "of the date (default, downloaded once from CelesTrak), constant for F10.7 = 150 and Ap = 4.")
+        "of the date (default, downloaded from CelesTrak), constant for F10.7 = 150 and Ap = 4.")
 
     return arg_parser
 
@@ -124,12 +148,198 @@ def msisModelName():
 
 
 
-def spaceWeather(jd):
-    """ Get the solar and geomagnetic activity given to the MSIS model at the given Julian date.
+def spaceWeatherFile():
+    """ Return the path of the space weather file of pymsis, the one set with PYMSIS_SPACE_WEATHER_FILE or
+        the one it downloads into its package directory.
+    """
 
-    With the real space weather, the measured F10.7 of the previous day, its 81-day average and the daily Ap
-    are taken from the CelesTrak file that pymsis downloads once. If they are not available, e.g. offline or
-    for a future date, the constant values are used with a warning.
+    return Path(os.environ.get('PYMSIS_SPACE_WEATHER_FILE', Path(pymsis.__file__).parent/'SW-All.csv'))
+
+
+
+def warnSpaceWeather(key, message):
+    """ Print a warning about the space weather once per process.
+
+    Arguments:
+        key: [str] Kind of the warning.
+        message: [str] Warning.
+
+    Return:
+        None
+    """
+
+    if key not in SPACE_WEATHER_STATE['warned']:
+        SPACE_WEATHER_STATE['warned'].add(key)
+        print("WARNING: " + message)
+
+
+
+def downloadSpaceWeather():
+    """ Download the space weather file from CelesTrak with pymsis, giving up after SPACE_WEATHER_TIMEOUT.
+
+    Return:
+        [bool] True if the file was downloaded.
+    """
+
+    timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(SPACE_WEATHER_TIMEOUT)
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            pymsis.utils.download_f107_ap()
+
+        return True
+
+    except Exception as e:
+        warnSpaceWeather('download', "The space weather file could not be downloaded from CelesTrak " \
+            "({:s}).".format(repr(e)))
+
+        return False
+
+    finally:
+        socket.setdefaulttimeout(timeout)
+
+
+
+def readSpaceWeatherRange():
+    """ Read the end of the space weather file and the first date of its predicted values into
+        SPACE_WEATHER_STATE.
+
+    Return:
+        None
+    """
+
+    path = spaceWeatherFile()
+    SPACE_WEATHER_STATE['available'] = path.is_file()
+    if not SPACE_WEATHER_STATE['available']:
+        return
+
+    last_date = None
+    predicted_start = None
+
+    with path.open() as f:
+        for line in f:
+
+            columns = line.split(',')
+            if (len(columns) < 27) or (not columns[0][:1].isdigit()):
+                continue
+
+            last_date = np.datetime64(columns[0][:10])
+            if (predicted_start is None) and (columns[26].strip() == 'PRD'):
+                predicted_start = last_date
+
+    if last_date is None:
+        SPACE_WEATHER_STATE['available'] = False
+        return
+
+    # Each row covers its whole day
+    SPACE_WEATHER_STATE['end'] = last_date + np.timedelta64(1, 'D')
+    SPACE_WEATHER_STATE['predicted_start'] = predicted_start if predicted_start is not None \
+        else SPACE_WEATHER_STATE['end']
+
+
+
+def updateSpaceWeather(dt_max):
+    """ Make sure the space weather file is there, downloading it once, and refresh it once if the given date
+        is only predicted by it or is past its end.
+
+    Arguments:
+        dt_max: [datetime64] Latest date at which the space weather is needed.
+
+    Return:
+        None
+    """
+
+    state = SPACE_WEATHER_STATE
+
+    if not state['checked']:
+        state['checked'] = True
+
+        if not spaceWeatherFile().is_file():
+            state['refreshed'] = True
+            downloadSpaceWeather()
+
+        readSpaceWeatherRange()
+
+    # Refresh the file once if it does not have the measured values of the date
+    if state['available'] and (not state['refreshed']) and (dt_max >= state['predicted_start']):
+        state['refreshed'] = True
+
+        if downloadSpaceWeather():
+            readSpaceWeatherRange()
+
+
+
+def spaceWeatherArrays(dt_arr):
+    """ Get the solar and geomagnetic activity of every point for the MSIS model.
+
+    With the real space weather, the measured F10.7 of the previous day, its 81-day average and the ap
+    indices are taken from the CelesTrak file of pymsis, which is downloaded once with a time limit. The
+    values the file only predicts are used and labelled 'predicted'. Without the file, or past its end,
+    the constant values are used with a warning.
+
+    Arguments:
+        dt_arr: [ndarray] Dates (datetime64, UTC).
+
+    Return:
+        (f107, f107a, ap, source):
+            - f107: [ndarray] F10.7 of the previous day (sfu).
+            - f107a: [ndarray] 81-day average of F10.7 (sfu).
+            - ap: [ndarray] ap indices, 7 per point.
+            - source: [ndarray] 'real', 'predicted' or 'constant' for every point.
+    """
+
+    n = len(dt_arr)
+    f107 = np.full(n, CONSTANT_F107)
+    f107a = np.full(n, CONSTANT_F107A)
+    ap = np.full((n, 7), CONSTANT_AP)
+    source = np.full(n, 'constant', dtype=object)
+
+    if (MSIS_SPACE_WEATHER != "real") or (n == 0):
+        return f107, f107a, ap, source
+
+    updateSpaceWeather(np.max(dt_arr))
+
+    if not SPACE_WEATHER_STATE['available']:
+        warnSpaceWeather('missing', "The measured F10.7 and Ap are not available, so the constant values " \
+            "are used.")
+        return f107, f107a, ap, source
+
+    # Take the values of the dates inside the file, so that pymsis does not download it again
+    inside = dt_arr < SPACE_WEATHER_STATE['end']
+    if not np.all(inside):
+        warnSpaceWeather('end', "The space weather file ends on {:s}, so the constant values are used " \
+            "after it.".format(str(SPACE_WEATHER_STATE['end'])))
+
+    if np.any(inside):
+
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            f107_in, f107a_in, ap_in = pymsis.utils.get_f107_ap(dt_arr[inside])
+
+        # Keep the constant values where the file has none
+        valid = np.isfinite(f107_in) & np.isfinite(f107a_in) & np.all(np.isfinite(ap_in), axis=1)
+        if not np.all(valid):
+            warnSpaceWeather('invalid', "The space weather file has no values for some dates, so the " \
+                "constant values are used there.")
+
+        idx = np.where(inside)[0][valid]
+        f107[idx] = f107_in[valid]
+        f107a[idx] = f107a_in[valid]
+        ap[idx] = ap_in[valid]
+        source[idx] = np.where(dt_arr[idx] >= SPACE_WEATHER_STATE['predicted_start'], 'predicted', 'real')
+
+    if np.any(source == 'predicted'):
+        warnSpaceWeather('predicted', "The space weather of some dates is only predicted by CelesTrak.")
+
+    return f107, f107a, ap, source
+
+
+
+def spaceWeather(jd):
+    """ Get the solar and geomagnetic activity given to the MSIS model at the given Julian date, see
+        spaceWeatherArrays().
 
     Arguments:
         jd: [float] Julian date.
@@ -139,26 +349,12 @@ def spaceWeather(jd):
             - f107: [float] F10.7 of the previous day (sfu).
             - f107a: [float] 81-day average of F10.7 (sfu).
             - ap: [float] Daily Ap.
-            - source: [str] 'real' or 'constant'.
+            - source: [str] 'real', 'predicted' or 'constant'.
     """
 
-    if MSIS_SPACE_WEATHER == "real":
+    f107, f107a, ap, source = spaceWeatherArrays(np.array([np.datetime64(jd2Date(jd, dt_obj=True))]))
 
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore')
-                f107, f107a, ap = pymsis.utils.get_f107_ap(np.datetime64(jd2Date(jd, dt_obj=True)))
-
-            if np.all(np.isfinite(f107)) and np.all(np.isfinite(f107a)) and np.all(np.isfinite(ap)):
-                return float(np.ravel(f107)[0]), float(np.ravel(f107a)[0]), float(np.ravel(ap)[0]), 'real'
-
-        except Exception as e:
-            if not SPACE_WEATHER_WARNED[0]:
-                print("WARNING: The measured F10.7 and Ap are not available ({:s}), so the constant values " \
-                    "are used.".format(repr(e)))
-                SPACE_WEATHER_WARNED[0] = True
-
-    return CONSTANT_F107, CONSTANT_F107A, CONSTANT_AP, 'constant'
+    return float(f107[0]), float(f107a[0]), float(ap[0, 0]), str(source[0])
 
 
 
@@ -478,7 +674,6 @@ def getMSISVariable(lat, lon, height, jd, variable):
 
     Return:
         [float or ndarray] The requested variable, in SI units.
-
     """
 
     # Take the date given on the command line, if there was one
@@ -487,27 +682,27 @@ def getMSISVariable(lat, lon, height, jd, variable):
 
     # Broadcast the inputs to a common shape, so that pymsis evaluates them point by point
     lat, lon, height, jd = np.broadcast_arrays(np.degrees(lat), np.degrees(lon), height, jd)
+    values = np.full(lat.size, np.nan)
 
-    # Convert every distinct Julian date to a date once
-    jd_unique, jd_index = np.unique(jd.ravel(), return_inverse=True)
-    dt_unique = np.array([np.datetime64(jd2Date(jd_value, dt_obj=True)) for jd_value in jd_unique])
-    dt_arr = dt_unique[jd_index.ravel()]
+    # Evaluate only the finite points, leaving NaN in the others
+    finite = np.isfinite(lat.ravel()) & np.isfinite(lon.ravel()) & np.isfinite(height.ravel()) \
+        & np.isfinite(jd.ravel())
 
-    # Take the measured solar and geomagnetic activity of every distinct date, or the constant values
-    sw_unique = np.array([spaceWeather(jd_value) for jd_value in jd_unique], dtype=object)
-    if all(sw[3] == 'real' for sw in sw_unique):
-        f107_arr = f107a_arr = ap_arr = None
-    else:
-        f107_arr = np.full(lat.size, CONSTANT_F107)
-        f107a_arr = np.full(lat.size, CONSTANT_F107A)
-        ap_arr = np.full((lat.size, 7), CONSTANT_AP)
+    if np.any(finite):
 
-    # Take the requested variable out of the 11 that the model returns, giving all inputs the same length
-    #   so that pymsis returns one row per point instead of a grid
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        values = calculate(dt_arr, lon.ravel(), lat.ravel(), height.ravel()/1000, f107_arr, f107a_arr, \
-            ap_arr, version=MSIS_VERSION)[:, variable].astype(np.float64)
+        # Convert every distinct Julian date to a date once
+        jd_unique, jd_index = np.unique(jd.ravel()[finite], return_inverse=True)
+        dt_unique = np.array([np.datetime64(jd2Date(jd_value, dt_obj=True)) for jd_value in jd_unique])
+        dt_arr = dt_unique[jd_index.ravel()]
+
+        f107, f107a, ap, _ = spaceWeatherArrays(dt_arr)
+
+        # Take the requested variable out of the 11 the model returns, with inputs of equal length for one row
+        #   per point
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            values[finite] = calculate(dt_arr, lon.ravel()[finite], lat.ravel()[finite], \
+                height.ravel()[finite]/1000, f107, f107a, ap, version=MSIS_VERSION)[:, variable]
 
     # Return a scalar if only scalars were given
     if lat.ndim == 0:
@@ -518,14 +713,34 @@ def getMSISVariable(lat, lon, height, jd, variable):
 
 
 def getAtmDensity(lat, lon, height, jd):
-    """ For the given heights, returns the atmosphere mass density in kg/m^3. See getMSISVariable(). """
+    """ Compute the atmosphere mass density of the MSIS model, see getMSISVariable().
+
+    Arguments:
+        lat: [float or ndarray] Latitude in radians.
+        lon: [float or ndarray] Longitude in radians.
+        height: [float or ndarray] Height in meters.
+        jd: [float or ndarray] Julian date, of all the points or of every point.
+
+    Return:
+        [float or ndarray] Atmosphere mass density (kg/m^3), NaN for non-finite inputs.
+    """
 
     return getMSISVariable(lat, lon, height, jd, Variable.MASS_DENSITY)
 
 
 
 def getAtmTemperature(lat, lon, height, jd):
-    """ For the given heights, returns the neutral atmosphere temperature in K. See getMSISVariable(). """
+    """ Compute the neutral atmosphere temperature of the MSIS model, see getMSISVariable().
+
+    Arguments:
+        lat: [float or ndarray] Latitude in radians.
+        lon: [float or ndarray] Longitude in radians.
+        height: [float or ndarray] Height in meters.
+        jd: [float or ndarray] Julian date, of all the points or of every point.
+
+    Return:
+        [float or ndarray] Temperature (K), NaN for non-finite inputs.
+    """
 
     return getMSISVariable(lat, lon, height, jd, Variable.TEMPERATURE)
 

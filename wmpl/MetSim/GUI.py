@@ -35,7 +35,7 @@ from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersec
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, getAtmDensityTable, \
     atmDensTable, atmDensityTableInfo, ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, \
-    getMSISVersion, setAtmosphere
+    msisModelName, setAtmosphere
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -3046,11 +3046,12 @@ class MetSimGUI(QMainWindow):
         self.const.atm_table_ht, self.const.atm_table_log10_rho = atm_table
         self.const.atm_density_info = atm_info
 
-        # Keep the saved polynomial of a legacy constants file, so that its fit is reproduced, unless refitted
+        # Keep the saved polynomial of a legacy constants file unless it is refitted
         if (const_json_file is not None) and (self.const.atm_density_model == 'polynomial') \
             and (not refit_atm):
 
             self.const.dens_co = np.array(self.const.dens_co)
+            self.const.atm_density_info = None
             print("Using the atmosphere density polynomial saved in the constants file, give --refitatm to " \
                 "refit it from the MSIS model.")
 
@@ -5388,7 +5389,7 @@ class MetSimGUI(QMainWindow):
 
         # Plot the MSIS density
         self.mpw.canvas.axes.semilogx(atm_densities, height_arr/1000, \
-            label="MSIS " + getMSISVersion(), color='k')
+            label=msisModelName(), color='k')
 
         # Plot the density table and mark the model the simulation uses
         if usesAtmDensityTable(self.const):

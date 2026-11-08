@@ -85,7 +85,7 @@ The atmosphere mass density is computed with the MSIS models through `pymsis`, w
 available on PyPI (it replaces the bundled `PythonNRLMSISE00` submodule, which is no longer used):
 
 ```
-pip install pymsis
+pip install "pymsis>=0.13"
 ```
 
 Optionally, if you want to use the REBOUND orbital integrator, install:
@@ -182,7 +182,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda install -y -c conda-forge basemap basemap-data-hires
  	conda install -y -c conda-forge cartopy paramiko
 	conda install -y -c astropy astropy
-	pip install pymsis
+	pip install "pymsis>=0.13"
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)

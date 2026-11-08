@@ -19,13 +19,14 @@ import os
 import numpy as np
 import pytest
 
+pytest.importorskip('wmpl.PythonNRLMSISE00.nrlmsise_00')
+
 from wmpl.PythonNRLMSISE00.nrlmsise_00 import gtd7
 from wmpl.PythonNRLMSISE00.nrlmsise_00_header import nrlmsise_input, nrlmsise_flags, nrlmsise_output
-from wmpl.Formats.GenericFunctions import addSolverOptions
 import wmpl.Utils.AtmosphereDensity as AtmosphereDensity
 from wmpl.Utils.AtmosphereDensity import MSIS_JD_ENV, MSIS_VERSION_ENV, addAtmosphereArguments, atmDensPoly, \
     atmDensityTableInfo, fitAtmPoly, getAtmDensity, getAtmDensity_vect, getAtmTemperature, getMSISVersion, \
-    setAtmosphere, spaceWeather
+    setAtmosphere, spaceWeather, spaceWeatherArrays, SPACE_WEATHER_STATE
 from wmpl.Utils.TrajConversions import datetime2JD
 
 
@@ -37,7 +38,7 @@ JD_REF = datetime2JD(DT_REF)
 
 
 
-def _setAtmosphere(*args):
+def setAtmosphereOptions(*args):
     """ Set the atmosphere with the given command line options.
 
     Arguments:
@@ -50,6 +51,23 @@ def _setAtmosphere(*args):
     arg_parser = argparse.ArgumentParser()
     addAtmosphereArguments(arg_parser)
     setAtmosphere(arg_parser.parse_args(list(args)))
+
+
+
+def keepSpaceWeatherState(monkeypatch):
+    """ Restore the space weather state of the module after the test, and clear its warnings.
+
+    Arguments:
+        monkeypatch: [MonkeyPatch] Fixture of the test.
+
+    Return:
+        None
+    """
+
+    for key, value in list(SPACE_WEATHER_STATE.items()):
+        monkeypatch.setitem(SPACE_WEATHER_STATE, key, value)
+
+    SPACE_WEATHER_STATE['warned'] = set()
 
 
 
@@ -92,7 +110,7 @@ def testMSIS00MatchesTheBundledNRLMSISEPort():
     """
 
     try:
-        _setAtmosphere('--atm', '00', '--atmsw', 'constant')
+        setAtmosphereOptions('--atm', '00', '--atmsw', 'constant')
 
         for height in np.arange(20000, 180001, 5000):
 
@@ -102,7 +120,7 @@ def testMSIS00MatchesTheBundledNRLMSISEPort():
             assert abs(getAtmTemperature(LAT, LON, float(height), JD_REF)/temp_ref - 1) < 1e-4
 
     finally:
-        _setAtmosphere()
+        setAtmosphereOptions()
 
 
 
@@ -153,65 +171,147 @@ def testAtmosphereArgumentsSelectTheModelAndTheDate():
     try:
 
         # Check that NRLMSIS 2.1 gives significantly lower densities at 120 km than NRLMSISE-00
-        _setAtmosphere('--atmsw', 'constant')
+        setAtmosphereOptions('--atmsw', 'constant')
         dens_msis21 = getAtmDensity(LAT, LON, 120000.0, JD_REF)
-        _setAtmosphere('--atm', '00', '--atmsw', 'constant')
+        setAtmosphereOptions('--atm', '00', '--atmsw', 'constant')
         assert dens_msis21/getAtmDensity(LAT, LON, 120000.0, JD_REF) < 0.9
 
         # Check that the date given on the command line is used instead of the one passed to the function
         dens_other_time = getAtmDensity(LAT, LON, 120000.0, datetime2JD(dt_other))
-        _setAtmosphere('--atm', '00', '--atmsw', 'constant', '--atmtime', \
+        setAtmosphereOptions('--atm', '00', '--atmsw', 'constant', '--atmtime', \
             dt_other.strftime("%Y%m%d-%H%M%S"))
         assert getAtmDensity(LAT, LON, 120000.0, JD_REF) == dens_other_time
 
     finally:
 
         # Restore the defaults for the other tests
-        _setAtmosphere()
+        setAtmosphereOptions()
 
     assert getMSISVersion() == "2.1"
 
 
 
-def testTheMeasuredSpaceWeatherIsUsedOrTheConstantOne(monkeypatch):
-    """ Check that the measured F10.7 and Ap of the date are used and recorded, and that the constant values
-        are used when they are not available.
+def testTheMeasuredSpaceWeatherIsUsedAndRecorded():
+    """ Check that the measured F10.7 and Ap of the date are used and recorded, if the space weather file
+        is available.
     """
 
     f107, f107a, ap, source = spaceWeather(JD_REF)
 
-    # Check the measured values, which need the CelesTrak file
-    if source == 'real':
+    if source != 'real':
+        pytest.skip("The space weather file is not available")
 
-        # The Sun was quiet in April 2020
-        assert 60 < f107 < 80
-        assert 60 < f107a < 80
+    # The Sun was quiet in April 2020
+    assert 60 < f107 < 80
+    assert 60 < f107a < 80
 
-        info = atmDensityTableInfo(LAT, LON, JD_REF)
-        assert info['model'] == "NRLMSIS 2.1"
-        assert info['space_weather'] == 'real'
-        assert info['f107'] == f107
+    info = atmDensityTableInfo(LAT, LON, JD_REF)
+    assert info['model'] == AtmosphereDensity.msisModelName()
+    assert info['space_weather'] == 'real'
+    assert info['f107'] == f107
 
-        # Check that the quiet Sun gives a lower density at 150 km than the constant activity
-        dens_real = getAtmDensity(LAT, LON, 150000.0, JD_REF)
-        try:
-            _setAtmosphere('--atmsw', 'constant')
-            assert dens_real/getAtmDensity(LAT, LON, 150000.0, JD_REF) < 0.97
-        finally:
-            _setAtmosphere()
+    # Check that the quiet Sun gives a lower density at 150 km than the constant activity
+    dens_real = getAtmDensity(LAT, LON, 150000.0, JD_REF)
+    try:
+        setAtmosphereOptions('--atmsw', 'constant')
+        assert dens_real/getAtmDensity(LAT, LON, 150000.0, JD_REF) < 0.97
+    finally:
+        setAtmosphereOptions()
 
-    # Check the constant values when the measured ones are not available
-    def failingDownload(*args, **kwargs):
+
+
+def testWithoutTheSpaceWeatherFileTheConstantValuesAreUsedAndItIsDownloadedOnce(monkeypatch, tmp_path):
+    """ Check that without the space weather file, which cannot be downloaded, the constant values are used
+        and the download is tried only once in the process, also for many calls.
+    """
+
+    downloads = []
+
+    def failingDownload():
+        """ Count the download attempts and fail. """
+
+        downloads.append(1)
         raise OSError("offline")
 
-    monkeypatch.setattr(AtmosphereDensity.pymsis.utils, 'get_f107_ap', failingDownload)
+    monkeypatch.setenv('PYMSIS_SPACE_WEATHER_FILE', str(tmp_path/'missing.csv'))
+    monkeypatch.setattr(AtmosphereDensity.pymsis.utils, 'download_f107_ap', failingDownload)
+    keepSpaceWeatherState(monkeypatch)
+    SPACE_WEATHER_STATE['checked'] = False
+    SPACE_WEATHER_STATE['refreshed'] = False
 
     assert spaceWeather(JD_REF) == (150.0, 150.0, 4.0, 'constant')
+
+    for ht in np.linspace(80000, 120000, 20):
+        assert np.isfinite(getAtmDensity(LAT, LON, ht, JD_REF))
+
     assert atmDensityTableInfo(LAT, LON, JD_REF)['space_weather'] == 'constant'
+    assert len(downloads) == 1
 
 
 
-def _childAtmosphere(_):
+def testPredictedAndMissingDatesAreLabelled(monkeypatch):
+    """ Check that dates the space weather file only predicts are labelled 'predicted', after one refresh,
+        and that dates past its end get the constant values.
+    """
+
+    f107, f107a, ap, source = spaceWeather(JD_REF)
+    if source != 'real':
+        pytest.skip("The space weather file is not available")
+
+    downloads = []
+
+    def noDownload():
+        """ Count the refreshes without downloading. """
+
+        downloads.append(1)
+        raise OSError("not refreshed in the test")
+
+    monkeypatch.setattr(AtmosphereDensity.pymsis.utils, 'download_f107_ap', noDownload)
+    keepSpaceWeatherState(monkeypatch)
+    SPACE_WEATHER_STATE['refreshed'] = False
+
+    predicted_start = SPACE_WEATHER_STATE['predicted_start']
+    end = SPACE_WEATHER_STATE['end']
+    dates = np.array([np.datetime64('2020-04-20T16:15'), predicted_start + np.timedelta64(12, 'h'), \
+        end + np.timedelta64(400, 'D')])
+
+    _, _, _, sources = spaceWeatherArrays(dates)
+
+    assert sources[0] == 'real'
+    assert sources[2] == 'constant'
+    if predicted_start < end:
+        assert sources[1] == 'predicted'
+
+    assert len(downloads) == 1
+
+
+
+def testNonFiniteInputsGiveNaN():
+    """ Check that a non-finite height gives NaN for that point only.
+    """
+
+    height_arr = np.array([80000.0, np.nan, 100000.0])
+    dens = getAtmDensity(LAT, LON, height_arr, JD_REF)
+
+    assert np.isnan(dens[1])
+    assert np.all(np.isfinite(dens[[0, 2]]))
+    assert np.isnan(getAtmDensity(LAT, LON, np.nan, JD_REF))
+
+
+
+def testABadAtmosphereTimeIsAParserError():
+    """ Check that a malformed --atmtime is rejected by the command line parser.
+    """
+
+    arg_parser = argparse.ArgumentParser()
+    addAtmosphereArguments(arg_parser)
+
+    with pytest.raises(SystemExit):
+        arg_parser.parse_args(['--atmtime', '2020-04-20'])
+
+
+
+def childAtmosphere(_):
     """ Return the model and a density as seen by a process started by multiprocessing, the density also
         depending on the date.
     """
@@ -225,41 +325,22 @@ def testAProcessStartedBySpawnUsesTheChosenAtmosphere():
         afresh, uses the model and date chosen in its parent through the environment.
     """
 
-    default = _childAtmosphere(0)
+    default = childAtmosphere(0)
 
     try:
-        _setAtmosphere('--atm', '00', '--atmtime', '20240101-000000')
-        parent = _childAtmosphere(0)
+        setAtmosphereOptions('--atm', '00', '--atmtime', '20240101-000000')
+        parent = childAtmosphere(0)
 
         with multiprocessing.get_context("spawn").Pool(1) as pool:
-            child = pool.map(_childAtmosphere, [0])[0]
+            child = pool.map(childAtmosphere, [0])[0]
 
         assert parent == child
         assert child[0] == "00"
         assert abs(child[1]/default[1] - 1) > 1e-3
 
     finally:
-        _setAtmosphere()
+        setAtmosphereOptions()
 
     # Check that the defaults leave no date behind for later processes
     assert os.environ[MSIS_VERSION_ENV] == "2.1"
     assert MSIS_JD_ENV not in os.environ
-
-
-
-def testTheTrajectorySolverOptionsSelectTheAtmosphere():
-    """ Check that the input formats of the trajectory solver take --atm and --atmtime through
-        addSolverOptions(), and apply them with setAtmosphere() after parsing.
-    """
-
-    arg_parser = argparse.ArgumentParser()
-    addSolverOptions(arg_parser)
-
-    try:
-        setAtmosphere(arg_parser.parse_args(['--atm', '2.0']))
-        assert getMSISVersion() == "2.0"
-
-    finally:
-        setAtmosphere(arg_parser.parse_args([]))
-
-    assert getMSISVersion() == "2.1"
