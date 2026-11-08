@@ -552,6 +552,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('--updated', action='store_true', \
         help="Load the updated simulation JSON file instead of the original one.")
 
+    arg_parser.add_argument('--refitatm', action="store_true", \
+        help="Refit the atmosphere density polynomial of a legacy constants file, saved without " \
+        "atm_density_model, from the MSIS model instead of using the saved polynomial.")
+
     # Add the atmosphere model options
     addAtmosphereArguments(arg_parser)
 
@@ -754,8 +758,14 @@ if __name__ == "__main__":
     dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, traj.jdt_ref)
 
 
-    # Assign the density coefficients
-    const.dens_co = dens_co
+    # Keep the saved polynomial of a legacy constants file, so that its fit is reproduced, unless refitted
+    if (const.atm_density_model == 'polynomial') and (not cml_args.refitatm):
+        const.dens_co = np.array(const.dens_co)
+        print("Using the atmosphere density polynomial saved in the constants file, give --refitatm to " \
+            "refit it from the MSIS model.")
+
+    else:
+        const.dens_co = dens_co
 
     # Tabulate the density over the whole simulation, which is used if the constants have the table model
     atm_ht_max = max(ATM_TABLE_HT_MAX, dens_fit_ht_beg)

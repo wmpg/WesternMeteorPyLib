@@ -838,9 +838,9 @@ def atmDensityDescription(const):
             len(const.atm_table_ht), const.atm_table_ht[0]/1000, const.atm_table_ht[-1]/1000)
 
     return "Atmosphere density: {:s} table, {:.1f} to {:.1f} km every {:.0f} m, lat {:.4f} deg, " \
-        "lon {:.4f} deg, JD {:.6f}, F10.7 {:g}, F10.7A {:g}, Ap {:g}".format(info['model'], \
-        info['ht_min']/1000, info['ht_max']/1000, info['step'], info['lat'], info['lon'], info['jd'], \
-        info['f107'], info['f107a'], info['ap'])
+        "lon {:.4f} deg, JD {:.6f}, F10.7 {:g}, F10.7A {:g}, Ap {:g} ({:s} space weather)".format( \
+        info['model'], info['ht_min']/1000, info['ht_max']/1000, info['step'], info['lat'], info['lon'], \
+        info['jd'], info['f107'], info['f107a'], info['ap'], info.get('space_weather', 'constant'))
 
 
 
