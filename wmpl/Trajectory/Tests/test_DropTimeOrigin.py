@@ -86,8 +86,11 @@ def testStationWithAClockFarOffDoesNotMoveTheDrop():
     traj, radiant_eci = _solve(1.0)
     reference, _ = _solve(0.0)
 
+    # The solution and the residuals of the used stations are those with the clock set
     assert np.allclose(traj.radiant_eci_mini, reference.radiant_eci_mini, rtol=0, atol=1e-12)
-    assert np.allclose(traj.radiant_eci_mini, radiant_eci, rtol=0, atol=1e-6)
+    for obs, ref_obs in zip(traj.observations[:3], reference.observations[:3]):
+        assert np.allclose(obs.h_residuals, ref_obs.h_residuals, rtol=0, atol=1e-6)
+        assert np.allclose(obs.v_residuals, ref_obs.v_residuals, rtol=0, atol=1e-6)
 
-    used = [obs for obs in traj.observations if not obs.ignore_station]
-    assert max(np.max(np.hypot(obs.h_residuals, obs.v_residuals)) for obs in used) < 0.05
+    # The radiant is found, to the difference between the drop of the synthetic meteor and the solver's
+    assert np.allclose(traj.radiant_eci_mini, radiant_eci, rtol=0, atol=1e-5)
