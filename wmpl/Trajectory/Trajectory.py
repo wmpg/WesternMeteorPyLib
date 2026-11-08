@@ -6924,9 +6924,9 @@ class Trajectory(object):
             calc_res=(_rerun_timing and self.estimate_timing_vel), calc_lengths=False)
 
 
-        # Scale the gravity drop of the next pass for a decelerating meteor, with the lengths of this pass.
-        #   The times do not change before the next pass
-        if (not _rerun_timing) and self.gravity_correction and getattr(self, 'gravity_decel', False):
+        # Scale the gravity drop of the next pass for a decelerating meteor, with the lengths of this pass, so
+        #   each extra pass uses the lengths of the one before. The times do not change before the next pass
+        if self.gravity_correction and getattr(self, 'gravity_decel', False):
             self.calcGravityDropScale(self.observations)
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
