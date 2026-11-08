@@ -41,9 +41,10 @@ def _solve(clock_offsets=None):
         traj: [Trajectory object] Solved trajectory.
     """
 
+    # The pick filtering is off, as on noise-free data it rejects picks by the numerical noise
     traj, _, _ = observeStraightMeteor(noise=0.0, duration=DURATION, v_init=V_INIT, elevation=ELEVATION, \
         gravity_drop=True, clock_offsets=clock_offsets, estimate_timing_vel=True, gravity_correction=True, \
-        calc_orbit=False)
+        filter_picks=False, calc_orbit=False)
 
     return traj.run()
 

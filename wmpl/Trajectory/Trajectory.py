@@ -745,8 +745,75 @@ def numStationsNotIgnored(observations):
 
 
 
-def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, 
-                              gravity_factor=1.0, v0z=None):
+def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
+    """ Compute the beginning point of the trajectory, from which the gravity drop is computed.
+
+    applyGravityDrop takes r0 to be the distance of the beginning of the meteor from the centre of the Earth,
+    and its drop model descends from there with the vertical velocity, from the earliest time. Each station
+    gives the point on the radiant line closest to its first line of sight, skipping the ignored stations and
+    picks. With the initial velocity, each point is moved back along the radiant line to the earliest time,
+    and the median of the points is taken, so one station with a poor first pick does not set it. Without
+    it, the highest point is taken.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+        state_vect: [ndarray] (x, y, z) ECI coordinates of a point on the radiant line (meters).
+        radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+
+    Keyword arguments:
+        v_init: [float] Initial velocity (m/s), used to move the point back to the earliest time. None by
+            default, when it is not moved.
+
+    Return:
+        (eci0, r0): [tuple] ECI coordinates of the beginning point (meters), and its distance from the centre
+            of the Earth (meters).
+    """
+
+    # Take the first pick which is not ignored of each station which is not ignored
+    first_picks = []
+    for obs in observations:
+
+        used_picks = np.flatnonzero(np.array(obs.ignore_list) == 0)
+
+        if (not obs.ignore_station) and len(used_picks):
+            first_picks.append((obs, used_picks[0]))
+
+    # Take the first picks of all stations if all are ignored
+    if not first_picks:
+        first_picks = [(obs, 0) for obs in observations]
+
+    radiant_eci = vectNorm(radiant_eci)
+
+    # Find the earliest time, from which the drop is computed
+    t0 = min([obs.time_data[0] for obs in observations])
+
+    dist_list = []
+    for obs, i in first_picks:
+
+        # Calculate closest points of approach (observed line of sight to radiant line)
+        _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], state_vect, radiant_eci)
+
+        # Compute the distance of the point along the radiant line, moved back to the earliest time
+        dist = np.dot(rad_cpa - state_vect, radiant_eci)
+        if v_init is not None:
+            dist += v_init*(obs.time_data[i] - t0)
+
+        dist_list.append(dist)
+
+    # Take the median of the points, or the highest one without the initial velocity
+    if v_init is not None:
+        dist0 = np.median(dist_list)
+    else:
+        dist0 = max(dist_list)
+
+    eci0 = state_vect + dist0*radiant_eci
+
+    return eci0, vectMag(eci0)
+
+
+
+def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
+                              gravity_factor=1.0, v0z=None, r0=None):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -763,6 +830,9 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
         gravity: [bool] If True, the gravity drop will be taken into account.
         gravity_factor: [float] Factor by which the gravity correction will be multiplied. 1.0 by default.
         v0z: [float] Initial vertical velocity of the meteor. If None, 0.0 will be used.
+        r0: [float] Distance of the beginning of the meteor from the centre of the Earth, for the gravity drop
+            (see gravityDropReference). Fixed rather than taken from the line being fitted, so the cost stays
+            continuous. If None, the distance of each point is used.
 
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
@@ -827,14 +897,16 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
                 if v0z is None:
                     v0z = 0.0
 
-                # Get the magnitude of the radiant vector
-                rad_cpa_mag = vectMag(rad_cpa)
+                # Take the distance of the beginning of the meteor, or of the point itself if it is not given
+                r0_point = r0
+                if r0_point is None:
+                    r0_point = vectMag(rad_cpa)
 
-                # If the magnitude is 0, set it to 1 to avoid a division by zero issue
-                if rad_cpa_mag == 0:
-                    rad_cpa_mag = 1.0
+                # If the distance is 0, set it to 1 to avoid a division by zero
+                if r0_point == 0:
+                    r0_point = 1.0
 
-                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, rad_cpa_mag, gravity_factor, v0z)
+                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, gravity_factor, v0z)
                 _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
 
@@ -857,19 +929,20 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 
-def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None):
+def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
+    r0=None):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
     
     return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity,\
-        gravity_factor=gravity_factor, v0z=v0z)
+        gravity_factor=gravity_factor, v0z=v0z, r0=r0)
 
 
 
 
-def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False, gravity_factor=1.0, 
-                        v0z=None):
+def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False, gravity_factor=1.0, \
+                        v0z=None, r0=None):
     """ Calculate horizontal and vertical residuals from the radiant line, for the given observed point.
 
     Arguments:
@@ -883,6 +956,8 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
         gravity: [bool] Apply the correction for Earth's gravity.
         gravity_factor: [float] Factor by which the gravity correction will be multiplied. 1.0 by default.
         v0z: [float] Initial vertical velocity of the meteor. If None, 0.0 will be used.
+        r0: [float] Distance of the beginning of the meteor from the centre of the Earth, for the gravity drop
+            (see gravityDropReference). If None, the distance of the point itself is used.
 
     Return:
         (hres, vres): [tuple of floats] residuals in horitontal and vertical direction from the radiant line
@@ -908,7 +983,9 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
         # Correct the point on the trajectory for gravity
         if v0z is None:
             v0z = 0.0
-        rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), gravity_factor, v0z)
+        if r0 is None:
+            r0 = vectMag(rad_cpa)
+        rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, gravity_factor, v0z)
 
         # ###########################
 
@@ -2806,6 +2883,10 @@ class Trajectory(object):
         # V0z (vertical component of the initial velocity)
         self.v0z = None
 
+        # Distance of the beginning of the meteor from the centre of the Earth, fixed for the gravity pass of
+        #   the line-of-sight fit (see gravityDropReference)
+        self.gravity_r0 = None
+
         # Calculated average velocity
         self.v_avg = None
 
@@ -3063,6 +3144,9 @@ class Trajectory(object):
 
         """
 
+        # The same beginning point for the gravity drop as the line-of-sight fit
+        _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
+
         # Go though observations from all stations
         for obs in observations:
 
@@ -3075,7 +3159,7 @@ class Trajectory(object):
 
                 # Calculate horizontal and vertical residuals
                 hres, vres = calcSpatialResidual(self.jdt_ref, jd, state_vect, radiant_eci, stat, meas, \
-                    gravity=self.gravity_correction, gravity_factor=self.gravity_factor, v0z=self.v0z)
+                    gravity=self.gravity_correction, gravity_factor=self.gravity_factor, v0z=self.v0z, r0=r0)
 
                 # Add residuals to the residual list
                 obs.h_residuals.append(hres)
@@ -3130,8 +3214,12 @@ class Trajectory(object):
 
         """
 
-        # Find the earliest point in time, the reference time of the gravity drop
+        # Same reference time and beginning point as the line-of-sight fit
         t0 = min([obs.time_data[0] for obs in observations])
+        if gravity:
+            r0 = self.gravity_r0
+            if r0 is None:
+                _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
 
         # Go through observations from all stations
         for obs in observations:
@@ -3159,8 +3247,7 @@ class Trajectory(object):
                         if v0z is None:
                             v0z = 0.0
 
-                        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa), \
-                            self.gravity_factor, v0z)
+                        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, r0, self.gravity_factor, v0z)
                         _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
                         rad_cpa = rad_cpa + rad_cpa_dropped - rad_cpa_grav
 
@@ -3804,6 +3891,31 @@ class Trajectory(object):
 
 
 
+    def calcV0z(self, eci0, radiant_eci):
+        """ Compute the vertical component of the initial velocity, which the gravity drop needs (self.v0z).
+
+        Arguments:
+            eci0: [ndarray] ECI coordinates of the beginning point (see gravityDropReference).
+            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+        """
+
+        # Radiant should be calculated from radiant_eci, not state_vect_mini, which is always a near 
+        # vertical
+
+        # Compute the apparent radiant
+        ra_a, dec_a = eci2RaDec(radiant_eci)
+
+        # Compute alt/az of the apparent radiant
+        lat_0, lon_0, _ = cartesian2Geo(self.jdt_ref, *eci0)
+        _, alt_a = raDec2AltAz(ra_a, dec_a, self.jdt_ref, lat_0, lon_0)
+
+        # Compute the apparent zenith angle
+        zc = np.pi/2 - alt_a
+
+        self.v0z = -self.v_init*np.cos(zc)
+
+
+
     def calcLLA(self, state_vect, radiant_eci, observations):
         """ Calculate latitude, longitude and altitude of every point on the observer's line of sight, 
             which is closest to the radiant line.
@@ -3821,43 +3933,9 @@ class Trajectory(object):
         # Determine the first time
         t0 = min([obs.time_data[0] for obs in observations])
 
-        # Determine the largest distance from the centre of the Earth and use it as the beginning point
-        eci_list = []
-        for obs in observations:
-        
-            # Calculate closest points of approach (observed line of sight to radiant line)
-            obs_cpa, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, \
-                radiant_eci)
-
-            eci_list.append(rad_cpa)
-
-        # Find the largest distance from the centre of the Earth
-        max_dist_indx = np.argmax([vectMag(r) for r in eci_list])
-
-        # Get ECI coordinates of the largest distance and the distance itself
-        eci0 = eci_list[max_dist_indx]
-        r0 = vectMag(eci0)
-
-        
-        ### Compute the apparent zenith angle ###
-        # Radiant should be calculated from radiant_eci, not state_vect_mini, which is always a near 
-        # vertical ##
-
-        # Compute the apparent radiant
-        ra_a, dec_a = eci2RaDec(radiant_eci)
-
-        # Compute alt/az of the apparent radiant
-        lat_0, lon_0, _ = cartesian2Geo(self.jdt_ref, *eci0)
-        _, alt_a = raDec2AltAz(ra_a, dec_a, self.jdt_ref, lat_0, lon_0)
-
-        # Compute the apparent zenith angle
-        zc = np.pi/2 - alt_a
-
-        ####
-
-            
-        # Compute the vertical component of the velocity if the orbit was already computed
-        self.v0z = -self.v_init*np.cos(zc)
+        # Beginning point for the gravity drop, and the vertical velocity
+        eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
+        self.calcV0z(eci0, radiant_eci)
 
         ###########################################
 
@@ -4033,38 +4111,9 @@ class Trajectory(object):
         # Determine the first time of observation
         t0 = min([obs.time_data[0] for obs in observations])
 
-        # Determine the largest distance from the centre of the Earth and use it as the beginning point
-        eci_list = []
-        for obs in observations:
-        
-            # Calculate closest points of approach (observed line of sight to radiant line)
-            _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, \
-                radiant_eci)
-
-            eci_list.append(rad_cpa)
-
-        # Find the largest distance from the centre of the Earth
-        max_dist_indx = np.argmax([vectMag(r) for r in eci_list])
-
-        # Get ECI coordinates of the largest distance and the distance itself
-        eci0 = eci_list[max_dist_indx]
-        r0 = vectMag(eci0)
-
-        
-        ### Compute the apparent zenith angle ###
-
-        # Compute the apparent radiant
-        ra_a, dec_a = eci2RaDec(radiant_eci)
-
-        # Compute alt/az of the apparent radiant
-        lat_0, lon_0, _ = cartesian2Geo(self.jdt_ref, *eci0)
-        _, alt_a = raDec2AltAz(ra_a, dec_a, self.jdt_ref, lat_0, lon_0)
-
-        # Compute the apparent zenith angle
-        zc = np.pi/2 - alt_a
-                 
-        # Compute the vertical component of the velocity if the orbit was already computed
-        self.v0z = -self.v_init*np.cos(zc)
+        # Beginning point for the gravity drop, and the vertical velocity
+        eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
+        self.calcV0z(eci0, radiant_eci)
 
         ####
 
@@ -6289,6 +6338,11 @@ class Trajectory(object):
             return None
 
 
+        # Trajectories pickled before the beginning of the gravity drop was kept do not have it
+        if not hasattr(self, 'gravity_r0'):
+            self.gravity_r0 = None
+
+
         ### Recompute the reference JD and all times so that the first time starts at 0 ###
 
         # Determine the first relative time from reference JD
@@ -6451,8 +6505,8 @@ class Trajectory(object):
         # Calculate the initial sum and angles deviating from the radiant line
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
              self.best_conv_inter.radiant_eci, weights=weights, \
-             gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, 
-             v0z=self.v0z
+             gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, \
+             v0z=self.v0z, r0=self.gravity_r0
              )
 
         if self.verbose:
@@ -6465,7 +6519,7 @@ class Trajectory(object):
         # Perform the minimization of angle deviations. The gravity will only be compensated for in the second
         #   pass, which has the vertical velocity from the first
         minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), \
-            self.gravity_factor, self.v0z)
+            self.gravity_factor, self.v0z, self.gravity_r0)
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
             method="Nelder-Mead")
 
@@ -6538,8 +6592,8 @@ class Trajectory(object):
             print('BOUNDS:', bounds)
             print('p0:', p0)
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
-                weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), 
-                bounds=bounds, method='SLSQP')
+                weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z, \
+                self.gravity_r0), bounds=bounds, method='SLSQP')
 
             # Keep the unbounded solution if it converged and the bounded one did not converge or is worse
             if unbounded_solution.success and ((not minimize_solution.success) or \
@@ -6753,6 +6807,12 @@ class Trajectory(object):
                 # Reset fixed times to 0, as the timing offsets have already been applied
                 for station in self.fixed_time_offsets:
                     self.fixed_time_offsets[station] = 0.0
+
+                # Compute the beginning point and the vertical velocity of the gravity pass from this pass
+                if self.gravity_correction:
+                    eci0, self.gravity_r0 = gravityDropReference(self.observations, self.state_vect_mini, \
+                        self.radiant_eci_mini, v_init=self.v_init)
+                    self.calcV0z(eci0, self.radiant_eci_mini)
 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
                 # values up to this point
