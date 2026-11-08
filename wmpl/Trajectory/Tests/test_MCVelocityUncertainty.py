@@ -1,6 +1,6 @@
 """ Tests of the Monte Carlo uncertainties of the initial velocity vector (Vx, Vy, Vz) in
-    wmpl.Trajectory.Trajectory.calcMCUncertainties. They must be the spread of the velocity vectors of the runs,
-    also for the components of the radiant which are negative.
+    wmpl.Trajectory.Trajectory.calcMCUncertainties. They must be the spread of the velocity vectors of the
+    runs, also for the components of the radiant which are negative.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_MCVelocityUncertainty.py -v
