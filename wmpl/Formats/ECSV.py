@@ -10,10 +10,9 @@ import datetime
 import numpy as np
 
 from wmpl.Utils.AtmosphereDensity import setAtmosphere
-from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
-    prepareObservations, writeMiligInputFileMeteorObservation
-from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
-    equatorialCoordPrecession_vect, jd2Date
+from wmpl.Formats.GenericFunctions import addKMLOptions, addSolverOptions, solveTrajectoryGeneric, \
+    MeteorObservation, prepareObservations, writeMiligInputFileMeteorObservation
+from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
 
 
 
@@ -22,7 +21,7 @@ from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, 
 FPS = 15
 
 
-def loadECSVs(ecsv_paths, no_prepare=False):
+def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
     """ Load meteor observations from ECSV files. 
     
     Arguments:
@@ -30,6 +29,10 @@ def loadECSVs(ecsv_paths, no_prepare=False):
 
     Keyword arguments:
         no_prepare: [bool] If True, only load the observations, do not prepare them for the solver.
+        radec_per_point: [bool] Have the solver convert each point's R.A./Dec. back to azimuth/altitude at
+            that point's own time, at which they were computed from the file. True by default. False is
+            incorrect and only for reproducing solutions from before this option existed: it converts them
+            all at the reference time, which rotates each line of sight by the Earth's rotation since then.
     
     """
 
@@ -100,6 +103,10 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             # Skip the header
             data = data[1:]
 
+            # Skip the rows without the main fragment (fragment 0), i.e. the frames on which only other
+            #   fragments were measured (their columns have a numeric suffix, e.g. azimuth1)
+            data = data[np.char.strip(data[:, azim_indx]) != '']
+
             # Unpack data
             dt_data, azim_data, alt_data, x_data, y_data = data[:, dt_indx], data[:, azim_indx], \
                 data[:, alt_indx], data[:, x_indx], data[:, y_indx]
@@ -112,6 +119,18 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             # Get magnitude data, if any
             if mag_indx is not None:
                 mag_data = data[:, mag_indx].astype(np.float64)
+
+                # SkyFit2 sets the integrated pixel value to 1 if no photometry pixels were chosen, which
+                #   leaves the magnitude at the photometric offset, so these points get no magnitude
+                if 'integrated_pixel_value' in header:
+                    no_photometry = data[:, header.index('integrated_pixel_value')].astype(np.float64) <= 1
+                    mag_data[no_photometry] = np.nan
+
+                    if np.any(no_photometry):
+                        print(("Station {:s}: {:d} of {:d} points were picked without photometry " \
+                            + "(integrated pixel value 1), they have no magnitude").format(station_id, \
+                            int(np.sum(no_photometry)), len(mag_data)))
+
             else:
                 mag_data = np.zeros_like(azim_data) + 10.0
 
@@ -137,8 +156,8 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             ra_data, dec_data = altAz2RADec_vect(np.radians(azim_data), np.radians(alt_data), jd_data, \
                 np.radians(station_lat), np.radians(station_lon))
 
-            # Precess to J2000
-            ra_data, dec_data = equatorialCoordPrecession_vect(jdt_ref, J2000_JD.days, ra_data, dec_data)
+            # Precess and nutate from the epoch of date to J2000
+            ra_data, dec_data = equatorialCoordDateToJ2000_vect(jdt_ref, ra_data, dec_data)
 
             comment = '{"ff_name":' + f'"{image_file}"' +'}'
 
@@ -146,6 +165,9 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             # Init the meteor object
             meteor = MeteorObservation(jdt_ref, station_id, np.radians(station_lat), \
                 np.radians(station_lon), station_ele, FPS, ff_name=comment)
+
+            # The R.A./Dec. above were computed at each point's own time
+            meteor.radec_per_point = radec_per_point
 
             # Add data to meteor object
             for t_rel, x_centroid, y_centroid, ra, dec, azim, alt, mag in zip(time_data, x_data, y_data, \
@@ -294,7 +316,7 @@ def saveECSV(dir_path, meteor_observations,
 
 
             # Precess RA/Dec to J2000
-            ra_J2000, dec_J2000 = equatorialCoordPrecession_vect(meteor.jdt_ref, J2000_JD.days, ra, dec)
+            ra_J2000, dec_J2000 = equatorialCoordDateToJ2000_vect(meteor.jdt_ref, ra, dec)
 
 
             # Add an entry to the ECSV file
@@ -335,6 +357,7 @@ if __name__ == "__main__":
 
     # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
+    arg_parser = addKMLOptions(arg_parser)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
         help="Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.", \
@@ -346,6 +369,10 @@ if __name__ == "__main__":
     
     arg_parser.add_argument('--writemilig', metavar='MILIG_PATH', type=str, \
         help="Write the observations to a MILIG input file and exit. The MILIG_PATH argument is the path to the output file.")
+
+    arg_parser.add_argument('--radec_at_ref', \
+        help="Legacy and incorrect, only to reproduce older solutions. Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed, which rotates each line of sight by the Earth's rotation since the reference time.", \
+        action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -408,7 +435,7 @@ if __name__ == "__main__":
 
 
     # Load the observations into container objects
-    jdt_ref, meteor_list = loadECSVs(ecsv_paths)
+    jdt_ref, meteor_list = loadECSVs(ecsv_paths, radec_per_point=not cml_args.radec_at_ref)
 
 
     # Write the observations to a MILIG input file and exit
@@ -450,5 +477,7 @@ if __name__ == "__main__":
         show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
         show_jacchia=cml_args.jacchia,
         estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-        fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, enable_OSM_plot=cml_args.enableOSM)
+        fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, \
+        enable_OSM_plot=cml_args.enableOSM, save_kml=(cml_args.kml or cml_args.kmlmeas), \
+        kml_measured=cml_args.kmlmeas)
 
