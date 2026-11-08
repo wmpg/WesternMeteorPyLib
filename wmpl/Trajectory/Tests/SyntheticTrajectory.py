@@ -250,6 +250,45 @@ STRAIGHT_STATIONS = [
 
 
 
+def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, elevation=55.0, \
+    gravity_drop=False):
+    """ Compute the points of a straight, constant-velocity meteor.
+
+    Keyword arguments:
+        duration: [float] Duration of the meteor (s). STRAIGHT_DURATION by default.
+        v_init: [float] Velocity of the meteor (m/s). STRAIGHT_V_INIT by default.
+        elevation: [float] Elevation of the radiant at the beginning of the meteor (deg). 55 by default.
+        gravity_drop: [bool] Drop the meteor by gravity with applyGravityDrop, so that it is not a straight
+            line anymore. False by default.
+
+    Return:
+        (times, points, begin, radiant_eci):
+            - times: [ndarray] Times of the points, from the beginning (s).
+            - points: [ndarray] ECI coordinates of the points (m), one row per point.
+            - begin: [ndarray] ECI coordinates of the beginning of the meteor (m).
+            - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
+    """
+
+    # Compute the beginning point and the radiant
+    lat, lon = np.radians(STRAIGHT_BEG_LAT), np.radians(STRAIGHT_BEG_LON)
+    begin = np.array(geo2Cartesian(lat, lon, STRAIGHT_BEG_HT, STRAIGHT_JDT_REF))
+    ra, dec = altAz2RADec(np.radians(210.0), np.radians(elevation), STRAIGHT_JDT_REF, lat, lon)
+    radiant_eci = np.array(raDec2ECI(ra, dec))
+
+    # Compute the points along the trajectory
+    times = np.linspace(0, duration, STRAIGHT_N_POINTS)
+    points = begin - np.outer(v_init*times, radiant_eci)
+
+    # Drop the points by gravity, with the vertical component of the velocity
+    if gravity_drop:
+        v0z = -v_init*np.sin(np.radians(elevation))
+        points = np.array([applyGravityDrop(point, t, vectMag(begin), 1.0, v0z) \
+            for point, t in zip(points, times)])
+
+    return times, points, begin, radiant_eci
+
+
+
 def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, \
     elevation=55.0, gravity_drop=False, clock_offsets=None, **kwargs):
     """ Observe a straight, constant-velocity meteor from three stations and make a trajectory object.
@@ -280,21 +319,9 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
     if clock_offsets is None:
         clock_offsets = {}
 
-    # Compute the beginning point and the radiant
-    lat, lon = np.radians(STRAIGHT_BEG_LAT), np.radians(STRAIGHT_BEG_LON)
-    begin = np.array(geo2Cartesian(lat, lon, STRAIGHT_BEG_HT, STRAIGHT_JDT_REF))
-    ra, dec = altAz2RADec(np.radians(210.0), np.radians(elevation), STRAIGHT_JDT_REF, lat, lon)
-    radiant_eci = np.array(raDec2ECI(ra, dec))
-
     # Compute the points along the trajectory
-    times = np.linspace(0, duration, STRAIGHT_N_POINTS)
-    points = begin - np.outer(v_init*times, radiant_eci)
-
-    # Drop the points by gravity, with the vertical component of the velocity
-    if gravity_drop:
-        v0z = -v_init*np.sin(np.radians(elevation))
-        points = np.array([applyGravityDrop(point, t, vectMag(begin), 1.0, v0z) \
-            for point, t in zip(points, times)])
+    times, points, begin, radiant_eci = straightMeteorPoints(duration=duration, v_init=v_init, \
+        elevation=elevation, gravity_drop=gravity_drop)
 
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
         show_plots=False, save_results=False, verbose=False)

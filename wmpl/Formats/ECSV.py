@@ -151,7 +151,7 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             ra_data, dec_data = altAz2RADec_vect(np.radians(azim_data), np.radians(alt_data), jd_data, \
                 np.radians(station_lat), np.radians(station_lon))
 
-            # Precess to J2000, from the true equator and equinox of date altAz2RADec_vect gives
+            # Precess and nutate from the epoch of date to J2000
             ra_data, dec_data = equatorialCoordDateToJ2000_vect(jdt_ref, ra_data, dec_data)
 
             comment = '{"ff_name":' + f'"{image_file}"' +'}'
