@@ -66,7 +66,6 @@ from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
 
 
 class TimeoutException(Exception):
@@ -4047,7 +4046,8 @@ class ObservationData:
                             except (IndexError, ValueError):
                                 continue
 
-                if not (lum_eff_type_val == 0 and lum_eff_type_fixed):
+                # Use the default also when the constant model is fixed without a lum_eff line
+                if (not (lum_eff_type_val == 0 and lum_eff_type_fixed)) or (luminous_efficiency is None):
                     luminous_efficiency = 0.7  # fallback default
 
             else:
@@ -4060,16 +4060,13 @@ class ObservationData:
             # Compute the photometric mass
             photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, tau=luminous_efficiency/100, P_0m=self.P_0m)
 
-            # run in case we have a different lum_eff_type than constant luminous efficiency to better estimate the correct mass range
-            if lum_eff_type_val is not None and not (lum_eff_type_val == 0 and lum_eff_type_fixed):
-                # Get the luminous efficiency
-                tau_lum_eff_type = luminousEfficiency(lum_eff_type_val, luminous_efficiency, self.v_init, photom_mass)
-                print("NOTE: Adjusting luminous efficiency for the given lum_eff_type new luminous efficiency =", tau_lum_eff_type)
-                if tau_lum_eff_type <= 0:
-                    print("WARNING: Computed non-physical luminous efficiency. Using constant value instead.")
-                else:
-                    # Recompute the photometric mass with the new luminous efficiency
-                    photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, tau=tau_lum_eff_type, P_0m=self.P_0m)
+            # Recompute the mass with the luminous efficiency model at the average speed, iterated by calcMass() to
+            #   the mass it gives
+            if (lum_eff_type_val is not None) and (lum_eff_type_val != 0):
+                photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, \
+                    tau=int(lum_eff_type_val), P_0m=self.P_0m)
+                print("NOTE: Recomputed the mass with the luminous efficiency model lum_eff_type = {:d} at the " \
+                    "average speed: {:.4e} kg".format(int(lum_eff_type_val), photom_mass))
 
             m_init_list.append(photom_mass)
 
