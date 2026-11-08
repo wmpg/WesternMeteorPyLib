@@ -32,7 +32,7 @@ CLOCK_OFFSET = -0.3
 
 
 
-def _solve(per_point=True, cams=False, clock_offsets=None, **kwargs):
+def _solve(per_point=True, cams=False, clock_offsets=None, time_shift=0.0, **kwargs):
     """ Solve the noise-free straight meteor from R.A./Dec. measurements.
 
     Keyword arguments:
@@ -43,6 +43,8 @@ def _solve(per_point=True, cams=False, clock_offsets=None, **kwargs):
         clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. The camera
             measures the azimuth and elevation, which are converted to R.A./Dec. at the time its clock shows.
             None by default, when all clocks are exact.
+        time_shift: [float] Seconds from the reference time to the first point, the same for all stations. 0
+            by default.
         **kwargs: [dict] Keyword arguments of the Trajectory object, which replace the defaults (no timing
             estimation, no gravity correction, no pick filtering, no Monte Carlo, no plots and no saving).
 
@@ -56,6 +58,7 @@ def _solve(per_point=True, cams=False, clock_offsets=None, **kwargs):
         clock_offsets = {}
 
     times, points, _, radiant_eci = straightMeteorPoints()
+    times = times + time_shift
 
     # The pick filtering is off, as on noise-free data it rejects picks by the numerical noise
     traj_kwargs = dict(meastype=1, max_toffset=1.0, estimate_timing_vel=False, gravity_correction=False, \
@@ -155,6 +158,20 @@ def testCamsRaDecStillInvert():
 
     assert _worstResidual(traj) < 0.01
     assert _radiantError(traj.radiant_eci_mini, radiant_eci) < 0.01
+
+
+
+def testPerPointRaDecInvertWhenTheFirstPointIsAfterTheReferenceTime():
+    """ Check that per-point R.A./Dec. are inverted when the solver moves the reference time to the first
+        point, and converts the R.A./Dec. again for the next pass. Those computed at the time of each point do
+        not depend on the reference time, so they must be kept as they are: converted again at the reference
+        time, they left 22 m of residual.
+    """
+
+    traj, radiant_eci = _solve(time_shift=0.7, estimate_timing_vel=True)
+
+    assert _worstResidual(traj) < 0.05
+    assert _radiantError(traj.radiant_eci_mini, radiant_eci) < 0.05
 
 
 

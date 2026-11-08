@@ -6309,13 +6309,17 @@ class Trajectory(object):
             self.jdt_ref = self.jdt_ref + t0/86400.0
 
             # Recompute the given RA and Dec for the new reference JD, as they are converted to azimuth and
-            #   elevation at the reference JD when the observations are reinitialized for the next pass. Those
-            #   computed at each point's own time are converted at radec_jd, which does not change
+            #   elevation at the reference JD when the observations are reinitialized for the next pass
             if self.meastype == 1:
                 for obs in self.observations:
-                    if obs.radec_jd is None:
-                        obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, \
-                            self.jdt_ref, obs.lat, obs.lon)
+
+                    # R.A. and Dec. computed at each point's own time are converted at those times, not at the
+                    #   reference JD, so they stay as they are
+                    if getattr(obs, 'radec_jd', None) is not None:
+                        continue
+
+                    obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, self.jdt_ref, \
+                        obs.lat, obs.lon)
 
 
         ###################################################################################
