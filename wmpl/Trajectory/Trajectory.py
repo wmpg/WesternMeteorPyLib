@@ -1412,6 +1412,191 @@ def moveStateVector(state_vect, radiant_eci, observations):
 
 
 
+# Size of the first simplex of the line-of-sight fit, as a move of the line at the ends of the meteor (m)
+LOS_SIMPLEX_SIZE = 100.0
+
+# Size of the simplex at which a Nelder-Mead minimization of the line-of-sight fit stops (m)
+LOS_SIMPLEX_TOLERANCE = 1e-4
+
+# Largest move of the line by a fresh simplex at which the line-of-sight fit has converged (m)
+LOS_RESTART_TOLERANCE = 1e-3
+
+# Largest number of fresh simplices in the line-of-sight fit
+LOS_MAX_SIMPLICES = 10
+
+# Directions of the steps of the fresh simplices of the line-of-sight fit, along the coordinates and turned
+#   by an orthogonal Hadamard matrix, used in turn
+LOS_SIMPLEX_DIRECTIONS = [np.eye(4), 0.5*np.array([[1.0, 1.0, 1.0, 1.0], [1.0, -1.0, 1.0, -1.0], \
+    [1.0, 1.0, -1.0, -1.0], [1.0, -1.0, -1.0, 1.0]])]
+
+
+
+def lineFrame(state_vect, radiant_eci, observations):
+    """ Make a frame of coordinates for the lines near the given line. A line has four degrees of freedom,
+        two for a rotation about the middle of the meteor and two for a shift across the line. Both are
+        given as the move of the line at the ends of the observed part of the meteor (m), so the coordinates
+        have comparable scales. A move along the line and the length of the radiant vector are left out, as
+        they do not change the angles between the line and the lines of sight.
+
+    Arguments:
+        state_vect: [ndarray] (x, y, z) ECI coordinates of a point on the line (meters).
+        radiant_eci: [ndarray] (x, y, z) components of the radiant direction vector.
+        observations: [list] A list of ObservationPoints objects which hold measurements from individual
+            stations.
+
+    Return:
+        (middle, half_length, radiant, axes):
+            - middle: [ndarray] ECI coordinates of the middle of the observed part of the meteor (meters).
+            - half_length: [float] Half of the length of the observed part of the meteor (meters).
+            - radiant: [ndarray] Unit radiant vector of the line.
+            - axes: [ndarray] Two unit vectors perpendicular to the radiant, as rows.
+    """
+
+    radiant = vectNorm(radiant_eci)
+
+    # Project the first and the last used point of every used station on the line
+    distances = []
+    for obs in observations:
+
+        if obs.ignore_station:
+            continue
+
+        used = np.where(np.array(obs.ignore_list) == 0)[0]
+        if len(used) == 0:
+            continue
+
+        for i in (used[0], used[-1]):
+            _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], state_vect, radiant)
+            distances.append(np.dot(rad_cpa - state_vect, radiant))
+
+    # Take the middle of the observed part, and keep the half length above 1 m
+    middle = np.array(state_vect, dtype=np.float64)
+    half_length = 1.0
+    if distances:
+        middle = state_vect + radiant*(min(distances) + max(distances))/2
+        half_length = max((max(distances) - min(distances))/2, 1.0)
+
+    # Choose two axes perpendicular to the radiant
+    reference = np.array([1.0, 0.0, 0.0])
+    if np.abs(radiant[0]) > 0.9:
+        reference = np.array([0.0, 1.0, 0.0])
+
+    axis_1 = vectNorm(np.cross(radiant, reference))
+    axis_2 = np.cross(radiant, axis_1)
+
+
+    return middle, half_length, radiant, np.array([axis_1, axis_2])
+
+
+
+def lineFromFrame(coords, frame):
+    """ Compute the line at the given coordinates of a frame made by lineFrame.
+
+    Arguments:
+        coords: [ndarray] Rotation (2) and shift (2) of the line, as moves at the ends of the meteor (meters).
+        frame: [tuple] Frame of the coordinates, as returned by lineFrame.
+
+    Return:
+        [ndarray] ECI coordinates of a point on the line (meters) and the unit radiant vector, joined.
+    """
+
+    middle, half_length, radiant, axes = frame
+
+    return np.r_[middle + np.dot(coords[2:], axes), vectNorm(radiant + np.dot(coords[:2], axes)/half_length)]
+
+
+
+def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
+    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame),
+        to be given to scipy.optimize.minimize as the method. With the six parameters of a state vector and
+        a radiant vector, the simplex can wander along the line, where the cost does not change, or collapse
+        and stop short of the minimum, the known way Nelder-Mead fails (McKinnon 1998). The minimization is
+        started again from its solution with a fresh simplex, the usual remedy (Kelley 1999), until two fresh
+        simplices in a row move the line by less than LOS_RESTART_TOLERANCE. The fresh simplices take their
+        steps along the coordinates and along turned directions in turn, so that a narrow valley across the
+        coordinates is not missed, and their size is ten times the last move, between 1 m and
+        LOS_SIMPLEX_SIZE.
+
+        References:
+            McKinnon, K. I. M. (1998). Convergence of the Nelder-Mead simplex method to a nonstationary
+                point. SIAM Journal on Optimization, 9(1), 148-158.
+            Kelley, C. T. (1999). Detection and remediation of stagnation in the Nelder-Mead algorithm using
+                a sufficient decrease condition. SIAM Journal on Optimization, 10(1), 43-55.
+
+    Arguments:
+        fun: [function] Cost of the line, called as fun(params, *args), where params are the ECI coordinates
+            of a point on the line (meters) and the radiant vector, joined.
+        x0: [ndarray] Initial parameters of the line.
+
+    Keyword arguments:
+        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects. An empty
+            tuple by default.
+        maxfev: [int] Largest number of evaluations of the cost in all minimizations. None by default, when
+            each minimization has the limit of the Nelder-Mead method of scipy.
+        kwargs: [dict] Other arguments given by scipy.optimize.minimize, not used.
+
+    Return:
+        [OptimizeResult] Result of the last Nelder-Mead minimization, with the point on the line moved to the
+            beginning of the meteor, a unit radiant vector, and the iterations and evaluations of all
+            minimizations.
+    """
+
+    observations = args[0]
+    params = np.array(x0, dtype=np.float64)
+    simplex_size = LOS_SIMPLEX_SIZE
+    still_runs = 0
+    nit = 0
+    nfev = 0
+
+    for i in range(LOS_MAX_SIMPLICES):
+
+        # Start from a fresh simplex around the current line
+        frame = lineFrame(params[:3], params[3:], observations)
+        directions = LOS_SIMPLEX_DIRECTIONS[i%len(LOS_SIMPLEX_DIRECTIONS)]
+        simplex = np.vstack([np.zeros(4), simplex_size*directions])
+
+        # Stop each minimization on the size of the simplex only
+        options = {'initial_simplex': simplex, 'xatol': LOS_SIMPLEX_TOLERANCE, 'fatol': np.inf}
+
+        # Give each minimization the evaluations which are left
+        if maxfev is not None:
+            options['maxfev'] = maxfev - nfev
+
+        solution = scipy.optimize.minimize(lambda coords: fun(lineFromFrame(coords, frame), *args), \
+            np.zeros(4), method='Nelder-Mead', options=options)
+
+        nit += solution.nit
+        nfev += solution.nfev
+        params = lineFromFrame(solution.x, frame)
+
+        # Stop when no evaluations are left
+        if (maxfev is not None) and (nfev >= maxfev):
+            break
+
+        # Stop when two fresh simplices in a row converged without moving the line
+        move = np.max(np.abs(solution.x))
+        if solution.success and (move < LOS_RESTART_TOLERANCE):
+            still_runs += 1
+        else:
+            still_runs = 0
+
+        if still_runs >= 2:
+            break
+
+        # Scale the next simplex to the last move
+        simplex_size = min(max(10*move, 1.0), LOS_SIMPLEX_SIZE)
+
+    # Return the line with the state vector at the beginning of the meteor
+    params[:3] = moveStateVector(params[:3], params[3:], observations)
+    solution.x = params
+    solution.nit = nit
+    solution.nfev = nfev
+
+
+    return solution
+
+
+
 
 class MCUncertainties(object):
     def __init__(self, mc_traj_list):
@@ -6521,7 +6706,7 @@ class Trajectory(object):
         minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), \
             self.gravity_factor, self.v0z, self.gravity_r0)
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
-            method="Nelder-Mead")
+            method=nelderMeadLine)
 
         # Get the number of restarts, which trajectories pickled before the option was added do not have
         los_restarts = getattr(self, 'los_restarts', 0)
@@ -6531,14 +6716,13 @@ class Trajectory(object):
         for _ in range(los_restarts):
 
             restarted_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
-                args=minimize_args, method="Nelder-Mead")
+                args=minimize_args, method=nelderMeadLine)
 
             if restarted_solution.success or (not minimize_solution.success):
                 minimize_solution = restarted_solution
 
         # Continue a minimization which ran out of function evaluations from the beginning of the meteor on
-        #   the line, as the cost does not change along the line and the simplex can end up billions of
-        #   meters away from the meteor, where it does not converge
+        #   the line
         for _ in range(LOS_CONTINUE_RUNS):
 
             if minimize_solution.success:
@@ -6547,7 +6731,7 @@ class Trajectory(object):
             restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], \
                 self.observations), vectNorm(minimize_solution.x[3:])]
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, \
-                method="Nelder-Mead")
+                method=nelderMeadLine)
 
         # Minimize again from the previous solution (of the pass before the timing was estimated, or the main
         #   solution in a Monte Carlo run) if its cost is lower than at the minimum found, as the minimization
@@ -6559,7 +6743,7 @@ class Trajectory(object):
             if minimizeAngleCost(previous, *minimize_args) < minimize_solution.fun:
 
                 previous_solution = scipy.optimize.minimize(minimizeAngleCost, previous, \
-                    args=minimize_args, method="Nelder-Mead")
+                    args=minimize_args, method=nelderMeadLine)
 
                 if previous_solution.success or (not minimize_solution.success):
                     minimize_solution = previous_solution
