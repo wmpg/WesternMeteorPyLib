@@ -23,10 +23,10 @@ from wmpl.Utils.Physics import calcMass
 
 # Solved trajectory shipped with the repository
 DYNESTY_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXAMPLE_PICKLE = os.path.join(DYNESTY_DIR, "examples", "20191023_091225", "20191023_091225_trajectory.pickle")
+EXAMPLE_PICKLE = os.path.join(DYNESTY_DIR, 'examples', '20191023_091225', '20191023_091225_trajectory.pickle')
 
 # Prior file to which the luminous efficiency lines are added
-BASE_PRIOR = os.path.join(DYNESTY_DIR, "priors", "stony_meteoroid_SingleBody.prior")
+BASE_PRIOR = os.path.join(DYNESTY_DIR, 'priors', 'stony_meteoroid_SingleBody.prior')
 
 
 
@@ -37,13 +37,12 @@ def _photometricMass(lum_eff_lines):
         lum_eff_lines: [list of str] Lines of the prior file that set the luminous efficiency.
 
     Return:
-        (m_init, calls):
-            - m_init: [float] Photometric mass estimated by ObservationData() (kg).
-            - calls: [list] Arguments, keyword arguments and result of each call of calcMass().
+        m_init: [float] Photometric mass estimated by ObservationData() (kg).
+        calls: [list] Arguments, keyword arguments and result of each call of calcMass().
     """
 
     with open(BASE_PRIOR) as f:
-        lines = [line for line in f if not line.startswith("lum_eff")]
+        lines = [line for line in f if not line.startswith('lum_eff')]
 
     # Record the calls of calcMass()
     calls = []
@@ -59,12 +58,12 @@ def _photometricMass(lum_eff_lines):
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
 
-            prior_path = os.path.join(tmp_dir, "test.prior")
-            with open(prior_path, "w") as f:
-                f.writelines(lines + [line + "\n" for line in lum_eff_lines])
+            prior_path = os.path.join(tmp_dir, 'test.prior')
+            with open(prior_path, 'w') as f:
+                f.writelines(lines + [line + '\n' for line in lum_eff_lines])
 
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+                warnings.simplefilter('ignore')
                 m_init = DynestyMetSim.ObservationData([EXAMPLE_PICKLE], prior_file_path=prior_path).m_init
 
     finally:
@@ -79,17 +78,17 @@ def testTheModelIsEvaluatedAtTheAverageSpeed():
         that the mass is the one the model gives at that mass.
     """
 
-    m_init, calls = _photometricMass(["lum_eff_type, 5, fix"])
+    m_init, calls = _photometricMass(['lum_eff_type, 5, fix'])
 
     # The last call computes the mass with the model
     (time_arr, mag_arr, velocity), kwargs, mass = calls[-1]
 
-    assert kwargs["tau"] == 5
+    assert kwargs['tau'] == 5
     assert np.ndim(velocity) == 0
     assert mass == m_init
 
     # Check that the mass is self-consistent
-    mass_at_mass = calcMass(time_arr, mag_arr, velocity, tau=5, P_0m=kwargs["P_0m"], lum_eff_mass=mass)
+    mass_at_mass = calcMass(time_arr, mag_arr, velocity, tau=5, P_0m=kwargs['P_0m'], lum_eff_mass=mass)
 
     assert np.isclose(mass_at_mass, mass, rtol=1e-3)
 
@@ -100,9 +99,9 @@ def testTheConstantModelWithoutAValueTakesTheDefault():
         dividing None.
     """
 
-    mass_default, _ = _photometricMass(["lum_eff_type, 0, fix"])
-    mass_explicit, _ = _photometricMass(["lum_eff_type, 0, fix", "lum_eff, 0.7, fix"])
-    mass_double, _ = _photometricMass(["lum_eff_type, 0, fix", "lum_eff, 1.4, fix"])
+    mass_default, _ = _photometricMass(['lum_eff_type, 0, fix'])
+    mass_explicit, _ = _photometricMass(['lum_eff_type, 0, fix', 'lum_eff, 0.7, fix'])
+    mass_double, _ = _photometricMass(['lum_eff_type, 0, fix', 'lum_eff, 1.4, fix'])
 
     assert mass_default == mass_explicit
     assert np.isclose(mass_double, mass_default/2, rtol=1e-9)
