@@ -3249,7 +3249,16 @@ class MetSimGUI(QMainWindow):
             print("No photometry, assuming default mass:", self.const.m_init)
             return 0, self.const.m_init
 
-        print("NOTE: The mass was computing using a constant luminous efficiency defined in the GUI!")
+        # Use the constant luminous efficiency from the GUI
+        if self.const.lum_eff_type == 0:
+            tau = self.const.lum_eff/100
+            print("NOTE: The mass was computed using the constant luminous efficiency defined in the GUI!")
+
+        # Pass the code of the chosen model, which calcMass() evaluates at the average velocity
+        else:
+            tau = int(self.const.lum_eff_type)
+            print("NOTE: The mass was computed using the luminous efficiency model chosen in the GUI " \
+                "(lum_eff_type = {:d}) at the average velocity!".format(tau))
 
         # Sort array by time
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
@@ -3271,7 +3280,7 @@ class MetSimGUI(QMainWindow):
 
         # Compute the photometric mass
         photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, \
-            tau=self.const.lum_eff/100, P_0m=self.const.P_0m)
+            tau=tau, P_0m=self.const.P_0m)
 
         
         return radiated_energy, photom_mass
@@ -3312,7 +3321,10 @@ class MetSimGUI(QMainWindow):
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
         self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         
+        # Block the signal so that showing the previous simulation does not change the current model
+        self.lumEffComboBox.blockSignals(True)
         self.lumEffComboBox.setCurrentIndex(const.lum_eff_type)
+        self.lumEffComboBox.blockSignals(False)
 
         # Enable/disable the constant tau box (index 0 = constant tau)
         self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
@@ -3428,12 +3440,32 @@ class MetSimGUI(QMainWindow):
 
 
     def updateLumEffType(self):
-        """ Update the luminous efficiency type. """
+        """ Update the luminous efficiency type and rescale the initial mass by the change in the photometric
+            mass, as updateInitialMass() does for the constant luminous efficiency.
+        """
 
-        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
+        # Skip if the type did not change
+        lum_eff_type = self.lumEffComboBox.currentIndex()
+        if lum_eff_type == self.const.lum_eff_type:
+            return
+
+        # Read the edits in the other input boxes, which the refresh below would discard
+        lum_eff_type_old = self.const.lum_eff_type
+        self.readInputBoxes()
+        self.const.lum_eff_type = lum_eff_type_old
+
+        # Compute the photometric mass with the old and the new luminous efficiency
+        _, photom_mass_old = self.calcPhotometricMass()
+        self.const.lum_eff_type = lum_eff_type
+        _, photom_mass_new = self.calcPhotometricMass()
 
         # Enable/disable the constant tau box (index 0 = constant tau)
         self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
+
+        # Rescale the initial mass, which does not change without photometry
+        self.const.m_init *= photom_mass_new/photom_mass_old
+
+        self.updateInputBoxes()
 
 
     def updateGrainDiameters(self):
