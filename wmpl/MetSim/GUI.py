@@ -29,13 +29,14 @@ from PyQt5.uic import loadUi
 from wmpl.Formats.Met import loadMet
 from wmpl.Formats.ECSV import loadECSVs
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin, \
+    constantsRelativeToGround, loadedConstantsRelativeToGround
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, getAtmDensityTable, \
     atmDensTable
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
-from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
+from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
 from wmpl.Utils.TrajConversions import unixTime2JD, datetime2JD, jd2Date, geo2Cartesian, cartesian2Geo, \
@@ -156,6 +157,16 @@ class SimulationResults(object):
         ###
 
 
+        # Add the Earth's rotation along the path to give the lengths and speeds in the inertial frame of the
+        #   trajectory solver, as MetSim simulates the motion relative to the ground
+        self.v_rotation = getattr(self.const, 'v_rotation', 0.0)
+        if self.v_rotation:
+            for name in ('brightest', 'leading_frag', 'main'):
+                setattr(self, name + '_length_arr', getattr(self, name + '_length_arr') \
+                    + self.v_rotation*self.time_arr)
+                setattr(self, name + '_vel_arr', getattr(self, name + '_vel_arr') + self.v_rotation)
+
+
     def writeCSV(self, dir_path, file_name):
 
         # Combine data into one array
@@ -182,6 +193,12 @@ class SimulationResults(object):
                   "log10 Lum total (W), log10 Lum main (W), log10 Lum grain (W), "+\
                   "log10 Electron line density (-/m), Mass total (kg), Mass main (kg)"
 
+        # Note the frame of the lengths and speeds
+        if self.v_rotation:
+            header += "\nLengths and speeds are in the inertial frame of the trajectory solver. Subtract " \
+                "the Earth's rotation along the path, v_rotation = {:.2f} m/s, for the speeds relative to " \
+                "the air.".format(self.v_rotation)
+
 
         # If the file cannot be opened, throw an error message
         try:
@@ -204,6 +221,7 @@ class SimulationResults(object):
 
             # Write the data
             np.savetxt(f, out_arr, fmt='%.5e', delimiter=',', newline='\n', header=header, comments="# ")
+
 
 
 class ECSVObservations(object):
@@ -1350,9 +1368,9 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
 
     ### Compute the residuals ###
 
-    # Count the total number of length and magnitude points
-    mag_point_count = len(~np.isnan(fit_input_data[:, 1]))
-    lag_point_count = len(~np.isnan(fit_input_data[:, 2]))
+    # Count the length and magnitude points with a measurement
+    mag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 1])), 1)
+    lag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 2])), 1)
 
     # Interpolate simulated magnitude and length
     len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr, \
@@ -1393,15 +1411,16 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # if np.isnan(mag_res):
         #     mag_res = 10.0
 
-        # Compute the magnitude residual in linear luminosity units
+        # Compute the magnitude residual in linear luminosity units, for the points with a magnitude
+        mag_res = 0
         if not np.isnan(mag):
             lum_obs = const.P_0m*10**(-0.4*mag)
             lum_sim = const.P_0m*10**(-0.4*mag_sim)
 
             mag_res = mag_weight*(lum_obs - lum_sim)**2
 
-        if np.isnan(mag_res):
-            mag_res = 1e6**2
+            if np.isnan(mag_res):
+                mag_res = 1e6**2
 
 
         # Choose the lag weight
@@ -2288,17 +2307,21 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
 
         # Set a default filter which takes all observations
         mag_filter = np.ones(len(obs.model_ht), dtype=bool)
+        len_filter = np.ones(len(obs.model_ht), dtype=bool)
 
         if obs.absolute_magnitudes is not None:
 
             # Filter out observations with magnitude fainter than +9 or with NaN magnitudes
             mag_filter = (obs.absolute_magnitudes < 9) & (~np.isnan(obs.absolute_magnitudes))
 
+            # The lengths of the points without a magnitude are still plotted
+            len_filter = ~(obs.absolute_magnitudes >= 9)
+
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
 
         # Sample the simulated normalized length at observed times
-        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[mag_filter])
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[len_filter])
 
 
         # Select plot parameters for the current station
@@ -2337,33 +2360,33 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
             # sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[mag_filter]
 
             # Compute the observed lag using the simulated velocity
-            obs_lag = obs.state_vect_dist[mag_filter] - sim_vel_beg*obs.time_data[mag_filter]
+            obs_lag = obs.state_vect_dist[len_filter] - sim_vel_beg*obs.time_data[len_filter]
 
             # Plot the observed lag
-            ax_lenres.plot(obs_lag, obs.model_ht[mag_filter]/1000, **plot_params)
+            ax_lenres.plot(obs_lag, obs.model_ht[len_filter]/1000, **plot_params)
             
             # ax_lenres.plot(sim_lag, obs.model_ht[mag_filter]/1000, **plot_params_dict["sim"])
 
         else:
 
             # Compute the length residuals
-            len_residuals = obs.state_vect_dist[mag_filter] - sim_norm_len_sampled
+            len_residuals = obs.state_vect_dist[len_filter] - sim_norm_len_sampled
 
             # Demean the residuals
             len_residuals = len_residuals - np.median(len_residuals)
 
             # Plot the length residuals
-            ax_lenres.plot(len_residuals, obs.model_ht[mag_filter]/1000, **plot_params)
+            ax_lenres.plot(len_residuals, obs.model_ht[len_filter]/1000, **plot_params)
 
 
-        if len(obs.model_ht[mag_filter]):
+        if len(obs.model_ht[len_filter]):
             # Keep track of the observed height range
-            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
-            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
+            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[len_filter]))
+            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[len_filter]))
 
             # Keep track of the observed time range
-            time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
-            time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
+            time_obs_max = max(time_obs_max, np.max(obs.time_data[len_filter]))
+            time_obs_min = min(time_obs_min, np.min(obs.time_data[len_filter]))
 
 
     # Compute the magnitude residuals from the ECSV files
@@ -2372,9 +2395,13 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
         # Plot additional magnitudes for all sites
         for site in ecsv_obs.sites:
 
-            # Extract data (filter out inf values)
-            height_data = ecsv_obs.height_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
-            abs_mag_data = ecsv_obs.abs_mag_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
+            # Extract data (filter out inf values and the points without a magnitude)
+            height_data = ecsv_obs.height_data[site][np.isfinite(ecsv_obs.abs_mag_data[site])]
+            abs_mag_data = ecsv_obs.abs_mag_data[site][np.isfinite(ecsv_obs.abs_mag_data[site])]
+
+            # Skip the sites without magnitudes
+            if len(abs_mag_data) == 0:
+                continue
 
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(height_data)
@@ -2935,6 +2962,9 @@ class MetSimGUI(QMainWindow):
                 if const_json['erosion_sigma_change'] != const_json['sigma']:
                     self.erosion_different_sigma = True
 
+            # Convert constants saved with the inertial speed to the ground
+            loadedConstantsRelativeToGround(self.const, const_json, self.traj)
+
             # if 'fragmentation_string' in const_json:
             #     if const_json['fragmentation_string'] is not None:
             #         self.fragmentation = FragmentationContainer(self, os.path.join(self.dir_path, \
@@ -2977,9 +3007,12 @@ class MetSimGUI(QMainWindow):
             self.const.erosion_on = False
             self.const.disruption_on = False
 
-            # Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
+            # Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into
             # account
             self.computeSimZenithAngle()
+
+            # Convert the inertial speed and zenith angle to the ground
+            constantsRelativeToGround(self.const, earthRotationSpeed(self.traj))
 
             # Calculate the photometric mass
             _, self.const.m_init = self.calcPhotometricMass()
@@ -3254,7 +3287,16 @@ class MetSimGUI(QMainWindow):
             print("No photometry, assuming default mass:", self.const.m_init)
             return 0, self.const.m_init
 
-        print("NOTE: The mass was computing using a constant luminous efficiency defined in the GUI!")
+        # Use the constant luminous efficiency from the GUI
+        if self.const.lum_eff_type == 0:
+            tau = self.const.lum_eff/100
+            print("NOTE: The mass was computed using the constant luminous efficiency defined in the GUI!")
+
+        # Pass the code of the chosen model, which calcMass() evaluates at the average ground-relative speed
+        else:
+            tau = int(self.const.lum_eff_type)
+            print("NOTE: The mass was computed using the luminous efficiency model chosen in the GUI " \
+                "(lum_eff_type = {:d}) at the average speed relative to the ground!".format(tau))
 
         # Sort array by time
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
@@ -3265,13 +3307,18 @@ class MetSimGUI(QMainWindow):
         # Average out the magnitudes
         time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
 
+        # A light curve of a single point cannot be integrated, so the default mass is used
+        if len(np.unique(time_arr)) < 2:
+            print("Too few photometry points, assuming default mass:", self.const.m_init)
+            return 0, self.const.m_init
+
 
         # Calculate the radiated energy
         radiated_energy = calcRadiatedEnergy(np.array(time_arr), np.array(mag_arr), P_0m=self.const.P_0m)
 
         # Compute the photometric mass
-        photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, \
-            tau=self.const.lum_eff/100, P_0m=self.const.P_0m)
+        photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg_norot, \
+            tau=tau, P_0m=self.const.P_0m)
 
         
         return radiated_energy, photom_mass
@@ -3312,7 +3359,10 @@ class MetSimGUI(QMainWindow):
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
         self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         
+        # Block the signal so that showing the previous simulation does not change the current model
+        self.lumEffComboBox.blockSignals(True)
         self.lumEffComboBox.setCurrentIndex(const.lum_eff_type)
+        self.lumEffComboBox.blockSignals(False)
 
         # Enable/disable the constant tau box (index 0 = constant tau)
         self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
@@ -3428,12 +3478,32 @@ class MetSimGUI(QMainWindow):
 
 
     def updateLumEffType(self):
-        """ Update the luminous efficiency type. """
+        """ Update the luminous efficiency type and rescale the initial mass by the change in the photometric
+            mass, as updateInitialMass() does for the constant luminous efficiency.
+        """
 
-        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
+        # Skip if the type did not change
+        lum_eff_type = self.lumEffComboBox.currentIndex()
+        if lum_eff_type == self.const.lum_eff_type:
+            return
+
+        # Read the edits in the other input boxes, which the refresh below would discard
+        lum_eff_type_old = self.const.lum_eff_type
+        self.readInputBoxes()
+        self.const.lum_eff_type = lum_eff_type_old
+
+        # Compute the photometric mass with the old and the new luminous efficiency
+        _, photom_mass_old = self.calcPhotometricMass()
+        self.const.lum_eff_type = lum_eff_type
+        _, photom_mass_new = self.calcPhotometricMass()
 
         # Enable/disable the constant tau box (index 0 = constant tau)
         self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
+
+        # Rescale the initial mass, which does not change without photometry
+        self.const.m_init *= photom_mass_new/photom_mass_old
+
+        self.updateInputBoxes()
 
 
     def updateGrainDiameters(self):
@@ -4092,9 +4162,11 @@ class MetSimGUI(QMainWindow):
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x', 
                     linestyle='dashed', label=str(site), markersize=5, linewidth=1)
 
-                # Keep track of the faintest and the brightest magnitude
-                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
-                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+                # Keep track of the faintest and the brightest magnitude, skipping the points without one
+                abs_mag_finite = abs_mag_data[np.isfinite(abs_mag_data)]
+                if len(abs_mag_finite):
+                    mag_brightest = min(mag_brightest, np.min(abs_mag_finite))
+                    mag_faintest = max(mag_faintest, np.max(abs_mag_finite))
 
 
         # Plot additional observations from the .met file (if available)
@@ -4248,6 +4320,11 @@ class MetSimGUI(QMainWindow):
 
         self.magnitudePlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, \
             self.plot_beg_ht + BEG_HT_PAD])
+        # Use the default limits if no magnitudes were plotted
+        if not (np.isfinite(mag_brightest) and np.isfinite(mag_faintest)):
+            mag_brightest = -2.0
+            mag_faintest = 6.0
+
         self.magnitudePlot.canvas.axes.set_xlim([mag_brightest - 1, mag_faintest + 1])
         self.magnitudePlot.canvas.axes.invert_xaxis()
 
@@ -4453,10 +4530,10 @@ class MetSimGUI(QMainWindow):
         self.lagPlot.canvas.figure.clear()
 
 
-        # Update the observed initial velocity label
-        # NOTE: The ECI, not the ground-fixed velocity needs to be used, as the meteor model does not
-        #   include Earth's rotation!
-        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init/1000))
+        # Update the observed initial velocity label, relative to the ground and inertial
+        v_rotation = getattr(self.const, 'v_rotation', 0.0)
+        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s ({:.3f} ECI)".format( \
+            (self.traj.orbit.v_init - v_rotation)/1000, self.traj.orbit.v_init/1000))
 
 
         # Compute things needed for the simulated lag
@@ -5334,9 +5411,9 @@ class MetSimGUI(QMainWindow):
 
             # Compute the dynamic pressure
             brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
-                self.traj.jdt_ref, sr.brightest_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.brightest_vel_arr - sr.v_rotation, gamma=self.const.gamma)
             leading_frag_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.leading_frag_height_arr, \
-                self.traj.jdt_ref, sr.leading_frag_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.leading_frag_vel_arr - sr.v_rotation, gamma=self.const.gamma)
 
 
             # Plot dyn pressure
@@ -5467,9 +5544,9 @@ class MetSimGUI(QMainWindow):
 
             # Compute the dynamic pressure
             brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
-                self.traj.jdt_ref, sr.brightest_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.brightest_vel_arr - sr.v_rotation, gamma=self.const.gamma)
             main_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.main_height_arr, \
-                self.traj.jdt_ref, sr.main_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.main_vel_arr - sr.v_rotation, gamma=self.const.gamma)
 
 
             # Filter out very small masses
@@ -6065,10 +6142,8 @@ class MetSimGUI(QMainWindow):
     def saveUpdatedOrbit(self):
         """ Save updated orbit and trajectory to file. """
 
-        # Compute the difference between the model and the measured initial velocity
-        # NOTE: The ECI, not the ground-fixed velocity needs to be used, as the meteor model does not
-        #   include Earth's rotation!
-        v_init_diff = self.const.v_init - self.traj.orbit.v_init
+        # Compute the difference between the model and the measured initial velocity in the inertial frame
+        v_init_diff = self.const.v_init + getattr(self.const, 'v_rotation', 0.0) - self.traj.orbit.v_init
 
         # Recompute the orbit with an increased initial velocity
         # Reuse the same frame convention (moving vs fixed stations) that the original orbit solve used,
