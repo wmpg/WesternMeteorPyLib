@@ -79,7 +79,7 @@ not. All accept scalars or numpy arrays; a scalar gives a plain `str`.
 ```python
 import numpy as np
 from wmpl.Utils.OrbitClassification import (classifyNEO, isArjuna, classifyBorovicka,
-    isEarthCrossing, isProgrograde)
+    isEarthCrossing, isPrograde)
 
 q, e, i = 0.97, 0.03, np.radians(1.5)
 
@@ -180,7 +180,7 @@ References:
 | Function | True when |
 | :--- | :--- |
 | `isSunApproaching(q, q_limit=0.2)` | q < 0.2 AU, the Sun-approaching class of Borovička et al. (2005) |
-| `isProgrograde(i)` | i < 90° |
+| `isPrograde(i)` | i < 90° |
 | `isRetrograde(i)` | i > 90° |
 | `isEarthCrossing(q, e)` | q ≤ 1 AU ≤ Q |
 

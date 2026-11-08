@@ -558,7 +558,7 @@ def isSunApproaching(q, q_limit=SUN_APPROACHING_Q_LIMIT):
     return np.asarray(q) < q_limit
 
 
-def isProgrograde(i):
+def isPrograde(i):
     """ Test whether an orbit is prograde, moving around the Sun in the sense of the planets.
 
         An orbit at exactly 90 deg is neither prograde nor retrograde.
@@ -1308,7 +1308,7 @@ if __name__ == "__main__":
         print("-------------")
 
     # The direction of an orbit at exactly 90 deg is neither
-    direction = "prograde" if isProgrograde(incl) else ("retrograde" if isRetrograde(incl) \
+    direction = "prograde" if isPrograde(incl) else ("retrograde" if isRetrograde(incl) \
         else "polar")
 
     for key, label, value in (

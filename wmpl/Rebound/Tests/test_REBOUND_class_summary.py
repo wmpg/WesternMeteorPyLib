@@ -73,8 +73,8 @@ def testReportSaysItIsTheNominalAtTheEndOfTheRun(reb):
 def testReportWithoutClonesOrForAnUnboundNominal(reb):
 
     lines = reb._tisserandAndClassReportLines(3.4, "asteroidal-chondritic")
-    assert lines == ["Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the end "
-                     "of the run, nominal:", "  T_J   = 3.400000", "  class = asteroidal-chondritic"]
+    assert lines == ["Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the " \
+        "end of the run, nominal:", "  T_J   = 3.400000", "  class = asteroidal-chondritic"]
 
     clones = reb.tisserandAndClassSummary([_orbit(-3.0, 1.2, 30.0), _orbit(2.2, 0.6, 1.0)])
     text = "\n".join(reb._tisserandAndClassReportLines(None, "halley-type", clones))

@@ -8,17 +8,14 @@ class.
 
 Run with pytest:
     python -m pytest wmpl/Utils/Tests/test_OrbitClassification.py -v
-
-or standalone (no pytest required):
-    python -m wmpl.Utils.Tests.test_OrbitClassification
 """
 
-import math
+from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
 from wmpl.Utils.OrbitClassification import (classifyNEO, isArjuna, classifyBorovicka,
-    isSunApproaching, isProgrograde, isRetrograde, isEarthCrossing, calcTisserand,
+    isSunApproaching, isPrograde, isRetrograde, isEarthCrossing, calcTisserand,
     EARTH_PERIHELION, EARTH_APHELION, NEO_Q_LIMIT, ARJUNA_A_MIN, ARJUNA_A_MAX, ARJUNA_E_MAX,
     ARJUNA_INCL_MAX, HALLEY_INCL_LIMIT, ASTEROIDAL_APHELION_LIMIT, SUN_APPROACHING_Q_LIMIT,
     A_JUPITER, _tisserandFromPerihelion)
@@ -29,7 +26,7 @@ def _q(a, e):
     return a*(1.0 - e)
 
 
-def test_neo_classes_of_known_asteroids():
+def testNeoClassesOfKnownAsteroids():
     """ One asteroid of each class, from its published semi-major axis and eccentricity. """
 
     # (name, a [AU], e, class)
@@ -44,7 +41,7 @@ def test_neo_classes_of_known_asteroids():
             "{:s} came out as {!r}".format(name, classifyNEO(_q(a, e), e))
 
 
-def test_neo_limits_are_the_earth_perihelion_and_aphelion():
+def testNeoLimitsAreTheEarthPerihelionAndAphelion():
     """ Atira ends at an aphelion of 0.983 AU, Apollo at a perihelion of 1.017 AU and Amor at
         1.3 AU. An orbit exactly on the first limit is an Aten, as that class is defined by
         Q >= 0.983 AU, and one exactly on the other two goes to the next class out.
@@ -64,7 +61,7 @@ def test_neo_limits_are_the_earth_perihelion_and_aphelion():
     assert classifyNEO(NEO_Q_LIMIT, e) == 'non-NEO'
 
 
-def test_neo_class_has_no_gap_at_one_astronomical_unit():
+def testNeoClassHasNoGapAtOneAstronomicalUnit():
     """ An orbit with a = 1 AU exactly goes with the larger orbits. """
 
     for e in (0.0, 0.1, 0.5):
@@ -72,14 +69,14 @@ def test_neo_class_has_no_gap_at_one_astronomical_unit():
             "e = {:.1f}, a = 1 AU: {!r}".format(e, classifyNEO(_q(1.0, e), e))
 
 
-def test_neo_unbound_orbit_is_labelled_unbound():
+def testNeoUnboundOrbitIsLabelledUnbound():
     """ The classes are for bound orbits, and an unbound one must not fall into one of them. """
 
     assert classifyNEO(0.5, 1.0) == 'unbound'
     assert classifyNEO(0.5, 1.3) == 'unbound'
 
 
-def test_arjuna_domain_and_its_limits():
+def testArjunaDomainAndItsLimits():
     """ The Arjuna limits are strict, and it takes all three of them. """
 
     i = np.radians(1.0)
@@ -103,7 +100,7 @@ def test_arjuna_domain_and_its_limits():
     assert not isArjuna(0.99, 1.0, i)
 
 
-def test_arjuna_members_are_also_in_a_neo_class():
+def testArjunaMembersAreAlsoInANeoClass():
     """ Arjuna is a subset of the other classes and not an alternative to them. """
 
     for a, e in ((0.99, 0.05), (1.0, 0.08), (1.012, 0.02)):
@@ -111,7 +108,7 @@ def test_arjuna_members_are_also_in_a_neo_class():
         assert classifyNEO(_q(a, e), e) in ('Aten', 'Apollo', 'Amor', 'Atira')
 
 
-def test_borovicka_class_of_known_bodies():
+def testBorovickaClassOfKnownBodies():
     """ A body of each class, from its published elements (inclination in degrees), and the two iron
         meteoroids on Halley-type orbits of Vojacek et al. (2019), table 1, T_J = 1.9 and 1.7.
     """
@@ -137,15 +134,15 @@ def test_borovicka_class_of_known_bodies():
     assert classifyBorovicka(_q(a, e), e, np.radians(11.78)) == 'asteroidal-chondritic'
 
 
-def test_borovicka_limits():
+def testBorovickaLimits():
     """ T_J = 2 and i = 45 deg are not Halley type, T_J = 3 and Q = 4.5 AU are not asteroidal, and
         q = 0.2 AU is not Sun-approaching, as the published limits are all strict.
     """
 
     def orbitWithTisserand(tisserand, a, incl=0.0):
         # T = a_J/a + 2 cos(i) sqrt((a/a_J)(1 - e^2)), solved for e
-        root = (tisserand - A_JUPITER/a)/(2.0*math.cos(incl))
-        e = math.sqrt(1.0 - root**2*A_JUPITER/a)
+        root = (tisserand - A_JUPITER/a)/(2.0*np.cos(incl))
+        e = np.sqrt(1.0 - root**2*A_JUPITER/a)
         assert abs(float(calcTisserand(a, e, incl)) - tisserand) < 1e-9
         return _q(a, e), e
 
@@ -187,7 +184,7 @@ def test_borovicka_limits():
         == 'sun-approaching'
 
 
-def test_borovicka_order_of_the_classes():
+def testBorovickaOrderOfTheClasses():
     """ The definitions overlap, and the class is the first in the published order that holds. """
 
     # Q = 4.375 AU with 2 < T_J < 3 (2.94) and a low inclination: Jupiter family by T_J and i, but
@@ -208,7 +205,7 @@ def test_borovicka_order_of_the_classes():
         == 'sun-approaching'
 
 
-def test_tisserand_from_perihelion_matches_calcTisserand_for_bound_orbits():
+def testTisserandFromPerihelionMatchesCalcTisserandForBoundOrbits():
     """ The class is computed from q and e, so that it is defined for an unbound orbit, and that
         form must agree with the semi-major axis form wherever the latter exists.
     """
@@ -219,7 +216,7 @@ def test_tisserand_from_perihelion_matches_calcTisserand_for_bound_orbits():
             - float(calcTisserand(a, e, incl))) < 1e-9, "a = {:.1f} AU".format(a)
 
 
-def test_borovicka_class_of_unbound_orbits():
+def testBorovickaClassOfUnboundOrbits():
     """ A parabolic or hyperbolic orbit has no aphelion, so it is never asteroidal-chondritic by its
         aphelion, and is classified rather than left as nan.
     """
@@ -233,17 +230,17 @@ def test_borovicka_class_of_unbound_orbits():
     assert classifyBorovicka(0.1, 1.2, np.radians(30.0)) == 'sun-approaching'
 
 
-def test_flags():
+def testFlags():
     """ Sun approaching, direction and Earth crossing. """
 
     assert isSunApproaching(0.1) and not isSunApproaching(0.2) and not isSunApproaching(0.5)
     assert isSunApproaching(0.3, q_limit=0.4)
 
-    assert isProgrograde(np.radians(10.0)) and not isRetrograde(np.radians(10.0))
-    assert isRetrograde(np.radians(170.0)) and not isProgrograde(np.radians(170.0))
+    assert isPrograde(np.radians(10.0)) and not isRetrograde(np.radians(10.0))
+    assert isRetrograde(np.radians(170.0)) and not isPrograde(np.radians(170.0))
 
     # Exactly polar is neither
-    assert not isProgrograde(np.pi/2) and not isRetrograde(np.pi/2)
+    assert not isPrograde(np.pi/2) and not isRetrograde(np.pi/2)
 
     # q <= 1 <= Q
     assert isEarthCrossing(0.5, 0.5)         # Q = 1.5
@@ -255,7 +252,7 @@ def test_flags():
     assert not isEarthCrossing(1.5, 1.3)
 
 
-def test_classification_accepts_arrays():
+def testClassificationAcceptsArrays():
     """ The labels and flags work elementwise, and a scalar still gives a plain str. """
 
     # An Aten, an Amor on a retrograde orbit, an Earth-like Apollo, and a hyperbolic orbit
@@ -272,46 +269,9 @@ def test_classification_accepts_arrays():
     assert classifyBorovicka(q, e, i, ecliptic_shower=np.array([True, False, False, False])
         ).tolist() == ['ecliptic-shower', 'halley-type', 'asteroidal-chondritic', 'halley-type']
     assert isSunApproaching(q).tolist() == [False, False, False, False]
-    assert isProgrograde(i).tolist() == [True, False, True, True]
+    assert isPrograde(i).tolist() == [True, False, True, True]
     assert isRetrograde(i).tolist() == [False, True, False, False]
     assert isEarthCrossing(q, e).tolist() == [True, False, True, False]
 
     assert type(classifyNEO(0.7, 0.3)) is str
     assert type(classifyBorovicka(0.7, 0.3, 0.1)) is str
-
-
-if __name__ == "__main__":
-
-    test_functions = [
-        test_neo_classes_of_known_asteroids,
-        test_neo_limits_are_the_earth_perihelion_and_aphelion,
-        test_neo_class_has_no_gap_at_one_astronomical_unit,
-        test_neo_unbound_orbit_is_labelled_unbound,
-        test_arjuna_domain_and_its_limits,
-        test_arjuna_members_are_also_in_a_neo_class,
-        test_borovicka_class_of_known_bodies,
-        test_borovicka_limits,
-        test_borovicka_order_of_the_classes,
-        test_tisserand_from_perihelion_matches_calcTisserand_for_bound_orbits,
-        test_borovicka_class_of_unbound_orbits,
-        test_flags,
-        test_classification_accepts_arrays,
-        ]
-
-    failed = 0
-    for test_func in test_functions:
-
-        try:
-            test_func()
-            print("PASS: {:s}".format(test_func.__name__))
-
-        except Exception as e:
-            failed += 1
-            print("FAIL: {:s}: {:s}".format(test_func.__name__, str(e)))
-
-    print()
-    if failed:
-        print("{:d}/{:d} tests failed".format(failed, len(test_functions)))
-        raise SystemExit(1)
-
-    print("All {:d} tests passed".format(len(test_functions)))
