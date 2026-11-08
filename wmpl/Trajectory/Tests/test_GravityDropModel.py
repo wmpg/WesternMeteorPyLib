@@ -2,109 +2,221 @@
 
 applyGravityDrop descends from the beginning of the meteor, at distance r0 from the centre of the Earth,
 with the vertical velocity v0z. The line-of-sight fit and the spatial residuals passed the distance of each
-point instead, and the fit always ran with v0z=None (no vertical velocity): calcLLA computes it only after
+point instead, and the fit always ran with v0z=None (no vertical velocity), as calcLLA computes it only after
 the pass that applies the drop.
 
-The tests drop a noise-free constant-velocity trajectory with applyGravityDrop, as the solver models it,
-observe it from three stations as azimuth/elevation at each point's own time, and solve with the timing
-estimated.
+The tests drop the noise-free straight meteor of SyntheticTrajectory with applyGravityDrop, as the solver
+models it, observe it from three stations, and solve it with the gravity correction.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityDropModel.py -v
 """
 
+from __future__ import print_function, division, absolute_import
+
 import numpy as np
 
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import Trajectory, applyGravityDrop
-from wmpl.Utils.TrajConversions import altAz2RADec, eci2RaDec, geo2Cartesian, raDec2AltAz_vect, raDec2ECI
-
-
-JDT_REF = 2461070.9343128
-N_POINTS = 40
-
-# (station_id, lat, lon, elevation) in degrees and metres
-STATIONS = [
-    ("A", -43.60, 172.12, 120.0),
-    ("B", -42.90, 173.20, 200.0),
-    ("C", -43.30, 171.30, 350.0),
-]
+from wmpl.Trajectory.Trajectory import Trajectory, angleSumMeasurements2Line, gravityDropReference
+from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor, worstResidual
+from wmpl.Utils.Math import angleBetweenVectors
 
 
-def _solve(duration, v_init, elevation):
-    """ Solve a gravity-dropped trajectory. Returns the solution and the true radiant unit vector. """
 
-    lat, lon, ht = np.radians(-43.20), np.radians(172.30), 85000.0
-    begin = np.array(geo2Cartesian(lat, lon, ht, JDT_REF))
-    ra, dec = altAz2RADec(np.radians(210.0), np.radians(elevation), JDT_REF, lat, lon)
-    radiant_eci = np.array(raDec2ECI(ra, dec))
+def _solve(duration, v_init, elevation, estimate_timing_vel=True):
+    """ Solve the noise-free straight meteor dropped by gravity.
 
-    times = np.linspace(0, duration, N_POINTS)
-    straight = begin - np.outer(v_init*times, radiant_eci)
-    v0z = -v_init*np.sin(np.radians(elevation))
-    points = np.array([applyGravityDrop(point, t, np.linalg.norm(begin), 1.0, v0z)
-        for point, t in zip(straight, times)])
+    Arguments:
+        duration: [float] Duration of the meteor (s).
+        v_init: [float] Velocity of the meteor (m/s).
+        elevation: [float] Elevation of the radiant at the beginning of the meteor (deg).
 
-    traj = Trajectory(JDT_REF, meastype=2, max_toffset=1.0, estimate_timing_vel=True, gravity_correction=True,
-        monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False, verbose=False)
+    Keyword arguments:
+        estimate_timing_vel: [bool] Estimate the timing offsets. True by default.
 
-    for station_id, s_lat, s_lon, ele in STATIONS:
+    Return:
+        (traj, radiant_error):
+            - traj: [Trajectory object] Solved trajectory.
+            - radiant_error: [float] Angle between the solved and the true radiant (arcsec).
+    """
 
-        jds = JDT_REF + times/86400.0
+    # The pick filtering is off, as on noise-free data it rejects picks by the numerical noise
+    traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=duration, v_init=v_init, \
+        elevation=elevation, gravity_drop=True, estimate_timing_vel=estimate_timing_vel, \
+        gravity_correction=True, filter_picks=False, calc_orbit=False)
+    traj = traj.run()
 
-        ra_list, dec_list = [], []
-        for point, jd in zip(points, jds):
-            station = np.array(geo2Cartesian(np.radians(s_lat), np.radians(s_lon), ele, jd))
-            r, d = eci2RaDec(point - station)
-            ra_list.append(r)
-            dec_list.append(d)
-
-        azim, elev = raDec2AltAz_vect(np.array(ra_list), np.array(dec_list), jds, np.radians(s_lat),
-            np.radians(s_lon))
-
-        traj.infillTrajectory(azim, elev, times, np.radians(s_lat), np.radians(s_lon), ele,
-            station_id=station_id)
-
-    return traj.run(), radiant_eci
+    # Compute the angle between the solved and the true radiant
+    return traj, 3600*np.degrees(angleBetweenVectors(traj.radiant_eci_mini, radiant_eci))
 
 
-def _radiantError(traj, radiant_eci):
-    """ Angle between the solved and the true radiant, in arcseconds. """
 
-    return 3600*np.degrees(np.arccos(np.clip(np.dot(traj.radiant_eci_mini, radiant_eci), -1, 1)))
+def testASteepFastMeteorInverts():
+    """ Check that a meteor of 2.5 s at 30 km/s and 55 deg is inverted. Before, the radiant was 0.25 arcsec
+        off with 0.27 m of residual.
+    """
 
+    traj, radiant_error = _solve(2.5, 30000.0, 55.0)
 
-def _worstResidual(traj):
-    """ Largest spatial residual over all stations, in metres. """
-
-    return max(np.max(np.hypot(obs.h_residuals, obs.v_residuals)) for obs in traj.observations)
-
-
-def test_a_steep_fast_meteor_inverts():
-    """ 2.5 s at 30 km/s, 55 deg. Before: 0.27 arcsec and 0.265 m of residual. """
-
-    traj, radiant_eci = _solve(2.5, 30000.0, 55.0)
-
-    assert _radiantError(traj, radiant_eci) < 0.01
-    assert _worstResidual(traj) < 0.01
+    # Check the radiant, the residuals and the initial velocity
+    assert radiant_error < 0.05
+    assert worstResidual(traj) < 0.01
     assert abs(traj.v_init - 30000.0) < 0.1
 
 
-def test_a_shallow_slow_meteor_inverts():
-    """ 5 s at 15 km/s, 30 deg, where the drop reaches about 120 m. Before: 0.97 arcsec and 0.70 m. """
 
-    traj, radiant_eci = _solve(5.0, 15000.0, 30.0)
+def testAShallowSlowMeteorInverts():
+    """ Check that a meteor of 5 s at 15 km/s and 30 deg, which drops by about 120 m, is inverted. Before,
+        the radiant was 0.94 arcsec off with 0.70 m of residual.
+    """
 
-    assert _radiantError(traj, radiant_eci) < 0.1
-    assert _worstResidual(traj) < 0.1
+    traj, radiant_error = _solve(5.0, 15000.0, 30.0)
+
+    # Check the radiant, the residuals and the initial velocity
+    assert radiant_error < 0.1
+    assert worstResidual(traj) < 0.1
     assert abs(traj.v_init - 15000.0) < 0.1
+
+
+
+def testAShallowSlowMeteorInvertsWithoutTiming():
+    """ Check that the shallow slow meteor is inverted without the timing estimation too. Before, the radiant
+        was 0.92 arcsec off with 0.74 m of residual.
+    """
+
+    traj, radiant_error = _solve(5.0, 15000.0, 30.0, estimate_timing_vel=False)
+
+    # Check the radiant, the residuals and the initial velocity
+    assert radiant_error < 0.1
+    assert worstResidual(traj) < 0.1
+    assert abs(traj.v_init - 15000.0) < 0.1
+
+
+
+def testAnIgnoredStationDoesNotSetTheBeginning():
+    """ Check that an ignored station whose first line of sight is far above the meteor does not set the
+        beginning of the gravity drop. Before, the radiant was 0.36 arcsec off.
+    """
+
+    traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, elevation=30.0, \
+        gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, filter_picks=False, \
+        calc_orbit=False)
+
+    # Raise the first line of sight of station C by 5 deg and ignore the station
+    obs = traj.observations[2]
+    obs.elev_data[0] += np.radians(5.0)
+    obs.ignore_station = True
+
+    # Solve the observations again with station C ignored
+    solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
+        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
+        save_results=False, verbose=False)
+
+    for obs in traj.observations:
+        solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id, ignore_station=obs.ignore_station)
+
+    solved = solved.run()
+
+    # Check the radiant
+    assert 3600*np.degrees(angleBetweenVectors(solved.radiant_eci_mini, radiant_eci)) < 0.05
+
+
+
+def testAnIgnoredPickDoesNotSetTheBeginning():
+    """ Check that an ignored first pick far above the meteor does not set the beginning of the gravity drop.
+        Before, the radiant was 0.37 arcsec off.
+    """
+
+    traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, elevation=30.0, \
+        gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, filter_picks=False, \
+        calc_orbit=False)
+
+    # Raise the first line of sight of station A by 5 deg and ignore that pick
+    obs = traj.observations[0]
+    obs.elev_data[0] += np.radians(5.0)
+    ignore_list = np.zeros(len(obs.time_data), dtype=np.uint8)
+    ignore_list[0] = 1
+
+    # Solve the observations again with the pick ignored
+    solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
+        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
+        save_results=False, verbose=False)
+
+    for obs, station_ignore_list in zip(traj.observations, [ignore_list, None, None]):
+        solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id, ignore_list=station_ignore_list)
+
+    solved = solved.run()
+
+    # Check the radiant
+    assert 3600*np.degrees(angleBetweenVectors(solved.radiant_eci_mini, radiant_eci)) < 0.05
+
+
+
+def testIgnoredLeadingPicksDoNotShiftTheDrop():
+    """ Check that the beginning of the gravity drop is moved back to the earliest time when the picks of
+        the first 2 s of every station are ignored, as the drop is computed from the earliest time. The cost
+        of the line-of-sight fit is checked at the true line, as Nelder-Mead does not always reach it (see
+        #154). Before, it was 0.27 arcsec there.
+    """
+
+    traj, begin, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
+        elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
+        filter_picks=False, calc_orbit=False)
+
+    # Solve the observations again with the picks of the first 2 s ignored
+    solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
+        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
+        save_results=False, verbose=False)
+
+    for obs in traj.observations:
+        solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id, ignore_list=(obs.time_data < 2.0).astype(np.uint8))
+
+    solved = solved.run()
+
+    # Compute the cost of the gravity pass at the true line
+    cost = angleSumMeasurements2Line(solved.observations, begin, radiant_eci, gravity=True, \
+        v0z=solved.v0z, r0=solved.gravity_r0)
+
+    assert 3600*np.degrees(cost) < 0.01
+
+
+
+def testOnePoorFirstPickDoesNotSetTheBeginning():
+    """ Check that the first pick of one station, pointing 20 km up the trajectory and not ignored, does not
+        set the beginning of the gravity drop, as the median of the stations is taken. Before, the beginning
+        was 10 km too high.
+    """
+
+    traj, begin, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
+        elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
+        filter_picks=False, calc_orbit=False)
+
+    # Point the first line of sight of station C 20 km up the trajectory
+    obs = traj.observations[2]
+    los = begin + 20000.0*radiant_eci - obs.stat_eci_los[0]
+    obs.meas_eci_los[0] = los/np.linalg.norm(los)
+
+    # Compute the beginning from the true line
+    _, r0 = gravityDropReference(traj.observations, begin, radiant_eci, v_init=15000.0)
+
+    assert abs(r0 - np.linalg.norm(begin)) < 100.0
+
+
 
 
 if __name__ == "__main__":
 
-    for case in ((2.5, 30000.0, 55.0), (5.0, 15000.0, 30.0)):
-        traj, radiant_eci = _solve(*case)
-        print("{}: radiant error {:.3f} arcsec, worst residual {:.3f} m, initial velocity error {:+.3f} m/s".format(
-            case, _radiantError(traj, radiant_eci), _worstResidual(traj), traj.v_init - case[1]))
+    # Print the radiant error, the worst residual and the initial velocity error of each case
+    for duration, v_init, elevation, estimate_timing_vel in ((2.5, 30000.0, 55.0, True), \
+        (5.0, 15000.0, 30.0, True), (5.0, 15000.0, 30.0, False)):
+
+        traj, radiant_error = _solve(duration, v_init, elevation, estimate_timing_vel=estimate_timing_vel)
+
+        print("{:.1f} s, {:.0f} m/s, {:.0f} deg, timing {!s:5}: radiant error {:.3f} arcsec, " \
+            "worst residual {:.3f} m, initial velocity error {:+.3f} m/s".format(duration, v_init, \
+            elevation, estimate_timing_vel, radiant_error, worstResidual(traj), traj.v_init - v_init))
