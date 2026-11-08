@@ -7,11 +7,11 @@ import warnings
 import numpy as np
 import scipy.integrate
 
-# Import the correct scipy.integrate.simpson function
+# Import the correct scipy.integrate.trapezoid function
 try:
-    from scipy.integrate import simps as simpson
+    from scipy.integrate import trapezoid
 except ImportError:
-    from scipy.integrate import simpson as simpson
+    from scipy.integrate import trapz as trapezoid
 
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
@@ -169,7 +169,9 @@ def calcRadiatedEnergy(time, mag_abs, P_0m=840.0):
 
     # Integrate the interpolated I
     #intens_int = intens_interpol.integrate(np.min(time), np.max(time))
-    intens_int = simpson(intens, x=time)
+
+    # Integrate with the trapezoidal rule, as Simpson's rule can go negative on unevenly spaced points
+    intens_int = trapezoid(intens, x=time)
 
     return intens_int
 
@@ -262,7 +264,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
             intens = calcIntensity(mag_abs, P_0m=P_0m)
             vel_arr = np.asarray(velocity, dtype=float)
             dm_dt = 2.0*intens/(tau*vel_arr**2)
-            return simpson(dm_dt, x=time)
+            return trapezoid(dm_dt, x=time)
 
     # Velocity-dependent model: resolve the lum_eff_type code.
     if isinstance(tau, str):
@@ -337,7 +339,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         # Integrate the instantaneous mass-loss rate dm/dt = 2*I/(tau*v^2)
         dm_dt = 2.0*intens/(tau_arr*vel_arr**2)
 
-        return simpson(dm_dt, x=time)
+        return trapezoid(dm_dt, x=time)
 
 
     # If the mass is given explicitly, evaluate the models at that mass.
