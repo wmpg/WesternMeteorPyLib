@@ -60,12 +60,13 @@ except ImportError:
 
 from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin, \
-    constantsRelativeToGround, constantsToInertial
+    constantsRelativeToGround, constantsToInertial, atmDensityDescription
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
+    ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -3969,8 +3970,16 @@ class ObservationData:
             lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
             jd_dat=traj.jdt_ref
 
-            # Fit the polynomail describing the density
+            # Fit the polynomial describing the density
             self.dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
+
+            # Tabulate the density over the whole simulation, used instead of the polynomial
+            atm_ht_max = max(ATM_TABLE_HT_MAX, dens_fit_ht_beg)
+            self.atm_table_ht, self.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, \
+                ATM_TABLE_HT_MIN, atm_ht_max, jd_dat)
+            self.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, jd_dat, height_max=atm_ht_max)
+            self.atm_density_model = 'table'
+
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4091,6 +4100,9 @@ class ObservationData:
                     "average speed: {:.4e} kg".format(int(lum_eff_type_val), photom_mass))
 
             m_init_list.append(photom_mass)
+
+        # Print the atmosphere the simulations use
+        print(atmDensityDescription(self))
 
         # do the mean of the zenith_angle_list and m_init_list
         self.zenith_angle = np.mean(zenith_angle_list)
@@ -4515,6 +4527,13 @@ class ObservationData:
             self.m_init = self.const.m_init
 
             self.dens_co = np.array(self.const.dens_co) 
+            self.atm_table_ht = getattr(self.const, 'atm_table_ht', None)
+            self.atm_table_log10_rho = getattr(self.const, 'atm_table_log10_rho', None)
+            self.atm_density_info = getattr(self.const, 'atm_density_info', None)
+            self.atm_density_model = getattr(self.const, 'atm_density_model', 'polynomial')
+
+            # Print the atmosphere the simulations use
+            print(atmDensityDescription(self))
 
             # Compute absolute magnitudes
             absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)
@@ -5841,6 +5860,12 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
 
     # Assign the density coefficients
     const_nominal.dens_co = dens_co
+
+    # Assign the density model and table, where observations saved without them use the legacy polynomial
+    const_nominal.atm_density_model = getattr(real_event, 'atm_density_model', 'polynomial')
+    const_nominal.atm_table_ht = getattr(real_event, 'atm_table_ht', None)
+    const_nominal.atm_table_log10_rho = getattr(real_event, 'atm_table_log10_rho', None)
+    const_nominal.atm_density_info = getattr(real_event, 'atm_density_info', None)
 
     # # Turn on plotting of LCs of individual fragments 
     # const_nominal.fragmentation_show_individual_lcs = True
