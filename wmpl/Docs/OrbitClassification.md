@@ -156,8 +156,9 @@ association and never gives this class.
 
 The published limits are strict inequalities, which leaves the limits themselves unassigned. Here
 T_J = 2 and i = 45° do not make an orbit Halley type, and T_J = 3 and Q = 4.5 AU do not make it
-asteroidal-chondritic. T_J is computed from `q` and `e` so that it stays finite for an unbound orbit,
-which has no aphelion and so is never asteroidal-chondritic by Q.
+asteroidal-chondritic. An unbound orbit (`e >= 1`) that is not Sun-approaching or in an ecliptic
+shower is `'halley-type'`, the class of the long-period and hyperbolic orbits, whatever its T_J. A
+non-finite `q`, `e` or `i` gives `'undefined'`, and `classifyNEO` does the same for `q` and `e`.
 
 **The asteroidal limit of T_J = 3 differs from `classifyTancrediComet`**, which puts it at 3.05, so
 an orbit with T_J between 3 and 3.05 — 2P/Encke at 3.0253 — is `'asteroidal-chondritic'` here and
