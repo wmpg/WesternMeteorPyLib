@@ -1,6 +1,6 @@
-""" Tests of the timing offsets between stations in wmpl.Trajectory.Trajectory. The residuals in time between two
-    stations at the same lengths are linear in their offsets, so the offsets are found by linear least squares,
-    with one used station held at 0, and the reported residuals are in seconds.
+""" Tests of the timing offsets between stations in wmpl.Trajectory.Trajectory. The residuals in time between
+    two stations at the same lengths are linear in their offsets, so the offsets are found by linear least
+    squares, with one used station held at 0, and the reported residuals are in seconds.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_TimingOffsets.py -v
@@ -14,8 +14,8 @@ import matplotlib
 matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import Trajectory, timingCost, timingDifferences
-from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, observeStraightMeteor, \
-    stationAzimAlt, straightMeteorPoints, timingOffsets
+from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
+    observeStraightMeteor, stationAzimAlt, straightMeteorPoints, timingOffsets
 
 
 # Clocks ahead of the true time (s)
@@ -58,7 +58,8 @@ def _stationWeights(traj):
 
 
 def testCostStatistics():
-    """ Check that the residuals of all points of all pairs are averaged with the weights of the pairs, once. """
+    """ Check that the residuals of all points of all pairs are averaged with the weights of the pairs, once.
+    """
 
     pairs = [
         (0, 1, np.array([0.001, -0.002, 0.003]), 1.0),
@@ -109,8 +110,8 @@ def testOffsetsAreTheLeastSquaresMinimum():
 
 
 def testReferenceStationIsAUsedStation():
-    """ Check that the station held at a zero offset is not an ignored one, which would leave the offsets of the
-        used stations free to shift together.
+    """ Check that the station held at a zero offset is not an ignored one, which would leave the offsets of
+        the used stations free to shift together.
     """
 
     traj, _, _ = observeStraightMeteor(noise=NOISE, seed=3, clock_offsets=CLOCK_OFFSETS)
