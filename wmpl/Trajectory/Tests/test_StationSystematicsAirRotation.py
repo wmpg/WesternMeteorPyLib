@@ -101,6 +101,21 @@ def _residuals(traj, shift_at=None):
 
 
 
+def _fitTimeOrigin(observations):
+    """ The time from which the line-of-sight fit of the solver drops the points: the first time of the used
+        stations (dropTimeOrigin, #202), or of all observations with a solver without it.
+    """
+
+    try:
+        from wmpl.Trajectory.Trajectory import dropTimeOrigin
+
+    except ImportError:
+        return min(obs.time_data[0] for obs in observations)
+
+    return dropTimeOrigin(observations)
+
+
+
 def testAConstantDisplacementGivesTheResidualsOfTheMovedLine():
     """ A constant displacement across the line gives the residuals of the line moved by it, which are not
         those of the line.
@@ -133,9 +148,9 @@ def testAConstantDisplacementGivesTheResidualsOfTheMovedLine():
 
 
 def testTheDisplacementIsTakenAtTheTimesOfTheFit():
-    """ The displacement and the factor of the drop are taken at the times from the first point of all
-        observations, also of an ignored station which starts earlier, as in the line-of-sight fit, and on the
-        radiant line of the solution.
+    """ The displacement and the factor of the drop are taken at the times of the line-of-sight fit, also
+        with an ignored station which starts earlier (which does not set them with #202), and on the radiant
+        line of the solution.
     """
 
     traj = _trajectory()
@@ -165,6 +180,7 @@ def testTheDisplacementIsTakenAtTheTimesOfTheFit():
 
     try:
         _errors(traj, shiftAt)
+        first = t0 - _fitTimeOrigin(traj.observations)
 
     finally:
         traj.observations.pop()
@@ -172,7 +188,7 @@ def testTheDisplacementIsTakenAtTheTimesOfTheFit():
         del traj.gravityFreeFall
 
     assert len(shift_calls) > 0
-    assert np.isclose(min(shift_calls), 0.3, rtol=0, atol=1e-9)
+    assert np.isclose(min(shift_calls), first, rtol=0, atol=1e-9)
     assert np.array_equal(shift_calls, factor_calls)
 
 
