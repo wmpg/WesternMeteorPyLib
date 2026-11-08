@@ -1,7 +1,7 @@
 """ Tests of what is made from ECSV files besides the trajectory: the azimuths and altitudes of the prepared
-    observations, which go into the MILIG input file, the R.A./Dec. given to the Gural solver, and the ECSV files
-    written by saveECSV. The R.A./Dec. of ECSV files are computed at the time of each row, so they have to be
-    converted back at that time.
+    observations, which go into the MILIG input file, the R.A./Dec. given to the Gural solver, and the ECSV
+    files written by saveECSV. The R.A./Dec. of ECSV files are computed at the time of each row, so they have
+    to be converted back at that time.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVOutputs.py -v
@@ -46,8 +46,8 @@ DURATION = 2.5
 
 
 def _writeECSVs(dir_path):
-    """ Write the noise-free straight meteor of SyntheticTrajectory, lasting DURATION, as seen from each of its
-        stations into an ECSV file per station, with the azimuth and altitude at the time of each row.
+    """ Write the noise-free straight meteor of SyntheticTrajectory, lasting DURATION, as seen from each of
+        its stations into an ECSV file per station, with the azimuth and altitude at the time of each row.
 
     Arguments:
         dir_path: [str] Directory where the files are written.
