@@ -185,6 +185,19 @@ class ConfigStruct(object):
         self.meteorites_orbit_file = os.path.join(abs_path, 'share', 'Meteorites_with_Orbits.csv')
 
 
+        ### COORDINATES
+
+        # LEGACY AND INCORRECT, only for reproducing solutions made before the nutation was added to the
+        #   conversion of J2000 coordinates. When True, J2000 R.A. and Dec. are only precessed to the epoch of
+        #   date and back, which leaves them on the mean equator and equinox of date, while WMPL's ECI frame is
+        #   on the true one (apparent sidereal time), up to ~17 arcsec away. Do not use it for new solutions.
+        #   Set it with the WMPL_LEGACY_J2000=1 environment variable, which also reaches the processes the
+        #   solver starts
+        self.legacy_j2000_precession_only = (os.environ.get('WMPL_LEGACY_J2000', '0') == '1')
+
+        ###
+
+
         ### SHOWER ASSOCIATION
 
         # Jenniskens et al. (2018) shower table

@@ -17,6 +17,7 @@ import erfa
 import matplotlib
 matplotlib.use('Agg')
 
+from wmpl.Config import config
 from wmpl.Formats.GenericFunctions import MeteorObservation, prepareObservations
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
@@ -24,7 +25,8 @@ from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT
 from wmpl.Utils.Earth import calcApparentSiderealEarthRotation
 from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.TrajConversions import J2000_JD, nutationMatrix, equatorialCoordJ2000ToDate, \
-    equatorialCoordDateToJ2000, jd2DynamicalTimeJD, raDec2ECI, eci2RaDec, geo2Cartesian, raDec2AltAz_vect
+    equatorialCoordDateToJ2000, equatorialCoordPrecession, jd2DynamicalTimeJD, raDec2ECI, eci2RaDec, \
+    geo2Cartesian, cartesian2Geo, raDec2AltAz_vect
 
 
 # Julian date of the tests
@@ -116,6 +118,51 @@ def testTheConversionInverts():
         ra_back, dec_back = equatorialCoordDateToJ2000(JD, *equatorialCoordJ2000ToDate(JD, ra, dec))
 
         assert _angle(ra, dec, ra_back, dec_back) < 0.01
+
+
+
+def testTheJ2000PositionOfAStationMatchesTheIAU():
+    """ Check that geo2Cartesian and cartesian2Geo convert a position to J2000 and back like the IAU, in
+        both hemispheres. They used to give the colatitude to the precession as the declination, which put
+        a southern station about 12900 km off.
+    """
+
+    npb = _iauJ2000ToDate(JD)
+
+    for lat, lon in ((45.0, 15.0), (-43.6, 172.1)):
+
+        lat, lon = np.radians(lat), np.radians(lon)
+
+        eci = np.array(geo2Cartesian(lat, lon, 100.0, JD))
+        eci_j2000 = np.array(geo2Cartesian(lat, lon, 100.0, JD, precess_j2000=True))
+
+        # 0.3 arcsec, the accuracy of the nutation series, is 9 m on the surface of the Earth
+        assert np.linalg.norm(eci_j2000 - npb.T.dot(eci)) < 20.0
+
+        lat_back, lon_back, _ = cartesian2Geo(JD, *eci_j2000, precess_j2000=True)
+
+        assert abs(lat_back - lat) < 1e-7
+        assert abs(lon_back - lon) < 1e-7
+
+
+
+def testTheLegacyConversionOnlyPrecesses():
+    """ Check that the legacy conversion, which is incorrect, only precesses J2000 coordinates.
+    """
+
+    ra, dec = np.radians(150.0), np.radians(-30.0)
+
+    config.legacy_j2000_precession_only = True
+
+    try:
+        ra_date, dec_date = equatorialCoordJ2000ToDate(JD, ra, dec)
+        ra_back, dec_back = equatorialCoordDateToJ2000(JD, ra_date, dec_date)
+
+    finally:
+        config.legacy_j2000_precession_only = False
+
+    assert _angle(ra_date, dec_date, *equatorialCoordPrecession(J2000_JD.days, JD, ra, dec)) < 1e-6
+    assert _angle(ra_back, dec_back, *equatorialCoordPrecession(JD, J2000_JD.days, ra_date, dec_date)) < 1e-6
 
 
 

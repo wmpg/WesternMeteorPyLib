@@ -18,8 +18,8 @@ from wmpl.Utils.SolarLongitude import jd2SolLonJPL
 from wmpl.Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, \
     jd2LST, jd2Date, jd2DynamicalTimeJD, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo,\
     eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD, \
-    geo2Cartesian, equatorialCoordDateToJ2000, equatorialCoordJ2000ToDate
-from wmpl.Utils.Math import vectNorm, vectMag, rotateVector, cartesianToSpherical, sphericalToCartesian
+    geo2Cartesian, equatorialCoordDateToJ2000, equatorialCoordJ2000ToDate, eciDateToJ2000
+from wmpl.Utils.Math import vectNorm, vectMag, rotateVector
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.Pickling import loadPickle
 
@@ -845,19 +845,8 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_ref, lat_geocentric, lon_ref)
         
 
-        ### Precess ECI coordinates to J2000 ###
-
-        # Convert rectangular to spherical coordinates
-        re, delta_e, alpha_e = cartesianToSpherical(*eci_ref)
-
-        # Precess coordinates to J2000, from the true equator and equinox of date of the ECI frame
-        alpha_ej, delta_ej = equatorialCoordDateToJ2000(jd_ref, alpha_e, delta_e)
-
-        # Convert coordinates back to rectangular
-        eci_ref = sphericalToCartesian(re, delta_ej, alpha_ej)
-        eci_ref = np.array(eci_ref)
-
-        ######
+        # Convert the ECI coordinates to J2000
+        eci_ref = eciDateToJ2000(jd_ref, eci_ref)
 
         # Precess the geocentric radiant to J2000
         ra_g, dec_g = equatorialCoordDateToJ2000(jd_ref, ra_g, dec_g)
