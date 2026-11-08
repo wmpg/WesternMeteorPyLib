@@ -59,6 +59,10 @@ def testTheDropHasTheFactorOfTheSolver():
     traj = observeMeteor(meteor, gravity_correction=True, gravity_factor=0.8, calc_orbit=False)
     traj.run()
 
+    # The factor is that of the drop along the vertical, which solutions without the free fall of the meteor
+    #   from the line keep (#195)
+    traj.gravityFreeFall = lambda: None
+
     # Without a scale of the drop, the factor is the gravity factor
     traj.gravity_drop_scale = None
     factors = _dropFactors(traj)
