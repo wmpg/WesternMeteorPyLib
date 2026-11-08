@@ -746,7 +746,7 @@ def numStationsNotIgnored(observations):
 
 
 def gravityDropReference(observations, state_vect, radiant_eci):
-    """ Beginning point of the trajectory, from which the gravity drop is computed.
+    """ Compute the beginning point of the trajectory, from which the gravity drop is computed.
 
     applyGravityDrop takes r0 to be the distance of the beginning of the meteor from the centre of the Earth,
     and its drop model descends from there with the vertical velocity. This is the point calcLLA and
@@ -864,9 +864,12 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
                 if v0z is None:
                     v0z = 0.0
 
-                # The drop descends from the beginning of the meteor. Without its distance from the centre of
-                #   the Earth, take the point's own
-                r0_point = vectMag(rad_cpa) if r0 is None else r0
+                # Take the distance of the beginning of the meteor, or of the point itself if it is not given
+                r0_point = r0
+                if r0_point is None:
+                    r0_point = vectMag(rad_cpa)
+
+                # If the distance is 0, set it to 1 to avoid a division by zero
                 if r0_point == 0:
                     r0_point = 1.0
 
@@ -2847,8 +2850,8 @@ class Trajectory(object):
         # V0z (vertical component of the initial velocity)
         self.v0z = None
 
-        # Distance of the beginning of the meteor from the centre of the Earth, fixed for the gravity pass of the
-        #   line-of-sight fit (see gravityDropReference)
+        # Distance of the beginning of the meteor from the centre of the Earth, fixed for the gravity pass of
+        #   the line-of-sight fit (see gravityDropReference)
         self.gravity_r0 = None
 
         # Calculated average velocity
@@ -6302,6 +6305,11 @@ class Trajectory(object):
             return None
 
 
+        # Trajectories pickled before the beginning of the gravity drop was kept do not have it
+        if not hasattr(self, 'gravity_r0'):
+            self.gravity_r0 = None
+
+
         ### Recompute the reference JD and all times so that the first time starts at 0 ###
 
         # Determine the first relative time from reference JD
@@ -6767,8 +6775,7 @@ class Trajectory(object):
                 for station in self.fixed_time_offsets:
                     self.fixed_time_offsets[station] = 0.0
 
-                # The gravity pass needs the vertical velocity, which this pass's initial velocity gives.
-                #   calcLLA computes it too, but only after the second pass has run
+                # Compute the beginning point and the vertical velocity of the gravity pass from this pass
                 if self.gravity_correction:
                     eci0, self.gravity_r0 = gravityDropReference(self.observations, self.state_vect_mini, 
                         self.radiant_eci_mini)
