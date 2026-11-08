@@ -7085,15 +7085,20 @@ class Trajectory(object):
                 # Save the picked trajectory structure with original points
                 savePickle(self, self.output_dir, self.file_name + '_trajectory.pickle')
 
-                # Save the 3D KML
-                if getattr(self, 'save_kml', False):
-                    from wmpl.Utils.TrajectoryKML import trajectoryToKML
-                    trajectoryToKML(self, os.path.join(self.output_dir, self.file_name + '_3D.kml'), \
-                        measured=getattr(self, 'kml_measured', False))
-
                 # Save trajectory report with original points
                 self.saveReport(self.output_dir, self.file_name + '_report.txt', \
                         uncertainties=uncertainties, verbose = not self.monte_carlo)
+
+                # Save the 3D KML, without stopping the solver if it fails
+                if getattr(self, 'save_kml', False):
+
+                    try:
+                        from wmpl.Utils.TrajectoryKML import trajectoryToKML
+                        trajectoryToKML(self, os.path.join(self.output_dir, self.file_name + '_3D.kml'), \
+                            measured=getattr(self, 'kml_measured', False))
+
+                    except Exception as e:
+                        print("WARNING: The 3D KML could not be saved: {:s}".format(repr(e)))
 
 
             # Save and show plots
