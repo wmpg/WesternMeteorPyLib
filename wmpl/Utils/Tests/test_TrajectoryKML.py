@@ -197,12 +197,20 @@ def testThePointsAndResidualsAreWhereTheSolverPutThem():
 
 
 
-def testThePointsGiveTheSpeedOfTheDragFitAtTheirLengths():
+def testThePointsGiveTheSpeedOfTheDragFitAtTheirLengths(monkeypatch):
     """ Check that the projected points give the speed of the drag fit at their lengths along the
-        trajectory, and the point-to-point speed except for the first point of a station.
+        trajectory, not at their heights, which on real data differ from the heights of the drag fit, and
+        the point-to-point speed except for the first point of a station.
     """
 
     traj = _solve(noise=1e-4)
+
+    # Make the speeds at heights unavailable
+    def failingVelocityAtHeight(self, ht_arr):
+        raise AssertionError("velocityAtHeight was used")
+
+    monkeypatch.setattr(DragFit, 'velocityAtHeight', failingVelocityAtHeight)
+
     folders = _parseKML(traj)
     drag_fit = DragFit(traj)
 
@@ -226,6 +234,23 @@ def testThePointsGiveTheSpeedOfTheDragFitAtTheirLengths():
             else:
                 vel_point = float(description.split("v point = ")[1].split(" km/s")[0])
                 assert vel_point == pytest.approx(obs.velocities[k]/1000, abs=1e-3)
+
+
+
+def testIgnoredStationsAreSkipped():
+    """ Check that an ignored station has no measured layers but keeps its station placemark.
+    """
+
+    traj = _solve()
+    traj.observations[1].ignore_station = True
+    folders = _parseKML(traj)
+
+    station_id = traj.observations[1].station_id
+
+    for name in ("3. Projected Points", "4. Lines of Sight", "5. Residuals"):
+        assert station_id not in folders[name]
+
+    assert len(folders["6. Stations"][None].findall(KML_NS + 'Placemark')) == len(traj.observations)
 
 
 

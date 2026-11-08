@@ -444,7 +444,7 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500):
     The trajectory is sampled from the drag fit (SampleTrajectoryPositions.sampleTrajectory()) evenly in time
     over the used picks, which gives smooth times and speeds and the path bent by gravity, also for an
     Earth-grazer. The measured layers add the projected point of every frame on the solved line, the line of
-    sight to it and the residual. The vertical plane spans the first and the last observed point. The measured
+    sight to it and the residual. The vertical plane spans the ends of the drag fit. The measured
     folders are split by station, and the ignored stations and points are skipped. If the drag model cannot
     be fitted, the measured layers are saved instead.
 
@@ -455,7 +455,7 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500):
     Keyword arguments:
         measured: [bool] Add the projected points, the lines of sight and the residuals of the measurements.
             False by default.
-        n_samples: [int] Number of samples of the drag fit. 500 by default.
+        n_samples: [int] Number of samples of the drag fit, at least 2. 500 by default.
 
     Return:
         output_kml_path: [str] Path of the KML file.
@@ -469,7 +469,7 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500):
     # Sample the trajectory of the drag fit evenly in time over the used picks
     try:
         time_data, _ = usedPoints(traj)
-        sample_step = (np.max(time_data) - np.min(time_data))/(n_samples - 1)
+        sample_step = (np.max(time_data) - np.min(time_data))/(max(n_samples, 2) - 1)
         traj_samples = sampleTrajectory(traj, np.min(time_data), np.max(time_data), sample_step, \
             by_time=True)
         drag_fit = traj_samples.drag_fit
@@ -624,9 +624,14 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500):
                     altitudemode=simplekml.AltitudeMode.absolute)
             residual.style = res_style
 
+    # Span the vertical plane between the ends of the drag fit, or the observed beginning and end without it
+    if traj_samples is not None:
+        plane_coords = [sample_coords[0], sample_coords[-1]]
+    else:
+        plane_coords = [(np.degrees(traj.rbeg_lon), np.degrees(traj.rbeg_lat), traj.rbeg_ele), \
+            (np.degrees(traj.rend_lon), np.degrees(traj.rend_lat), traj.rend_ele)]
+
     # Add the vertical plane as an extruded line, as a polygon hides what is behind it
-    plane_coords = [(np.degrees(traj.rbeg_lon), np.degrees(traj.rbeg_lat), traj.rbeg_ele), \
-        (np.degrees(traj.rend_lon), np.degrees(traj.rend_lat), traj.rend_ele)]
     wall = folders['Vertical Plane'].newlinestring(name="Vertical plane", coords=plane_coords)
     wall.altitudemode = simplekml.AltitudeMode.absolute
     wall.extrude = 1
