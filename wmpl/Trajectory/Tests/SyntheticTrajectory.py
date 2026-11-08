@@ -343,3 +343,34 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
             np.radians(s_lon), ele, station_id=station_id)
 
     return traj, begin, radiant_eci
+
+
+
+def worstResidual(traj):
+    """ Compute the largest spatial residual over all stations.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        [float] Largest spatial residual (m).
+    """
+
+    return max(np.max(np.hypot(obs.h_residuals, obs.v_residuals)) for obs in traj.observations)
+
+
+
+def timingOffsets(traj):
+    """ Compute the estimated timing offsets relative to station A, as the solver may take any station as the
+        reference.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        [dict] Timing offset per station ID (s).
+    """
+
+    offsets = dict(zip([obs.station_id for obs in traj.observations], traj.time_diffs_final))
+
+    return {station_id: offset - offsets['A'] for station_id, offset in offsets.items()}

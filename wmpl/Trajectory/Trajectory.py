@@ -133,8 +133,7 @@ class ObservedPoints(object):
 
         self.time_data = time_data
 
-        # Julian date at which each R.A./Dec. was computed. It is absolute, so it does not move when the timing
-        #   offsets shift time_data or jdt_ref changes
+        # Keep the absolute Julian date at which each R.A./Dec. was computed
         self.radec_jd = None
         if radec_jd is not None:
             self.radec_jd = np.array(radec_jd, dtype=np.float64)
@@ -448,13 +447,16 @@ class ObservedPoints(object):
 
 
     def calcAzimuthal(self):
-        """ Calculate azimuthal coordinates from right ascension and declination. """
+        """ Calculate azimuthal coordinates from right ascension and declination.
 
-        # For CAMS data the azimuthal to equatorial conversion was done without considering the flow of time
-        # during the meteor's appearance, so by default the JD is fixed to the reference time. Data that does
-        # account for it gives the time of each conversion in radec_jd. That is the time the R.A./Dec. was
-        # computed at, not JD_data: the timing offsets estimated later shift JD_data, and the azimuth and
-        # elevation the camera measured must stay fixed to the Earth when they do.
+        For CAMS data the azimuthal to equatorial conversion was done without considering the flow of time
+        during the meteor's appearance, so by default the JD is fixed to the reference time. Data that does
+        account for it gives the time of each conversion in radec_jd. That is the time the R.A./Dec. was
+        computed at, not JD_data: the timing offsets estimated later shift JD_data, and the azimuth and
+        elevation the camera measured must stay fixed to the Earth when they do.
+        """
+
+        # Take the time at which the R.A./Dec. were computed
         if self.radec_jd is None:
             jdt_ref_vect = np.zeros_like(self.ra_data) + self.jdt_ref
         else:
@@ -2957,11 +2959,12 @@ class Trajectory(object):
             obs: [ObservedPoints] Instance of ObservedPoints.
 
         Keyword arguments:
-            meastype: [int] Measurement type. If not given, it will be read from the trajectory object.
+            meastype: [int] Measurement type. If not given, it will be read from the trajectory object. Only
+                then are the times at which the R.A./Dec. were computed (radec_jd) kept, as obs.ra_data is
+                recomputed at jdt_ref.
         """
 
-        # Only the original measurements carry the times their R.A./Dec. was computed at. obs.ra_data does
-        #   not: it is recomputed at jdt_ref, so it is the CAMS convention that inverts it.
+        # Only the original measurements carry the times their R.A./Dec. were computed at
         radec_jd = None
 
         if meastype is None:

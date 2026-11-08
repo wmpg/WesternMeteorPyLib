@@ -21,7 +21,8 @@ matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
-    observeStraightMeteor, stationAzimAlt, straightMeteorPoints
+    observeStraightMeteor, stationAzimAlt, straightMeteorPoints, timingOffsets, \
+    worstResidual
 from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.TrajConversions import altAz2RADec_vect
 
@@ -91,20 +92,6 @@ def _solve(per_point=True, cams=False, clock_offsets=None, time_shift=0.0, **kwa
 
 
 
-def _worstResidual(traj):
-    """ Compute the largest spatial residual over all stations.
-
-    Arguments:
-        traj: [Trajectory object] Solved trajectory.
-
-    Return:
-        [float] Largest spatial residual (m).
-    """
-
-    return max(np.max(np.hypot(obs.h_residuals, obs.v_residuals)) for obs in traj.observations)
-
-
-
 def _radiantError(radiant_eci, radiant_ref):
     """ Compute the angle between two radiants.
 
@@ -120,23 +107,6 @@ def _radiantError(radiant_eci, radiant_ref):
 
 
 
-def _offsetOfB(traj):
-    """ Compute the estimated timing offset of station B relative to station A, as the solver may take any
-        station as the reference.
-
-    Arguments:
-        traj: [Trajectory object] Solved trajectory.
-
-    Return:
-        [float] Timing offset of B relative to A (s).
-    """
-
-    offsets = dict(zip([obs.station_id for obs in traj.observations], traj.time_diffs_final))
-
-    return offsets['B'] - offsets['A']
-
-
-
 def testPerPointRaDecInverts():
     """ Check that R.A./Dec. computed at the time of each point are inverted when radec_jd is given. Without
         it, the worst residual is 22.4 m and the radiant is 52.4 arcsec off.
@@ -144,7 +114,7 @@ def testPerPointRaDecInverts():
 
     traj, radiant_eci = _solve()
 
-    assert _worstResidual(traj) < 0.01
+    assert worstResidual(traj) < 0.01
     assert _radiantError(traj.radiant_eci_mini, radiant_eci) < 0.01
 
 
@@ -156,7 +126,7 @@ def testCamsRaDecStillInvert():
 
     traj, radiant_eci = _solve(per_point=False, cams=True)
 
-    assert _worstResidual(traj) < 0.01
+    assert worstResidual(traj) < 0.01
     assert _radiantError(traj.radiant_eci_mini, radiant_eci) < 0.01
 
 
@@ -170,7 +140,7 @@ def testPerPointRaDecInvertWhenTheFirstPointIsAfterTheReferenceTime():
 
     traj, radiant_eci = _solve(time_shift=0.7, estimate_timing_vel=True)
 
-    assert _worstResidual(traj) < 0.05
+    assert worstResidual(traj) < 0.05
     assert _radiantError(traj.radiant_eci_mini, radiant_eci) < 0.05
 
 
@@ -191,9 +161,9 @@ def testACorrectedClockKeepsTheLinesOfSightFixedToTheEarth():
     reference = reference.run()
 
     # The timing estimation recovers the clock offset to 44 microseconds either way
-    assert abs(_offsetOfB(traj) + CLOCK_OFFSET) < 1e-4
+    assert abs(timingOffsets(traj)['B'] + CLOCK_OFFSET) < 1e-4
 
-    assert abs(_offsetOfB(traj) - _offsetOfB(reference)) < 1e-6
+    assert abs(timingOffsets(traj)['B'] - timingOffsets(reference)['B']) < 1e-6
     assert _radiantError(traj.radiant_eci_mini, reference.radiant_eci_mini) < 0.05
 
 
@@ -223,4 +193,4 @@ if __name__ == "__main__":
     for per_point in (False, True):
         traj, radiant_eci = _solve(per_point=per_point)
         print("radec_jd given: {!s:5}  worst residual {:8.3f} m  radiant error {:7.2f} arcsec".format(\
-            per_point, _worstResidual(traj), _radiantError(traj.radiant_eci_mini, radiant_eci)))
+            per_point, worstResidual(traj), _radiantError(traj.radiant_eci_mini, radiant_eci)))
