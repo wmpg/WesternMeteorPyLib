@@ -135,6 +135,7 @@ def testRunsMadeBeforeTheGroundFrameAreReplayedWithTheInertialSpeed():
         replayInTheFrameOfTheRun(dynesty_file, obs)
 
         assert obs.v_rotation == 0.0
+        assert obs.legacy_inertial_frame
 
         # Check that it cannot be resumed
         with pytest.raises(ValueError):
@@ -148,3 +149,21 @@ def testRunsMadeBeforeTheGroundFrameAreReplayedWithTheInertialSpeed():
         replayInTheFrameOfTheRun(dynesty_file, obs)
 
         assert obs.v_rotation == -49.6
+
+
+
+def testTheConstantsOfALegacyReplayStayInertial():
+    """ Check that the constants of a replayed older run keep the sampled inertial values without v_rotation,
+        so they are converted to the ground when loaded later.
+    """
+
+    obs = _observations()
+    obs.v_rotation = 0.0
+    obs.legacy_inertial_frame = True
+
+    const = constructConstants([obs.v_init, obs.zenith_angle, obs.m_init], obs, \
+        ['v_init', 'zenith_angle', 'm_init'], {})
+
+    assert const.v_init == obs.v_init
+    assert const.zenith_angle == obs.zenith_angle
+    assert not hasattr(const, 'v_rotation')

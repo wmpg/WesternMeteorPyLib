@@ -5892,8 +5892,9 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
         # use the function thaht add them in the const_nominal
         const_nominal = addFragToConst(const_nominal, combined_frag_dic)
 
-    # Convert the sampled inertial v_init and zenith angle to the ground
-    constantsRelativeToGround(const_nominal, getattr(real_event, 'v_rotation', 0.0))
+    # Convert the sampled inertial v_init and zenith angle to the ground, unless replaying an older run
+    if not getattr(real_event, 'legacy_inertial_frame', False):
+        constantsRelativeToGround(const_nominal, getattr(real_event, 'v_rotation', 0.0))
 
     if dir_path!="" and file_name!="":
         _, _, _ = runSimulation(const_nominal, compute_wake=False) # completes the some fields in const_nominal that will be saved
@@ -6305,7 +6306,8 @@ def groundFrameMarkerPath(dynesty_file):
 def replayInTheFrameOfTheRun(dynesty_file, obs_data):
     """ Set the rotation of the observations to 0 for a dynesty run without the ground-frame marker, which
         was made before MetSim was simulated relative to the ground, so its samples are replayed with the
-        model they were computed with.
+        model they were computed with. The constants of the replay keep the inertial values without
+        v_rotation, as they were saved before.
 
     Arguments:
         dynesty_file: [str] Path to the dynesty checkpoint file.
@@ -6322,6 +6324,7 @@ def replayInTheFrameOfTheRun(dynesty_file, obs_data):
         "replayed with the inertial speed. Start a new run for results relative to the ground." \
         "".format(dynesty_file))
     obs_data.v_rotation = 0.0
+    obs_data.legacy_inertial_frame = True
 
 
 

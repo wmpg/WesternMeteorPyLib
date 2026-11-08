@@ -484,6 +484,7 @@ def heightCurvature(h0, zc, l, r_earth):
     return math.sqrt((h0 + r_earth)**2 - 2*l*math.cos(zc)*(h0 + r_earth) + l**2) - r_earth
 
 
+
 def constantsRelativeToGround(const, v_rotation):
     """ Convert the initial speed and the zenith angle of the constants from the inertial frame of the
         trajectory solver to the ground, as MetSim simulates the motion relative to the air.
