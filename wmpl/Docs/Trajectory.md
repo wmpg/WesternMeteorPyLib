@@ -83,25 +83,35 @@ direction of motion at the first point.
 
 Drag also slows down the velocity which gravity adds across the path, like the rest of the velocity, so a
 decelerating meteor drops less than one at a constant velocity. Its path bends at `dtheta/dt = g_perp/v`, as
-in [the drag fit](DragFit.md). The solver scales the drop at a constant velocity by the ratio of the two,
-which it computes with the velocity of the Jacchia fit of the lag, from the pass before the one with the
-drop. The velocity is held above 3 km/s, where ablation stops, as the exponential of the fit can fall far
-below the velocity of a fireball at its end. At a constant velocity the scale is 1, so meteors which barely
-decelerate are not affected.
+in [the drag fit](DragFit.md). This depends only on the velocity: the size, shape and density of the meteoroid
+and the density of the air act on the drop only through the deceleration they cause. The solver scales the
+drop at a constant velocity by the ratio of the two, with a velocity fitted to the lengths of the points of
+the pass before the one with the drop.
 
-For Winchcombe (8.2 s, 13.8 to 3.6 km/s), the drop at the last point is 188 m instead of 245 m, against
-189 m from the bending of the drag fit. The end height moves up by 46 m and the radiant by 10 arcsec. On
-fireballs integrated in 3D with drag and gravity, which slow down to 4-10 km/s, the radiant error of a
-noise-free solution falls from 5-65 arcsec to 0.1-9 arcsec, and the largest error of the positions across
-the path from 4-71 m to 0.4-10 m.
+The velocity is fitted without a model of the deceleration, of the atmosphere or of the heights:
+
+- It is constant, or linear in time over up to 8 segments joined end to end, and the Bayesian information
+  criterion (Schwarz 1978) chooses the number of segments. Points which show no change of velocity keep a
+  constant velocity, and the drop is not scaled. A deceleration of any shape, such as that of a fireball which
+  fragments, gets the segments it needs.
+- The velocity does not increase faster than gravity can speed a meteor up (9.83 m/s^2), as drag only slows
+  a meteor down. This keeps the fit from following the scatter of few or noisy points, while it follows a
+  meteor which gravity alone speeds up or slows down.
+- It is held above 3 km/s, where ablation stops.
+
+For Winchcombe (8.2 s, 13.8 to 3.6 km/s), the drop at the last point is 189 m instead of 245 m, the same as
+from the bending of the drag fit, and along the whole path the two drops differ by at most 0.9 m. The end
+height moves up by 41 m and the radiant by 26 arcsec. On fireballs integrated in 3D with drag and gravity,
+which slow down to 4-10 km/s, the radiant error of a noise-free solution falls from 5-65 arcsec to 0.2-2.1
+arcsec, and the largest error of the positions across the path from 4-71 m to 0.1-0.9 m.
 
 - `Trajectory(..., gravity_decel=False)` keeps the drop at a constant velocity. Trajectories pickled before
   the option was added keep it too.
 - `traj.gravity_drop_scale` holds the times from the first point and the scale at those times, and
   `traj.gravityDropFactor(t)` gives the factor of the drop at the time `t` from the first point. The drag
   fit and the dynamic mass fit apply the same drop as the solver with it.
-- The Jacchia exponential overestimates the deceleration at the end of strongly decelerating fireballs, so
-  there the scale is 0.012-0.024 too small, against a correction of 0.25-0.33 (synthetic fireballs ending
-  at 4-7 km/s).
+- With few points, gaps between the stations and a large scatter of the lengths, the points may only support
+  a constant deceleration, which then stands for a deceleration concentrated at the end. On such a fireball
+  (3.4 s, 57 points, 400 m of scatter), the drop differs from that of the drag fit by up to 2.7 m out of 53 m.
 - As in the drag fit, the velocity is that of the solver, not relative to the air, and the small change of
   the bending by the gravity along the path is left out.

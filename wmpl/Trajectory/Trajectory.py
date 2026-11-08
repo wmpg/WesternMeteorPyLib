@@ -766,8 +766,114 @@ def gravityDropReference(observations, state_vect, radiant_eci):
 GRAVITY_DROP_SCALE_POINTS = 1001
 
 # Lowest velocity with which the gravity drop is scaled (m/s). Ablation essentially stops below about 3 km/s,
-#   while the exponential of the Jacchia fit can fall far below the velocity of a fireball at its end
+#   while the fitted velocity can fall below it at the end when the last points scatter
 GRAVITY_DROP_MIN_VEL = 3000.0
+
+# Largest number of segments of the velocity fitted to the lengths for the gravity drop, and largest number of
+#   groups of points, consecutive in time, to which the points are averaged before the fit
+GRAVITY_DROP_VEL_SEGMENTS = 8
+GRAVITY_DROP_VEL_GROUPS = 500
+
+# Largest acceleration of a meteor along its path (m/s^2): drag only slows a meteor down, and gravity speeds
+#   it up by at most g, here at the surface of the Earth
+GRAVITY_DROP_MAX_ACC = 9.83
+
+
+
+def segmentedVelocity(time_rel, length, time_eval, max_segments=GRAVITY_DROP_VEL_SEGMENTS, \
+    n_groups=GRAVITY_DROP_VEL_GROUPS, max_acc=GRAVITY_DROP_MAX_ACC):
+    """ Velocity of a meteor from its lengths along the trajectory, without a model of its deceleration.
+
+    The lengths are fitted by least squares with a velocity which is constant, or linear in time over 1 to
+    max_segments segments with equal numbers of points, continuous where the segments meet. The number of
+    segments is chosen by the Bayesian information criterion, so the velocity stays constant when the points
+    do not show a change of velocity, and follows a deceleration of any shape, such as that of a fireball
+    which fragments, when they do. No model of the deceleration, the atmosphere or the heights is used. The
+    only bound is that the velocity does not increase faster than max_acc: drag only slows a meteor down, and
+    only gravity speeds it up. This keeps the velocity from following the scatter of few or noisy points.
+
+    Reference:
+        Schwarz, G. (1978). Estimating the dimension of a model. The Annals of Statistics, 6(2), 461-464.
+
+    Arguments:
+        time_rel: [ndarray] Times of the points (s).
+        length: [ndarray] Lengths of the points along the trajectory (m).
+        time_eval: [ndarray] Times at which the velocity is evaluated (s). Outside the times of the points,
+            the velocity at the nearest point is used.
+
+    Keyword arguments:
+        max_segments: [int] Largest number of segments of the velocity.
+        n_groups: [int] Largest number of groups of points, consecutive in time, whose times and lengths are
+            averaged before the fit.
+        max_acc: [float] Largest increase of the velocity with time (m/s^2).
+
+    Return:
+        vel: [ndarray] Velocity at the times time_eval (m/s). None if the points have fewer than 3 distinct
+            times.
+    """
+
+    # Average the lengths at equal times, as from several stations
+    time_unique, inverse = np.unique(np.asarray(time_rel, dtype=np.float64), return_inverse=True)
+    length_unique = np.bincount(inverse, weights=np.asarray(length, dtype=np.float64))/np.bincount(inverse)
+
+    if len(time_unique) < 3:
+        return None
+
+    # Average groups of consecutive points, which keeps the fit small for many points
+    if len(time_unique) > n_groups:
+        groups = np.array_split(np.arange(len(time_unique)), n_groups)
+        time_unique = np.array([np.mean(time_unique[grp]) for grp in groups])
+        length_unique = np.array([np.mean(length_unique[grp]) for grp in groups])
+
+    # Normalize the times to 0-1
+    n_points = len(time_unique)
+    time_beg, time_span = time_unique[0], time_unique[-1] - time_unique[0]
+    tau = (time_unique - time_beg)/time_span
+
+    # Fit the lengths with 0 (constant velocity) to max_segments segments of a linear velocity, and keep the
+    #   fit with the lowest Bayesian information criterion
+    best = None
+    for n_seg in range(max_segments + 1):
+
+        n_params = n_seg + 2
+        if n_points < n_params + 2:
+            break
+
+        # The velocity is b + sum(s_k*(time spent in segment k)), with the slope s_k of each segment, so the
+        #   length is a + b*tau + sum(s_k*(integral of the time spent in segment k)). The slope is at most
+        #   max_acc, in units of the normalized time
+        edges = np.r_[0.0, np.quantile(tau, np.arange(1, n_seg)/n_seg), 1.0]
+        columns = [np.ones(n_points), tau]
+        for edge_beg, edge_end in zip(edges[:n_seg], edges[1:n_seg + 1]):
+            in_segment = np.clip(tau - edge_beg, 0.0, edge_end - edge_beg)
+            columns.append(0.5*in_segment**2 + (edge_end - edge_beg)*np.maximum(tau - edge_end, 0.0))
+        design = np.column_stack(columns)
+
+        if n_seg == 0:
+            coeffs = np.linalg.lstsq(design, length_unique, rcond=None)[0]
+
+        else:
+            upper = np.r_[np.inf, np.inf, np.full(n_seg, max_acc*time_span**2)]
+            coeffs = scipy.optimize.lsq_linear(design, length_unique, bounds=(-np.inf, upper), \
+                method='bvls').x
+
+        rss = np.sum((length_unique - design @ coeffs)**2)
+        bic = n_points*np.log(max(rss/n_points, 1e-300)) + n_params*np.log(n_points)
+
+        if (best is None) or (bic < best[0]):
+            best = (bic, n_seg, coeffs, edges)
+
+    _, n_seg, coeffs, edges = best
+
+    # Differentiate the lengths. The time spent in each segment holds the velocity outside the times of the
+    #   points
+    time_eval = np.atleast_1d(np.asarray(time_eval, dtype=np.float64))
+    tau_eval = (time_eval - time_beg)/time_span
+    vel = np.full_like(tau_eval, coeffs[1])
+    for slope, edge_beg, edge_end in zip(coeffs[2:], edges[:n_seg], edges[1:n_seg + 1]):
+        vel += slope*np.clip(tau_eval - edge_beg, 0.0, edge_end - edge_beg)
+
+    return vel/time_span
 
 
 
@@ -2665,9 +2771,9 @@ class Trajectory(object):
             gravity_factor: [flat] Gravity correction factor. 1.0 by default (full correction). 
                 Can be between 0 - 1. Lower values used for lift compensation.
             gravity_decel: [bool] Reduce the gravity drop of a decelerating meteor, as drag also slows down
-                the velocity which gravity adds across the path (see gravityDropScale). The deceleration is
-                taken from the Jacchia fit of the lag. True by default. If False, the drop assumes a constant
-                velocity.
+                the velocity which gravity adds across the path (see gravityDropScale). The velocity is fitted
+                to the lengths without a model of the deceleration (see segmentedVelocity). True by default.
+                If False, the drop assumes a constant velocity.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
@@ -3916,46 +4022,43 @@ class Trajectory(object):
 
 
 
-    def calcGravityDropScale(self, observations, jacchia_fit):
-        """ Compute the scale of the gravity drop of a decelerating meteor (self.gravity_drop_scale), with the
-            velocity of the Jacchia fit of the lag, from the beginning of the meteor to its last used point.
-            The velocity is held at GRAVITY_DROP_MIN_VEL or above. The scale is None, and the drop assumes a
-            constant velocity, if gravity_decel is off or if the fit measures no deceleration.
+    def calcGravityDropScale(self, observations):
+        """ Compute the scale of the gravity drop of a decelerating meteor (self.gravity_drop_scale), from the
+            beginning of the meteor to its last used point. The velocity is fitted to the lengths of the used
+            points along the trajectory without a model of the deceleration (see segmentedVelocity), and is
+            held at GRAVITY_DROP_MIN_VEL or above. The scale is None, and the drop assumes a constant
+            velocity, if gravity_decel is off or if the points have no lengths.
 
         Arguments:
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
                 stations.
-            jacchia_fit: [ndarray] Parameters a1 and a2 of the Jacchia fit of the lag of all stations (see
-                fitJacchiaLag). None if there is no fit.
         """
 
         self.gravity_drop_scale = None
 
         # Trajectories pickled before the option was added keep the drop at a constant velocity
-        if (not getattr(self, 'gravity_decel', False)) or (jacchia_fit is None) or (self.v_init is None):
+        if not getattr(self, 'gravity_decel', False):
             return None
 
-        a1, a2 = np.abs(jacchia_fit[0]), np.abs(jacchia_fit[1])
-        if a1*a2 == 0:
-            return None
-
-        # Take the times from the beginning of the meteor, as the drop, to the last used point
+        # Take the times from the beginning of the meteor, as the drop, and the lengths of the used points
         t0 = min([obs.time_data[0] for obs in observations])
-        used_times = [obs.time_data[obs.ignore_list == 0] for obs in observations \
-            if (not obs.ignore_station) and np.any(obs.ignore_list == 0)]
-        if not used_times:
+        used = [obs for obs in observations if (not obs.ignore_station) and np.any(obs.ignore_list == 0) \
+            and (getattr(obs, 'state_vect_dist', None) is not None)]
+        if not used:
             return None
 
-        t_end = max([np.max(times) for times in used_times])
-        if t_end <= t0:
+        times = np.concatenate([obs.time_data[obs.ignore_list == 0] for obs in used]) - t0
+        lengths = np.concatenate([np.asarray(obs.state_vect_dist)[obs.ignore_list == 0] for obs in used])
+        if (np.max(times) <= 0) or (not np.all(np.isfinite(lengths))):
             return None
 
-        time_rel = np.linspace(0.0, t_end - t0, GRAVITY_DROP_SCALE_POINTS)
-        vel = jacchiaVelocityFunc(t0 + time_rel, a1, a2, self.v_init)
-        if not np.all(np.isfinite(vel)):
+        time_rel = np.linspace(0.0, np.max(times), GRAVITY_DROP_SCALE_POINTS)
+        vel = segmentedVelocity(times, lengths, time_rel)
+        if (vel is None) or (not np.all(np.isfinite(vel))):
             return None
 
-        # Hold the velocity at the speed where ablation stops, which the exponential can fall below at the end
+        # Hold the velocity at the speed where ablation stops, which the last segment of the fit can fall
+        #   below
         vel = np.maximum(vel, GRAVITY_DROP_MIN_VEL)
 
         self.gravity_drop_scale = (time_rel, gravityDropScale(time_rel, vel))
@@ -4003,8 +4106,8 @@ class Trajectory(object):
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci)
         self.calcV0z(eci0, radiant_eci)
 
-        # Scale of the drop of a decelerating meteor, from the Jacchia fit of the lag
-        self.calcGravityDropScale(observations, getattr(self, 'jacchia_fit', None))
+        # Scale of the drop of a decelerating meteor, from the lengths of the points
+        self.calcGravityDropScale(observations)
 
         ###########################################
 
@@ -4185,8 +4288,8 @@ class Trajectory(object):
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci)
         self.calcV0z(eci0, radiant_eci)
 
-        # Scale of the drop of a decelerating meteor, from the Jacchia fit of the lag
-        self.calcGravityDropScale(observations, getattr(self, 'jacchia_fit', None))
+        # Scale of the drop of a decelerating meteor, from the lengths of the points
+        self.calcGravityDropScale(observations)
 
         ####
 
@@ -6804,10 +6907,10 @@ class Trajectory(object):
             calc_res=_rerun_timing, gravity=(_rerun_timing and self.gravity_correction))
 
 
-        # Scale the gravity drop of the next pass for a decelerating meteor, with the Jacchia fit of the lag
-        #   of this pass. The times do not change before the next pass
+        # Scale the gravity drop of the next pass for a decelerating meteor, with the lengths of this pass.
+        #   The times do not change before the next pass
         if (not _rerun_timing) and self.gravity_correction and getattr(self, 'gravity_decel', False):
-            self.calcGravityDropScale(self.observations, self.fitJacchiaLag(self.observations))
+            self.calcGravityDropScale(self.observations)
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
         ######################################################################################################

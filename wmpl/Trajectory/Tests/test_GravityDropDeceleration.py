@@ -1,10 +1,12 @@
 """ Tests of the gravity drop of a decelerating meteor in the trajectory solver.
 
 Drag also slows down the velocity which gravity adds across the path, so a decelerating meteor drops less
-than one at a constant velocity, which applyGravityDrop assumes. The solver scales the drop with the velocity
-of the Jacchia fit of the lag (gravityDropScale, Trajectory.calcGravityDropScale). The tests check the scale
-against analytic cases and against a fireball integrated in 3D with drag and gravity, and solve that fireball
-with and without the scale.
+than one at a constant velocity, which applyGravityDrop assumes. The solver scales the drop with a velocity
+fitted to the lengths without a deceleration model such as the Jacchia fit (gravityDropScale,
+segmentedVelocity, Trajectory.calcGravityDropScale). The tests check the scale against analytic cases and
+against a fireball integrated in 3D with drag and gravity, solve that fireball with and without the scale,
+and check the velocity of a fireball which fragments, of a meteor at a constant velocity, of one whose
+velocity changes by gravity alone, and of few noisy points.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityDropDeceleration.py -v
@@ -17,8 +19,8 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MIN_VEL, Trajectory, gravityDropScale, \
-    jacchiaVelocityFunc
+from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MAX_ACC, GRAVITY_DROP_MIN_VEL, Trajectory, \
+    gravityDropScale, segmentedVelocity
 from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDragMeteor, observeMeteor, \
     observeStraightMeteor
 
@@ -71,11 +73,40 @@ def _perpendicularErrors(traj, meteor):
 
 
 
-def _solveFireball(gravity_decel):
+def _decelerate(traj, v_beg, v_end):
+    """ Replace the lengths of the points of a solved trajectory by those of a meteor which slows down
+        linearly in time.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+        v_beg: [float] Velocity at the first point (m/s).
+        v_end: [float] Velocity at the last point (m/s).
+
+    Return:
+        (t0, t_end): [tuple of float] Times of the first and of the last point (s).
+    """
+
+    t0 = min([obs.time_data[0] for obs in traj.observations])
+    t_end = max([obs.time_data[-1] for obs in traj.observations])
+    decel = (v_beg - v_end)/(t_end - t0)
+
+    for obs in traj.observations:
+        t_rel = obs.time_data - t0
+        obs.state_vect_dist = v_beg*t_rel - 0.5*decel*t_rel**2
+
+    return t0, t_end
+
+
+
+def _solveFireball(gravity_decel, jacchia_fit=None):
     """ Solve the noise-free fireball with the gravity correction.
 
     Arguments:
         gravity_decel: [bool] Scale the drop for the deceleration.
+
+    Keyword arguments:
+        jacchia_fit: [ndarray] Parameters a1 and a2 which the Jacchia fit of the lag returns instead of the
+            fit, for every station and for all of them. None by default, the fit is done.
 
     Return:
         (traj, radiant_error, perp_errors):
@@ -89,7 +120,28 @@ def _solveFireball(gravity_decel):
 
     traj = observeMeteor(meteor, noise=0.0, gravity_correction=True, gravity_decel=gravity_decel, \
         calc_orbit=False)
-    traj.run()
+
+    if jacchia_fit is None:
+        traj.run()
+
+    else:
+
+        # Replace the Jacchia fit on the class of this object (wmpl loads every module twice)
+        traj_class = type(traj)
+        original = traj_class.fitJacchiaLag
+
+        def _replacedFit(self, observations):
+            for obs in observations:
+                obs.jacchia_fit = np.array(jacchia_fit)
+            return np.array(jacchia_fit)
+
+        traj_class.fitJacchiaLag = _replacedFit
+
+        try:
+            traj.run()
+
+        finally:
+            traj_class.fitJacchiaLag = original
 
     radiant_error = 3600*np.degrees(np.linalg.norm(traj.radiant_eci_mini - meteor.radiantAtTime(0.0)))
 
@@ -196,54 +248,242 @@ def testNoScaleWithoutTheOptionOrInOldPickles():
     traj, _, _ = observeStraightMeteor(gravity_correction=True)
     traj.run()
 
-    traj.v_init = 20000.0
-    jacchia_fit = np.array([10.0, 2.0])
+    # The lengths of a decelerating meteor
+    _decelerate(traj, 20000.0, 10000.0)
+
+    traj.gravity_decel = True
+    traj.calcGravityDropScale(traj.observations)
+    assert traj.gravity_drop_scale is not None
 
     traj.gravity_decel = False
-    traj.calcGravityDropScale(traj.observations, jacchia_fit)
+    traj.calcGravityDropScale(traj.observations)
     assert traj.gravity_drop_scale is None
 
     del traj.gravity_decel
-    traj.calcGravityDropScale(traj.observations, jacchia_fit)
+    traj.calcGravityDropScale(traj.observations)
     assert traj.gravity_drop_scale is None
 
 
 
 def testTheVelocityIsHeldAboveWhereAblationStops():
-    """ Check that a Jacchia fit whose velocity falls below zero at the end still scales the drop, with the
+    """ Check that a meteor which slows down below GRAVITY_DROP_MIN_VEL at the end scales the drop with the
         velocity held at GRAVITY_DROP_MIN_VEL.
     """
 
     traj, _, _ = observeStraightMeteor(gravity_correction=True)
     traj.run()
 
-    t0 = min([obs.time_data[0] for obs in traj.observations])
-    t_end = max([obs.time_data[-1] for obs in traj.observations])
+    # The lengths of a meteor which slows down linearly from 20 to 1 km/s
+    t0, t_end = _decelerate(traj, 20000.0, 1000.0)
 
-    # Choose a2 so that the velocity of the fit is negative at the last point
-    traj.v_init = 20000.0
-    a2 = 3.0
-    a1 = 1.5*traj.v_init/(a2*np.exp(a2*t_end))
-    assert jacchiaVelocityFunc(t_end, a1, a2, traj.v_init) < 0
-
-    traj.calcGravityDropScale(traj.observations, np.array([a1, a2]))
-
+    traj.calcGravityDropScale(traj.observations)
     time_rel, scale = traj.gravity_drop_scale
-    vel = np.maximum(jacchiaVelocityFunc(t0 + time_rel, a1, a2, traj.v_init), GRAVITY_DROP_MIN_VEL)
 
-    assert np.allclose(scale, gravityDropScale(time_rel, vel))
+    vel = 20000.0 - 19000.0*time_rel/(t_end - t0)
+    held = gravityDropScale(time_rel, np.maximum(vel, GRAVITY_DROP_MIN_VEL))[-1]
+    not_held = gravityDropScale(time_rel, vel)[-1]
+
     assert np.all(np.isfinite(scale))
-    assert 0 < scale[-1] < 1
+    assert abs(scale[-1] - held) < 0.002
+    assert abs(held - not_held) > 0.02
+
+    # The scale is the same when the times do not start at 0, as when the first point is not at the
+    #   reference time
+    for obs in traj.observations:
+        obs.time_data = obs.time_data + 0.7
+
+    traj.calcGravityDropScale(traj.observations)
+    assert np.allclose(traj.gravity_drop_scale[0], time_rel)
+    assert np.allclose(traj.gravity_drop_scale[1], scale)
+
+
+
+def _lengths(profile, times, duration):
+    """ Integrate a velocity profile to the lengths at the given times.
+
+    Arguments:
+        profile: [function] Velocity (m/s) as a function of the time (s).
+        times: [ndarray] Times of the points (s).
+        duration: [float] Duration of the meteor (s).
+
+    Return:
+        [ndarray] Lengths at the times of the points (m).
+    """
+
+    time_fine = np.linspace(0.0, duration, 80001)
+    vel_fine = profile(time_fine)
+    length_fine = np.r_[0.0, np.cumsum(0.5*(vel_fine[1:] + vel_fine[:-1])*np.diff(time_fine))]
+
+    return np.interp(times, time_fine, length_fine)
+
+
+
+def _twoStations(duration, fps=25.0):
+    """ Times of the points of two stations, one until 70% of the duration and one from 25%, whose frames
+        are not simultaneous.
+
+    Arguments:
+        duration: [float] Duration of the meteor (s).
+
+    Keyword arguments:
+        fps: [float] Frame rate (frames per second). 25 by default.
+
+    Return:
+        (times, n_first): [tuple] Times of the points (s), and the number of points of the first station.
+    """
+
+    times_first = np.arange(0.0, 0.7*duration, 1.0/fps)
+    times_second = np.arange(0.25*duration, duration, 1.0/fps) + 0.37/fps
+
+    return np.r_[times_first, times_second], len(times_first)
+
+
+
+def testTheVelocityFollowsAFragmentingFireball():
+    """ Check the velocity fitted to noisy lengths of two stations against the true velocity of a fireball
+        which fragments, a deceleration which an exponential does not follow.
+    """
+
+    duration = 8.0
+    time_eval = np.linspace(0.0, duration, 1001)
+
+    # A slow deceleration, and 4 km/s lost in about 1 s at 5 s
+    def profile(t):
+        return 16000.0 - 300.0*t - 2000.0*(1 + np.tanh((t - 5.0)/0.3))
+
+    vel_true = profile(time_eval)
+
+    for seed in range(3):
+
+        # 50 m of noise, and an offset of 30 m between the stations
+        rng = np.random.default_rng(seed)
+        times, n_first = _twoStations(duration)
+        lengths = _lengths(profile, times, duration) + rng.normal(0.0, 50.0, len(times))
+        lengths[n_first:] += 30.0
+
+        vel = segmentedVelocity(times, lengths, time_eval)
+
+        assert np.sqrt(np.mean((vel - vel_true)**2)) < 100.0
+        assert abs(gravityDropScale(time_eval, vel)[-1] - gravityDropScale(time_eval, vel_true)[-1]) < 0.002
+
+        # Outside the times of the points, the velocity at the nearest point
+        outside = segmentedVelocity(times, lengths, np.array([-1.0, np.min(times), np.max(times), \
+            np.max(times) + 1.0]))
+        assert (outside[0] == outside[1]) and (outside[2] == outside[3])
+
+    # Fewer than 3 distinct times give no velocity
+    assert segmentedVelocity(np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 2.0]), time_eval) is None
+
+
+
+def testNoChangeOfVelocityIsFoundAtAConstantVelocity():
+    """ Check that noisy lengths of a meteor at a constant velocity give a constant velocity, so its drop is
+        not scaled.
+    """
+
+    duration = 3.0
+    time_eval = np.linspace(0.0, duration, 1001)
+
+    for seed in range(10):
+
+        rng = np.random.default_rng(seed)
+        times, n_first = _twoStations(duration)
+        lengths = 15000.0*times + rng.normal(0.0, 100.0, len(times))
+        lengths[n_first:] += 30.0
+
+        vel = segmentedVelocity(times, lengths, time_eval)
+
+        # The offset between the stations moves the velocity by a few tens of m/s
+        assert np.ptp(vel) == 0
+        assert abs(vel[0] - 15000.0) < 50.0
+        assert abs(gravityDropScale(time_eval, vel)[-1] - 1.0) < 1e-12
+
+
+
+def testAChangeOfVelocityByGravityAloneIsFollowed():
+    """ Check that the velocity follows a meteor whose velocity changes by gravity alone, up or down by
+        8 m/s^2, as it may increase as fast as gravity can speed a meteor up.
+    """
+
+    duration = 10.0
+    time_eval = np.linspace(0.0, duration, 1001)
+
+    for acc in (8.0, -8.0):
+
+        def profile(t):
+            return 11000.0 + acc*t
+
+        scale_true = gravityDropScale(time_eval, profile(time_eval))[-1]
+        assert abs(scale_true - 1.0) > 0.002
+
+        for seed in range(5):
+
+            rng = np.random.default_rng(seed)
+            times, _ = _twoStations(duration)
+            lengths = _lengths(profile, times, duration) + rng.normal(0.0, 30.0, len(times))
+
+            vel = segmentedVelocity(times, lengths, time_eval)
+
+            assert np.all(np.diff(vel)/np.diff(time_eval) <= GRAVITY_DROP_MAX_ACC + 1e-6)
+            assert abs(gravityDropScale(time_eval, vel)[-1] - scale_true) < 0.0008
+
+
+
+def testFewNoisyPointsDoNotMakeTheVelocityOscillate():
+    """ Check that few noisy points of three stations, with gaps and offsets between them, give a velocity
+        which does not increase faster than gravity can speed a meteor up, nor leave the range of the true
+        one.
+    """
+
+    duration = 3.4
+    time_eval = np.linspace(0.0, duration, 1001)
+
+    def profile(t):
+        return 70000.0 - 3000.0*t
+
+    for seed in range(10):
+
+        # A station which sees the beginning, one with a low frame rate and one near the end
+        rng = np.random.default_rng(seed)
+        times = [np.arange(0.0, 0.6, 0.04), np.arange(0.3, duration, 0.15) + 0.01, \
+            np.arange(2.4, 3.1, 0.04) + 0.02]
+        lengths = [_lengths(profile, t, duration) + rng.normal(0.0, 400.0, len(t)) for t in times]
+        lengths[1] += 300.0
+        lengths[2] -= 300.0
+
+        vel = segmentedVelocity(np.concatenate(times), np.concatenate(lengths), time_eval)
+
+        assert np.all(np.diff(vel)/np.diff(time_eval) <= GRAVITY_DROP_MAX_ACC + 1e-6)
+        assert (np.min(vel) > 55000.0) and (np.max(vel) < 75000.0)
+
+
+
+def testTheScaleDoesNotUseTheJacchiaFit():
+    """ Check that the scale and the solution do not change when the Jacchia fit of the lag is replaced by
+        one far from the deceleration of the fireball.
+    """
+
+    traj, radiant_error, _ = _solveFireball(True)
+    traj_jacchia, radiant_error_jacchia, _ = _solveFireball(True, jacchia_fit=[500.0, 5.0])
+
+    assert np.allclose(traj_jacchia.jacchia_fit, [500.0, 5.0])
+    assert np.array_equal(traj.gravity_drop_scale[1], traj_jacchia.gravity_drop_scale[1])
+    assert np.array_equal(traj.radiant_eci_mini, traj_jacchia.radiant_eci_mini)
+    assert radiant_error == radiant_error_jacchia
 
 
 
 def testAMeteorWithoutDecelerationIsNotScaled():
-    """ Check that a straight meteor at a constant velocity keeps the drop at a constant velocity. """
+    """ Check that a straight meteor at a constant velocity keeps the drop at a constant velocity, without
+        noise and with about 20 arcsec of noise.
+    """
 
-    traj, _, _ = observeStraightMeteor(noise=0.0, gravity_correction=True)
-    traj.run()
+    for kwargs in (dict(noise=0.0), dict(seed=1), dict(seed=2)):
 
-    assert (traj.gravity_drop_scale is None) or (np.min(traj.gravity_drop_scale[1]) > 0.999)
+        traj, _, _ = observeStraightMeteor(gravity_correction=True, **kwargs)
+        traj.run()
+
+        assert (traj.gravity_drop_scale is None) or (np.min(traj.gravity_drop_scale[1]) > 0.999)
 
 
 
@@ -254,7 +494,10 @@ if __name__ == "__main__":
     test_list = [testTheScaleIsOneAtAConstantVelocity, testTheScaleOfALinearDeceleration, \
         testTheScaleGivesTheDropOfABentPath, testTheSolverRecoversABentFireball, \
         testTheDropFactorIsTheGravityFactorTimesTheScale, testNoScaleWithoutTheOptionOrInOldPickles, \
-        testTheVelocityIsHeldAboveWhereAblationStops, testAMeteorWithoutDecelerationIsNotScaled]
+        testTheVelocityIsHeldAboveWhereAblationStops, testTheVelocityFollowsAFragmentingFireball, \
+        testNoChangeOfVelocityIsFoundAtAConstantVelocity, testAChangeOfVelocityByGravityAloneIsFollowed, \
+        testFewNoisyPointsDoNotMakeTheVelocityOscillate, \
+        testTheScaleDoesNotUseTheJacchiaFit, testAMeteorWithoutDecelerationIsNotScaled]
 
     for test in test_list:
         test()
