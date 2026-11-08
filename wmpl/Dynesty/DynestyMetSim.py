@@ -3980,9 +3980,6 @@ class ObservationData:
             self.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, jd_dat, height_max=atm_ht_max)
             self.atm_density_model = 'table'
 
-            # Print the atmosphere the simulations use
-            print(atmDensityDescription(self))
-
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4103,6 +4100,9 @@ class ObservationData:
                     "average speed: {:.4e} kg".format(int(lum_eff_type_val), photom_mass))
 
             m_init_list.append(photom_mass)
+
+        # Print the atmosphere the simulations use
+        print(atmDensityDescription(self))
 
         # do the mean of the zenith_angle_list and m_init_list
         self.zenith_angle = np.mean(zenith_angle_list)

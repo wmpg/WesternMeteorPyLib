@@ -429,3 +429,36 @@ def testTheAtmosphereIsDescribed():
 
     assert "NRLMSISE-00 table, 14.0 to 180.0 km every 500 m" in description
     assert "Ap 4" in description
+
+
+
+def testTheCythonTableOnShortAndUnevenTables():
+    """ Check that the Cython table equals the vectorized utility on a 2-point table and on an uneven grid,
+        accepts read-only arrays, and rejects tables that are too short or have mismatched columns.
+    """
+
+    rng = np.random.default_rng(1)
+    uneven_ht = np.sort(rng.uniform(10000.0, 190000.0, 300))
+    uneven_log10_rho = -5.0 - uneven_ht/20000.0 + 0.1*np.sin(uneven_ht/7000.0)
+
+    for table_ht, table_log10_rho in (([90000.0, 110000.0], [-5.5, -7.0]), (uneven_ht, uneven_log10_rho)):
+
+        table_ht = np.array(table_ht)
+        table_log10_rho = np.array(table_log10_rho)
+        table_ht.flags.writeable = False
+
+        table = MetSimErosion.AtmDensityTableCy(table_ht, table_log10_rho)
+        ht = np.concatenate([table_ht, np.linspace(0.0, 200000.0, 401)])
+
+        rho_cy = np.array([table.density(h) for h in ht])
+        rho_vect = atmDensTable(ht, table_ht, table_log10_rho)
+
+        assert np.allclose(rho_cy, rho_vect, rtol=1e-12, atol=0)
+
+    # Check the rejected tables
+    for table in (([100000.0], [-6.0]), ([90000.0, 100000.0, 110000.0], [-6.0])):
+        with pytest.raises(ValueError):
+            MetSimErosion.AtmDensityTableCy(*table)
+
+        with pytest.raises(ValueError):
+            MetSimErosion.atmDensityTable(95000.0, np.array(table[0]), np.array(table[1]))
