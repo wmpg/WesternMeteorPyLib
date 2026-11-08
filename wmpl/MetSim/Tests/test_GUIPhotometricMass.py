@@ -73,6 +73,7 @@ def _standIn(lum_eff_type=0, lum_eff=0.7, with_photometry=True):
     gui = SimpleNamespace(met_obs=None, ecsv_obs=None, lc_data=None, traj=traj, const=const)
     gui.calcPhotometricMass = lambda: MetSimGUI.calcPhotometricMass(gui)
     gui.inputLumEff = SimpleNamespace(setDisabled=lambda disabled: None)
+    gui.readInputBoxes = lambda: None
     gui.updateInputBoxes = lambda: None
 
     return gui
@@ -124,6 +125,30 @@ def testChangingTheModelRescalesTheInitialMass():
     MetSimGUI.updateLumEffType(gui)
 
     assert gui.const.m_init == m_init
+
+
+
+def testChangingTheModelKeepsAPendingMassEdit():
+    """ Check that an initial mass typed in the box but not yet read is rescaled, not discarded.
+    """
+
+    gui = _standIn(lum_eff_type=0)
+    mass_constant = MetSimGUI.calcPhotometricMass(gui)[1]
+    gui.const.m_init = mass_constant
+
+    # Type three times the photometric mass in the box, as readInputBoxes() also reads the type from the combo box
+    def readInputBoxes():
+        gui.const.m_init = 3*mass_constant
+        gui.const.lum_eff_type = gui.lumEffComboBox.currentIndex()
+
+    gui.readInputBoxes = readInputBoxes
+
+    # Choose RC2001 Type I
+    gui.lumEffComboBox = SimpleNamespace(currentIndex=lambda: 1)
+    MetSimGUI.updateLumEffType(gui)
+
+    assert gui.const.lum_eff_type == 1
+    assert np.isclose(gui.const.m_init, 3*MetSimGUI.calcPhotometricMass(gui)[1], rtol=1e-12)
 
 
 

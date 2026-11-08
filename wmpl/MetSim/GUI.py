@@ -3449,6 +3449,11 @@ class MetSimGUI(QMainWindow):
         if lum_eff_type == self.const.lum_eff_type:
             return
 
+        # Read the edits in the other input boxes, which the refresh below would discard
+        lum_eff_type_old = self.const.lum_eff_type
+        self.readInputBoxes()
+        self.const.lum_eff_type = lum_eff_type_old
+
         # Compute the photometric mass with the old and the new luminous efficiency
         _, photom_mass_old = self.calcPhotometricMass()
         self.const.lum_eff_type = lum_eff_type
