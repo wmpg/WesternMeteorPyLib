@@ -479,14 +479,15 @@ def earthRotationSpeed(traj):
         traj: [Trajectory object] Solved trajectory with an orbit.
 
     Return:
-        [float] Speed of the rotation along the trajectory (m/s), 0 if the orbit has no v_init_norot.
+        [float] Speed of the rotation along the trajectory (m/s). 0 without an orbit or its v_init_norot, and
+            for a solution with fixed stations, whose speeds are already relative to the ground.
     """
 
-    v_init_norot = getattr(traj.orbit, 'v_init_norot', None)
-    if v_init_norot is None:
+    orbit = getattr(traj, 'orbit', None)
+    if (getattr(orbit, 'v_init', None) is None) or (getattr(orbit, 'v_init_norot', None) is None):
         return 0.0
 
-    return traj.orbit.v_init - v_init_norot
+    return orbit.v_init - orbit.v_init_norot
 
 
 

@@ -63,7 +63,7 @@ def _standIn(lum_eff_type=0, lum_eff=0.7, with_photometry=True):
 
     obs = SimpleNamespace(time_data=TIME, absolute_magnitudes=(MAG_ABS if with_photometry else None), \
         ignore_list=np.zeros(len(TIME), dtype=int))
-    traj = SimpleNamespace(observations=[obs], orbit=SimpleNamespace(v_avg=V_AVG))
+    traj = SimpleNamespace(observations=[obs], orbit=SimpleNamespace(v_avg=V_AVG, v_avg_norot=V_AVG))
 
     const = Constants()
     const.lum_eff_type = lum_eff_type
