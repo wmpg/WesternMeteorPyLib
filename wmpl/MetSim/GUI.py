@@ -1423,9 +1423,9 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
 
     ### Compute the residuals ###
 
-    # Count the total number of length and magnitude points
-    mag_point_count = len(~np.isnan(fit_input_data[:, 1]))
-    lag_point_count = len(~np.isnan(fit_input_data[:, 2]))
+    # Count the length and magnitude points with a measurement
+    mag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 1])), 1)
+    lag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 2])), 1)
 
     # Interpolate simulated magnitude and length
     len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr, \
@@ -1466,15 +1466,16 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # if np.isnan(mag_res):
         #     mag_res = 10.0
 
-        # Compute the magnitude residual in linear luminosity units
+        # Compute the magnitude residual in linear luminosity units, for the points with a magnitude
+        mag_res = 0
         if not np.isnan(mag):
             lum_obs = const.P_0m*10**(-0.4*mag)
             lum_sim = const.P_0m*10**(-0.4*mag_sim)
 
             mag_res = mag_weight*(lum_obs - lum_sim)**2
 
-        if np.isnan(mag_res):
-            mag_res = 1e6**2
+            if np.isnan(mag_res):
+                mag_res = 1e6**2
 
 
         # Choose the lag weight
@@ -2356,17 +2357,21 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
 
         # Set a default filter which takes all observations
         mag_filter = np.ones(len(obs.model_ht), dtype=bool)
+        len_filter = np.ones(len(obs.model_ht), dtype=bool)
 
         if obs.absolute_magnitudes is not None:
 
             # Filter out observations with magnitude fainter than +9 or with NaN magnitudes
             mag_filter = (obs.absolute_magnitudes < 9) & (~np.isnan(obs.absolute_magnitudes))
 
+            # The lengths of the points without a magnitude are still plotted
+            len_filter = ~(obs.absolute_magnitudes >= 9)
+
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
 
         # Sample the simulated normalized length at observed times
-        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[mag_filter])
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[len_filter])
 
 
         # Select plot parameters for the current station
@@ -2405,33 +2410,33 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
             # sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[mag_filter]
 
             # Compute the observed lag using the simulated velocity
-            obs_lag = obs.state_vect_dist[mag_filter] - sim_vel_beg*obs.time_data[mag_filter]
+            obs_lag = obs.state_vect_dist[len_filter] - sim_vel_beg*obs.time_data[len_filter]
 
             # Plot the observed lag
-            ax_lenres.plot(obs_lag, obs.model_ht[mag_filter]/1000, **plot_params)
+            ax_lenres.plot(obs_lag, obs.model_ht[len_filter]/1000, **plot_params)
             
             # ax_lenres.plot(sim_lag, obs.model_ht[mag_filter]/1000, **plot_params_dict["sim"])
 
         else:
 
             # Compute the length residuals
-            len_residuals = obs.state_vect_dist[mag_filter] - sim_norm_len_sampled
+            len_residuals = obs.state_vect_dist[len_filter] - sim_norm_len_sampled
 
             # Demean the residuals
             len_residuals = len_residuals - np.median(len_residuals)
 
             # Plot the length residuals
-            ax_lenres.plot(len_residuals, obs.model_ht[mag_filter]/1000, **plot_params)
+            ax_lenres.plot(len_residuals, obs.model_ht[len_filter]/1000, **plot_params)
 
 
-        if len(obs.model_ht[mag_filter]):
+        if len(obs.model_ht[len_filter]):
             # Keep track of the observed height range
-            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
-            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
+            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[len_filter]))
+            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[len_filter]))
 
             # Keep track of the observed time range
-            time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
-            time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
+            time_obs_max = max(time_obs_max, np.max(obs.time_data[len_filter]))
+            time_obs_min = min(time_obs_min, np.min(obs.time_data[len_filter]))
 
 
     # Compute the magnitude residuals from the ECSV files
@@ -2440,9 +2445,13 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
         # Plot additional magnitudes for all sites
         for site in ecsv_obs.sites:
 
-            # Extract data (filter out inf values)
-            height_data = ecsv_obs.height_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
-            abs_mag_data = ecsv_obs.abs_mag_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
+            # Extract data (filter out inf values and the points without a magnitude)
+            height_data = ecsv_obs.height_data[site][np.isfinite(ecsv_obs.abs_mag_data[site])]
+            abs_mag_data = ecsv_obs.abs_mag_data[site][np.isfinite(ecsv_obs.abs_mag_data[site])]
+
+            # Skip the sites without magnitudes
+            if len(abs_mag_data) == 0:
+                continue
 
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(height_data)
@@ -3321,14 +3330,15 @@ class MetSimGUI(QMainWindow):
             print("No photometry, assuming default mass:", self.const.m_init)
             return 0, self.const.m_init
 
-        # The luminous efficiency chosen in the GUI: its constant value, or the code of the velocity- and
-        #   mass-dependent model, which calcMass() evaluates at the average speed relative to the ground
+        # Use the constant luminous efficiency from the GUI
         if self.const.lum_eff_type == 0:
             tau = self.const.lum_eff/100
             print("NOTE: The mass was computed using the constant luminous efficiency defined in the GUI!")
+
+        # Pass the code of the chosen model, which calcMass() evaluates at the average ground-relative speed
         else:
             tau = int(self.const.lum_eff_type)
-            print("NOTE: The mass was computed using the luminous efficiency model chosen in the GUI "
+            print("NOTE: The mass was computed using the luminous efficiency model chosen in the GUI " \
                 "(lum_eff_type = {:d}) at the average speed relative to the ground!".format(tau))
 
         # Sort array by time
@@ -3339,6 +3349,11 @@ class MetSimGUI(QMainWindow):
         
         # Average out the magnitudes
         time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
+
+        # A light curve of a single point cannot be integrated, so the default mass is used
+        if len(np.unique(time_arr)) < 2:
+            print("Too few photometry points, assuming default mass:", self.const.m_init)
+            return 0, self.const.m_init
 
 
         # Calculate the radiated energy
@@ -3387,8 +3402,7 @@ class MetSimGUI(QMainWindow):
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
         self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         
-        # Without its signal, so that showing the previous simulation does not change the current model (nor rescale
-        #   the initial mass, see updateLumEffType()): only the user choosing a model does
+        # Block the signal so that showing the previous simulation does not change the current model
         self.lumEffComboBox.blockSignals(True)
         self.lumEffComboBox.setCurrentIndex(const.lum_eff_type)
         self.lumEffComboBox.blockSignals(False)
@@ -3507,14 +3521,21 @@ class MetSimGUI(QMainWindow):
 
 
     def updateLumEffType(self):
-        """ Update the luminous efficiency type, and rescale the initial mass by how the photometric mass changes
-            with it, as updateInitialMass() does for the constant luminous efficiency. """
+        """ Update the luminous efficiency type and rescale the initial mass by the change in the photometric
+            mass, as updateInitialMass() does for the constant luminous efficiency.
+        """
 
+        # Skip if the type did not change
         lum_eff_type = self.lumEffComboBox.currentIndex()
         if lum_eff_type == self.const.lum_eff_type:
             return
 
-        # Photometric mass with the old and the new luminous efficiency
+        # Read the edits in the other input boxes, which the refresh below would discard
+        lum_eff_type_old = self.const.lum_eff_type
+        self.readInputBoxes()
+        self.const.lum_eff_type = lum_eff_type_old
+
+        # Compute the photometric mass with the old and the new luminous efficiency
         _, photom_mass_old = self.calcPhotometricMass()
         self.const.lum_eff_type = lum_eff_type
         _, photom_mass_new = self.calcPhotometricMass()
@@ -3522,7 +3543,7 @@ class MetSimGUI(QMainWindow):
         # Enable/disable the constant tau box (index 0 = constant tau)
         self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
 
-        # Rescale the initial mass (without photometry both are the initial mass, which stays)
+        # Rescale the initial mass, which does not change without photometry
         self.const.m_init *= photom_mass_new/photom_mass_old
 
         self.updateInputBoxes()
@@ -4184,9 +4205,11 @@ class MetSimGUI(QMainWindow):
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x', 
                     linestyle='dashed', label=str(site), markersize=5, linewidth=1)
 
-                # Keep track of the faintest and the brightest magnitude
-                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
-                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+                # Keep track of the faintest and the brightest magnitude, skipping the points without one
+                abs_mag_finite = abs_mag_data[np.isfinite(abs_mag_data)]
+                if len(abs_mag_finite):
+                    mag_brightest = min(mag_brightest, np.min(abs_mag_finite))
+                    mag_faintest = max(mag_faintest, np.max(abs_mag_finite))
 
 
         # Plot additional observations from the .met file (if available)
@@ -4340,6 +4363,11 @@ class MetSimGUI(QMainWindow):
 
         self.magnitudePlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, \
             self.plot_beg_ht + BEG_HT_PAD])
+        # Use the default limits if no magnitudes were plotted
+        if not (np.isfinite(mag_brightest) and np.isfinite(mag_faintest)):
+            mag_brightest = -2.0
+            mag_faintest = 6.0
+
         self.magnitudePlot.canvas.axes.set_xlim([mag_brightest - 1, mag_faintest + 1])
         self.magnitudePlot.canvas.axes.invert_xaxis()
 

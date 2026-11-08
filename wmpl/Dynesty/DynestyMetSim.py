@@ -67,7 +67,6 @@ from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
 
 
 class TimeoutException(Exception):
@@ -159,7 +158,8 @@ def buildGlobalTimeAxis(
     lag_key="lag",           # optional in data
     v_init=None,             # if given, recompute lag = length - v_init*time
     min_overlap_pts=8,
-    offset_tol=2e-3,):
+    offset_tol=2e-3,
+    mag_key=None,):
     """ Align station clocks to the station that starts at the highest altitude.
 
     If length exists, also align length and re-zero it at the same global start.
@@ -177,6 +177,8 @@ def buildGlobalTimeAxis(
         v_init: [float] Initial velocity. If provided, lag is recomputed. None by default.
         min_overlap_pts: [int] Minimum number of overlapping points required for alignment. 8 by default.
         offset_tol: [float] Offset tolerance for time alignment. 2e-3 by default.
+        mag_key: [str] Key for magnitude data. Of the points with the same time, the ones with a magnitude are
+            kept before the ones without (NaN). None by default, in which case any of them may be kept.
 
     Return:
         out: [dict] Updated data dictionary with aligned time (and optionally length/lag).
@@ -283,6 +285,10 @@ def buildGlobalTimeAxis(
 
     # Finally sort by time (required for integration)
     idx = np.argsort(out[time_key])
+
+    # Put the points without a magnitude after the others with the same time, so they are the duplicates
+    if (mag_key is not None) and (mag_key in out) and np.any(np.isnan(out[mag_key].astype(float))):
+        idx = np.lexsort((np.isnan(out[mag_key].astype(float)), out[time_key]))
     out = {k: np.asarray(v)[idx] for k, v in out.items()}
 
     # Drop duplicate times
@@ -3547,43 +3553,6 @@ def integrateLuminosity(all_simulated_time, time_fps, luminosity_arr, dt, fps, P
     return new_luminosity_arr, new_abs_magnitude
 
 
-def photometricMassLumEffModel(time_arr, mag_arr, traj, lum_eff_type, P_0m):
-    """ Photometric mass with a velocity- and mass-dependent luminous efficiency model, evaluated along the
-        trajectory: at each photometric point, at the speed of the trajectory's Jacchia fit of the lag, with the mass
-        iterated to self-consistency by calcMass(). Without a usable Jacchia fit, at the average speed. The speeds are
-        relative to the ground (the air).
-
-    Arguments:
-        time_arr: [ndarray] Times of the magnitudes (s), in the trajectory's time.
-        mag_arr: [ndarray] Absolute magnitudes.
-        traj: [Trajectory] The trajectory, for its Jacchia fit and its initial and average speeds relative to the
-            ground (orbit.v_init_norot and orbit.v_avg_norot).
-        lum_eff_type: [int] Luminous efficiency model, 1 to 8 (see luminousEfficiency()).
-        P_0m: [float] Power of a zero-magnitude meteor (W).
-
-    Return:
-        (mass, vel_arr): The photometric mass (kg), and the speeds it was computed with (m/s): one per point, or
-            the average speed.
-    """
-
-    from wmpl.Trajectory.Trajectory import jacchiaVelocityFunc
-
-    time_arr, mag_arr = np.array(time_arr), np.array(mag_arr)
-    vel_arr = traj.orbit.v_avg_norot
-
-    # The Jacchia fit is a smooth, monotonic deceleration curve, as calcMass() needs from a velocity array (point
-    #   speeds are too noisy). A failed fit leaves zeros, which give the initial speed. Relative to the ground, as the
-    #   light comes from the speed relative to the air: the solver's inertial speeds minus the Earth's rotation
-    #   along the path, which offsets them all alike (as for Orbit's v_avg_norot)
-    jacchia_fit = getattr(traj, "jacchia_fit", None)
-    if jacchia_fit is not None:
-        vel_jacchia = jacchiaVelocityFunc(time_arr, *jacchia_fit, traj.orbit.v_init_norot)
-        if np.all(np.isfinite(vel_jacchia)) and np.all(vel_jacchia > 0):
-            vel_arr = vel_jacchia
-
-    return calcMass(time_arr, mag_arr, vel_arr, tau=int(lum_eff_type), P_0m=P_0m), vel_arr
-
-
 class ObservationData:
     """ Class to load the observation data and create an object.
 
@@ -3841,8 +3810,24 @@ class ObservationData:
         # for the lum data delete all the keys that have values above 8
         if np.any(lum_data['absolute_magnitudes'] > 8):
             print(obs.station_id,'Found values below 8 absolute magnitudes :', lum_data['absolute_magnitudes'][lum_data['absolute_magnitudes'] > 8])
-            # delete any values above 8 absolute_magnitudes and delete the corresponding values in the other arrays
-            lum_data = {key: lum_data[key][lum_data['absolute_magnitudes'] < 8] for key in lum_data.keys()}
+
+            # delete any values above 8 absolute_magnitudes and delete the corresponding values in the other
+            #   arrays, keeping the points without a magnitude (NaN) until the station clocks are aligned
+            keep = (lum_data['absolute_magnitudes'] < 8) | np.isnan(lum_data['absolute_magnitudes'])
+            lum_data = {key: lum_data[key][keep] for key in lum_data.keys()}
+
+        # Compute the height step of every point between the frames of its station (in the order of time),
+        #   before the points without a magnitude are removed, for the pick position adjustment below
+        height_step = np.zeros(len(lum_data['height']))
+        for station in np.unique(lum_data['flag_station']):
+            indices = np.where(lum_data['flag_station'] == station)[0]
+
+            # Take the steps between the distinct frames, as the same frame can come from several files
+            _, first, inverse = np.unique(lum_data['time'][indices], return_index=True, return_inverse=True)
+            if len(first) > 1:
+                diffs = np.diff(lum_data['height'][indices][first])
+                height_step[indices] = np.concatenate(([diffs[0]], diffs))[inverse.ravel()]
+        lum_data['height_step'] = height_step
 
         # # print all the keys in the lag_data
         # print('Keys in lag_data:',lag_data.keys())
@@ -3883,9 +3868,15 @@ class ObservationData:
             offset_tol_use=0.2*(1/self.fps_lum)
         else:
             offset_tol_use=0.2*(1/80.0)
-        lum_data, lum_aligned = buildGlobalTimeAxis(lum_data,offset_tol=offset_tol_use)
+        lum_data, lum_aligned = buildGlobalTimeAxis(lum_data,offset_tol=offset_tol_use, \
+            mag_key='absolute_magnitudes')
         if lum_aligned:
             print('Luminosity data aligned to global time axis.')
+
+        # delete the points without a magnitude (NaN), after their positions were used to align the clocks
+        keep = ~np.isnan(lum_data['absolute_magnitudes'])
+        if not np.all(keep):
+            lum_data = {key: lum_data[key][keep] for key in lum_data.keys()}
 
         if self.fps_lag > 80:
             offset_tol_use=0.2*(1/self.fps_lag)
@@ -3926,11 +3917,8 @@ class ObservationData:
             # Get all indices where this station appears
             indices = np.where(self.stations_lum == station)[0]
 
-            # Compute the differences between consecutive heights
-            diffs = np.diff(self.height_lum[indices])
-            
-            # Prepend the first difference to match the array length
-            diffheight = np.concatenate(([diffs[0]], diffs))
+            # Take the height steps between the frames, computed before the points were filtered
+            diffheight = lum_data['height_step'][indices]
             
             # Subtract half of diffheight from the heights
             self.height_lum[indices] = self.height_lum[indices] - diffheight*pick_position
@@ -4018,6 +4006,11 @@ class ObservationData:
             # Average out the magnitudes
             time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
 
+            # A light curve of a single point cannot be integrated
+            if len(np.unique(time_arr)) < 2:
+                print('Too few valid luminosity points to compute the photometric mass')
+                continue
+
             # # Calculate the radiated energy
             # radiated_energy = calcRadiatedEnergy(np.array(time_arr), np.array(mag_arr), P_0m=self.P_0m)
             lum_eff_type_val = None
@@ -4061,7 +4054,7 @@ class ObservationData:
                             except (IndexError, ValueError):
                                 continue
 
-                # Also when the constant model is fixed without a lum_eff line, which left it None
+                # Use the default also when the constant model is fixed without a lum_eff line
                 if (not (lum_eff_type_val == 0 and lum_eff_type_fixed)) or (luminous_efficiency is None):
                     luminous_efficiency = 0.7  # fallback default
 
@@ -4075,15 +4068,13 @@ class ObservationData:
             # Compute the photometric mass
             photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, tau=luminous_efficiency/100, P_0m=self.P_0m)
 
-            # run in case we have a different lum_eff_type than constant luminous efficiency to better estimate the correct mass range:
-            #   recompute the mass with the model along the trajectory, at the speed of each point and the mass it
-            #   gives, instead of a single luminous efficiency at the initial speed and the constant-efficiency mass
+            # Recompute the mass with the luminous efficiency model at the average speed relative to the ground,
+            #   iterated by calcMass() to the mass it gives
             if (lum_eff_type_val is not None) and (lum_eff_type_val != 0):
-                photom_mass, vel_used = photometricMassLumEffModel(time_arr, mag_arr, traj, lum_eff_type_val, \
-                    self.P_0m)
-                print("NOTE: Recomputed the mass with the luminous efficiency model lum_eff_type = {:d}, at {:s}: "
-                    "{:.4e} kg".format(int(lum_eff_type_val), "the Jacchia speeds of the points" \
-                    if np.ndim(vel_used) else "the average speed", photom_mass))
+                photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, \
+                    tau=int(lum_eff_type_val), P_0m=self.P_0m)
+                print("NOTE: Recomputed the mass with the luminous efficiency model lum_eff_type = {:d} at the " \
+                    "average speed: {:.4e} kg".format(int(lum_eff_type_val), photom_mass))
 
             m_init_list.append(photom_mass)
 
