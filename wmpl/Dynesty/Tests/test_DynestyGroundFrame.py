@@ -15,7 +15,7 @@ import warnings
 import numpy as np
 
 from wmpl.Dynesty.DynestyMetSim import ObservationData, constructConstants, runSimulationDynesty
-from wmpl.MetSim.GUI import constantsToInertial
+from wmpl.MetSim.MetSimErosion import constantsToInertial
 from wmpl.Utils.Pickling import loadPickle
 
 

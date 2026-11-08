@@ -20,9 +20,9 @@ import tempfile
 
 import numpy as np
 
-from wmpl.MetSim.GUI import SimulationResults, constantsRelativeToGround, constantsToInertial, \
-    loadConstants, loadedConstantsRelativeToGround, saveConstants
-from wmpl.MetSim.MetSimErosion import Constants, runSimulation
+from wmpl.MetSim.GUI import SimulationResults, loadConstants, saveConstants
+from wmpl.MetSim.MetSimErosion import Constants, constantsRelativeToGround, constantsToInertial, \
+    loadedConstantsRelativeToGround, runSimulation
 from wmpl.Utils.Physics import earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle
 
@@ -183,7 +183,7 @@ def testTheInertialValuesReproduceTheMeteorRelativeToTheGround():
 
 def testOldConstantsFilesAreConvertedToTheGround():
     """ Check that a constants file without v_rotation is converted to the ground when loaded, and that one
-        saved with v_rotation is left as it is.
+        saved with v_rotation keeps its ground values and takes the rotation of the trajectory.
     """
 
     traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
@@ -215,3 +215,12 @@ def testOldConstantsFilesAreConvertedToTheGround():
         assert const_new.v_init == const.v_init
         assert const_new.v_rotation == v_rotation
         assert np.isclose(const_new.zenith_angle, const.zenith_angle, rtol=0, atol=1e-12)
+
+        # Check that a file saved with another rotation takes the rotation of this trajectory
+        const.v_rotation = v_rotation + 300.0
+        saveConstants(const, tmp_dir, 'other.json')
+        const_other, const_json_other = loadConstants(os.path.join(tmp_dir, 'other.json'))
+        loadedConstantsRelativeToGround(const_other, const_json_other, traj)
+
+        assert const_other.v_init == const.v_init
+        assert const_other.v_rotation == v_rotation

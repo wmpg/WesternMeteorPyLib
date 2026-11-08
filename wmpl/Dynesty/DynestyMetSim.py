@@ -59,8 +59,8 @@ except ImportError:
     DYNESTY_FOUND = False
 
 from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
-from wmpl.MetSim.GUI import constantsRelativeToGround, constantsToInertial
-from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin
+from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin, \
+    constantsRelativeToGround, constantsToInertial
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed

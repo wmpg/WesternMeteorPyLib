@@ -13,9 +13,8 @@ import scipy.optimize
 
 from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import Trajectory
-from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations, \
-    loadedConstantsRelativeToGround
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants
+from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants, loadedConstantsRelativeToGround
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Pickling import loadPickle
