@@ -3048,6 +3048,11 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Assign geometric uncertainty flag, if it was changed
     traj_best.geometric_uncert = geometric_uncert
 
+    # The runs fitted the lines of sight with noise added, which doubles the variance of their residuals, so
+    #   keep the formal covariance of the fit of the measured ones (see losFormalUncertainty)
+    traj_best.los_covariance = getattr(traj, 'los_covariance', None)
+    traj_best.los_frame = getattr(traj, 'los_frame', None)
+
     # Without timing estimation the noise does not change the velocity, so sample it within its uncertainty
     if not traj.estimate_timing_vel:
         mc_results = sampleMCVelocities(mc_results)

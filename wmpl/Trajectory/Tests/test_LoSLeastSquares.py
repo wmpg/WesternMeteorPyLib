@@ -8,6 +8,7 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import sys
 
 import numpy as np
@@ -270,3 +271,33 @@ def testHuberIsTheDefault():
     traj = Trajectory(2460600.25, los_fit='angles')
     assert traj.lineOfSightMethod()[0] is nelderMeadLine
     assert traj.losFormalUncertainty() == (None, None)
+
+
+
+def testTheMonteCarloKeepsTheFormalUncertaintyOfTheMeasuredLines():
+    """ Check that the solution returned by the Monte Carlo, one of its runs, has the formal uncertainty of the
+        fit of the measured lines of sight, not of the run, whose lines of sight had noise added.
+    """
+
+    module = sys.modules['wmpl.Trajectory.Trajectory']
+
+    traj, _, _ = observeStraightMeteor(noise=np.radians(10.0/3600), seed=1, los_fit='least_squares')
+    traj = traj.run()
+
+    # Runs as the Monte Carlo returns them: the same line, with the covariance of noisier lines of sight
+    def _runs(*args, **kwargs):
+        runs = [copy.deepcopy(traj) for _ in range(2)]
+        for run in runs:
+            run.los_covariance = 2*traj.los_covariance
+        return runs
+
+    original = module.parallelComputeGenerator
+    module.parallelComputeGenerator = _runs
+    try:
+        traj_best, _ = module.monteCarloTrajectory(traj, mc_runs=2, plot_results=False, mc_cores=1)
+    finally:
+        module.parallelComputeGenerator = original
+
+    assert traj_best is not traj
+    assert np.array_equal(traj_best.los_covariance, traj.los_covariance)
+    assert traj_best.losFormalUncertainty() == traj.losFormalUncertainty()
