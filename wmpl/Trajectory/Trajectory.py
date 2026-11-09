@@ -915,9 +915,8 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
             station_ray = rad_cpa - stat_eci
             station_ray = vectNorm(station_ray)
 
-            # Calculate the angle between the observed LoS as seen from the station and the radiant line
-            #   from the chord between the two unit vectors, which unlike the arccos of their dot product
-            #   stays precise for the small angles at the minimum
+            # Calculate the angle between the observed LoS and the radiant line from the chord between the
+            #   unit vectors, which is precise for small angles
             chord = vectMag(station_ray - meas_eci)
             angle_sum += weights[i]*2*np.arcsin(min(chord/2, 1.0))
 
@@ -1424,19 +1423,15 @@ LOS_RESTART_TOLERANCE = 1e-2
 # Largest number of fresh simplices in the line-of-sight fit
 LOS_MAX_SIMPLICES = 10
 
-# Directions of the steps of the fresh simplices of the line-of-sight fit, along the coordinates and turned
-#   by an orthogonal Hadamard matrix, used in turn
+# Steps of the fresh simplices, along the coordinates and turned by a Hadamard matrix, used in turn
 LOS_SIMPLEX_DIRECTIONS = [np.eye(4), 0.5*np.array([[1.0, 1.0, 1.0, 1.0], [1.0, -1.0, 1.0, -1.0], \
     [1.0, 1.0, -1.0, -1.0], [1.0, -1.0, -1.0, 1.0]])]
 
 
 
 def lineFrame(state_vect, radiant_eci, observations):
-    """ Make a frame of coordinates for the lines near the given line. A line has four degrees of freedom,
-        two for a rotation about the middle of the meteor and two for a shift across the line. Both are
-        given as the move of the line at the ends of the observed part of the meteor (m), so the coordinates
-        have comparable scales. A move along the line and the length of the radiant vector are left out, as
-        they do not change the angles between the line and the lines of sight.
+    """ Make a frame of the four degrees of freedom of a line: two rotations about the middle of the meteor
+        and two shifts across the line, all as moves of the line at the ends of the meteor (m).
 
     Arguments:
         state_vect: [ndarray] (x, y, z) ECI coordinates of a point on the line (meters).
@@ -1507,15 +1502,11 @@ def lineFromFrame(coords, frame):
 
 
 def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
-    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame),
-        to be given to scipy.optimize.minimize as the method. With the six parameters of a state vector and
-        a radiant vector, the simplex can wander along the line, where the cost does not change, or collapse
-        and stop short of the minimum, the known way Nelder-Mead fails (McKinnon 1998). The minimization is
-        started again from its solution with a fresh simplex, the usual remedy (Kelley 1999), until two fresh
-        simplices in a row move the line by less than LOS_RESTART_TOLERANCE. The fresh simplices take their
-        steps along the coordinates and along turned directions in turn, so that a narrow valley across the
-        coordinates is not missed, and their size is ten times the last move, between 1 m and
-        LOS_SIMPLEX_SIZE.
+    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame).
+        It is given to scipy.optimize.minimize as the method. With the six parameters of a state vector and a
+        radiant, the simplex can collapse and stop short of the minimum (McKinnon 1998). The minimization is
+        therefore restarted with a fresh simplex (Kelley 1999) until two in a row move the line by less than
+        LOS_RESTART_TOLERANCE.
 
         References:
             McKinnon, K. I. M. (1998). Convergence of the Nelder-Mead simplex method to a nonstationary
@@ -1591,7 +1582,7 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
         # Scale the next simplex to the last move
         simplex_size = min(max(10*move, 1.0), LOS_SIMPLEX_SIZE)
 
-    # Keep the start if the minimizations did not lower its cost, which they can miss by rounding
+    # Keep the start if the minimizations did not lower its cost
     if solution.fun > start_cost:
         params = np.r_[start_params[:3], vectNorm(start_params[3:])]
         solution.fun = start_cost

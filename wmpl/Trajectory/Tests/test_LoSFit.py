@@ -27,10 +27,8 @@ import scipy.optimize
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import stateVectorDiverged
-from wmpl.Trajectory.Trajectory import lineFrame, lineFromFrame, minimizeAngleCost, moveStateVector, \
-    nelderMeadLine
-from wmpl.Trajectory.Trajectory import angleSumMeasurements2Line
+from wmpl.Trajectory.Trajectory import angleSumMeasurements2Line, lineFrame, lineFromFrame, \
+    minimizeAngleCost, moveStateVector, nelderMeadLine, stateVectorDiverged
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.Math import angleBetweenVectors, vectNorm
 
@@ -446,7 +444,8 @@ def testTheLineFitGivesAUnitRadiantAndTheBeginningOfTheMeteor():
 
     assert result.success
     assert abs(np.linalg.norm(result.x[3:]) - 1) < 1e-12
-    assert np.linalg.norm(result.x[:3] - moveStateVector(result.x[:3], result.x[3:], traj.observations)) < 1e-6
+    begin_fit = moveStateVector(result.x[:3], result.x[3:], traj.observations)
+    assert np.linalg.norm(result.x[:3] - begin_fit) < 1e-6
 
     # The noise of 20 arcsec per point leaves the radiant within a minute of arc
     assert np.degrees(angleBetweenVectors(result.x[3:], radiant)) < 1/60
@@ -532,7 +531,8 @@ if __name__ == "__main__":
         testAFitInADistantMinimumIsMinimizedAgainFromThePreviousSolution, testNoRestartByDefault, \
         testEachRestartStartsFromThePreviousSolution, testAFailedRestartDoesNotReplaceAConvergedSolution, \
         testTheLineFrameMovesTheLineAtTheEndsOfTheMeteor, \
-        testTheLineFitGivesAUnitRadiantAndTheBeginningOfTheMeteor, testTheLineFitStopsAtItsLimitOfEvaluations, \
+        testTheLineFitGivesAUnitRadiantAndTheBeginningOfTheMeteor, \
+        testTheLineFitStopsAtItsLimitOfEvaluations, \
         testTheLineFitEndsAtTheSameLineFromDifferentStarts, testSmallAnglesFromTheLineArePrecise]
 
     for test in test_list:
