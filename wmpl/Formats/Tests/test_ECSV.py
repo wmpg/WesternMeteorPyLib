@@ -173,20 +173,22 @@ def testAppliedTimeOffsetsOfAStationWithTwoFiles(tmp_path):
 
 
 
-def test_flare_points(tmp_path):
-    """ With flares=True only the main fragment points flagged as flares are loaded, also the ones not used in
-        the trajectory, with their flags. """
+def testFlarePoints(tmp_path):
+    """ Check that with flares=True only the main fragment points flagged as flares are loaded, also the ones
+        not used in the trajectory, with their flags.
+    """
 
     path = writeFragmentECSV(tmp_path/"a.ecsv", "XX0001")
     with open(path) as f:
         lines = f.read().splitlines()
 
     # Flag frames 2 (not used in the trajectory) and 4 as flares
-    lines = [line.replace(",2,False,False,", ",2,True,False,").replace(",4,False,True,", ",4,True,True,") 
+    lines = [line.replace(",2,False,False,", ",2,True,False,").replace(",4,False,True,", ",4,True,True,") \
         for line in lines]
     with open(path, 'w') as f:
         f.write("\n".join(lines) + "\n")
 
+    # Load only the flares
     _, meteors = loadECSVs([path], no_prepare=True, flares=True)
 
     assert len(meteors) == 1
@@ -199,28 +201,32 @@ def test_flare_points(tmp_path):
 
 
 
-def test_flare_report_compares_stations():
-    """ The flares of each station are its consecutive flare points. Flares of two stations whose times
-        overlap and heights agree are consistent; a flare of one station seen at another time is not. """
+def testFlareReportComparesStations():
+    """ Check that the flares of each station are its consecutive flare points, that flares of two stations
+        whose times overlap and heights agree are consistent, and that a flare seen at another time is not.
+    """
 
     jd0 = 2461070.9
 
     def point(station_id, t, ht, std=True):
-        flare = {'station_id': station_id, 'jd': jd0 + t/86400, 't_rel': t, 'ht': ht, 'used': True, 
-            'frame_dt': 0.04, 'ht_rate': -10000.0, 't_std': None, 'ht_std': None, 't_std_mc': None, 
+        """ Make a flare point, with uncertainties as from flareHeights() if std is True. """
+
+        flare = {'station_id': station_id, 'jd': jd0 + t/86400, 't_rel': t, 'ht': ht, 'used': True, \
+            'frame_dt': 0.04, 'ht_rate': -10000.0, 't_std': None, 'ht_std': None, 't_std_mc': None, \
             'ht_std_mc': None}
 
-        # Uncertainties from the Monte Carlo runs, and with the duration of the frame, as from flareHeights()
+        # Uncertainties from the Monte Carlo runs and from the duration of the frame
         if std:
             frame_std = 0.04/np.sqrt(12)
-            flare.update(t_std_mc=0.005, ht_std_mc=50.0, t_std=np.hypot(0.005, frame_std), 
+            flare.update(t_std_mc=0.005, ht_std_mc=50.0, t_std=np.hypot(0.005, frame_std), \
                 ht_std=np.hypot(50.0, 10000.0*frame_std))
 
         return flare
 
+
     # Station A sees one flare, station B the same one and a second one 0.6 s later
-    flares = [point('A', 0.50, 90000), point('A', 0.54, 89600), point('B', 0.52, 89800), point('B', 0.56, 89400), 
-        point('B', 1.20, 83000), point('B', 1.24, 82600)]
+    flares = [point('A', 0.50, 90000), point('A', 0.54, 89600), point('B', 0.52, 89800), \
+        point('B', 0.56, 89400), point('B', 1.20, 83000), point('B', 1.24, 82600)]
 
     report = flareReport(flares, ref_stations=['A'])
 
@@ -260,23 +266,28 @@ def testOriginalPicksTrajectory(tmp_path):
 
 
 
-def test_time_reference_stations():
-    """ The times refer to the clocks of the stations whose time offsets are not estimated: the reference 
-        station, or the ones with fixed offsets. The Monte Carlo runs always estimate the offsets. """
+def testTimeReferenceStations():
+    """ Check that the times refer to the clocks of the stations whose time offsets are not estimated, the
+        reference station or the ones with fixed offsets, and that the Monte Carlo runs always estimate them.
+    """
 
     def solution(estimate_timing_vel, stations_time_dict):
-        return SimpleNamespace(estimate_timing_vel=estimate_timing_vel, 
+        """ Make a stand-in for a solution with the given timing. """
+
+        return SimpleNamespace(estimate_timing_vel=estimate_timing_vel, \
             stations_time_dict=OrderedDict(stations_time_dict))
 
+
+    # The reference station and the stations with fixed offsets
     assert timeReferenceStations(solution(True, [('A', True), ('B', 0), ('C', True)])) == ['B']
     assert timeReferenceStations(solution(True, [('A', 0.1), ('B', 0.0), ('C', True)])) == ['A', 'B']
 
-    # Without the estimation of the time offsets, the times are those of the clocks of every station
+    # Without the timing estimation, the times are those of the clock of every station
     no_timing = solution(False, [])
     assert timeReferenceStations(no_timing) == []
     assert "times from the clock of each station" in flareReport([], ref_stations=[])
 
-    # ... but the Monte Carlo runs estimate them anyway, so the uncertainties refer to their reference station
+    # The Monte Carlo runs estimate them anyway, with their own reference station
     assert timeReferenceStations(no_timing, mc_trajs=[solution(True, [('A', 0), ('B', True)])]) == ['A']
 
 

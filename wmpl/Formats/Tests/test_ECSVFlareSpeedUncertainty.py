@@ -31,8 +31,7 @@ def testTheRunsShiftTheSpeedWithinTheUncertaintyOfTheDragFit(tmp_path):
     assert np.isfinite(speed_std) and (speed_std > 0)
     assert 0.8 < flare['v_std_mc']/speed_std < 1.2
 
-    # The frame adds to it, and the pressure, proportional to the square of the speed, scatters at least
-    #   twice as much in relative terms
+    # The frame adds to it, and the pressure scatters at least twice as much in relative terms
     assert flare['v_std'] >= flare['v_std_mc']
     assert flare['p_std_mc']/flare['p'] > 0.8*2*flare['v_std_mc']/flare['v']
 

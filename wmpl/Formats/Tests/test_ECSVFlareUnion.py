@@ -137,3 +137,16 @@ def testTwoFlaresOnePointApartWhichOneFlareCouldBeAreNoted():
 
     assert "one point apart" not in flareReport(flares + [rowPoint('B', 0.60, 14)])
     assert "one point apart" not in flareReport(flares + [rowPoint('B', 0.60, 13, ecsv_file='B_2.ecsv')])
+
+
+
+if __name__ == "__main__":
+
+    testTheFlaresOfTwoAndThreeStationsAreJoined()
+    testAFlareConsistentWithTwoFlaresIsAmbiguous()
+    testFlaresAreOnlyJoinedWhenEachIsTheOnlyConsistentOneOfTheOther()
+    testAGroupWithTwoFlaresOfOneStationIsLeftAlone()
+    testWithoutUncertaintiesTheFlaresAreNotJoined()
+    testTwoFlaresOnePointApartWhichOneFlareCouldBeAreNoted()
+
+    print("All tests passed.")
