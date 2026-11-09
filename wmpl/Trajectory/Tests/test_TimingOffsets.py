@@ -12,7 +12,8 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import Trajectory, timingCost, timingDifferences
+from wmpl.Trajectory.Trajectory import Trajectory, stationsWithoutTimeOverlap, timingCost, \
+    timingDifferences
 from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
     observeStraightMeteor, stationAzimAlt, straightMeteorPoints, timingOffsets
 
@@ -145,12 +146,16 @@ def testFixedOffsetOfAnAbsentStation():
 
 
 
-def observeSeparately(estimate_timing_vel):
+def observeSeparately(estimate_timing_vel, exclude_end=False):
     """ Observe the straight meteor with stations A and B seeing its first part and station C its last part,
         so that the lengths of C do not overlap with those of A or B.
 
     Arguments:
         estimate_timing_vel: [bool] Passed to the Trajectory object.
+
+    Keyword arguments:
+        exclude_end: [bool] Let station A see the whole meteor with its last part excluded, so that C overlaps
+            with A only inside the exclusion zone. False by default.
 
     Return:
         [Trajectory object] Trajectory object with the observations, not yet solved.
@@ -166,11 +171,18 @@ def observeSeparately(estimate_timing_vel):
 
     for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
 
+        excluded_time = None
+
         # Take the first part of the meteor for A and B, and the last part for C
         if station_id == 'C':
             sel = slice(26, None)
         else:
             sel = slice(0, 24)
+
+        # Let A see the whole meteor and exclude its last part
+        if exclude_end and (station_id == 'A'):
+            sel = slice(0, None)
+            excluded_time = [times[24], times[-1]]
 
         # Compute the noisy directions of the points as seen from the station
         jds = STRAIGHT_JDT_REF + times[sel]/86400.0
@@ -179,7 +191,7 @@ def observeSeparately(estimate_timing_vel):
         elev = elev + rng.normal(0, NOISE, len(elev))
 
         traj.infillTrajectory(azim, elev, times[sel], np.radians(s_lat), np.radians(s_lon), ele, \
-            station_id=station_id)
+            station_id=station_id, excluded_time=excluded_time)
 
     return traj
 
@@ -206,6 +218,33 @@ def testStationWithoutOverlapIsIgnoredWithTimingEstimation():
 
 
 
+def testOverlapInsideExclusionZoneIsNotCounted():
+    """ Check that the points inside the exclusion zone of a station are not counted in its overlap with
+        another station.
+    """
+
+    traj = observeSeparately(estimate_timing_vel=False, exclude_end=True).run()
+
+    # C overlaps with A only inside the exclusion zone of A
+    pairs = timingDifferences(traj.observations)
+    assert min(len(diffs) for _, _, diffs, _ in pairs) >= 4
+    assert stationsWithoutTimeOverlap(traj.observations, pairs) == [2]
+
+
+
+def testStationOverlappingInsideExclusionZoneIsIgnored():
+    """ Check that a station which overlaps with another one only inside its exclusion zone is ignored when
+        the timing is estimated.
+    """
+
+    traj = observeSeparately(estimate_timing_vel=True, exclude_end=True).run()
+
+    assert traj.observations[2].ignore_station
+    assert not traj.observations[0].ignore_station
+    assert not traj.observations[1].ignore_station
+
+
+
 
 if __name__ == "__main__":
 
@@ -215,5 +254,7 @@ if __name__ == "__main__":
     testFixedOffsetOfAnAbsentStation()
     testStationWithoutOverlapIsKeptWithoutTimingEstimation()
     testStationWithoutOverlapIsIgnoredWithTimingEstimation()
+    testOverlapInsideExclusionZoneIsNotCounted()
+    testStationOverlappingInsideExclusionZoneIsIgnored()
 
     print("All tests passed.")

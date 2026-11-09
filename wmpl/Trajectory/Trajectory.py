@@ -1214,10 +1214,6 @@ def timingDifferences(observations, weights=None):
             # Find common points in length between both stations
             common_pts = (len2 >= np.min(len1)) & (len2 <= np.max(len1))
 
-            # Skip the pair if there is no, or almost no overlap
-            if np.count_nonzero(common_pts) < 4:
-                continue
-
             # Take only the common points
             time2 = time2[common_pts]
             len2 = len2[common_pts]
@@ -1232,6 +1228,10 @@ def timingDifferences(observations, weights=None):
 
                 time2 = time2[outside]
                 len2 = len2[outside]
+
+            # Skip the pair if there is no, or almost no overlap
+            if len(len2) < 4:
+                continue
 
             # Interpolate the time of the first (i.e. reference) station at the lengths of the second
             sort_ind = np.argsort(len1, kind='stable')
