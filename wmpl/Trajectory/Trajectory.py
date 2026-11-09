@@ -48,11 +48,11 @@ except ImportError:
 
 import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.EarthRotation import deltaUT1, eciToInertial, inertialToECI
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
     angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval, \
     medianStddev
 from wmpl.Utils.Misc import valueFormat
+from wmpl.Utils.EarthRotation import deltaUT1, eciToInertial, inertialToECI
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot
@@ -4568,6 +4568,9 @@ class Trajectory(object):
         
         out_str += "\n"
 
+        # UT1 - UTC, by which the lines of sight were turned into the ECI frame (see EarthRotation)
+        out_str += "UT1 - UTC: {:+.4f} s\n\n".format(getattr(self, 'dut1', 0.0))
+
 
 
         # Write the uncertainty type
@@ -4586,7 +4589,6 @@ class Trajectory(object):
 
         out_str += "Reference JD: {:20.12f}\n".format(self.jdt_ref)
         out_str += "Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
-        out_str += "UT1 - UTC: {:+.4f} s\n".format(getattr(self, 'dut1', 0.0))
 
         out_str += "\n\n"
 
