@@ -954,20 +954,21 @@ def _quantiles_from_samples(arr_2d, qs):
         out[name] = np.nanquantile(arr_2d, q, axis=0, method='linear')
     return out
 
-def _weightedHistogramMode(x_valid, w_valid, smooth):
-    """ Weighted, optionally dynesty-style-smoothed histogram of already NaN-filtered samples.
+def weightedHistogramMode(x_valid, w_valid, smooth):
+    """ Compute the weighted histogram of samples, smoothed as dynesty does, to find their mode.
 
     Arguments:
-        x_valid: [ndarray] 1D sample values, with any NaNs already masked out by the caller.
-        w_valid: [ndarray] Importance weights matching x_valid (need not be renormalized).
-        smooth: [float or int] Number of bins (int) or smoothing fraction used to derive
-            nbins = round(10/smooth) and apply a Gaussian KDE-style smoothing (float).
+        x_valid: [ndarray] Finite sample values.
+        w_valid: [ndarray] Weights of the samples (not necessarily normalized).
+        smooth: [float or int] Number of bins (int), or the smoothing fraction which gives round(10/smooth)
+            bins smoothed with a Gaussian kernel (float).
 
     Return:
-        centers: [ndarray] Bin centers.
-        hist: [ndarray] (Smoothed) weighted histogram counts, same length as centers.
-
+        (centers, hist):
+            - centers: [ndarray] Bin centers.
+            - hist: [ndarray] Weighted histogram, smoothed for a float smooth.
     """
+
     lo, hi = np.min(x_valid), np.max(x_valid)
     if isinstance(smooth, int):
         hist, edges = np.histogram(x_valid, bins=smooth, weights=w_valid, range=(lo, hi))
@@ -2134,7 +2135,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             mode_value = mode_raw[i]
 
             # mode via corner logic
-            centers, hist = _weightedHistogramMode(x_valid, w_valid, smooth)
+            centers, hist = weightedHistogramMode(x_valid, w_valid, smooth)
             mode_Ndim = centers[np.argmax(hist)]
 
             # now apply your log & unit transforms *after* computing stats
@@ -2592,7 +2593,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             continue
 
         # Compute histogram
-        centers, hist = _weightedHistogramMode(x_valid, w_valid, smooth)
+        centers, hist = weightedHistogramMode(x_valid, w_valid, smooth)
 
         # Fill under the curve
         ax.fill_between(centers, hist, color='blue', alpha=0.6)
@@ -5966,9 +5967,7 @@ def runSimulationDynesty(parameter_guess, real_event, var_names, fix_var):
     # build the const to run the
     const_nominal = constructConstants(parameter_guess, real_event, var_names, fix_var)
 
-    # Run the simulation. A ZeroDivisionError means this parameter draw is unphysical;
-    # let it propagate so the caller (logLikelihoodDynesty) can reject the point with
-    # -np.inf instead of silently swapping in an unrelated nominal simulation.
+    # Run the simulation, leaving a ZeroDivisionError of an unphysical draw to the caller to reject
     frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
     simulation_MetSim_object = SimulationResults(const_nominal, frag_main, results_list, wake_results)
 
@@ -6213,8 +6212,10 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
         # If not Linux, run the simulation without timeout
         try:
             simulation_results = runSimulationDynesty(guess_var, obs_metsim_obj, var_names, fix_var)
+
+        # Reject an unphysical draw
         except ZeroDivisionError:
-            return -np.inf  # unphysical parameter draw, reject the point
+            return -np.inf
     else:
         # Set timeout handler
         signal.signal(signal.SIGALRM, timeout_handler)
@@ -6225,8 +6226,11 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
         except TimeoutException:
             print('timeout')
             return -np.inf  # immediately return -np.inf if times out
+
+        # Reject an unphysical draw
         except ZeroDivisionError:
-            return -np.inf  # unphysical parameter draw, reject the point
+            return -np.inf
+
         finally:
             signal.alarm(0)  # Cancel alarm
         
