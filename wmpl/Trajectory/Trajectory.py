@@ -989,8 +989,8 @@ def angleSumPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, point_fac
         stat_eci_los: [ndarray] ECI coordinates of the station at every point (meters), one row per point.
         ignore_list: [ndarray] Points which are not used are marked with a value other than 0.
         point_factors: [ndarray] Factor of the gravity drop of every point.
-        point_shifts: [ndarray] Displacement of every point by drag against the rotating air, added to the
-            dropped point (meters), one (x, y, z) row per point.
+        point_shifts: [ndarray] Displacement of every dropped point by drag against the rotating air (meters),
+            one row per point.
         state_vect: [ndarray] ECI position of the state vector (meters).
         radiant_eci: [ndarray] Unit vector of the radiant in ECI.
         t0: [float] Time of the beginning of the meteor (s).
@@ -1099,10 +1099,9 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
             continuous. If None, the distance of each point is used.
         drop_scale: [tuple] Times from the beginning of the meteor (s) and the scale of the gravity drop at
             those times (see Trajectory.calcGravityDropScale). None by default, for a constant velocity.
-        air_shift: [tuple] Times from the beginning of the meteor (s) and the displacements of a decelerating
-            meteor across the line at those times (meters), by drag against the air which rotates with the
-            Earth (see Trajectory.calcAirRotationShift). With the gravity drop, every point is also moved by
-            the displacement at its time. None by default, when the points are not moved.
+        air_shift: [tuple] Times from the beginning of the meteor (s) and the displacements by drag against
+            the rotating air at those times (meters), to move the dropped points (see
+            Trajectory.calcAirRotationShift). None by default.
         free_fall: [tuple] Free fall table (see freeFallTable), to drop the points by their free fall from the
             line in place of drop_scale, r0 and v0z (see freeFallDrop). None by default.
 
@@ -1212,8 +1211,8 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
         v0z: [float] Initial vertical velocity of the meteor. If None, 0.0 will be used.
         r0: [float] Distance of the beginning of the meteor from the centre of the Earth, for the gravity drop
             (see gravityDropReference). If None, the distance of the point itself is used.
-        shift: [ndarray] Displacement of the point across the line by drag against the air which rotates with
-            the Earth (meters), applied with the gravity drop (see interpAirRotationShift). None by default.
+        shift: [ndarray] Displacement of the dropped point by drag against the rotating air (meters) (see
+            interpAirRotationShift). None by default.
         free_fall: [tuple] Free fall table (see freeFallTable), to drop the point by its free fall from the
             line in place of r0 and v0z (see freeFallDrop). None by default.
 
@@ -3010,29 +3009,21 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
 
 
-# Rotation rate of the Earth (rad/s), over one sidereal day as in Orbit.calcOrbit
+# Rotation rate of the Earth over one sidereal day, as in Orbit.calcOrbit (rad/s)
 EARTH_ROTATION_RATE = 2*np.pi/86164.09053
 
 
 
 def airRotationShift(time_rel, vel, eci0, radiant_eci):
-    """ Compute the displacement of a decelerating meteor across its initial line, as drag acts against its
-        velocity relative to the air, which rotates with the Earth.
-
-    The air at the meteor moves with the velocity u = omega x r in ECI coordinates, up to 465 m/s. Drag acts
-    against the velocity of the meteor relative to the air, so it pulls the velocity of the meteor across the
-    initial line, p, towards the part of the air velocity across the line, u_perp:
-    dp/dt = (a/w)*(u_perp - p), where a is the deceleration by drag and w the speed relative to the air. The
-    velocity across the line is 0 at the beginning and stays 0 at a constant velocity, so the line keeps the
-    initial direction of the meteor in ECI coordinates. The air velocity is taken at the points along the
-    line, and the speed gravity adds along the line is added back to the given velocities for w. This is
-    exact to the first order in u/w, and adds to the gravity drop.
+    """ Compute the displacement of a decelerating meteor across its initial line by drag against the air,
+        which rotates with the Earth. The velocity across the line p follows dp/dt = (a/w)*(u_perp - p), with
+        the deceleration by drag a, the speed relative to the air w and the air velocity across the line
+        u_perp.
 
     Arguments:
         time_rel: [ndarray] Times from the beginning of the meteor (s), increasing from 0.
-        vel: [ndarray] Velocities along the line at those times (m/s), all larger than 0. They are taken from
-            lengths which do not hold the speed gravity adds along the line, as the lengths of a pass with
-            the gravity drop, so only drag changes them.
+        vel: [ndarray] Velocities along the line at those times, changed by drag alone (m/s), all larger
+            than 0.
         eci0: [ndarray] (x, y, z) ECI coordinates of the beginning of the meteor (meters).
         radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector of the line.
 
@@ -3047,7 +3038,7 @@ def airRotationShift(time_rel, vel, eci0, radiant_eci):
     radiant_eci = vectNorm(np.asarray(radiant_eci, dtype=np.float64))
     dt = np.diff(time_rel)
 
-    # Add back the speed gravity adds along the line, with the gravity at the beginning
+    # Add back the speed which gravity adds along the line
     r0 = vectMag(eci0)
     g_along = G*5.9722e24/r0**2*np.dot(eci0/r0, radiant_eci)
     speed = vel + g_along*time_rel
@@ -3057,14 +3048,14 @@ def airRotationShift(time_rel, vel, eci0, radiant_eci):
     points = eci0 - np.outer(dist, radiant_eci)
     air_vel = np.cross(np.array([0.0, 0.0, EARTH_ROTATION_RATE]), points)
 
-    # Take the part of the air velocity across the line, and the speed relative to the air
+    # Compute the air velocity across the line and the speed relative to the air
     air_vel_perp = air_vel - np.outer(air_vel @ radiant_eci, radiant_eci)
     air_speed = np.linalg.norm(-np.outer(speed, radiant_eci) - air_vel, axis=1)
 
-    # Compute the rate at which drag pulls the velocity across the line towards the air velocity
+    # Compute the rate at which drag pulls the velocity towards the air
     rate = -np.gradient(vel, time_rel)/air_speed
 
-    # Integrate the velocity across the line, exactly for coefficients constant over each step
+    # Integrate the velocity across the line, exactly over each step
     vel_perp = np.zeros_like(points)
     for k in range(len(dt)):
 
@@ -3082,10 +3073,8 @@ def airRotationShift(time_rel, vel, eci0, radiant_eci):
 
 
 def interpAirRotationShift(air_shift, time_rel, radiant_eci):
-    """ Interpolate the displacement by drag against the rotating air at the given times, and keep its part
-        across the given line, so it does not move the points along it. After the last time of the
-        displacement, as at picks after the last one used, it goes on with the velocity across the line at
-        that time.
+    """ Interpolate the displacement by drag against the rotating air at the given times, across the given
+        line, and continue it after its last time with the velocity there.
 
     Arguments:
         air_shift: [tuple] Times from the beginning of the meteor (s) and the displacements at those times
@@ -3100,9 +3089,10 @@ def interpAirRotationShift(air_shift, time_rel, radiant_eci):
     time_grid, shift_grid = air_shift
     time_rel = np.atleast_1d(np.asarray(time_rel, dtype=np.float64))
 
+    # Interpolate every coordinate of the displacement
     shift = np.column_stack([np.interp(time_rel, time_grid, shift_grid[:, i]) for i in range(3)])
 
-    # Go on with the velocity across the line after the last time, which np.interp would hold
+    # Continue it after the last time with the velocity there
     after = time_rel > time_grid[-1]
     if np.any(after) and (len(time_grid) > 1):
         vel_end = (shift_grid[-1] - shift_grid[-2])/(time_grid[-1] - time_grid[-2])
@@ -3115,9 +3105,10 @@ def interpAirRotationShift(air_shift, time_rel, radiant_eci):
 
 
 
-# Largest number of times the line-of-sight fit is repeated with the displacement by drag against the rotating
-#   air, and the largest change of the displacement at which it stops (m)
+# Largest number of line-of-sight fits with the displacement by drag against the rotating air
 AIR_ROTATION_ITERATIONS = 3
+
+# Smallest displacement, and change of it, which moves the line (m)
 AIR_ROTATION_SHIFT_TOL = 0.1
 
 
@@ -3130,16 +3121,18 @@ def airRotationShiftChange(air_shift_old, air_shift_new):
         air_shift_new: [tuple] Times (s) and displacements (meters), or None.
 
     Return:
-        [float] Largest distance between the displacements at the times of the new one (meters). 0 if both
-            are None, infinite if only one is.
+        [float] Largest distance between the displacements at the times of the new one (meters), 0 if both
+            are None and infinite if only one is.
     """
 
+    # Handle the displacements which are None
     if (air_shift_old is None) and (air_shift_new is None):
         return 0.0
 
     if (air_shift_old is None) or (air_shift_new is None):
         return np.inf
 
+    # Interpolate the old displacement at the times of the new one
     time_new, shift_new = air_shift_new
     shift_old = np.column_stack([np.interp(time_new, air_shift_old[0], air_shift_old[1][:, i]) \
         for i in range(3)])
@@ -3445,10 +3438,8 @@ class Trajectory(object):
                 gravityDropScale and segmentedVelocity). If False, the drop assumes a constant velocity. True
                 by default.
             air_rotation: [bool] With the gravity drop, also move the path of a decelerating meteor by drag
-                against the air which rotates with the Earth, which pulls the velocity of the meteor across
-                its initial direction towards the velocity of the air (see airRotationShift). The velocity is
-                fitted to the lengths as for gravity_decel. True by default. If False, the path is the
-                dropped line.
+                against the air which rotates with the Earth (see airRotationShift). If False, the path is the
+                dropped line. True by default.
             gravity_free_fall: [bool] Drop the meteor by its free fall from the line, with the velocity of
                 gravity_decel (see freeFallDrop). If False, every point is dropped along its own vertical (see
                 applyGravityDrop). True by default.
@@ -3686,8 +3677,7 @@ class Trajectory(object):
         # Times and scales of the gravity drop of a decelerating meteor (see calcGravityDropScale)
         self.gravity_drop_scale = None
 
-        # Times from the beginning of the meteor and the displacements of a decelerating meteor across the
-        #   line at those times, by drag against the rotating air (see calcAirRotationShift)
+        # Times and displacements of a decelerating meteor by drag against the rotating air
         self.air_rotation_shift = None
 
         # Times and velocities of drag alone of a decelerating meteor, for its free fall
@@ -4716,13 +4706,10 @@ class Trajectory(object):
 
 
     def calcAirRotationShift(self, observations, state_vect, radiant_eci):
-        """ Compute the displacement of a decelerating meteor by drag against the air which rotates with the
-            Earth (self.air_rotation_shift), from the beginning of the meteor to its last used point. The
-            velocity is fitted to the lengths of the used points on the given line, moved by the current drop
-            and displacement (see calcDroppedLengths), without a model of the deceleration (see
-            segmentedVelocity), and is held at GRAVITY_DROP_MIN_VEL or above. The displacement is None if
-            air_rotation is off, if the points have no lengths, if the fitted velocity is constant or if the
-            displacement stays below AIR_ROTATION_SHIFT_TOL, at which the fit stops moving the line.
+        """ Compute the displacement of a decelerating meteor by drag against the rotating air
+            (self.air_rotation_shift), with the velocity fitted to the lengths of the used points on the given
+            line (see segmentedVelocity). It is None if air_rotation is off, if the fitted velocity is
+            constant or if the displacement stays below AIR_ROTATION_SHIFT_TOL.
 
         Arguments:
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
@@ -4735,7 +4722,7 @@ class Trajectory(object):
                 times (meters), one (x, y, z) row per time, or None.
         """
 
-        # Trajectories pickled before the option was added keep the dropped line
+        # Keep the dropped line without the option, as in old pickles
         if not getattr(self, 'air_rotation', False):
             self.air_rotation_shift = None
             return None
@@ -4746,18 +4733,20 @@ class Trajectory(object):
         air_shift = None
         if len(times) and (np.max(times) > 0) and np.all(np.isfinite(lengths)):
 
+            # Fit the velocity from the beginning of the meteor to its last used point
             time_rel = np.linspace(0.0, np.max(times), GRAVITY_DROP_SCALE_POINTS)
             vel = segmentedVelocity(times, lengths, time_rel)
 
             # Keep the line if the lengths show no change of velocity
             if (vel is not None) and np.all(np.isfinite(vel)) and (np.ptp(vel) > 0):
 
-                # Hold the velocity at the speed where ablation stops, as for the drop
+                # Hold the velocity at or above the speed where ablation stops
                 vel = np.maximum(vel, GRAVITY_DROP_MIN_VEL)
 
-                # Take the beginning of the meteor on the line, from which the drop descends
+                # Take the beginning of the meteor on the line, as for the drop
                 eci0, _ = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
 
+                # Integrate the displacement across the line
                 shift = airRotationShift(time_rel, vel, eci0, radiant_eci)
 
                 # Keep the line if the displacement is too small to move it
@@ -4771,18 +4760,19 @@ class Trajectory(object):
 
 
     def airRotationShiftAt(self, t_rel, radiant_eci):
-        """ Compute the displacement of the points at the given times by drag against the air which rotates
-            with the Earth, across the given line (see calcAirRotationShift).
+        """ Compute the displacement of the points at the given times by drag against the rotating air, across
+            the given line (see calcAirRotationShift).
 
         Arguments:
             t_rel: [float or ndarray] Times from the beginning of the meteor (s).
             radiant_eci: [ndarray] (x, y, z) components of the radiant direction vector of the line.
 
         Return:
-            [ndarray] Displacements (meters), one (x, y, z) row per time, or one (x, y, z) vector for a single
-                time. Zero if no displacement was computed.
+            [ndarray] Displacements (meters), one (x, y, z) row per time, or one vector for a single time.
+                Zero if no displacement was computed.
         """
 
+        # Interpolate the displacement, zero if it was not computed
         air_shift = getattr(self, 'air_rotation_shift', None)
 
         if air_shift is None:
@@ -4791,11 +4781,11 @@ class Trajectory(object):
         else:
             shift = interpAirRotationShift(air_shift, t_rel, radiant_eci)
 
+        # Return one vector for a single time
         if np.ndim(t_rel) == 0:
             return shift[0]
 
         return shift
-
 
 
 
@@ -4825,9 +4815,8 @@ class Trajectory(object):
 
 
     def calcDroppedLengths(self, observations, state_vect, radiant_eci):
-        """ Compute the lengths of the used points along the given line dropped by gravity, as calcVelocity
-            computes them. The points are also moved by the current displacement by drag against the rotating
-            air (see calcAirRotationShift).
+        """ Compute the lengths of the used points along the given line dropped by gravity and moved by drag
+            against the rotating air, as calcVelocity computes them.
 
         Arguments:
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
@@ -7460,7 +7449,7 @@ class Trajectory(object):
         if not hasattr(self, 'gravity_r0'):
             self.gravity_r0 = None
 
-        # Trajectories pickled before the displacement by drag against the rotating air do not have it
+        # Add the displacement by drag against the rotating air to old pickles
         if not hasattr(self, 'air_rotation_shift'):
             self.air_rotation_shift = None
 
@@ -7729,15 +7718,13 @@ class Trajectory(object):
                     self.gravity_drop_scale = drop_scale
                     self.gravity_drop_velocity = drop_velocity
 
-        # Move the line of a decelerating meteor by drag against the rotating air, with the lengths on the
-        #   line found, and minimize again from it with that displacement. The lengths depend on the
-        #   displacement, so this is repeated until the displacement stops changing. If a minimization does
-        #   not converge, the displacement and the solution before it are kept
+        # Refit the line moved by drag against the rotating air until it settles
         if _rerun_timing and self.gravity_correction and getattr(self, 'air_rotation', False) \
             and minimize_solution.success:
 
             for _ in range(AIR_ROTATION_ITERATIONS):
 
+                # Compute the displacement on the fitted line
                 air_shift = self.air_rotation_shift
                 self.calcAirRotationShift(self.observations, minimize_solution.x[:3], \
                     vectNorm(minimize_solution.x[3:]))
@@ -7747,13 +7734,14 @@ class Trajectory(object):
                     self.air_rotation_shift = air_shift
                     break
 
+                # Fit the line again with the new displacement
                 shifted_free_fall = self.gravityFreeFall()
                 shifted_scale = self.gravity_drop_scale if (shifted_free_fall is None) else None
                 shifted_args = minimize_args[:6] + (shifted_scale, self.air_rotation_shift, shifted_free_fall)
                 shifted_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
                     args=shifted_args, method=nelderMeadLine)
 
-                # Continue a minimization which ran out of function evaluations, as the first one
+                # Continue it from the beginning of the meteor if it ran out of evaluations
                 for _ in range(LOS_CONTINUE_RUNS):
 
                     if shifted_solution.success:
@@ -7764,6 +7752,7 @@ class Trajectory(object):
                     shifted_solution = scipy.optimize.minimize(minimizeAngleCost, restart, \
                         args=shifted_args, method=nelderMeadLine)
 
+                # Keep the previous displacement and solution if the new fit did not converge
                 if not shifted_solution.success:
                     self.air_rotation_shift = air_shift
                     break
@@ -7974,8 +7963,7 @@ class Trajectory(object):
                 self.gravity_drop_scale = None
                 self.gravity_drop_velocity = None
 
-        # The first pass fits its line without the drop, so the first pass with the drop starts without the
-        #   displacement by drag against the rotating air, which each pass with the drop keeps for the next
+        # Reset the displacement after the first pass, whose line is fitted without the drop
         if not _rerun_timing:
             self.air_rotation_shift = None
 

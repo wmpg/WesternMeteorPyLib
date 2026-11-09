@@ -51,6 +51,7 @@ def angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity=
         if gravity and (drop_scale is not None):
             point_factors = gravity_factor*np.interp(obs.time_data - t0, *drop_scale)
 
+        # Compute the displacement of every point by drag against the rotating air
         point_shifts = np.zeros((len(obs.time_data), 3))
         if gravity and (air_shift is not None):
             point_shifts = interpAirRotationShift(air_shift, obs.time_data - t0, radiant_eci)
@@ -129,7 +130,7 @@ def makeCases(observations, begin):
     t_end = max(np.max(obs.time_data) for obs in observations) - min(obs.time_data[0] for obs in observations)
     drop_scale = (np.linspace(0, t_end, 20), np.linspace(1.0, 0.7, 20))
 
-    # A displacement by drag against the rotating air of up to about 200 m
+    # A displacement by the rotating air of up to about 200 m
     air_shift = (np.linspace(0, t_end, 20), np.outer(np.linspace(0, 1, 20)**2, [150.0, -100.0, 60.0]))
 
     return [dict(), dict(gravity=True), dict(gravity=True, r0=r0, v0z=0.0, drop_scale=drop_scale), \

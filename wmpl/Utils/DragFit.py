@@ -637,6 +637,8 @@ class DragFit(object):
                     dropped = applyGravityDrop(eci, t - t0, r0, drop_factor(t - t0), v0z)
 
                 drop_grid[i] = eci - dropped
+
+                # Move the point by drag against the rotating air
                 if shift_at is not None:
                     drop_grid[i] -= shift_at(t - t0, self.radiant_eci)
 
@@ -651,8 +653,7 @@ class DragFit(object):
             pos = pos - dlen*self._bentRadiant(np.array([theta]), pos[None, :])[0]
             drop_grid[i] = line_eci[i] - pos
 
-        # And keep moving it by drag against the rotating air, by the change of the displacement since the
-        #   last point
+        # Keep moving the path below the last point by drag against the rotating air
         if (shift_at is not None) and (valid[-1] > self.i_last):
             i_below = np.arange(self.i_last + 1, valid[-1] + 1)
             t_last = self.time_grid[self.i_last] - t0

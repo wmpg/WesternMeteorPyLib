@@ -181,8 +181,7 @@ class BentDragMeteor(object):
             dt: [float] Integration step (s). 0.001 s by default.
             duration: [float] Duration of the integration (s). 20 s by default.
             air_rotation: [bool] Take the drag against the velocity relative to the air which rotates with
-                the Earth. False by default, when drag acts against the ECI velocity and the path only bends
-                by gravity.
+                the Earth, instead of the ECI velocity. False by default.
         """
 
         self.t_vis_beg = t_vis_beg
@@ -346,8 +345,8 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
         noise: [float] Noise of the azimuth and elevation (arcsec). 30 by default.
         fps: [float] Frame rate of the cameras. 25 by default.
         seed: [int] Seed of the noise. 1 by default.
-        kwargs: Passed to the Trajectory object. The drag against the rotating air (air_rotation) is
-            corrected only if the meteor was integrated with it, unless it is given.
+        kwargs: Passed to the Trajectory object, with air_rotation as the meteor was integrated unless it
+            is given.
 
     Return:
         traj: [Trajectory object] Trajectory object with the observations, not yet solved.
@@ -358,7 +357,7 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
         show_plots=False, save_results=False, verbose=False)
 
-    # Move the line by drag against the rotating air only if the meteor was integrated with it
+    # Correct the rotating air only if the meteor was integrated with it
     traj_kwargs['air_rotation'] = getattr(meteor, 'air_rotation', False)
 
     traj_kwargs.update(kwargs)

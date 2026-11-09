@@ -1561,8 +1561,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             drop_vel = np.maximum(np.gradient(drop_lengths, drop_times), GRAVITY_DROP_MIN_VEL)
             drop_scale = gravityDropScale(drop_times, drop_vel)
 
-        # Move the meteor by drag against the rotating air, from the velocity model, as the trajectory solver
-        #   does, from the point on the line at the first time
+        # Move the meteor by drag against the rotating air, as the solver does
         air_shift = None
         if drop_scale is not None:
             eci_beg = sim_met.state_vect - drop_lengths[0]*sim_met.radiant_eci
