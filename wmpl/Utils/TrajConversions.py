@@ -1126,6 +1126,38 @@ equatorialCoordPrecession_vect = np.vectorize(equatorialCoordPrecession, exclude
 
 
 
+def earthSpinAxisEcliptic(jd_tdb):
+    """ Compute the Earth's mean rotation pole of date in the ecliptic J2000 frame, the axis of
+    symmetry of the Earth's J2 and J4.
+
+    The precession matrix from J2000 to the date is R3(-z) R2(theta) R3(-zeta), so the pole of date
+    is, in J2000 equatorial coordinates, (sin(theta) cos(zeta), -sin(theta) sin(zeta), cos(theta)),
+    with the IAU 1976 angles used by equatorialCoordPrecession (Meeus, Astronomical Algorithms, p.
+    134). Nutation (< 10 arcsec) is left out. From J2000 the pole moves by ~20 arcsec per year.
+
+    Arguments:
+        jd_tdb: [float] Julian date (TDB) of the epoch.
+
+    Return:
+        [list] Unit vector [x, y, z].
+    """
+
+    # Julian centuries from J2000
+    t = (jd_tdb - J2000_JD.days)/36525.0
+
+    zeta = np.radians((2306.2181*t + 0.30188*t**2 + 0.017998*t**3)/3600)
+    theta = np.radians((2004.3109*t - 0.42665*t**2 - 0.041833*t**3)/3600)
+
+    # J2000 equatorial coordinates of the pole of date
+    pole = np.array([np.sin(theta)*np.cos(zeta), -np.sin(theta)*np.sin(zeta), np.cos(theta)])
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame
+    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    return [float(v) for v in pole/np.linalg.norm(pole)]
+
+
+
 def nutationMatrix(julian_date):
     """ Compute the rotation matrix from the mean to the true equator and equinox of date.
 

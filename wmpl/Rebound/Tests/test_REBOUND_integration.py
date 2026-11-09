@@ -371,7 +371,8 @@ def slowDepartureTask(reb, spin_axis, rotation=None):
         spin_axis: [list] Axis of the Earth's J2/J4, None for the z axis.
 
     Keyword arguments:
-        rotation: [ndarray] 3x3 matrix applied to every state, to integrate in a rotated frame.
+        rotation: [ndarray] 3x3 matrix applied to every state, to integrate in a rotated frame. None by
+            default.
 
     Return:
         [dict] Task for _integrateParticles.

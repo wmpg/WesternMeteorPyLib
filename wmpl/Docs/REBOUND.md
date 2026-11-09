@@ -61,8 +61,9 @@ gravitational harmonics and the radiation forces all come from `reboundx`.
 **Use REBOUNDx ≥ 4.4.0.** The simulations run in the ecliptic J2000 frame, and the Earth's J2/J4 are
 made symmetric about its rotation pole of date (precessed from J2000, about 20″ per year) through the
 `Omega` spin-axis parameter that REBOUNDx added in 4.4.0. Older versions ignore it and make them
-symmetric about the ecliptic pole, 23.4° off; the run then warns, and the report says so. The effect
-is a few m/s on the departure of a slow meteoroid (5.2 m/s for Winchcombe, at 14 km/s).
+symmetric about the ecliptic pole, 23.4° off; the run then warns, and the summary printed at the end
+says so. The effect is a few m/s on the departure of a slow meteoroid (5.2 m/s for Winchcombe, at 14
+km/s).
 
 **`--no-build-isolation` is not optional.** `reboundx` publishes no wheels, so `pip` always compiles
 it, by default against the newest `rebound` on PyPI rather than the one you installed. When the two

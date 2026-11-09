@@ -47,6 +47,7 @@ from wmpl.Config import config
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
     J2000_OBLIQUITY,
+    earthSpinAxisEcliptic,
     equatorialCoordDateToJ2000,
     eci2RaDec,
     vectMag,
@@ -172,37 +173,6 @@ def harmonicsSpinAxisSupported():
         return False
 
     return version >= (4, 4)
-
-
-def earthSpinAxisEcliptic(jd_tdb):
-    """ Compute the Earth's mean rotation pole of date in the ecliptic J2000 frame of the simulations,
-    the axis of symmetry of the Earth's J2 and J4.
-
-    The precession matrix from J2000 to the date is R3(-z) R2(theta) R3(-zeta), so the pole of date
-    is, in J2000 equatorial coordinates, (sin(theta) cos(zeta), -sin(theta) sin(zeta), cos(theta)),
-    with the IAU 1976 angles used by equatorialCoordPrecession (Meeus, Astronomical Algorithms, p.
-    134). Nutation (< 10 arcsec) is left out. From J2000 the pole moves by ~20 arcsec per year.
-
-    Arguments:
-        jd_tdb: [float] Julian date (TDB) of the epoch.
-
-    Return:
-        [list] Unit vector [x, y, z].
-    """
-
-    # Julian centuries from J2000
-    t = (jd_tdb - J2000_JD.days)/36525.0
-
-    zeta = np.radians((2306.2181*t + 0.30188*t**2 + 0.017998*t**3)/3600)
-    theta = np.radians((2004.3109*t - 0.42665*t**2 - 0.041833*t**3)/3600)
-
-    # J2000 equatorial coordinates of the pole of date
-    pole = np.array([np.sin(theta)*np.cos(zeta), -np.sin(theta)*np.sin(zeta), np.cos(theta)])
-
-    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (as ephemBodyStateRebound)
-    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
-
-    return [float(v) for v in pole/np.linalg.norm(pole)]
 
 
 def checkReboundxUsable():
@@ -1571,8 +1541,9 @@ def _integrateParticles(task):
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
             earth_spin_axis: [list] Optional. Direction of the Earth's rotation axis in the
                                  simulation frame, the axis of symmetry of its J2 and J4 (see
-                                 earthSpinAxisEcliptic). Needs REBOUNDx >= 4.4.0. None (default)
-                                 leaves REBOUNDx's default, the z axis (the ecliptic pole).
+                                 TrajConversions.earthSpinAxisEcliptic). Needs REBOUNDx >= 4.4.0.
+                                 None (default) leaves REBOUNDx's default, the z axis (the ecliptic
+                                 pole).
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
 
@@ -1699,9 +1670,11 @@ def _integrateParticles(task):
     ps["Earth"].params["J4"] = J4
     ps["Earth"].params["R_eq"] = RE_eq
 
+    # Orient the harmonics along the Earth's rotation axis
     earth_spin_axis = task.get("earth_spin_axis")
     if earth_spin_axis is not None:
         ps["Earth"].params["Omega"] = rb.Vec3d(*earth_spin_axis)
+
     # Assign the body radii used for impact detection
     for bname, brad in body_radii.items():
         if bname in planet_names:
