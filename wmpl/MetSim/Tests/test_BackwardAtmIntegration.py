@@ -20,7 +20,7 @@ from wmpl.MetSim.BackwardAtmIntegration import addBackwardArguments, backwardCon
 from wmpl.MetSim.MetSimErosion import Constants, Fragment, runSimulation
 from wmpl.Rebound.REBOUND import sampleStateVectors
 from wmpl.Utils.Pickling import loadPickle, savePickle
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, setAtmosphere
 from wmpl.Utils.TrajConversions import altAz2RADec, cartesian2Geo, geo2Cartesian, raDec2ECI
 
 
@@ -291,6 +291,20 @@ def test_command_line_reports_the_run_with_ceplechas_types_when_the_coefficient_
         assert "Ceplecha" not in capsys.readouterr().out
 
 
+@pytest.fixture
+def msis00Constant(monkeypatch):
+    """ Select NRLMSISE-00 with constant solar activity, the atmosphere the expected loads below were computed
+        in, and restore the module and the environment after the test. """
+
+    module = setAtmosphere.__globals__
+    for name in ('MSIS_VERSION', 'MSIS_JD', 'MSIS_SPACE_WEATHER'):
+        monkeypatch.setitem(module, name, module[name])
+    for name in ('MSIS_VERSION_ENV', 'MSIS_JD_ENV', 'MSIS_SPACE_WEATHER_ENV'):
+        monkeypatch.delenv(module[name], raising=False)
+
+    setAtmosphere(argparse.Namespace(atm='00', atmtime=None, atmsw='constant'))
+
+
 def _deepStart(h_start):
     """ A trajectory at 20 km/s, 45 deg from the zenith, whose reference point is at h_start (m). """
 
@@ -303,10 +317,10 @@ def _deepStart(h_start):
     return traj, np.r_[p0, 20000.0*np.array(raDec2ECI(ra, dec))]
 
 
-def test_reference_loading_gives_the_dynamic_pressure_and_the_received_energy():
+def test_reference_loading_gives_the_dynamic_pressure_and_the_received_energy(msis00Constant):
     """ The example meteor's reference point, at 116 km and 67 km/s, is under 0.0002 MPa and has received 0.9
         MJ/m^2; a fireball at 20 km/s, 45 deg from the zenith, is under 0.028, 0.12 and 0.41 MPa at 70, 60 and
-        50 km, having received 130, 590 and 2300 MJ/m^2. """
+        50 km, having received 130, 590 and 2300 MJ/m^2, in NRLMSISE-00 with constant solar activity. """
 
     traj, state_vect = _exampleStart()
     pressure, energy = referenceLoading(traj.jdt_ref, state_vect)
@@ -318,7 +332,7 @@ def test_reference_loading_gives_the_dynamic_pressure_and_the_received_energy():
         assert abs(pressure/p_expected - 1) < 0.05 and abs(energy/e_expected - 1) < 0.05
 
 
-def test_command_line_warns_when_the_reference_point_is_deep(capsys):
+def test_command_line_warns_when_the_reference_point_is_deep(capsys, msis00Constant):
     """ From 50 km, over the 0.04 MPa of a first fragmentation, the command line warns that a fragmentation above
         cannot be undone, and that the drag adds more speed than the initial velocity's 10 m/s uncertainty; from the
         example's 116 km it warns of neither. """

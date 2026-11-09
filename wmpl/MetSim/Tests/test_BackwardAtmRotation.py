@@ -11,7 +11,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 from wmpl.MetSim.BackwardAtmIntegration import _eciToEcef, backwardConstants, backwardStates, groundSpeed
-from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, atmDensityTable
+from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, atmDensity
 from wmpl.Utils.TrajConversions import ecef2LatLonAlt, enu2ECEF, geo2Cartesian
 
 
@@ -55,7 +55,7 @@ def _inertialRun(state_vect, m_init, const, t_end):
         g = -GM*r/r_norm**3*np.array([1 - j2*(5*z2 - 1), 1 - j2*(5*z2 - 1), 1 - j2*(5*z2 - 3)])
 
         ht = ecef2LatLonAlt(*_eciToEcef(JD + t/86400.0).dot(r))[2]
-        rho_atm = atmDensityTable(ht, const.atm_table_ht, const.atm_table_log10_rho)
+        rho_atm = atmDensity(ht, const)
 
         v_air = v - np.cross(omega, r)
         v_air_norm = np.sqrt(v_air @ v_air)

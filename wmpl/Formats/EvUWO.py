@@ -9,14 +9,14 @@ import shutil
 import numpy as np
 import scipy.interpolate
 
-from wmpl.Utils.AtmosphereDensity import setAtmosphere
 from wmpl.Formats.EventUWO import StationData
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.OSTools import mkdirP
-from wmpl.Utils.TrajConversions import jd2Date, jd2UnixTime, unixTime2JD, altAz2RADec
+from wmpl.Utils.TrajConversions import jd2Date, jd2UnixTime, unixTime2JD, altAz2RADec, \
+    equatorialCoordDateToJ2000
 
 
 def writeEvFile(dir_path, file_name, jdt_ref, station_id, lat, lon, ele, time_data, theta_data, phi_data, 
@@ -285,6 +285,9 @@ def readEvFileIntoMeteorObject(ev_file_path):
     # Init the meteor object
     meteor = MeteorObservation(sd.jd_ref, sd.station_id, sd.lat, sd.lon, sd.height, fps)
 
+    # The R.A./Dec. below are computed at each point's own time
+    meteor.radec_per_point = True
+
     # Add data to meteor object
     for t_rel, x_centroid, y_centroid, theta, phi, mag in zip(sd.time_data, sd.x_data, sd.y_data,\
         sd.theta_data, sd.phi_data, sd.mag_data):
@@ -298,7 +301,10 @@ def readEvFileIntoMeteorObject(ev_file_path):
 
         # Convert azim, alt to RA, Dec
         ra, dec = altAz2RADec(azim, alt, jd, sd.lat, sd.lon)
-        
+
+        # Precess and nutate from the epoch of date to J2000, as prepareObservations takes J2000
+        ra, dec = equatorialCoordDateToJ2000(sd.jd_ref, ra, dec)
+
         meteor.addPoint(
             t_rel*fps, 
             x_centroid, y_centroid, 
@@ -405,9 +411,6 @@ if __name__ == '__main__':
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
-
-    # Atmosphere model for any density the solver evaluates, also in its Monte Carlo processes
-    setAtmosphere(cml_args)
 
     #########################
 

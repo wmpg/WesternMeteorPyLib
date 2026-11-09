@@ -1,10 +1,11 @@
 numpy < 2.0
 cython
 scipy
-pymsis
+pymsis>=0.13
 matplotlib
 jplephem
 pyephem
+simplekml
 # https://github.com/matplotlib/basemap/archive/master.zip
 PyQt5 ; platform_machine != 'aarch64'
 pyyaml
