@@ -1462,7 +1462,11 @@ def lineFrame(state_vect, radiant_eci, observations):
 
         for i in (used[0], used[-1]):
             _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], state_vect, radiant)
-            distances.append(np.dot(rad_cpa - state_vect, radiant))
+            distance = np.dot(rad_cpa - state_vect, radiant)
+
+            # Skip a line of sight parallel to the line
+            if np.isfinite(distance):
+                distances.append(distance)
 
     # Take the middle of the observed part, and keep the half length above 1 m
     middle = np.array(state_vect, dtype=np.float64)
@@ -1520,8 +1524,8 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
         x0: [ndarray] Initial parameters of the line.
 
     Keyword arguments:
-        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects. An empty
-            tuple by default.
+        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects. It must
+            be given.
         maxfev: [int] Largest number of evaluations of the cost in all minimizations. None by default, when
             each minimization has the limit of the Nelder-Mead method of scipy.
         kwargs: [dict] Other arguments given by scipy.optimize.minimize, not used.
@@ -1565,8 +1569,8 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
         nfev += solution.nfev
         params = lineFromFrame(solution.x, frame)
 
-        # Stop when no evaluations are left
-        if (maxfev is not None) and (nfev >= maxfev):
+        # Stop when no evaluations are left, or a minimization ran out of them
+        if ((maxfev is not None) and (nfev >= maxfev)) or (not solution.success):
             break
 
         # Stop when two fresh simplices in a row converged without moving the line
@@ -1583,7 +1587,7 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
         simplex_size = min(max(10*move, 1.0), LOS_SIMPLEX_SIZE)
 
     # Keep the start if the minimizations did not lower its cost
-    if solution.fun > start_cost:
+    if np.isfinite(start_cost) and (not (solution.fun <= start_cost)):
         params = np.r_[start_params[:3], vectNorm(start_params[3:])]
         solution.fun = start_cost
 

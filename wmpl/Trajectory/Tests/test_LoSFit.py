@@ -465,6 +465,27 @@ def testTheLineFitStopsAtItsLimitOfEvaluations():
 
 
 
+def testTheLineFitStartedAlongALineOfSightGivesAFiniteLine():
+    """ Check that a start line almost parallel to a line of sight, whose cost is NaN, gives a finite line
+        without using up the evaluations of all fresh simplices.
+    """
+
+    traj, begin, radiant = observeStraightMeteor(seed=5, calc_orbit=False)
+    traj.run()
+
+    # Start 1 arcsec off the first line of sight of the first station
+    los = traj.observations[0].meas_eci_los[0]
+    p0 = np.r_[begin, vectNorm(los + 4e-6*vectNorm(np.cross(los, [0, 0, 1])))]
+    assert np.isnan(minimizeAngleCost(p0, traj.observations))
+
+    result = scipy.optimize.minimize(minimizeAngleCost, p0, args=(traj.observations,), method=nelderMeadLine)
+
+    assert np.all(np.isfinite(result.x))
+    assert np.isfinite(result.fun)
+    assert result.nfev < 1000
+
+
+
 def testTheLineFitEndsAtTheSameLineFromDifferentStarts():
     """ Check that the fit ends at the same line from the true line and from two lines 300 m and 0.05 deg off
         it. With these seeds, the Nelder-Mead minimization of the six parameters ended 0.4 and 0.1 arcsec
@@ -532,7 +553,7 @@ if __name__ == "__main__":
         testEachRestartStartsFromThePreviousSolution, testAFailedRestartDoesNotReplaceAConvergedSolution, \
         testTheLineFrameMovesTheLineAtTheEndsOfTheMeteor, \
         testTheLineFitGivesAUnitRadiantAndTheBeginningOfTheMeteor, \
-        testTheLineFitStopsAtItsLimitOfEvaluations, \
+        testTheLineFitStopsAtItsLimitOfEvaluations, testTheLineFitStartedAlongALineOfSightGivesAFiniteLine, \
         testTheLineFitEndsAtTheSameLineFromDifferentStarts, testSmallAnglesFromTheLineArePrecise]
 
     for test in test_list:
