@@ -1,6 +1,5 @@
-""" Tests of the time from which wmpl.Trajectory.Trajectory computes the gravity drop: the first time of the
-    stations which are used, so that a station which is not used, e.g. because its clock is far off, does not
-    move the drop of the others.
+""" Tests of the time from which the trajectory solver computes the gravity drop, the first time of the used
+    stations, so that a station which is not used, e.g. with its clock far off, does not move the drop.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_DropTimeOrigin.py -v
@@ -19,9 +18,9 @@ from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 
 
-class _Station(object):
+class FakeStation(object):
     def __init__(self, time_data, ignore_station):
-        """ The attributes of a station which dropTimeOrigin reads.
+        """ Make a stand-in for a station with the attributes which dropTimeOrigin reads.
 
         Arguments:
             time_data: [ndarray] Times of the points (s).
@@ -36,7 +35,8 @@ class _Station(object):
 def testOriginIsTheFirstTimeOfTheUsedStations():
     """ Check that the stations which are not used do not set the origin, unless no station is used. """
 
-    stations = [_Station([0.1, 0.2], False), _Station([-1.0, 0.0], True), _Station([0.05, 0.3], False)]
+    stations = [FakeStation([0.1, 0.2], False), FakeStation([-1.0, 0.0], True), \
+        FakeStation([0.05, 0.3], False)]
     assert dropTimeOrigin(stations) == 0.05
 
     for station in stations:
@@ -46,7 +46,7 @@ def testOriginIsTheFirstTimeOfTheUsedStations():
 
 
 
-def _solve(clock_lead):
+def solveWithIgnoredStation(clock_lead):
     """ Solve a noise-free straight meteor dropped by gravity, with a fourth station which is not used and
         whose clock is ahead by the given time.
 
@@ -80,21 +80,18 @@ def _solve(clock_lead):
 
 
 def testStationWithAClockFarOffDoesNotMoveTheDrop():
-    """ Check that a station which is not used and whose clock is 1 s ahead does not change the solution.
-        When its first time set the origin of the drop, the radiant was 115 arcsec off and the residuals of
-        the used stations reached 22 m.
-    """
+    """ Check that a station which is not used and whose clock is 1 s ahead does not change the solution. """
 
-    traj, radiant_eci = _solve(1.0)
-    reference, _ = _solve(0.0)
+    traj, radiant_eci = solveWithIgnoredStation(1.0)
+    reference, _ = solveWithIgnoredStation(0.0)
 
-    # The solution and the residuals of the used stations are those with the clock set
+    # Check the solution against the one with the clock set
     assert np.allclose(traj.radiant_eci_mini, reference.radiant_eci_mini, rtol=0, atol=1e-12)
     for obs, ref_obs in zip(traj.observations[:3], reference.observations[:3]):
         assert np.allclose(obs.h_residuals, ref_obs.h_residuals, rtol=0, atol=1e-6)
         assert np.allclose(obs.v_residuals, ref_obs.v_residuals, rtol=0, atol=1e-6)
 
-    # The radiant is found, to the difference between the drop of the synthetic meteor and the solver's
+    # Check the radiant against the truth
     assert np.allclose(traj.radiant_eci_mini, radiant_eci, rtol=0, atol=1e-5)
 
 
@@ -104,11 +101,23 @@ def testDragAndDynamicMassFitsDropFromTheSameTime():
         the clock of the station which is not used is 1 s ahead.
     """
 
-    traj, _ = _solve(1.0)
-    reference, _ = _solve(0.0)
+    traj, _ = solveWithIgnoredStation(1.0)
+    reference, _ = solveWithIgnoredStation(0.0)
 
+    # Check the drop of the drag fit
     assert np.allclose(DragFit(traj).drop_grid, DragFit(reference).drop_grid, rtol=0, atol=1e-3)
 
+    # Check the points of the dynamic mass fit
     for length, t in ((20e3, 1.0), (35e3, 2.5)):
         assert np.allclose(pointOnTrajectory(traj, length, t), pointOnTrajectory(reference, length, t), \
             rtol=0, atol=1e-6)
+
+
+
+if __name__ == "__main__":
+
+    testOriginIsTheFirstTimeOfTheUsedStations()
+    testStationWithAClockFarOffDoesNotMoveTheDrop()
+    testDragAndDynamicMassFitsDropFromTheSameTime()
+
+    print("All tests passed.")

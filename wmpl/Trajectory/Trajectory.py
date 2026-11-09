@@ -746,16 +746,16 @@ def numStationsNotIgnored(observations):
 
 
 def dropTimeOrigin(observations):
-    """ Find the time from which the gravity drop is computed: the first time of the stations which are used.
-        A station which is not used, e.g. because its clock is far off, does not set it.
+    """ Find the first time of the used stations, from which the gravity drop is computed.
 
     Arguments:
         observations: [list] A list of ObservedPoints objects.
 
     Return:
-        [float] Time of the beginning of the meteor (s), the first time of all stations if none is used.
+        [float] First time of the used stations, or of all stations if none is used (s).
     """
 
+    # Take the first times of the used stations
     times = [obs.time_data[0] for obs in observations if not obs.ignore_station]
 
     # Take all stations if none is used
