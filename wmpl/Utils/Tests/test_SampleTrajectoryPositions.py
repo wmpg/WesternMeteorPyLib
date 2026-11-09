@@ -125,8 +125,8 @@ def testSkippedSamplesAreReported():
 
 
 def testSamplesHaveTheMotionAndTheDynamics():
-    """ Check the positions, the uncertainties and the dynamics stored for every sample when sampling by
-        height, from above the beginning (116.1 km) to below the end (96.2 km).
+    """ Check that the positions, the uncertainties and the dynamics are stored for every sample when
+        sampling by height, from above the beginning (116.1 km) to below the end (96.2 km).
     """
 
     traj = loadPickle(TRAJ_DIR, TRAJ_FILE)
@@ -141,8 +141,7 @@ def testSamplesHaveTheMotionAndTheDynamics():
     assert arrays['eci'].shape == (n_samples, 3)
     assert arrays['radiant_eci'].shape == (n_samples, 3)
 
-    # The lengths are at the sampled heights, and the steps between the ECI points are the steps of length,
-    #   up to the change of the gravity drop
+    # The lengths match the heights and the ECI steps match the length steps
     assert np.allclose(drag_fit.heightAtLength(arrays['length']), arrays['ht'], atol=0.1)
     eci_step = np.linalg.norm(np.diff(arrays['eci'], axis=0), axis=1)
     assert np.allclose(eci_step, np.diff(arrays['length']), rtol=1e-4)
@@ -153,8 +152,7 @@ def testSamplesHaveTheMotionAndTheDynamics():
     assert np.allclose(np.linalg.norm(arrays['radiant_eci'], axis=1), 1.0)
     assert np.all(np.sum(path_back*arrays['radiant_eci'][1:], axis=1) > np.cos(np.radians(0.01)))
 
-    # The first sample is above the beginning, where the meteor moves without drag, and the last two are
-    #   below the end
+    # The first sample is above the beginning and the last two below the end
     assert list(arrays['extrapolated']) == [True] + [False]*10 + [True]*2
     assert arrays['k'][0] == 0
     assert np.all(arrays['k'][1:] > 0)
@@ -197,12 +195,12 @@ def testDynamicPressureIsRelativeToTheGround():
     arrays = traj_samples.toArrays()
     rho = traj_samples.drag_fit.airDensityAtLength(arrays['length'])
 
-    # The velocities in the ECI frame and relative to the ground differ by about 50 m/s, and never by more
-    #   than the rotation velocity at the equator
+    # The ECI and the ground velocities differ by about 50 m/s
     assert np.all(np.abs(arrays['vel_norot'] - arrays['vel']) > 10.0)
     assert np.all(np.abs(arrays['vel_norot'] - arrays['vel']) < 465.0)
     assert np.allclose(arrays['dyn_pressure'], rho*arrays['vel_norot']**2, rtol=1e-9)
 
+    # Compare with the dynamic pressure from the atmosphere model at every sample
     jd_arr = traj.jdt_ref + arrays['t_est']/86400.0
     dyn_pressure = dynamicPressure(arrays['lat'], arrays['lon'], arrays['ht'], jd_arr, arrays['vel_norot'])
     assert np.allclose(arrays['dyn_pressure'], dyn_pressure, rtol=0.02)
@@ -217,6 +215,7 @@ def testSaveCSV():
     traj_samples = sampleTrajectory(traj, 118000.0, 94000.0, 2000.0)
     arrays = traj_samples.toArrays()
 
+    # Save the samples and read the file back
     with tempfile.TemporaryDirectory() as dir_path:
 
         file_path = os.path.join(dir_path, 'samples.csv')
@@ -231,38 +230,38 @@ def testSaveCSV():
     header = [name.strip() for name in lines[4].split(',')]
     assert data.shape == (len(arrays['t_est']), len(header))
 
-    def _column(name):
+    # Compare the columns with the samples
+    def getColumn(name):
         return data[:, header.index(name)]
 
-    assert np.allclose(_column('Time (s)'), arrays['t_est'], atol=1e-6)
-    assert np.allclose(_column('Height (m)'), arrays['ht'], atol=0.01)
-    assert np.allclose(_column('Lat (deg)'), np.degrees(arrays['lat']), atol=1e-8)
-    assert np.allclose(_column('Vel (m/s)'), arrays['vel'], atol=0.01)
-    assert np.allclose(_column('Vel std (m/s)'), arrays['vel_std'], atol=0.01)
-    assert np.allclose(_column('Vgnd (m/s)'), arrays['vel_norot'], atol=0.01)
-    assert np.allclose(_column('Dyn pres (Pa)'), arrays['dyn_pressure'], rtol=1e-6)
-    assert np.allclose(_column('Z ECI (m)'), arrays['eci'][:, 2], atol=0.01)
-    assert np.array_equal(_column('Extrapolated'), arrays['extrapolated'].astype(int))
+    assert np.allclose(getColumn('Time (s)'), arrays['t_est'], atol=1e-6)
+    assert np.allclose(getColumn('Height (m)'), arrays['ht'], atol=0.01)
+    assert np.allclose(getColumn('Lat (deg)'), np.degrees(arrays['lat']), atol=1e-8)
+    assert np.allclose(getColumn('Vel (m/s)'), arrays['vel'], atol=0.01)
+    assert np.allclose(getColumn('Vel std (m/s)'), arrays['vel_std'], atol=0.01)
+    assert np.allclose(getColumn('Vgnd (m/s)'), arrays['vel_norot'], atol=0.01)
+    assert np.allclose(getColumn('Dyn pres (Pa)'), arrays['dyn_pressure'], rtol=1e-6)
+    assert np.allclose(getColumn('Z ECI (m)'), arrays['eci'][:, 2], atol=0.01)
+    assert np.array_equal(getColumn('Extrapolated'), arrays['extrapolated'].astype(int))
 
 
 
 def testGroundFixedRadiantDoesNotTurnWithDrag():
     """ Check that the direction of the radiant above the ground stays fixed while a fireball decelerates
-        from 18 to 5 km/s, as drag acts against the velocity relative to the air. The trajectory is solved
-        without the gravity correction, so the path is not bent. Derotating the radiant with the
-        instantaneous velocity turned it by 0.5 deg at the end and 2 deg at 5 km/s.
+        from 18 to 5 km/s, on a trajectory solved without the gravity correction.
     """
 
+    # Simulate, observe and solve the fireball
     meteor = DragMeteor(18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
     traj = observeMeteor(meteor)
     with contextlib.redirect_stdout(io.StringIO()):
         traj = traj.run()
 
+    # Sample it by time down to below 6 km/s
     arrays = sampleTrajectory(traj, 0.0, 4.4, 0.4, by_time=True).toArrays()
     assert arrays['vel'][-1] < 6000.0
 
-    # Convert the azimuths and elevations to unit vectors in the Earth-fixed frame, with the local east,
-    #   north and up directions
+    # Convert the azimuths and elevations to unit vectors in the Earth-fixed frame
     lat, lon = arrays['lat'], arrays['lon']
     east = np.column_stack([-np.sin(lon), np.cos(lon), np.zeros_like(lon)])
     north = np.column_stack([-np.sin(lat)*np.cos(lon), -np.sin(lat)*np.sin(lon), np.cos(lat)])
@@ -272,7 +271,7 @@ def testGroundFixedRadiantDoesNotTurnWithDrag():
     direction = (np.cos(elev)*np.sin(azim))[:, None]*east + (np.cos(elev)*np.cos(azim))[:, None]*north \
         + np.sin(elev)[:, None]*up
 
-    # The direction changes only by the change of the rotation velocity along the path
+    # The direction changes only with the rotation velocity along the path
     turn = np.degrees(np.arccos(np.clip(direction.dot(direction[0]), -1.0, 1.0)))
     assert np.max(turn) < 0.05
 
@@ -282,7 +281,7 @@ def testGroundFixedRadiantDoesNotTurnWithDrag():
 
 
 
-def testSamplesWithoutTheNewQuantities():
+def testSamplesWithOnlyThePositions():
     """ Check that samples added only with the positions give NaN for the other quantities. """
 
     traj = loadPickle(TRAJ_DIR, TRAJ_FILE)
@@ -306,7 +305,7 @@ if __name__ == "__main__":
         testTimeModeMatchesTheHeightMode, testVelocitiesArePhysical, testSkippedSamplesAreReported, \
         testSamplesHaveTheMotionAndTheDynamics, testTimeModeUncertainties, \
         testDynamicPressureIsRelativeToTheGround, testSaveCSV, testGroundFixedRadiantDoesNotTurnWithDrag, \
-        testSamplesWithoutTheNewQuantities]
+        testSamplesWithOnlyThePositions]
 
     for test in test_list:
         test()
