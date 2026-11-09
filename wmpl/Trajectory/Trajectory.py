@@ -1840,19 +1840,16 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
 
 
 
-# Largest number of line frames made around the solution of the least squares line-of-sight fit
+# Largest number of line frames of the least squares line-of-sight fit
 LOS_LSQ_MAX_FRAMES = 5
 
-# Step of the numerical derivatives of the least squares line-of-sight fit, as a move of the line at the ends
-#   of the meteor (m)
+# Step of the derivatives of the least squares line-of-sight fit, as a move at the ends of the meteor (m)
 LOS_LSQ_DIFF_STEP = 1e-3
 
-# Scale of the Huber loss of the least squares line-of-sight fit, in standard deviations of the residuals, for
-#   which the fit keeps 95% of the efficiency of least squares with normal errors (Huber 1964)
+# Scale of the Huber loss in standard deviations of the residuals, for 95% efficiency (Huber 1964)
 LOS_HUBER_K = 1.345
 
-# Unit of the residuals in the least squares line-of-sight fit (1 arcsec in radians), so that the tolerances
-#   of scipy.optimize.least_squares, which are absolute for the gradient, act at the scale of the residuals
+# Unit of the residuals of the least squares line-of-sight fit, the scale of its tolerances (radians)
 LOS_LSQ_RESIDUAL_UNIT = np.radians(1.0/3600)
 
 
@@ -1860,9 +1857,8 @@ LOS_LSQ_RESIDUAL_UNIT = np.radians(1.0/3600)
 @njit
 def angleResidualsPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, point_factors, state_vect, \
     radiant_eci, t0, gravity, r0, v0z, time_tab, vel_tab, len_tab, mom_tab, weight, residuals, start):
-    """ Fill in the signed angles between the lines of sight of one station and the radiant line, the
-        residuals of the least squares line-of-sight fit (see angleResidualsMeasurements2Line). The points are
-        dropped by gravity as in angleSumPoints.
+    """ Fill in the signed angles between the lines of sight of one station and the radiant line. It is the
+        loop over the points of angleResidualsMeasurements2Line, compiled with numba.
 
     Arguments:
         time_data: [ndarray] Times of the points (s).
@@ -1877,9 +1873,11 @@ def angleResidualsPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, poi
         r0: [float] Distance of the beginning of the meteor from the centre of the Earth (meters). If NaN, the
             distance of each point is used.
         v0z: [float] Initial vertical velocity of the meteor (m/s).
-        time_tab, vel_tab, len_tab, mom_tab: [ndarrays] Table of the motion along the line for the free fall
-            of the meteor from the line (see freeFallTable). If it is empty, the points are dropped along
+        time_tab: [ndarray] Times of the free fall table (see freeFallTable), empty to drop the points along
             their vertical by applyGravityDrop.
+        vel_tab: [ndarray] Velocities of the free fall table.
+        len_tab: [ndarray] Lengths of the free fall table.
+        mom_tab: [ndarray] Moments of the free fall table.
         weight: [float] Statistical weight of the station.
         residuals: [ndarray] Residuals of all stations, filled in from the index start.
         start: [int] Index of the first residual of this station.
@@ -1928,7 +1926,7 @@ def angleResidualsPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, poi
 
                 rad_cpa = applyGravityDrop(rad_cpa, t_rel, r0_point, point_factors[j], v0z)
 
-        # Compute the normal of the plane through the station which holds the line through the point
+        # Compute the normal of the plane through the station and the line
         to_point = rad_cpa - stat_eci
         normal = np.array([to_point[1]*radiant_eci[2] - to_point[2]*radiant_eci[1], \
             to_point[2]*radiant_eci[0] - to_point[0]*radiant_eci[2], \
@@ -1948,11 +1946,8 @@ def angleResidualsPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, poi
 
 def angleResidualsMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
     gravity_factor=1.0, v0z=None, r0=None, drop_scale=None, free_fall=None):
-    """ Compute the signed angles between the lines of sight and the radiant line, the residuals of the least
-        squares line-of-sight fit. The angle of each point is taken between its line of sight and the plane
-        through its station which holds the line, i.e. across the line as seen from the station. It is the
-        angle of angleSumMeasurements2Line to the third order, but with a sign, so the residuals change
-        smoothly with the line. Each residual is multiplied by the square root of the weight of its station.
+    """ Compute the residuals of the least squares line-of-sight fit, the signed angles between the lines of
+        sight and the planes through their stations and the radiant line.
 
     Arguments:
         observations: [list] A list of ObservedPoints objects which are containing meteor observations.
@@ -1968,30 +1963,33 @@ def angleResidualsMeasurements2Line(observations, state_vect, radiant_eci, weigh
             (see gravityDropReference). If None, the distance of each point is used.
         drop_scale: [tuple] Times from the beginning of the meteor (s) and the scale of the gravity drop of a
             decelerating meteor at those times (see angleSumMeasurements2Line). None by default.
-        free_fall: [tuple] Table of the motion along the line (see freeFallTable), to drop every point by the
-            free fall of the meteor from the line. None by default.
+        free_fall: [tuple] Free fall table (see freeFallTable), to drop the points by their free fall from the
+            line in place of drop_scale, r0 and v0z (see freeFallDrop). None by default.
 
     Return:
-        [ndarray] Residuals of all used points of the used stations (radians).
+        [ndarray] Residuals of all used points of the used stations, times the square root of the weight of
+            the station (radians).
     """
 
     # Make sure weight values are OK
     weights = checkWeights(observations, weights)
 
+    # Make contiguous arrays for the compiled loop, with a unit radiant vector
     radiant_eci = np.ascontiguousarray(vectNorm(np.array(radiant_eci, dtype=np.float64)))
     state_vect = np.ascontiguousarray(np.array(state_vect, dtype=np.float64))
 
-    # Take the gravity drop from the first time of the used stations, so that an ignored station does not
-    #   move it
+    # Take the gravity drop from the first time of the used stations
     t0 = dropTimeOrigin(observations)
 
-    # Assume zero vertical velocity if it is not given, and pass a distance which is not given as NaN
+    # Assume zero vertical velocity if it is not given
     if v0z is None:
         v0z = 0.0
+
+    # Use the distance of each point if the distance of the beginning is not given
     if r0 is None:
         r0 = np.nan
 
-    # The free fall holds the deceleration, so the drop is not scaled with it. Without it, an empty table
+    # Do not scale the free fall, which holds the deceleration, and pass an empty table without it
     if free_fall is not None:
         drop_scale = None
     else:
@@ -2002,6 +2000,7 @@ def angleResidualsMeasurements2Line(observations, state_vect, radiant_eci, weigh
     n_points = sum(int(np.count_nonzero(np.asarray(observations[i].ignore_list) == 0)) for i in stations)
     residuals = np.zeros(n_points)
 
+    # Go through the stations with a weight
     k = 0
     for i in stations:
 
@@ -2026,9 +2025,7 @@ def angleResidualsMeasurements2Line(observations, state_vect, radiant_eci, weigh
 
 def minimizeAngleResiduals(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
     r0=None, drop_scale=None, free_fall=None):
-    """ A helper function for the least squares minimization of angle deviations, with the arguments of
-        minimizeAngleCost.
-    """
+    """ A helper function for the least squares minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
 
@@ -2051,8 +2048,10 @@ def residualStations(observations, weights=None):
         [ndarray] Index of the station of every residual, in the list of observations.
     """
 
+    # Make sure weight values are OK
     weights = checkWeights(observations, weights)
 
+    # Repeat the index of every station with a weight for each of its used points
     stations = []
     for i, obs in enumerate(observations):
         if weights[i] > 0:
@@ -2064,9 +2063,8 @@ def residualStations(observations, weights=None):
 
 
 def fitLineFrames(params, args, loss='linear', f_scale=1.0, maxfev=None):
-    """ Fit a line to the residuals of angleResidualsMeasurements2Line with scipy.optimize.least_squares, over
-        the four coordinates of a line frame (see lineFrame), made again around the solution until the fit
-        moves the line by less than LOS_RESTART_TOLERANCE.
+    """ Fit a line to the residuals of angleResidualsMeasurements2Line with scipy.optimize.least_squares in a
+        line frame (see lineFrame), made again around the solution until the line stops moving.
 
     Arguments:
         params: [ndarray] Initial parameters of the line, the ECI coordinates of a point on it (meters) and
@@ -2080,8 +2078,12 @@ def fitLineFrames(params, args, loss='linear', f_scale=1.0, maxfev=None):
         maxfev: [int] Largest number of evaluations of the residuals. None by default, for no limit.
 
     Return:
-        (params, solution, nit, nfev): The line found, the result of its last fit, and the number of fits and
-            evaluations of the residuals.
+        (params, solution, nit, nfev):
+            - params: [ndarray] ECI coordinates of a point on the line found (meters) and its radiant vector,
+                joined.
+            - solution: [OptimizeResult] Result of the last fit.
+            - nit: [int] Number of fits.
+            - nfev: [int] Number of evaluations of the residuals.
     """
 
     observations = args[0]
@@ -2098,15 +2100,16 @@ def fitLineFrames(params, args, loss='linear', f_scale=1.0, maxfev=None):
         if maxfev is not None:
             max_nfev = max(maxfev - nfev, 1)
 
-        solution = scipy.optimize.least_squares(lambda coords: minimizeAngleResiduals(\
-            lineFromFrame(coords, frame), *args)/LOS_LSQ_RESIDUAL_UNIT, np.zeros(4), method='trf', \
-            loss=loss, f_scale=f_scale, diff_step=LOS_LSQ_DIFF_STEP, max_nfev=max_nfev)
+        # Fit the line with the residuals in their unit
+        solution = scipy.optimize.least_squares(lambda coords: \
+            minimizeAngleResiduals(lineFromFrame(coords, frame), *args)/LOS_LSQ_RESIDUAL_UNIT, np.zeros(4), \
+            method='trf', loss=loss, f_scale=f_scale, diff_step=LOS_LSQ_DIFF_STEP, max_nfev=max_nfev)
 
         nit += 1
         nfev += solution.nfev
         params = lineFromFrame(solution.x, frame)
 
-        # Stop when the fit no longer moves the line, or no evaluations are left
+        # Stop when the fit does not move the line, or no evaluations are left
         if (np.max(np.abs(solution.x)) < LOS_RESTART_TOLERANCE) \
             or ((maxfev is not None) and (nfev >= maxfev)):
             break
@@ -2117,19 +2120,15 @@ def fitLineFrames(params, args, loss='linear', f_scale=1.0, maxfev=None):
 
 
 def leastSquaresLine(fun, x0, args=(), maxfev=None, loss='linear', **kwargs):
-    """ Fit a line to the lines of sight by least squares of the angles between them and the line (see
-        angleResidualsMeasurements2Line), to be given to scipy.optimize.minimize as the method instead of
-        nelderMeadLine, with the arguments of minimizeAngleCost. The line is fitted with fitLineFrames. With
-        the Huber loss, it is then fitted again with the loss scaled to LOS_HUBER_K times the standard
-        deviation of its residuals, estimated from their median absolute value.
+    """ Fit a line by least squares of the signed angles of the lines of sight, as the method of
+        scipy.optimize.minimize, then again with the Huber loss scaled to the residuals if loss is 'huber'.
 
         References:
             Huber, P. J. (1964). Robust estimation of a location parameter. The Annals of Mathematical
                 Statistics, 35(1), 73-101.
 
     Arguments:
-        fun: [function] Cost of the line which nelderMeadLine minimizes (see minimizeAngleCost). It is only
-            evaluated at the solution, as the value by which the solver compares solutions.
+        fun: [function] Cost of the line (see minimizeAngleCost), only evaluated at the solution.
         x0: [ndarray] Initial parameters of the line, the ECI coordinates of a point on it (meters) and the
             radiant vector, joined.
 
@@ -2142,11 +2141,10 @@ def leastSquaresLine(fun, x0, args=(), maxfev=None, loss='linear', **kwargs):
         kwargs: [dict] Other arguments given by scipy.optimize.minimize, not used.
 
     Return:
-        [OptimizeResult] Result of the last least squares fit, with the point on the line moved to the
-            beginning of the meteor, a unit radiant vector, the cost fun at the solution, and the iterations
-            and evaluations of all fits. It also has the covariance of the four coordinates of the last frame
-            (covariance, see lineFrame), from the Jacobian and the variance of the residuals of every station,
-            the frame (frame) and the weighted residuals (residuals, radians).
+        [OptimizeResult] Result of the last fit, with the point on the line moved to the beginning of the
+            meteor, a unit radiant vector, the cost at the solution, and the iterations and evaluations of all
+            fits. It also has the covariance of the coordinates of the last line frame (covariance), the frame
+            (frame) and the weighted residuals (residuals, radians).
     """
 
     observations = args[0]
@@ -2155,9 +2153,10 @@ def leastSquaresLine(fun, x0, args=(), maxfev=None, loss='linear', **kwargs):
     # Fit by least squares with the given weights
     params, solution, nit, nfev = fitLineFrames(np.array(x0, dtype=np.float64), fit_args, maxfev=maxfev)
 
-    # Fit again with the robust loss, scaled to the residuals of the least squares fit
+    # Fit again with the robust loss
     if loss != 'linear':
 
+        # Scale the loss to the robust standard deviation of the residuals
         f_scale = 1.0
         sigma = 1.4826*np.median(np.abs(minimizeAngleResiduals(params, *fit_args)))/LOS_LSQ_RESIDUAL_UNIT
         if sigma > 0:
@@ -2168,7 +2167,7 @@ def leastSquaresLine(fun, x0, args=(), maxfev=None, loss='linear', **kwargs):
         nit += fit_nit
         nfev += fit_nfev
 
-    # Compute the Jacobian of the residuals at the solution, in a frame around it, by central differences
+    # Compute the Jacobian at the solution by central differences
     frame = lineFrame(params[:3], params[3:], observations)
     residuals = minimizeAngleResiduals(lineFromFrame(np.zeros(4), frame), *fit_args)
     jac = np.zeros((len(residuals), 4))
@@ -2178,10 +2177,10 @@ def leastSquaresLine(fun, x0, args=(), maxfev=None, loss='linear', **kwargs):
         jac[:, i] = (minimizeAngleResiduals(lineFromFrame(step, frame), *fit_args) \
             - minimizeAngleResiduals(lineFromFrame(-step, frame), *fit_args))/(2*LOS_LSQ_DIFF_STEP)
 
+    # Count the evaluations of the Jacobian
     nfev += 9
 
-    # Compute the covariance of the coordinates from the Jacobian and the variance of the residuals of every
-    #   station (a sandwich estimate), which holds also when the weights are not the inverse variances
+    # Compute the sandwich covariance from the variance of the residuals of every station
     covariance = None
     stations = residualStations(observations, fit_args[1] if (len(fit_args) > 1) else None)
     n_res = len(residuals)
@@ -3044,8 +3043,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Assign geometric uncertainty flag, if it was changed
     traj_best.geometric_uncert = geometric_uncert
 
-    # The runs fitted the lines of sight with noise added, which doubles the variance of their residuals, so
-    #   keep the formal covariance of the fit of the measured ones (see losFormalUncertainty)
+    # Keep the formal covariance of the measured lines of sight, not of the noisy run
     traj_best.los_covariance = getattr(traj, 'los_covariance', None)
     traj_best.los_frame = getattr(traj, 'los_frame', None)
 
@@ -3684,14 +3682,11 @@ class Trajectory(object):
                 trajectory of the drag fit, see Utils.TrajectoryKML.trajectoryToKML(). False by default.
             kml_measured: [bool] Add the projected points, lines of sight and residuals of the measurements to
                 the 3D KML. False by default.
-            los_fit: [str] Cost of the line-of-sight fit. 'huber' (default) minimizes the weighted sum of the
-                squares of the angles between the lines of sight and the line, signed across the line, with
-                scipy.optimize.least_squares, and fits it again with a Huber loss, which limits the pull of
-                outlying picks. It gives the formal covariance of the line (see leastSquaresLine and
-                losFormalUncertainty). 'least_squares' stops after the first fit. 'angles', the default
-                before, minimizes the weighted sum of the angles with Nelder-Mead (see nelderMeadLine); its
-                minimum is flat, so it ends farther from the true line. The formal covariance holds the random
-                errors of the picks; systematic errors of a station, e.g. of its calibration, are not in it.
+            los_fit: [str] Cost of the line-of-sight fit. 'huber' fits the signed angles between the lines of
+                sight and the line by least squares, then again with a Huber loss which limits the pull of
+                outlying picks, and gives the formal covariance of the line (see leastSquaresLine and
+                losFormalUncertainty). 'least_squares' stops after the first fit, and 'angles' minimizes the
+                weighted sum of the angles with Nelder-Mead (see nelderMeadLine). 'huber' by default.
 
         """
 
@@ -7527,10 +7522,12 @@ class Trajectory(object):
         """ Choose the minimization method of the line-of-sight fit from los_fit.
 
         Return:
-            (method, options): The method for scipy.optimize.minimize and its options.
+            (method, options):
+                - method: [function] Method for scipy.optimize.minimize.
+                - options: [dict] Options of the method.
         """
 
-        # Trajectories pickled before the option existed take the default
+        # Use the default in trajectories pickled without the option
         los_fit = getattr(self, 'los_fit', 'huber')
 
         if los_fit == 'least_squares':
@@ -7548,25 +7545,25 @@ class Trajectory(object):
 
     def losFormalUncertainty(self):
         """ Compute the formal standard deviations of the radiant and of the position of the line from the
-            covariance of the least squares line-of-sight fit (see leastSquaresLine). They hold the scatter
-            of the lines of sight, not the errors of the timing or of the gravity drop.
+            scatter of the lines of sight in the least squares line-of-sight fit (see leastSquaresLine).
 
         Return:
             (radiant_stddev, position_stddev):
-                - radiant_stddev: [float] Standard deviation of the direction of the radiant, as the root of
-                    the sum of the variances of its two components across the line (radians). None if the
-                    line was not fitted by least squares.
+                - radiant_stddev: [float] Standard deviation of the radiant direction, the root of the sum of
+                    the variances of its two components across the line (radians). None if the line was not
+                    fitted by least squares.
                 - position_stddev: [float] Standard deviation of the position of the line across it in the
-                    middle of the meteor, as the root of the sum of the variances of its two components
-                    (meters). None if the line was not fitted by least squares.
+                    middle of the meteor, the root of the sum of the variances of its two components (meters).
+                    None if the line was not fitted by least squares.
         """
 
+        # Take the covariance of the least squares fit, if there is one
         covariance = getattr(self, 'los_covariance', None)
         frame = getattr(self, 'los_frame', None)
         if (covariance is None) or (frame is None):
             return None, None
 
-        # The first two coordinates are the moves of the line at the ends of the meteor
+        # Compute the deviations of the rotation and of the shift of the line frame
         half_length = frame[1]
         radiant_stddev = np.sqrt(covariance[0, 0] + covariance[1, 1])/half_length
         position_stddev = np.sqrt(covariance[2, 2] + covariance[3, 3])

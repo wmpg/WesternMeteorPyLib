@@ -1,5 +1,5 @@
-""" Test of the --losfit option of the ECSV command line, which picks the cost of the line-of-sight fit of the
-    trajectory solver (los_fit of wmpl.Trajectory.Trajectory).
+""" Tests that the --losfit option of the ECSV command line picks the line-of-sight fit of the trajectory
+    solver (los_fit of wmpl.Trajectory.Trajectory).
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVLosFit.py -v
@@ -35,7 +35,7 @@ COLUMNS = ['datetime', 'ra', 'dec', 'azimuth', 'altitude', 'x_image', 'y_image',
 
 
 
-def _writeECSVs(dir_path):
+def writeECSVs(dir_path):
     """ Write the noise-free straight meteor of SyntheticTrajectory as seen from each of its stations into an
         ECSV file per station, with the azimuth and altitude at the time of each row.
 
@@ -48,7 +48,7 @@ def _writeECSVs(dir_path):
 
     times, points, _, _ = straightMeteorPoints()
 
-    # The times of the rows to the microsecond, as they are written
+    # Compute the times of the rows to the microsecond, as they are written, and their Julian dates
     dt_ref = jd2Date(STRAIGHT_JDT_REF, dt_obj=True)
     dt_list = [dt_ref + datetime.timedelta(microseconds=int(round(1e6*t))) for t in times]
     jds = np.array([datetime2JD(dt) for dt in dt_list])
@@ -56,8 +56,10 @@ def _writeECSVs(dir_path):
     paths = []
     for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
 
+        # Compute the direction of every row from the station
         azim, alt = stationAzimAlt(points, jds, s_lat, s_lon, ele)
 
+        # Write a row per point, with the azimuth and altitude in degrees
         rows = []
         for i, dt in enumerate(dt_list):
             rows.append(",".join([dt.strftime("%Y-%m-%dT%H:%M:%S.%f"), "0.0", "0.0", \
@@ -75,7 +77,7 @@ def _writeECSVs(dir_path):
 
 
 
-def _solveReport(los_fit):
+def solveECSVReport(los_fit):
     """ Solve the ECSV files of the straight meteor with the ECSV command line, without Monte Carlo runs, and
         read the report.
 
@@ -88,14 +90,16 @@ def _solveReport(los_fit):
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
-        paths = _writeECSVs(tmp_dir)
+        paths = writeECSVs(tmp_dir)
 
+        # Run the ECSV command line without Monte Carlo runs
         command = [sys.executable, "-m", "wmpl.Formats.ECSV"] + paths + ["-d", "-x"]
         if los_fit is not None:
             command += ["--losfit", los_fit]
 
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+        # Read the report of the solution
         report_paths = glob.glob(os.path.join(tmp_dir, "*", "*_report.txt"))
         assert len(report_paths) == 1
 
@@ -109,5 +113,13 @@ def testLosFitOptionPicksTheFit():
         uncertainty, and that --losfit angles fits the angles, which have no formal uncertainty.
     """
 
-    assert "Formal 1 sigma of the line-of-sight fit (huber)" in _solveReport(None)
-    assert "Formal 1 sigma of the line-of-sight fit" not in _solveReport("angles")
+    assert "Formal 1 sigma of the line-of-sight fit (huber)" in solveECSVReport(None)
+    assert "Formal 1 sigma of the line-of-sight fit" not in solveECSVReport("angles")
+
+
+
+if __name__ == "__main__":
+
+    testLosFitOptionPicksTheFit()
+
+    print("All tests passed.")

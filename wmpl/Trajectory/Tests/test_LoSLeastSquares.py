@@ -1,6 +1,5 @@
-""" Tests of the least squares line-of-sight fit of wmpl.Trajectory.Trajectory (los_fit='least_squares' or
-    'huber'): the signed angles between the lines of sight and the line, their least squares and Huber fits,
-    and the formal uncertainty of the line.
+""" Tests of the least squares and Huber line-of-sight fits of the trajectory solver (los_fit), of the signed
+    angles which they fit, and of the formal uncertainty of the line.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_LoSLeastSquares.py -v
@@ -24,7 +23,8 @@ from wmpl.Utils.Math import vectNorm
 from wmpl.Utils.TrajConversions import eci2RaDec, raDec2AltAz
 
 
-def _radiantError(traj, radiant_eci):
+
+def radiantError(traj, radiant_eci):
     """ Compute the angle between the solved and the true radiant from the chord, precise for small angles.
 
     Arguments:
@@ -41,7 +41,7 @@ def _radiantError(traj, radiant_eci):
 
 
 
-def _moveAcrossTrack(traj, offsets):
+def moveAcrossTrack(traj, offsets):
     """ Move picks across the track of their station, along the normal of its plane, and initialize the
         observations again.
 
@@ -50,6 +50,7 @@ def _moveAcrossTrack(traj, offsets):
         offsets: [dict] Angle by which to move each pick (rad), by station index and pick index.
     """
 
+    # Move the picks along the normal of the plane of their station
     for k, obs in enumerate(traj.observations):
 
         azim, elev = np.array(obs.azim_data), np.array(obs.elev_data)
@@ -60,6 +61,7 @@ def _moveAcrossTrack(traj, offsets):
 
         obs.meas1, obs.meas2 = azim, elev
 
+    # Initialize the observations again
     obs_list = traj.observations
     traj.observations = []
     for obs in obs_list:
@@ -74,17 +76,18 @@ def testResidualsAreTheAnglesWithASign():
 
     traj, begin, radiant_eci = observeStraightMeteor(noise=np.radians(30.0/3600), seed=1)
 
-    # A line a few hundred meters and tens of arcsec off
+    # Take a line a few hundred meters and tens of arcsec off
     state_vect = begin + np.array([180.0, -120.0, 60.0])
     radiant = vectNorm(radiant_eci + np.array([1e-4, -5e-5, 2e-5]))
 
     residuals = angleResidualsMeasurements2Line(traj.observations, state_vect, radiant)
     cost = angleSumMeasurements2Line(traj.observations, state_vect, radiant)
 
+    # Check the residuals against the angles of the cost
     assert len(residuals) == sum(len(obs.time_data) for obs in traj.observations)
     assert abs(np.mean(np.abs(residuals)) - cost) < 1e-5*cost
 
-    # On the true line the noise puts the residuals of every station on both sides of it
+    # Check that the residuals of every station are on both sides of the true line
     true_residuals = angleResidualsMeasurements2Line(traj.observations, begin, radiant_eci)
     start = 0
     for obs in traj.observations:
@@ -92,7 +95,7 @@ def testResidualsAreTheAnglesWithASign():
         start += len(obs.time_data)
         assert 0.2 < np.mean(station > 0) < 0.8
 
-    # Moving the line across by much more than the noise puts all residuals of a station on one side
+    # Check that a line moved far across puts the residuals of a station on one side
     shifted = angleResidualsMeasurements2Line(traj.observations, \
         state_vect + 2000.0*traj.observations[0].plane_N, radiant)
     station_a = shifted[:len(traj.observations[0].time_data)]
@@ -106,9 +109,9 @@ def testNoiseFreeLineIsFound():
     traj, begin, radiant_eci = observeStraightMeteor(noise=0.0, seed=1, los_fit='least_squares')
     traj = traj.run()
 
-    assert _radiantError(traj, radiant_eci) < 0.002
+    assert radiantError(traj, radiant_eci) < 0.002
 
-    # The state vector is on the true line
+    # Check that the state vector is on the true line
     offset = traj.state_vect_mini - begin
     assert np.linalg.norm(offset - np.dot(offset, radiant_eci)*radiant_eci) < 0.01
 
@@ -119,6 +122,7 @@ def testSameLineAsTheAnglesWithGravity():
         the gravity drop.
     """
 
+    # Solve the meteor with both fits
     radiants = []
     for los_fit in ['angles', 'least_squares']:
 
@@ -135,6 +139,7 @@ def testHuberLossResistsOutliers():
         which pull the least squares fit away.
     """
 
+    # Move three picks of every station by 10 sigma across the track
     noise = np.radians(30.0/3600)
     rng = np.random.default_rng(503)
     offsets = {}
@@ -142,20 +147,21 @@ def testHuberLossResistsOutliers():
         for i in rng.choice(np.arange(2, 38), 3, replace=False):
             offsets[(station, int(i))] = 10*noise*rng.choice([-1, 1])
 
+    # Solve the meteor with both losses
     errors = {}
     for los_fit in ['least_squares', 'huber']:
 
         traj, _, radiant_eci = observeStraightMeteor(noise=noise, seed=3, los_fit=los_fit, \
             filter_picks=False, estimate_timing_vel=False)
-        _moveAcrossTrack(traj, offsets)
+        moveAcrossTrack(traj, offsets)
 
-        errors[los_fit] = _radiantError(traj.run(), radiant_eci)
+        errors[los_fit] = radiantError(traj.run(), radiant_eci)
 
     assert errors['huber'] < errors['least_squares']/3
 
 
 
-def _observeUnequalNoise(seed, noise_arcsec=(10.0, 40.0, 10.0)):
+def observeUnequalNoise(seed, noise_arcsec=(10.0, 40.0, 10.0)):
     """ Observe the straight meteor of SyntheticTrajectory with a different noise at each station.
 
     Arguments:
@@ -177,6 +183,7 @@ def _observeUnequalNoise(seed, noise_arcsec=(10.0, 40.0, 10.0)):
         monte_carlo=False, show_plots=False, save_results=False, verbose=False, filter_picks=False, \
         los_fit='least_squares')
 
+    # Add the noise of each station to its directions
     noise_rad = np.radians(np.array(noise_arcsec)/3600)
     for (station_id, s_lat, s_lon, ele), noise in zip(STRAIGHT_STATIONS, noise_rad):
 
@@ -192,24 +199,24 @@ def _observeUnequalNoise(seed, noise_arcsec=(10.0, 40.0, 10.0)):
 
 
 def testFormalUncertaintyMatchesTheScatter():
-    """ Check that the formal standard deviation of the radiant is the scatter of the radiants of the same
-        meteor with different noise, also when the stations are not equally precise and the weights of the
-        stations are not their inverse variances. Over 200 noise seeds the ratio was 0.97, and the ratio of
-        30 seeds scatters by about 0.13.
+    """ Check that the formal standard deviation of the radiant is the scatter of the radiants over noise
+        seeds, also with stations of unequal precision whose weights are not their inverse variances.
     """
 
+    # Solve the meteor with 30 noise seeds
     errors, sigmas = [], []
     for seed in range(1, 31):
 
-        traj, radiant_eci = _observeUnequalNoise(seed)
+        traj, radiant_eci = observeUnequalNoise(seed)
         traj = traj.run()
 
         radiant_stddev, position_stddev = traj.losFormalUncertainty()
-        errors.append(_radiantError(traj, radiant_eci))
+        errors.append(radiantError(traj, radiant_eci))
         sigmas.append(3600*np.degrees(radiant_stddev))
 
         assert position_stddev > 0
 
+    # Compare the root mean square of the errors and of the formal deviations
     ratio = np.sqrt(np.mean(np.array(errors)**2))/np.sqrt(np.mean(np.array(sigmas)**2))
     assert 0.6 < ratio < 1.4
 
@@ -220,17 +227,20 @@ def testFewerEvaluationsThanNelderMead():
 
     module = sys.modules['wmpl.Trajectory.Trajectory']
 
+    # Count the evaluations of the cost of each fit
     counts = {}
     for los_fit, function in [('angles', 'minimizeAngleCost'), ('least_squares', 'minimizeAngleResiduals')]:
 
         original = getattr(module, function)
         calls = []
 
-        def _counted(*args, **kwargs):
+        def countCall(*args, **kwargs):
+            """ Count the call and pass it to the original function. """
+
             calls.append(1)
             return original(*args, **kwargs)
 
-        setattr(module, function, _counted)
+        setattr(module, function, countCall)
         try:
             traj, _, _ = observeStraightMeteor(noise=np.radians(10.0/3600), seed=1, los_fit=los_fit)
             traj.run()
@@ -244,8 +254,7 @@ def testFewerEvaluationsThanNelderMead():
 
 
 def testReportHasTheFormalUncertainty():
-    """ Check that the report gives the formal uncertainty of the least squares fit, and not of the angles.
-    """
+    """ Check that the report gives the formal uncertainty of the least squares fit, not of the angles. """
 
     for los_fit in ['angles', 'least_squares']:
 
@@ -258,16 +267,19 @@ def testReportHasTheFormalUncertainty():
 
 
 def testHuberIsTheDefault():
-    """ Check that the line-of-sight fit is the Huber fit by default, also of trajectories pickled before the
-        option existed, and that the angles are fitted when asked for.
+    """ Check that the line-of-sight fit is the Huber fit by default, also of trajectories pickled without the
+        option, and that the angles are fitted when asked for.
     """
 
+    # Check the default
     traj = Trajectory(2460600.25)
     assert traj.lineOfSightMethod() == (leastSquaresLine, {'loss': 'huber'})
 
+    # Check a trajectory pickled without the option
     del traj.los_fit
     assert traj.lineOfSightMethod() == (leastSquaresLine, {'loss': 'huber'})
 
+    # Check the fit of the angles
     traj = Trajectory(2460600.25, los_fit='angles')
     assert traj.lineOfSightMethod()[0] is nelderMeadLine
     assert traj.losFormalUncertainty() == (None, None)
@@ -275,8 +287,8 @@ def testHuberIsTheDefault():
 
 
 def testTheMonteCarloKeepsTheFormalUncertaintyOfTheMeasuredLines():
-    """ Check that the solution returned by the Monte Carlo, one of its runs, has the formal uncertainty of the
-        fit of the measured lines of sight, not of the run, whose lines of sight had noise added.
+    """ Check that the solution returned by the Monte Carlo, one of its runs, has the formal uncertainty of
+        the fit of the measured lines of sight, not of the run, whose lines of sight had noise added.
     """
 
     module = sys.modules['wmpl.Trajectory.Trajectory']
@@ -284,20 +296,39 @@ def testTheMonteCarloKeepsTheFormalUncertaintyOfTheMeasuredLines():
     traj, _, _ = observeStraightMeteor(noise=np.radians(10.0/3600), seed=1, los_fit='least_squares')
     traj = traj.run()
 
-    # Runs as the Monte Carlo returns them: the same line, with the covariance of noisier lines of sight
-    def _runs(*args, **kwargs):
+    def makeRuns(*args, **kwargs):
+        """ Make two runs of the same line with the covariance of noisier lines of sight. """
+
         runs = [copy.deepcopy(traj) for _ in range(2)]
         for run in runs:
             run.los_covariance = 2*traj.los_covariance
         return runs
 
+    # Run the Monte Carlo with the runs made here
     original = module.parallelComputeGenerator
-    module.parallelComputeGenerator = _runs
+    module.parallelComputeGenerator = makeRuns
     try:
         traj_best, _ = module.monteCarloTrajectory(traj, mc_runs=2, plot_results=False, mc_cores=1)
     finally:
         module.parallelComputeGenerator = original
 
+    # Check that the solution keeps the covariance of the measured lines of sight
     assert traj_best is not traj
     assert np.array_equal(traj_best.los_covariance, traj.los_covariance)
     assert traj_best.losFormalUncertainty() == traj.losFormalUncertainty()
+
+
+
+if __name__ == "__main__":
+
+    testResidualsAreTheAnglesWithASign()
+    testNoiseFreeLineIsFound()
+    testSameLineAsTheAnglesWithGravity()
+    testHuberLossResistsOutliers()
+    testFormalUncertaintyMatchesTheScatter()
+    testFewerEvaluationsThanNelderMead()
+    testReportHasTheFormalUncertainty()
+    testHuberIsTheDefault()
+    testTheMonteCarloKeepsTheFormalUncertaintyOfTheMeasuredLines()
+
+    print("All tests passed.")
