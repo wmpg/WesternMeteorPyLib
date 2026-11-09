@@ -1683,7 +1683,7 @@ def calcMCUncertainties(traj_list, traj_best):
     un.radiant_eci_mini = np.array([rad_x, rad_y, rad_z])
     un.radiant_eci_mini_ci = np.array([rad_x_ci, rad_y_ci, rad_z_ci])
 
-    # Velocity state vector, from the spread of the velocity vectors of the runs
+    # Velocity state vector from the spread of the runs
     un.vx = np.std([traj.v_init*traj.radiant_eci_mini[0] for traj in traj_list])
     un.vx_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[0] for traj in traj_list], un.ci)
     un.vy = np.std([traj.v_init*traj.radiant_eci_mini[1] for traj in traj_list])
