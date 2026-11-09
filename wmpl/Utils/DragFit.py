@@ -601,8 +601,7 @@ class DragFit(object):
         traj = self.traj
 
         # Take the time of the first point and the largest distance from the centre of the Earth of the first
-        #   points of the used stations as the reference, as the trajectory solver does (all stations if none
-        #   is used)
+        #   points of the used stations as the reference, as the trajectory solver does
         t0 = dropTimeOrigin(traj.observations)
         used = [obs for obs in traj.observations if not obs.ignore_station] or traj.observations
         r0 = max([vectMag(findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], self.state_vect, \

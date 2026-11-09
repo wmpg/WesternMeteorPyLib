@@ -1,10 +1,9 @@
 """ Tests of the compiled loop of the line-of-sight cost (angleSumPoints).
 
-The loop over the points of angleSumMeasurements2Line is compiled with numba. It must give the same sum to the
-last bit as the loop in Python which it replaces, so that the solutions do not change. The tests compare the
-cost with that loop, copied here, on lines around a meteor seen from three stations: without and with the
-gravity drop, with a fixed and a free distance of the beginning, a scaled drop, a vertical velocity, weights
-and ignored points.
+The loop over the points of angleSumMeasurements2Line is compiled with numba, and must give the same sum to
+the last bit as the loop in Python. The tests compare the cost with that loop, copied here, on lines around a
+meteor seen from three stations, without and with the gravity drop, with a fixed and a free distance of the
+beginning, a scaled drop, a vertical velocity, weights and ignored points.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_AngleSumPoints.py -v
@@ -23,12 +22,16 @@ from wmpl.Utils.Math import findClosestPoints, vectNorm, vectMag
 
 
 
-def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity=False, gravity_factor=1.0, \
+def angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity=False, gravity_factor=1.0, \
     v0z=None, r0=None, drop_scale=None):
-    """ The cost of angleSumMeasurements2Line with the loop over the points in Python, as it was before the
-        loop was compiled.
+    """ Compute the cost of angleSumMeasurements2Line with the loop over the points in Python. The arguments
+        are those of angleSumMeasurements2Line.
+
+    Return:
+        [float] Weighted mean of the angles (radians).
     """
 
+    # Use the stations which are not ignored
     if weights is None:
         weights = np.array([0 if obs.ignore_station else 1.0 for obs in observations])
 
@@ -41,10 +44,12 @@ def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity
 
     for i, obs in enumerate(observations):
 
+        # Compute the factor of the gravity drop of every point
         point_factors = np.full(len(obs.time_data), gravity_factor)
         if gravity and (drop_scale is not None):
             point_factors = gravity_factor*np.interp(obs.time_data - t0, *drop_scale)
 
+        # Go through all used points
         for t, meas_eci, stat_eci, ignore, point_factor in zip(obs.time_data, obs.meas_eci_los, \
             obs.stat_eci_los, obs.ignore_list, point_factors):
 
@@ -53,6 +58,7 @@ def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity
 
             _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
 
+            # Take the gravity drop into account
             if gravity:
 
                 t_rel = t - t0
@@ -70,6 +76,7 @@ def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity
                 rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, point_factor, v0z)
                 _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
+            # Add the angle between the line of sight and the line
             station_ray = vectNorm(rad_cpa - stat_eci)
             chord = vectMag(station_ray - meas_eci)
             angle_sum += weights[i]*2*np.arcsin(min(chord/2, 1.0))
@@ -79,18 +86,20 @@ def _angleSumPython(observations, state_vect, radiant_eci, weights=None, gravity
 
 
 
-def _observations():
-    """ Observations of a meteor dropped by gravity, seen from three stations, and the true line.
+def makeObservations():
+    """ Make the observations of a meteor dropped by gravity, seen from three stations, and the true line.
 
     Return:
-        (observations, begin, radiant_eci): [tuple] The observations, the beginning of the meteor (ECI, m) and
-            the radiant unit vector.
+        (observations, begin, radiant_eci):
+            - observations: [list] A list of ObservedPoints objects.
+            - begin: [ndarray] ECI coordinates of the beginning of the meteor (m).
+            - radiant_eci: [ndarray] Unit radiant vector.
     """
 
     traj, begin, radiant_eci = observeStraightMeteor(noise=5e-5, seed=3, duration=4.0, v_init=15000.0, \
         elevation=30.0, gravity_drop=True)
 
-    # Times which do not start at 0
+    # Shift the times so that they do not start at 0
     for obs in traj.observations:
         obs.time_data = obs.time_data + 0.37
 
@@ -98,32 +107,36 @@ def _observations():
 
 
 
-def _cases(observations, begin):
-    """ Keyword arguments of the cost which take every branch of the loop. """
+def makeCases(observations, begin):
+    """ Make the keyword arguments of the cost which take every branch of the loop.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+        begin: [ndarray] ECI coordinates of the beginning of the meteor (m).
+
+    Return:
+        [list] Dictionaries of keyword arguments.
+    """
 
     r0 = vectMag(begin)
     t_end = max(np.max(obs.time_data) for obs in observations) - min(obs.time_data[0] for obs in observations)
     drop_scale = (np.linspace(0, t_end, 20), np.linspace(1.0, 0.7, 20))
 
-    return [
-        dict(),
-        dict(gravity=True),
-        dict(gravity=True, r0=r0, v0z=0.0, drop_scale=drop_scale),
-        dict(gravity=True, r0=r0, v0z=-7500.0, drop_scale=drop_scale, gravity_factor=0.8),
-        dict(gravity=True, r0=r0, weights=np.array([1.0, 2.5, 0.5])),
-    ]
+    return [dict(), dict(gravity=True), dict(gravity=True, r0=r0, v0z=0.0, drop_scale=drop_scale), \
+        dict(gravity=True, r0=r0, v0z=-7500.0, drop_scale=drop_scale, gravity_factor=0.8), \
+        dict(gravity=True, r0=r0, weights=np.array([1.0, 2.5, 0.5]))]
 
 
 
 def testCompiledCostIsTheSameAsInPython():
-    """ The cost with the compiled loop is the same to the last bit as with the loop in Python, around the
-        true line and away from it.
+    """ Check that the cost with the compiled loop is the same to the last bit as with the loop in Python,
+        around the true line and away from it.
     """
 
-    observations, begin, radiant_eci = _observations()
+    observations, begin, radiant_eci = makeObservations()
     rng = np.random.default_rng(1)
 
-    for kwargs in _cases(observations, begin):
+    for kwargs in makeCases(observations, begin):
         for k in range(20):
 
             # The true line, then lines moved by up to a few km and a few tenths of a degree
@@ -131,16 +144,16 @@ def testCompiledCostIsTheSameAsInPython():
             radiant = vectNorm(radiant_eci + (k > 0)*rng.normal(0, 3e-3, 3))
 
             compiled = angleSumMeasurements2Line(observations, state_vect, radiant, **kwargs)
-            python = _angleSumPython(observations, state_vect, radiant, **kwargs)
+            python = angleSumPython(observations, state_vect, radiant, **kwargs)
 
             assert compiled == python, (kwargs.keys(), k, compiled, python)
 
 
 
 def testIgnoredPointsAndStationsAreLeftOut():
-    """ Points and stations which are ignored are left out of the sum, as in the loop in Python. """
+    """ Check that the ignored points and stations are left out of the sum, as in the loop in Python. """
 
-    observations, begin, radiant_eci = _observations()
+    observations, begin, radiant_eci = makeObservations()
 
     # Ignore every third point of the first station and the whole last station
     observations[0].ignore_list[::3] = 1
@@ -149,10 +162,10 @@ def testIgnoredPointsAndStationsAreLeftOut():
     state_vect = begin + np.array([300.0, -200.0, 100.0])
     radiant = vectNorm(radiant_eci + np.array([1e-3, -2e-3, 5e-4]))
 
-    for kwargs in _cases(observations, begin):
+    for kwargs in makeCases(observations, begin):
 
         compiled = angleSumMeasurements2Line(observations, state_vect, radiant, **kwargs)
-        python = _angleSumPython(observations, state_vect, radiant, **kwargs)
+        python = angleSumPython(observations, state_vect, radiant, **kwargs)
 
         assert compiled == python, (kwargs.keys(), compiled, python)
 
@@ -166,26 +179,26 @@ def testIgnoredPointsAndStationsAreLeftOut():
 def testCosinesOutOfRangeAreClippedAsInPython():
     """ Half chords above 1 are limited to 1 as in Python, and a chord which is not a number stays so. """
 
-    observations, begin, radiant_eci = _observations()
+    observations, begin, radiant_eci = makeObservations()
 
     # Lines of sight which are not unit vectors give half chords above 1
     observations[0].meas_eci_los = 1.5*observations[0].meas_eci_los
     observations[1].meas_eci_los = -1.5*observations[1].meas_eci_los
 
-    for kwargs in _cases(observations, begin):
+    for kwargs in makeCases(observations, begin):
 
         compiled = angleSumMeasurements2Line(observations, begin, radiant_eci, **kwargs)
-        python = _angleSumPython(observations, begin, radiant_eci, **kwargs)
+        python = angleSumPython(observations, begin, radiant_eci, **kwargs)
 
         assert np.isfinite(compiled)
         assert compiled == python, (kwargs.keys(), compiled, python)
 
     # A radiant line along a line of sight has no closest point, and the cost is not a number
-    observations, begin, radiant_eci = _observations()
+    observations, begin, radiant_eci = makeObservations()
     radiant = observations[0].meas_eci_los[0]
 
     assert np.isnan(angleSumMeasurements2Line(observations, begin, radiant))
-    assert np.isnan(_angleSumPython(observations, begin, radiant))
+    assert np.isnan(angleSumPython(observations, begin, radiant))
 
 
 

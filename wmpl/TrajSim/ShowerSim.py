@@ -1552,7 +1552,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
         # Vertical component of the initial velocity (has to be negative as the meteor is going down)
         v0z = -sim_met.v_init*np.cos(sim_met.orbit.zc)
 
-        # Scale the gravity drop for the deceleration of the velocity model, as the trajectory solver does
+        # Scale the gravity drop for the deceleration of the velocity model, as the solver does
         drop_scale = None
         if (len(time_data_model) > 1) and (time_data_model[-1] > 0):
             drop_times = np.linspace(0.0, time_data_model[-1], GRAVITY_DROP_SCALE_POINTS)
