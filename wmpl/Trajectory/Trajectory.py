@@ -3420,12 +3420,10 @@ class Trajectory(object):
 
             ### Calculate average velocity including all points up to the given point ###
 
-            # Take the last point of the line fitted for every point: the first 4 points for the first 4
-            #   points, otherwise all points up to the current point
+            # Take the last point of the line fitted up to every point, at least the 4th one
             last_ind = np.minimum(np.maximum(np.arange(len(obs.time_data)), 3), len(obs.time_data) - 1)
 
-            # Drop the points with NaNs or infs, and take the times and lengths from the first good point to
-            #   keep the sums precise
+            # Take the finite times and lengths relative to the first finite point
             good = np.isfinite(obs.time_data) & np.isfinite(obs.length)
             time_rel = np.zeros(len(obs.time_data))
             len_rel = np.zeros(len(obs.time_data))
@@ -3433,7 +3431,7 @@ class Trajectory(object):
                 time_rel[good] = obs.time_data[good] - obs.time_data[good][0]
                 len_rel[good] = obs.length[good] - obs.length[good][0]
 
-            # Fit a line through time vs. length with the cumulative sums of the least squares line fit
+            # Fit the lines through time vs. length from the cumulative sums
             n_sum = np.cumsum(good)[last_ind]
             t_sum = np.cumsum(time_rel)[last_ind]
             l_sum = np.cumsum(len_rel)[last_ind]
@@ -3471,10 +3469,11 @@ class Trajectory(object):
             # Calculate the time differences from point to point
             time_diffs = obs.time_data - time_shifted
 
-            # Calculate velocity for every point, NaN if there is no time between the points (the first
-            #   velocity is always 0)
+            # Calculate velocity for every point, NaN if no time passed between the points
             with np.errstate(divide='ignore', invalid='ignore'):
                 obs.velocities = np.where(time_diffs == 0, np.nan, dists_diffs/time_diffs)
+
+            # The first velocity is always 0
             obs.velocities[0] = 0.0
 
             ### ###
@@ -3569,8 +3568,7 @@ class Trajectory(object):
             print('Using automated velocity estimation with the sliding fit...')
             return None, None
 
-        # Fit a line through the time vs. state vector distance data, with the weight of each station as the
-        #   inverse of its variance
+        # Fit a weighted line through the time vs. state vector distance data
         line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
             sigma=all_inv_weights)
 
@@ -3597,7 +3595,7 @@ class Trajectory(object):
 
             if velocity_fit is None:
 
-                # Take the points which are not ignored, or all points if fewer than 4 are used
+                # Take the used points, or all points if fewer than 4 are used
                 used = obs.ignore_list == 0
                 if np.count_nonzero(used) < 4:
                     used = np.ones(len(obs.time_data), dtype=bool)
@@ -3650,7 +3648,7 @@ class Trajectory(object):
             # Initial parameters
             p0 = np.zeros(2)
 
-            # Take the points which are not ignored, or all points if fewer than 4 are used
+            # Take the used points, or all points if fewer than 4 are used
             used = obs.ignore_list == 0
             if np.count_nonzero(used) < 4:
                 used = np.ones(len(obs.time_data), dtype=bool)
@@ -3725,8 +3723,7 @@ class Trajectory(object):
 
         """
 
-        # Take the initial velocity as the median velocity between all used sites, or all sites if none is
-        #   used
+        # Take the median velocity of the used sites, or of all sites if none is used
         v_init_obs = [obs for obs in observations if (obs.v_init is not None) and (not obs.ignore_station)]
         if not v_init_obs:
             v_init_obs = [obs for obs in observations if obs.v_init is not None]
@@ -3934,8 +3931,7 @@ class Trajectory(object):
 
                     ### Compute the standard deviation of the velocity fit
 
-                    # Take the weighted least squares covariance of the line, scaled by the variance of its
-                    #   residuals
+                    # Compute the covariance of the weighted line, scaled by the variance of its residuals
                     design = np.c_[times_part, np.ones_like(times_part)]*np.sqrt(weights_list_path)[:, None]
                     line_residuals = lineFuncLS(velocity_fit, times_part, state_vect_dist_part, \
                         weights_list_path)
