@@ -6,7 +6,9 @@ point instead, and the fit always ran with v0z=None (no vertical velocity), as c
 the pass that applies the drop.
 
 The tests drop the noise-free straight meteor of SyntheticTrajectory with applyGravityDrop, as the solver
-models it, observe it from three stations, and solve it with the gravity correction.
+models it, observe it from three stations, and solve it with the gravity correction. The solver drops the
+meteor by its free fall from the line by default (see freeFallDrop), so they solve it with
+gravity_free_fall=False, which keeps applyGravityDrop.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityDropModel.py -v
@@ -45,7 +47,7 @@ def _solve(duration, v_init, elevation, estimate_timing_vel=True):
     # The pick filtering is off, as on noise-free data it rejects picks by the numerical noise
     traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=duration, v_init=v_init, \
         elevation=elevation, gravity_drop=True, estimate_timing_vel=estimate_timing_vel, \
-        gravity_correction=True, filter_picks=False, calc_orbit=False)
+        gravity_correction=True, gravity_free_fall=False, filter_picks=False, calc_orbit=False)
     traj = traj.run()
 
     # Compute the angle between the solved and the true radiant
@@ -101,8 +103,8 @@ def testAnIgnoredStationDoesNotSetTheBeginning():
     """
 
     traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, elevation=30.0, \
-        gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, filter_picks=False, \
-        calc_orbit=False)
+        gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, gravity_free_fall=False, \
+        filter_picks=False, calc_orbit=False)
 
     # Raise the first line of sight of station C by 5 deg and ignore the station
     obs = traj.observations[2]
@@ -111,8 +113,8 @@ def testAnIgnoredStationDoesNotSetTheBeginning():
 
     # Solve the observations again with station C ignored
     solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
-        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
-        save_results=False, verbose=False)
+        gravity_correction=True, gravity_free_fall=False, filter_picks=False, monte_carlo=False, \
+        calc_orbit=False, show_plots=False, save_results=False, verbose=False)
 
     for obs in traj.observations:
         solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
@@ -131,8 +133,8 @@ def testAnIgnoredPickDoesNotSetTheBeginning():
     """
 
     traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, elevation=30.0, \
-        gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, filter_picks=False, \
-        calc_orbit=False)
+        gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, gravity_free_fall=False, \
+        filter_picks=False, calc_orbit=False)
 
     # Raise the first line of sight of station A by 5 deg and ignore that pick
     obs = traj.observations[0]
@@ -142,8 +144,8 @@ def testAnIgnoredPickDoesNotSetTheBeginning():
 
     # Solve the observations again with the pick ignored
     solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
-        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
-        save_results=False, verbose=False)
+        gravity_correction=True, gravity_free_fall=False, filter_picks=False, monte_carlo=False, \
+        calc_orbit=False, show_plots=False, save_results=False, verbose=False)
 
     for obs, station_ignore_list in zip(traj.observations, [ignore_list, None, None]):
         solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
@@ -165,12 +167,12 @@ def testIgnoredLeadingPicksDoNotShiftTheDrop():
 
     traj, begin, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
         elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
-        filter_picks=False, calc_orbit=False)
+        gravity_free_fall=False, filter_picks=False, calc_orbit=False)
 
     # Solve the observations again with the picks of the first 2 s ignored
     solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
-        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
-        save_results=False, verbose=False)
+        gravity_correction=True, gravity_free_fall=False, filter_picks=False, monte_carlo=False, \
+        calc_orbit=False, show_plots=False, save_results=False, verbose=False)
 
     for obs in traj.observations:
         solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
@@ -194,7 +196,7 @@ def testOnePoorFirstPickDoesNotSetTheBeginning():
 
     traj, begin, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
         elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
-        filter_picks=False, calc_orbit=False)
+        gravity_free_fall=False, filter_picks=False, calc_orbit=False)
 
     # Point the first line of sight of station C 20 km up the trajectory
     obs = traj.observations[2]

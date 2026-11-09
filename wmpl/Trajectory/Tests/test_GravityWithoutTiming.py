@@ -4,9 +4,10 @@ The line-of-sight fit applies the gravity drop only in its second pass, which ha
 from the first. That pass used to run only after a timing estimate, so with estimate_timing_vel=False the
 fitted line was exactly the one gravity_correction=False gives.
 
-The tests drop a noise-free constant-velocity meteor by gravity, observe it from three stations, and check
-that the solver recovers it. A time range excluded from a station must still be excluded in the gravity pass,
-and lines of sight given as RA and Dec must not change in it. The orbit must take the fit status of that pass.
+The tests drop a noise-free constant-velocity meteor by its free fall from the line, observe it from three
+stations, and check that the solver recovers it. A time range excluded from a station must still be excluded
+in the gravity pass, and lines of sight given as RA and Dec must not change in it. The orbit must take the fit
+status of that pass.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityWithoutTiming.py -v
@@ -48,7 +49,7 @@ def _solve(duration, v_init, elevation, estimate_timing_vel, gravity_correction=
     """
 
     traj, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=duration, v_init=v_init, \
-        elevation=elevation, gravity_drop=True, estimate_timing_vel=estimate_timing_vel, \
+        elevation=elevation, gravity_drop=True, free_fall=True, estimate_timing_vel=estimate_timing_vel, \
         gravity_correction=gravity_correction, calc_orbit=False)
 
     return traj.run(), radiant_eci
@@ -97,8 +98,8 @@ def testAnExcludedTimeRangeIsKeptInTheGravityPass():
         observations are reinitialized for the gravity pass, as the times are shifted to start at 0.
     """
 
-    traj, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True, estimate_timing_vel=False, \
-        gravity_correction=True, calc_orbit=False)
+    traj, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True, free_fall=True, \
+        estimate_timing_vel=False, gravity_correction=True, calc_orbit=False)
 
     # Start the times at 10 s, and exclude 11-11.5 s from the first station
     observations = traj.observations
@@ -126,7 +127,7 @@ def testRADecAreKeptInTheGravityPassWhenTheTimesDoNotStartAtZero():
         reinitialized for the gravity pass, as the reference JD is moved to the first time.
     """
 
-    straight, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True)
+    straight, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True, free_fall=True)
 
     traj = Trajectory(straight.jdt_ref, meastype=1, max_toffset=1.0, estimate_timing_vel=False, \
         gravity_correction=True, monte_carlo=False, calc_orbit=False, show_plots=False, save_results=False, \
@@ -169,8 +170,8 @@ def testTheOrbitTakesTheStatusOfTheGravityPass():
         return SimpleNamespace(x=np.array(x0), fun=fun(np.array(x0), *args), success=False, nit=1, \
             message='Failed')
 
-    traj, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True, estimate_timing_vel=False, \
-        gravity_correction=True, calc_orbit=True)
+    traj, _, _ = observeStraightMeteor(noise=0.0, gravity_drop=True, free_fall=True, \
+        estimate_timing_vel=False, gravity_correction=True, calc_orbit=True)
 
     with mock.patch('scipy.optimize.minimize', failingGravityPass):
         traj = traj.run()

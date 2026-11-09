@@ -16,6 +16,8 @@ from wmpl.Config import config
 from wmpl.TrajSim.TrajSim import geocentricRadiantToApparent
 from wmpl.TrajSim.MeteorShowerModel import MeteorShower, sampleActivityModel
 from wmpl.Trajectory.Trajectory import ObservedPoints, Trajectory
+from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MIN_VEL, GRAVITY_DROP_SCALE_POINTS, gravityDropScale
+from wmpl.Trajectory.Trajectory import airRotationShift, interpAirRotationShift
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.TrajConversions import G, EARTH, altAz2RADec, raDec2ECI, rotatePolar, jd2Date, datetime2JD, \
@@ -1551,6 +1553,21 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
         # Vertical component of the initial velocity (has to be negative as the meteor is going down)
         v0z = -sim_met.v_init*np.cos(sim_met.orbit.zc)
 
+        # Scale the gravity drop for the deceleration of the velocity model, as the trajectory solver does
+        drop_scale = None
+        if (len(time_data_model) > 1) and (time_data_model[-1] > 0):
+            drop_times = np.linspace(0.0, time_data_model[-1], GRAVITY_DROP_SCALE_POINTS)
+            drop_lengths = np.array([velocity_model.getLength(sim_met.v_init, t) for t in drop_times])
+            drop_vel = np.maximum(np.gradient(drop_lengths, drop_times), GRAVITY_DROP_MIN_VEL)
+            drop_scale = gravityDropScale(drop_times, drop_vel)
+
+        # Move the meteor by drag against the rotating air, from the velocity model, as the trajectory solver
+        #   does, from the point on the line at the first time
+        air_shift = None
+        if drop_scale is not None:
+            eci_beg = sim_met.state_vect - drop_lengths[0]*sim_met.radiant_eci
+            air_shift = (drop_times, airRotationShift(drop_times, drop_vel, eci_beg, sim_met.radiant_eci))
+
         # Go through all trajectory points
         for t in time_data_model:
 
@@ -1584,7 +1601,16 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
                 r0 = vectMag(sim_met.begin_eci)
 
             
+            traj_eci_line = np.copy(traj_eci)
             traj_eci = applyGravityDrop(traj_eci, t, r0, v0z)
+
+            # Scale the drop for the deceleration
+            if drop_scale is not None:
+                traj_eci = traj_eci_line + np.interp(t, drop_times, drop_scale)*(traj_eci - traj_eci_line)
+
+            # Move the meteor by drag against the rotating air
+            if air_shift is not None:
+                traj_eci = traj_eci + interpAirRotationShift(air_shift, t, sim_met.radiant_eci)[0]
 
             ###
 

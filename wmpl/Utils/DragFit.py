@@ -36,9 +36,10 @@ path has bent by a few degrees from the first point. Further on, a dark flight m
 If the trajectory was solved with the gravity correction, the positions in the observed part are dropped from
 the line in the same way as in the trajectory solver, and the heights and the air density are computed on the
 dropped path. The drop is zero at the time of the first point, and the positions above it are on the line.
-The drop of the solver assumes a constant velocity, which overestimates the bending of a decelerating meteor,
-so below the last point the path is continued along the direction bent by theta, and the direction of the
-radiant is bent by theta everywhere.
+The solver scales its drop for the deceleration of the meteor (see Trajectory.gravityDropScale), unless the
+trajectory was solved with gravity_decel off or before the option was added. Its drop then assumes a constant
+velocity, which overestimates the bending of a decelerating meteor. Below the last point the path is continued
+along the direction bent by theta, and the direction of the radiant is bent by theta everywhere.
 
 The fitted K shows how the meteor changed during its flight. If K is constant, the deceleration is only
 driven by the air density and the velocity. For a single body K grows as m**(-1/3) as it ablates, and it
@@ -54,7 +55,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
+from wmpl.Trajectory.Trajectory import dropTimeOrigin
 from wmpl.Trajectory.Trajectory import applyGravityDrop
+from wmpl.Trajectory.Trajectory import freeFallDrop
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.Physics import ballisticCoeffMass
@@ -598,10 +601,12 @@ class DragFit(object):
         traj = self.traj
 
         # Take the time of the first point and the largest distance from the centre of the Earth of the first
-        #   points of all stations as the reference, as the trajectory solver does
-        t0 = min([obs.time_data[0] for obs in traj.observations])
+        #   points of the used stations as the reference, as the trajectory solver does (all stations if none
+        #   is used)
+        t0 = dropTimeOrigin(traj.observations)
+        used = [obs for obs in traj.observations if not obs.ignore_station] or traj.observations
         r0 = max([vectMag(findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], self.state_vect, \
-            self.radiant_eci)[1]) for obs in traj.observations])
+            self.radiant_eci)[1]) for obs in used])
 
         v0z = getattr(traj, 'v0z', None)
         if v0z is None:
@@ -609,13 +614,32 @@ class DragFit(object):
 
         gravity_factor = getattr(traj, 'gravity_factor', 1.0)
 
+        # Factor of the drop at each time, scaled for a decelerating meteor as in the solver
+        drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: gravity_factor)
+
+        # Or the free fall of the meteor from the line, as in the solver. Trajectories solved before it was
+        #   added drop the points along their vertical
+        free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
+        radiant_eci = np.ascontiguousarray(self.radiant_eci, dtype=np.float64)
+
+        # Displacement of the points by drag against the rotating air, as in the solver
+        shift_at = getattr(traj, 'airRotationShiftAt', None)
+
         # Compute the drop vector at every grid point with a defined time. The drop is zero above the first
         #   point, where the positions are on the line
         line_eci = self._lineEci(self.len_grid)
         drop_grid = np.zeros_like(line_eci)
         for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
             if np.isfinite(t) and (t > t0):
-                drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, gravity_factor, v0z)
+
+                if free_fall is not None:
+                    dropped = freeFallDrop(eci, t - t0, radiant_eci, *free_fall, gravity_factor)
+                else:
+                    dropped = applyGravityDrop(eci, t - t0, r0, drop_factor(t - t0), v0z)
+
+                drop_grid[i] = eci - dropped
+                if shift_at is not None:
+                    drop_grid[i] -= shift_at(t - t0, self.radiant_eci)
 
         # Below the last point, continue the path along the direction bent by gravity
         valid = np.where(np.isfinite(self.time_grid))[0]
@@ -627,6 +651,15 @@ class DragFit(object):
 
             pos = pos - dlen*self._bentRadiant(np.array([theta]), pos[None, :])[0]
             drop_grid[i] = line_eci[i] - pos
+
+        # And keep moving it by drag against the rotating air, by the change of the displacement since the
+        #   last point
+        if (shift_at is not None) and (valid[-1] > self.i_last):
+            i_below = np.arange(self.i_last + 1, valid[-1] + 1)
+            t_last = self.time_grid[self.i_last] - t0
+            shift_change = shift_at(self.time_grid[i_below] - t0, self.radiant_eci) \
+                - shift_at(t_last, self.radiant_eci)
+            drop_grid[i_below] -= shift_change
 
         # Keep the drop constant outside the modelled part, so the heights stay continuous
         drop_grid[:valid[0]] = drop_grid[valid[0]]
