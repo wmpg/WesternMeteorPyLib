@@ -12,6 +12,8 @@ from wmpl.Utils.Physics import dynamicMass, groundSpeed, earthRotationVelocity, 
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
+from wmpl.Trajectory.Trajectory import freeFallDrop
+from wmpl.Trajectory.Trajectory import dropTimeOrigin
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 
 
@@ -185,7 +187,7 @@ def pointOnTrajectory(traj, length, t):
     """ Compute the ECI coordinates of a point on the fitted trajectory, including the gravity drop.
 
         The point lies at the given length from the state vector along the radiant, displaced by the gravity
-        drop the solver models from the fitted line (see Trajectory.applyGravityDrop). Only the component of
+        drop the solver models from the fitted line (see Trajectory.gravityDropPoint). Only the component of
         the drop perpendicular to the line is applied, as in the solver's model points, where the along-track
         part is absorbed by the length.
 
@@ -203,11 +205,24 @@ def pointOnTrajectory(traj, length, t):
     # Solutions without the gravity correction have a straight fitted line and nothing to add
     if getattr(traj, 'gravity_correction', True):
 
-        # The solver measures the drop from the first observation of the meteor
-        t0 = min(obs.time_data[0] for obs in traj.observations)
+        # The solver measures the drop from the first observation of the used stations
+        t0 = dropTimeOrigin(traj.observations)
 
-        drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), getattr(traj, 'gravity_factor', 1.0), \
-            getattr(traj, 'v0z', None) or 0.0) - P
+        # The free fall of the meteor from the line, as in the solver. Trajectories solved before it was added
+        #   drop the points along their vertical
+        free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
+        if free_fall is not None:
+            drop = freeFallDrop(P, t - t0, np.ascontiguousarray(traj.radiant_eci_mini, dtype=np.float64), \
+                *free_fall, getattr(traj, 'gravity_factor', 1.0)) - P
+
+        else:
+
+            # The factor of the drop, scaled for a decelerating meteor as in the solver
+            gravity_factor = getattr(traj, 'gravity_factor', 1.0)
+            drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: gravity_factor)
+
+            drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), drop_factor(t - t0), \
+                getattr(traj, 'v0z', None) or 0.0) - P
 
         # Keep only the component perpendicular to the fitted line
         P = P + drop - np.dot(drop, traj.radiant_eci_mini)*traj.radiant_eci_mini

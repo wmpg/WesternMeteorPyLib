@@ -1,0 +1,94 @@
+""" Tests of the time from which wmpl.Trajectory.Trajectory computes the gravity drop: the first time of the
+    stations which are used, so that a station which is not used, e.g. because its clock is far off, does not
+    move the drop of the others.
+
+Run with pytest:
+    python -m pytest wmpl/Trajectory/Tests/test_DropTimeOrigin.py -v
+"""
+
+from __future__ import print_function, division, absolute_import
+
+import numpy as np
+
+import matplotlib
+matplotlib.use('Agg')
+
+from wmpl.Trajectory.Trajectory import Trajectory, dropTimeOrigin
+from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
+
+
+class _Station(object):
+    def __init__(self, time_data, ignore_station):
+        """ The attributes of a station which dropTimeOrigin reads.
+
+        Arguments:
+            time_data: [ndarray] Times of the points (s).
+            ignore_station: [bool] True if the station is not used.
+        """
+
+        self.time_data = np.array(time_data)
+        self.ignore_station = ignore_station
+
+
+
+def testOriginIsTheFirstTimeOfTheUsedStations():
+    """ Check that the stations which are not used do not set the origin, unless no station is used. """
+
+    stations = [_Station([0.1, 0.2], False), _Station([-1.0, 0.0], True), _Station([0.05, 0.3], False)]
+    assert dropTimeOrigin(stations) == 0.05
+
+    for station in stations:
+        station.ignore_station = True
+
+    assert dropTimeOrigin(stations) == -1.0
+
+
+
+def _solve(clock_lead):
+    """ Solve a noise-free straight meteor dropped by gravity, with a fourth station which is not used and whose
+        clock is ahead by the given time.
+
+    Arguments:
+        clock_lead: [float] How far ahead the clock of the station which is not used is (s).
+
+    Return:
+        (traj, radiant_eci):
+            - traj: [Trajectory object] Solved trajectory.
+            - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
+    """
+
+    # The meteor falls freely from its line, as the solver models it
+    observed, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=3.0, v_init=15000.0, elevation=30.0, \
+        gravity_drop=True, free_fall=True)
+
+    traj = Trajectory(observed.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
+        gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
+        save_results=False, verbose=False)
+
+    for obs in observed.observations:
+        traj.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id)
+
+    # Add a station which is not used, with the picks of station A and its clock ahead
+    obs = observed.observations[0]
+    traj.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data - clock_lead, obs.lat + 0.01, obs.lon, \
+        obs.ele, station_id='D', ignore_station=True)
+
+    return traj.run(), radiant_eci
+
+
+
+def testStationWithAClockFarOffDoesNotMoveTheDrop():
+    """ Check that a station which is not used and whose clock is 1 s ahead does not change the solution.
+        When its first time set the origin of the drop, the radiant was 115 arcsec off and the residuals of the
+        used stations reached 22 m.
+    """
+
+    traj, radiant_eci = _solve(1.0)
+    reference, _ = _solve(0.0)
+
+    assert np.allclose(traj.radiant_eci_mini, reference.radiant_eci_mini, rtol=0, atol=1e-12)
+    assert np.allclose(traj.radiant_eci_mini, radiant_eci, rtol=0, atol=1e-6)
+
+    used = [obs for obs in traj.observations if not obs.ignore_station]
+    assert max(np.max(np.hypot(obs.h_residuals, obs.v_residuals)) for obs in used) < 0.05
