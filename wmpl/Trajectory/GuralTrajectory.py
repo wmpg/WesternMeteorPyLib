@@ -1230,8 +1230,8 @@ class GuralTrajectory(object):
             out += 'Azimuth +north of due east for meas1, Zenith angle for meas2\n'
 
         out += "\n"
-        out += f'Reference JD: {self.jdt_ref:20.12f} (t = 0 for all relative times in this report)\n'
-        out += f'Time: {str(jd2Date(self.jdt_ref, dt_obj=True))} UTC'
+        out += "Reference JD: {:20.12f} (t = 0 for all relative times in this report)\n".format(self.jdt_ref)
+        out += "Time: {:s} UTC".format(str(jd2Date(self.jdt_ref, dt_obj=True)))
 
         out += '\n\n'
 
@@ -1274,9 +1274,10 @@ class GuralTrajectory(object):
 
         if self.orbit is not None:
             out += '\n'
-            out += 'Reference point on the trajectory (epoch of the state vector, radiant and orbit)\n'
-            out += f'  Time: {str(jd2Date(self.orbit.jd_ref, dt_obj=True))} UTC (JD {self.orbit.jd_ref:20.12f}, ' \
-                f't = {86400*(self.orbit.jd_ref - self.jdt_ref):.6f} s from the reference JD)\n'
+            out += "Reference point on the trajectory (epoch of the state vector, radiant and orbit)\n"
+            out += "  Time: {:s} UTC (JD {:20.12f}, t = {:.6f} s from the reference JD)\n".format( \
+                str(jd2Date(self.orbit.jd_ref, dt_obj=True)), self.orbit.jd_ref, \
+                86400*(self.orbit.jd_ref - self.jdt_ref))
             out += f'  Lat     = {np.degrees(self.orbit.lat_ref):>11.6f}\n'
             out += f'  Lon     = {np.degrees(_formatLongitude(self.orbit.lon_ref)):>+11.6}\n'
             out += f'  Ht      = {self.orbit.ht_ref}\n'

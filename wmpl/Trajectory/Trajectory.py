@@ -434,11 +434,11 @@ class ObservedPoints(object):
 
     @property
     def JD_data(self):
-        """ Julian date of each point. Derived on access because time_data is shifted after 
-            initialization (timing offsets, Monte Carlo copies) and the absolute times must follow it.
-        """
+        """ Julian date of each point, computed on access so that it follows the shifts of time_data. """
 
         return self.jdt_ref + self.time_data/86400.0
+
+
 
     def calcAzimuthal(self):
         """ Calculate azimuthal coordinates from right ascension and declination. """
@@ -4362,9 +4362,9 @@ class Trajectory(object):
 
 
 
-        # jdt_ref is t = 0 of every relative time in this report; the reference point further down
-        #   (orbit.jd_ref) is the beginning of the trajectory and can be seconds later
-        out_str += "Reference JD: {:20.12f} (t = 0 for all relative times in this report)\n".format(self.jdt_ref)
+        # Write the reference JD, which is t = 0 of all relative times in the report
+        out_str += "Reference JD: {:20.12f} (t = 0 for all relative times in this report)\n".format( \
+            self.jdt_ref)
         out_str += "Time: " + str(jd2Date(self.jdt_ref, dt_obj=True)) + " UTC\n"
 
         out_str += "\n\n"
@@ -4436,8 +4436,8 @@ class Trajectory(object):
         if self.orbit is not None:
             out_str += "Reference point on the trajectory (epoch of the state vector, radiant and orbit):\n"
             out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) \
-                + " UTC (JD {:20.12f}, t = {:.6f} s from the reference JD)\n".format(self.orbit.jd_ref, 
-                    86400*(self.orbit.jd_ref - self.jdt_ref))
+                + " UTC (JD {:20.12f}, t = {:.6f} s from the reference JD)\n".format(self.orbit.jd_ref, \
+                86400*(self.orbit.jd_ref - self.jdt_ref))
             out_str += "  Lat      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
                 '{:6.4f}', uncertainties, 'lat_ref', deg=True))
             out_str += "  Lon      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
