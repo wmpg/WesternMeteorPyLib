@@ -418,21 +418,20 @@ def testDecelerationMatchesTheModel():
     # The air density is the one the model was solved with
     assert np.allclose(drag_fit.airDensityAtLength(drag_fit.len_grid), drag_fit.rho_grid, rtol=1e-9)
 
-    # Compare with the derivative of the modelled velocity, except where K jumps at the first point and at
-    #   the one-sided derivative at the end of the modelled part
+    # Compare with the time derivative of the modelled velocity, except at both ends
     ind = np.where(drag_fit._valid)[0]
     dv_dt = np.gradient(drag_fit.vel_grid[ind], drag_fit.time_grid[ind])
     decel = drag_fit.decelerationAtLength(drag_fit.len_grid[ind])
     inner = (ind != drag_fit.i_first) & (ind != ind[-1]) & (np.abs(dv_dt) > 1.0)
     assert np.max(np.abs(decel[inner]/(-dv_dt[inner]) - 1.0)) < 2e-3
 
-    # Compare with the truth in the part where the deceleration is larger than 200 m/s^2
+    # Compare with the truth where the deceleration is above 200 m/s^2
     time_arr = np.linspace(0.85, 3.25, 7)
     decel_true = -np.interp(time_arr + meteor.t_vis_beg, meteor.time, np.gradient(meteor.vel, meteor.time))
     decel_fit = drag_fit.decelerationAtLength(drag_fit.lengthAtTime(time_arr))
     assert np.all(np.abs(decel_fit/decel_true - 1.0) < 0.15)
 
-    # Above the beginning the meteor moves without drag, so it is accelerated by gravity along the path
+    # Above the beginning only gravity acts along the path
     len_above = drag_fit.len_first - np.array([1e3, 10e3])
     g_along = np.interp(len_above, drag_fit.len_grid, drag_fit.g_grid)
     assert np.allclose(drag_fit.decelerationAtLength(len_above), -g_along)
@@ -444,8 +443,8 @@ def testDecelerationMatchesTheModel():
 
 
 def testMotionUncertaintyIsTheLinearPropagation():
-    """ Check the uncertainties of the velocity, the time and the length against the spread of the model
-        for parameters drawn from a tenth of their covariance, where the model is linear.
+    """ Check that the uncertainties of the velocity, the time and the length agree with the spread of the
+        model for parameters drawn from a tenth of their covariance, where the model is linear.
     """
 
     _, _, drag_fit = _solvedMeteor()
@@ -478,6 +477,7 @@ def testMotionUncertaintyIsTheLinearPropagation():
 
     mc_std = np.std(np.array(samples), axis=0)/scale
 
+    # Compare the linear uncertainties with the spread of the draws
     for lin_std, draw_std in zip([vel_std_len, time_std_len, vel_std_time, len_std_time], mc_std):
         assert np.all((lin_std/draw_std > 0.8) & (lin_std/draw_std < 1.25))
 
@@ -497,9 +497,11 @@ def testMotionUncertaintyAboveAndBelow():
 
     _, _, drag_fit = _solvedMeteor()
 
+    # Above the beginning the uncertainty is that of the first velocity
     vel_std, _ = drag_fit.motionStdAtLength(drag_fit.len_first - np.array([1e3, 10e3]))
     assert np.allclose(vel_std, np.sqrt(drag_fit.params_cov[1, 1]), rtol=1e-3)
 
+    # Below the end the uncertainty grows
     vel_std_obs, _ = drag_fit.motionStdAtTime(np.array([1.6]))
     vel_std_below, _ = drag_fit.motionStdAtTime(np.array([3.8]))
     assert vel_std_below[0] > 5*vel_std_obs[0]
@@ -518,6 +520,7 @@ def testMotionUncertaintyUnconstrained():
     drag_fit.params_null = np.zeros((len(drag_fit.params), 1))
     drag_fit.params_null[2, 0] = 1.0
 
+    # The velocity depends on K only after the first point
     vel_std, _ = drag_fit.motionStdAtLength(np.array([drag_fit.len_first - 1e3, drag_fit.len_last]))
     assert np.isfinite(vel_std[0])
     assert np.isinf(vel_std[1])
@@ -531,8 +534,7 @@ def testDynamicPressureOfTheTableIsRelativeToTheGround():
 
     _, _, drag_fit = _solvedMeteor()
 
-    # The fireball flies to the west-northwest, against the rotation of the Earth, so it is faster above the
-    #   ground. The rotation velocity at 45 deg latitude is 330 m/s
+    # The fireball flies west against the rotation of the Earth (330 m/s at 45 deg latitude)
     len_arr = np.linspace(drag_fit.len_first, drag_fit.len_last, 5)
     vel_diff = drag_fit.groundVelocityAtLength(len_arr) - drag_fit.velocityAtLength(len_arr)
     assert np.all((vel_diff > 100.0) & (vel_diff < 330.0))
@@ -540,15 +542,16 @@ def testDynamicPressureOfTheTableIsRelativeToTheGround():
     # Outside the modelled part the velocity is not defined
     assert np.isnan(drag_fit.groundVelocityAtLength(drag_fit.len_grid[-1] + 1e3)[0])
 
-    # Read the dynamic pressure at the beginning of every segment from the table (kPa)
+    # Read the dynamic pressure of every segment from the table (kPa)
     rows = [line for line in drag_fit.summaryTable().split("\n") if line[:4].strip().isdigit()]
     dyn_pres_table = np.array([float(row.split(",")[5]) for row in rows])
 
+    # Compute the dynamic pressure with the ground velocity
     rho = drag_fit.airDensityAtLength(drag_fit.ramp_beg)
     dyn_pres = rho*drag_fit.groundVelocityAtLength(drag_fit.ramp_beg)**2/1000
     assert np.allclose(dyn_pres_table, dyn_pres, atol=0.051)
 
-    # The ECI velocity gives a lower pressure, by much more than the rounding of the table at the end
+    # The ECI velocity gives a much lower pressure
     dyn_pres_eci = rho*drag_fit.velocityAtLength(drag_fit.ramp_beg)**2/1000
     assert np.max(dyn_pres_table - dyn_pres_eci) > 1.0
 

@@ -920,8 +920,7 @@ class DragFit(object):
 
 
     def groundVelocityAtLength(self, len_arr):
-        """ Compute the velocities relative to the ground at the given lengths along the trajectory, by adding
-            back the rotation velocity of the Earth at every point to the modelled velocity along the radiant.
+        """ Compute the velocities relative to the ground at the given lengths along the trajectory.
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -932,6 +931,7 @@ class DragFit(object):
 
         len_arr = np.atleast_1d(len_arr)
 
+        # Compute the modelled motion at the given lengths
         vel = self.velocityAtLength(len_arr)
         time_arr = self.timeAtLength(len_arr)
         eci_arr = self.eciAtLength(len_arr)
@@ -944,7 +944,7 @@ class DragFit(object):
             if not (np.isfinite(vel[i]) and np.isfinite(time_arr[i])):
                 continue
 
-            # Derotate the velocity at the point. The ECI coordinates are in the epoch of date
+            # Derotate the velocity, with the ECI coordinates in the epoch of date
             jd = self.traj.jdt_ref + time_arr[i]/86400.0
             lat, lon, _ = cartesian2Geo(jd, *eci_arr[i])
             _, _, vel_norot[i] = derotatedRadiantAltAz(vel[i]*radiant_arr[i], eci_arr[i], jd, lat, lon)
@@ -969,8 +969,8 @@ class DragFit(object):
 
 
     def decelerationAtLength(self, len_arr):
-        """ Compute the deceleration of the model at the given lengths along the trajectory,
-            K*rho*v**2 - g_along.
+        """ Compute the deceleration K*rho*v**2 - g_along of the model at the given lengths along the
+            trajectory.
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -982,6 +982,7 @@ class DragFit(object):
 
         len_arr = np.atleast_1d(len_arr)
 
+        # Take the drag and the gravity along the path
         k_arr, _ = self.ballisticCoeffAtLength(len_arr)
         vel = self.velocityAtLength(len_arr)
         g_along = np.interp(len_arr, self.len_grid, self.g_grid)
@@ -992,8 +993,7 @@ class DragFit(object):
 
     def _motionGradients(self, coord_arr, by_time):
         """ Compute the derivatives of the velocity and of the time or the length with respect to the
-            parameters, at the given lengths or times, by finite differences. The gravity drop is kept
-            fixed.
+            parameters by finite differences, with the gravity drop kept fixed.
 
         Arguments:
             coord_arr: [ndarray] Lengths along the trajectory from the state vector (m), or times (s).
@@ -1006,13 +1006,14 @@ class DragFit(object):
                 - grad_coord: [ndarray] Derivatives of the times or the lengths, one row per point.
         """
 
-        def _solution(params):
+        def motionAtParams(params):
 
-            # Solve the motion with the given parameters on a copy, which keeps this fit unchanged
+            # Solve the motion on a copy, which keeps this fit unchanged
             drag_fit = copy.copy(self)
             drag_fit.params = params
             drag_fit._solveFull()
 
+            # Interpolate the velocity and the time or the length at the given points
             valid = drag_fit._valid
             if by_time:
                 x_arr, y_arr = drag_fit.time_grid[valid], drag_fit.len_grid[valid]
@@ -1025,9 +1026,10 @@ class DragFit(object):
             return np.column_stack([vel, coord])
 
 
+        # Solve the motion with the fitted parameters
         n_params = len(self.params)
         params_std = np.sqrt(np.maximum(np.diag(self.params_cov), 0.0))
-        nominal = _solution(self.params)
+        nominal = motionAtParams(self.params)
 
         grad = np.zeros((len(coord_arr), 2, n_params))
         for j in range(n_params):
@@ -1039,10 +1041,10 @@ class DragFit(object):
 
             params_step = np.zeros(n_params)
             params_step[j] = step
-            plus = _solution(self.params + params_step)
-            minus = _solution(self.params - params_step)
+            plus = motionAtParams(self.params + params_step)
+            minus = motionAtParams(self.params - params_step)
 
-            # Take central differences, or one-sided ones where a step leaves the modelled part
+            # Take central differences, one-sided where a step leaves the modelled part
             grad_j = (plus - minus)/(2*step)
             grad_j = np.where(np.isnan(minus), (plus - nominal)/step, grad_j)
             grad_j = np.where(np.isnan(plus), (nominal - minus)/step, grad_j)
@@ -1055,8 +1057,7 @@ class DragFit(object):
 
     def motionStdAtLength(self, len_arr):
         """ Compute the uncertainties of the velocity and of the time at the given lengths along the
-            trajectory, propagated linearly from the covariance of the fitted parameters. Only the noise of
-            the points is included, not the uncertainty of the trajectory solution or the bias of the model.
+            trajectory, from the covariance of the parameters (the noise of the points only).
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -1076,8 +1077,7 @@ class DragFit(object):
 
     def motionStdAtTime(self, time_arr):
         """ Compute the uncertainties of the velocity and of the length along the trajectory at the given
-            times, propagated linearly from the covariance of the fitted parameters. Only the noise of the
-            points is included, not the uncertainty of the trajectory solution or the bias of the model.
+            times, from the covariance of the parameters (the noise of the points only).
 
         Arguments:
             time_arr: [float or ndarray] Times relative to the reference Julian date (s).
@@ -1205,8 +1205,7 @@ class DragFit(object):
             vel_seg = self.velocityAtLength(len_seg)
             k_seg, log_k_std = self.ballisticCoeffAtLength(len_seg)
 
-            # Compute the dynamic pressure at the beginning of the segment, with the velocity relative to the
-            #   air, which moves with the ground
+            # Compute the dynamic pressure at the beginning of the segment
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
             dyn_pres = rho_beg*self.groundVelocityAtLength(len_seg[0])[0]**2
 

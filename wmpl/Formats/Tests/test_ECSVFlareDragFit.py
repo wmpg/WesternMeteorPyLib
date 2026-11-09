@@ -14,8 +14,8 @@ from wmpl.Formats.ECSV import dragFitFlareWarning
 
 
 def dragFitTrajectory(ht_lo, ht_hi):
-    """ Stand-in for a trajectory whose initial velocity came from the drag fit, with only what the warning
-        reads from it.
+    """ Make a stand-in for a trajectory whose initial velocity came from the drag fit, with only what the
+        warning reads from it.
 
     Arguments:
         ht_lo: [float] Height of the lowest fitted point (m).
@@ -32,7 +32,7 @@ def dragFitTrajectory(ht_lo, ht_hi):
 
 
 def flarePoint(station_id, ht):
-    """ Flare point as flareHeights() gives it, with only what the warning reads from it.
+    """ Make a flare point as flareHeights() gives it, with only what the warning reads from it.
 
     Arguments:
         station_id: [str] Station of the point.
@@ -59,8 +59,7 @@ def testNoWarningWithoutTheDragFit():
 
 
 def testNoWarningForFlaresBelowTheFit():
-    """ Check that flares below the lowest fitted point give no warning.
-    """
+    """ Check that flares below the lowest fitted point give no warning. """
 
     traj = dragFitTrajectory(80000.0, 95000.0)
     flares = [flarePoint('XX0001', 79900.0), flarePoint('XX0002', 70000.0)]
@@ -75,7 +74,7 @@ def testWarningForFlaresWithinTheFit():
     """
 
     traj = dragFitTrajectory(80000.0, 95000.0)
-    flares = [flarePoint('XX0001', 84000.0), flarePoint('XX0001', 85020.0), flarePoint('XX0002', 86030.0),
+    flares = [flarePoint('XX0001', 84000.0), flarePoint('XX0001', 85020.0), flarePoint('XX0002', 86030.0), \
         flarePoint('XX0002', 70000.0)]
 
     warning = dragFitFlareWarning(traj, flares)
@@ -89,8 +88,7 @@ def testWarningForFlaresWithinTheFit():
 
 
 def testWarningForAFlareAtTheLowestFittedPoint():
-    """ Check that a flare point which is itself the lowest fitted point is within the fit.
-    """
+    """ Check that a flare point which is itself the lowest fitted point is within the fit. """
 
     traj = dragFitTrajectory(80000.0, 95000.0)
 
@@ -99,8 +97,7 @@ def testWarningForAFlareAtTheLowestFittedPoint():
 
 
 def testWarningForAFlareAboveTheWholeFit():
-    """ Check that a flare at or above the first fitted point gives no height to fit above it.
-    """
+    """ Check that a flare at or above the first fitted point gives no height to fit above it. """
 
     traj = dragFitTrajectory(80000.0, 95000.0)
 
@@ -108,3 +105,15 @@ def testWarningForAFlareAboveTheWholeFit():
 
     assert "no fitted point is free" in warning
     assert "--vinitdraght" not in warning.split("fragmentation.")[1]
+
+
+
+if __name__ == "__main__":
+
+    testNoWarningWithoutTheDragFit()
+    testNoWarningForFlaresBelowTheFit()
+    testWarningForFlaresWithinTheFit()
+    testWarningForAFlareAtTheLowestFittedPoint()
+    testWarningForAFlareAboveTheWholeFit()
+
+    print("All tests passed.")

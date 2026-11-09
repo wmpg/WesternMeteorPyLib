@@ -29,7 +29,7 @@ def flaggedEvent(dir_path, flagged, step=1, unpicked=(), frame_numbers=True):
 
     Keyword arguments:
         step: [int] Keep only the frames of XX0002 which are a multiple of it. 1 by default, for all.
-        unpicked: [list] Frames of XX0002 left without a point. None by default.
+        unpicked: [list] Frames of XX0002 left without a point. Empty by default.
         frame_numbers: [bool] If False, the file of XX0002 does not give the frame numbers. True by default.
 
     Return:
@@ -43,6 +43,7 @@ def flaggedEvent(dir_path, flagged, step=1, unpicked=(), frame_numbers=True):
     with open(path) as f:
         lines = f.read().splitlines()
 
+    # Keep the picked frames of XX0002 and flag the flares
     kept = []
     for line in lines:
 
@@ -69,6 +70,7 @@ def flaggedEvent(dir_path, flagged, step=1, unpicked=(), frame_numbers=True):
     with open(path, 'w') as f:
         f.write("\n".join(kept) + "\n")
 
+    # Solve the event
     jdt_ref, meteor_list = loadECSVs(paths)
     traj = solveTrajectoryGeneric(jdt_ref, meteor_list, str(dir_path), solver='original', monte_carlo=False, \
         save_results=False, show_plots=False, verbose=False, calc_orbit=True, gravity_correction=False, \
@@ -135,3 +137,11 @@ def testPointsWithoutRowsAreOneFlareWithinOneAndAHalfFrames():
 
     assert flareReport([flarePoint('A', 0.50, 0.04), flarePoint('A', 0.54, 0.04)]).count("point(s)") == 1
     assert flareReport([flarePoint('A', 0.50, 0.04), flarePoint('A', 0.58, 0.04)]).count("point(s)") == 2
+
+
+
+if __name__ == "__main__":
+
+    testPointsWithoutRowsAreOneFlareWithinOneAndAHalfFrames()
+
+    print("All tests passed.")

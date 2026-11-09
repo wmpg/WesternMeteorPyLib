@@ -17,11 +17,10 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from wmpl.Formats.ECSV import loadECSVs, unsolvedFragments, unsolvedFragmentReport
-from wmpl.Formats.ECSV import flareHeights, runTimeOffsets
-from wmpl.Formats.ECSV import loadFlares, projectFlares
-from wmpl.Formats.ECSV import poorFragmentTrajectories
+from wmpl.Formats.ECSV import loadECSVs, unsolvedFragments, unsolvedFragmentReport, flareHeights, \
+    runTimeOffsets, loadFlares, projectFlares, poorFragmentTrajectories
 from wmpl.Formats.GenericFunctions import solveTrajectoryGeneric
+from wmpl.Formats.Tests.SyntheticECSV import MAIN, FRAGMENT
 from wmpl.Utils.TrajConversions import latLonAlt2ECEF, ecef2ENU, ecef2LatLonAlt
 
 
@@ -36,13 +35,9 @@ META = """# %ECSV 0.9
 # - {{image_file: 'FF_{name}.fits'}}
 """
 
-# Columns of the main fragment and of an additional one (with its number as a suffix)
-MAIN = ['datetime', 'ra', 'dec', 'azimuth', 'altitude', 'x_image', 'y_image', 'mag_data']
-FRAGMENT = ['datetime', 'ra', 'dec', 'azimuth', 'altitude', 'x_image', 'y_image']
-
 # Latitude (deg), longitude (deg) and elevation (m) of the stations
-STATIONS = {'XX0001': (45.00, 10.00, 300.0), 'XX0002': (45.40, 10.70, 200.0), 'XX0003': (44.70, 10.80, 500.0),
-    'XX0004': (45.70, 10.00, 400.0)}
+STATIONS = {'XX0001': (45.00, 10.00, 300.0), 'XX0002': (45.40, 10.70, 200.0), \
+    'XX0003': (44.70, 10.80, 500.0), 'XX0004': (45.70, 10.00, 400.0)}
 
 # Time of the first frame, frame rate (frames per second) and speed (m/s)
 T0 = datetime.datetime(2026, 1, 30, 10, 25, 36, 0)
@@ -140,6 +135,7 @@ def writeEvent(dir_path, fragment_stations=('XX0001',), offset=None, \
         rows = []
         for i in range(N_FRAMES):
 
+            # Point of the main fragment, if the station sees it
             when = (T0 + datetime.timedelta(seconds=i/FPS + clock)).strftime("%Y-%m-%dT%H:%M:%S.%f")
             row = ['']*len(MAIN)
             if name in main_stations:
@@ -147,8 +143,10 @@ def writeEvent(dir_path, fragment_stations=('XX0001',), offset=None, \
                 row = [when, '10.0', '-30.0', '{:.8f}'.format(azim), '{:.8f}'.format(alt), '100', '200', \
                     '2.0']
 
+            # Frame number and flags
             row += [str(i), 'False', 'True']
 
+            # Point of fragment 1, on the last frames
             fragment = ['']*len(FRAGMENT)
             if (name in fragment_stations) and (i >= FRAGMENT_START):
                 azim, alt = azAlt(mainPoint(i) + offset(i), name)
@@ -156,6 +154,7 @@ def writeEvent(dir_path, fragment_stations=('XX0001',), offset=None, \
 
             rows.append(",".join(row + fragment))
 
+        # Write the file
         header = MAIN + ['frame_number', 'flare', 'trajectory_use'] + [column + '1' for column in FRAGMENT]
 
         path = os.path.join(str(dir_path), name + '.ecsv')
@@ -305,8 +304,7 @@ def testASeparationAlongTheLineOfSightIsNotSeenAndMovesTheHeightAsReported(tmp_p
     k = middle - FRAGMENT_START
     assert abs(frag['off'][k]) < 10.0
 
-    # The heights of the solver are above sea level, so the height of the point on the main path is the
-    #   reference
+    # Take the height of the solver on the main path as the reference, above sea level
     obs = [obs for obs in traj.observations if str(obs.station_id) == 'XX0001'][0]
     true_height = obs.model_ht[middle] + height(mainPoint(middle) + 300.0*in_plane) \
         - height(mainPoint(middle))
@@ -315,7 +313,7 @@ def testASeparationAlongTheLineOfSightIsNotSeenAndMovesTheHeightAsReported(tmp_p
     assert error > 50.0
     assert abs(error - 300.0*frag['ht_per_m'][k]) < 0.05*error
 
-    # How far ahead of the main one it appears to be, while it is at the same distance along the path
+    # How far ahead of the main one it appears, at the same distance along the path
     assert abs(abs(frag['ahead'][k]) - 300.0*abs(frag['ahead_per_m'][k])) < 0.05*abs(frag['ahead'][k])
 
 
@@ -394,6 +392,7 @@ def testTheSolutionWithTheOriginalPicksAmongTheRunsAddsNoTimeOffset(tmp_path):
         f.write(text.replace(",{:d},False,True,".format(FRAGMENT_START), \
             ",{:d},True,True,".format(FRAGMENT_START)))
 
+    # Add the solution with the original picks to the runs
     traj = solveMain(paths, tmp_path, estimate_timing=True)
     runs = monteCarloRuns(traj) + [traj]
 
@@ -455,8 +454,7 @@ def testAFlareNotUsedInTheTrajectoryTakesTheHeightOfTheTrajectoryAtItsTime(tmp_p
     projected = projectFlares(traj, flare_meteors, input_meteors)
     assert min(abs(flare['ht'] - unused['ht']) for flare in projected.values() if not flare['used']) > 1000.0
 
-    # In the runs, given other time offsets of the station than the other stations, it follows the
-    #   trajectory at the time each run gives it, while its line of sight would not move
+    # In the runs it follows the trajectory at the time offset each run gives its station
     runs = monteCarloRuns(traj)
     index = [obs.station_id for obs in traj.observations].index('XX0002')
     offsets = 0.01*np.arange(len(runs))
@@ -512,8 +510,8 @@ def testAStationOutOfTheMainTrajectoryIsNotProjected(tmp_path, capsys):
 
 
 def testTheReportWithAndWithoutTheMonteCarloRuns(tmp_path):
-    """ Check the report of a fragment projected on the main trajectory, with and without the Monte Carlo
-        runs, and when it is seen after the main one.
+    """ Check that the report gives a fragment projected on the main trajectory with and without the Monte
+        Carlo runs, and when it is seen after the main one.
     """
 
     middle = (FRAGMENT_START + N_FRAMES)//2
@@ -570,6 +568,8 @@ def testPoorFragmentTrajectoriesAreFound():
             state_vect_mini=np.array([6.5e6, 0.0, 0.0]), best_conv_inter=None if (conv_angle is None) \
             else SimpleNamespace(conv_angle=np.radians(conv_angle)))
 
+
+    # Two poor fragments and two good ones
     main = solution(0.0, 40.0)
     fragment_trajs = [(1, solution(0.0, 2.0)), (2, solution(2000.0, 10.0)), (3, solution(300.0, 10.0)), \
         (4, solution(300.0, None))]
@@ -594,3 +594,10 @@ def testTheReportSaysWhyAFragmentIsProjected(tmp_path):
     assert "Additional fragments projected on the main trajectory" in report
     assert "(seen from one station)" in unsolvedFragmentReport(unsolvedFragments(traj, paths, [1]), traj)
 
+
+
+if __name__ == "__main__":
+
+    testPoorFragmentTrajectoriesAreFound()
+
+    print("All tests passed.")

@@ -19,8 +19,8 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 
 def flaggedEvent(dir_path, frame):
-    """ Write a noiseless event with a flare flagged on a frame of station XX0002, and solve it with its orbit,
-        which gives the Earth's rotation along the path.
+    """ Write a noiseless event with a flare flagged on a frame of station XX0002, and solve it with its
+        orbit, which gives the Earth's rotation along the path.
 
     Arguments:
         dir_path: [str] Directory of the files.
@@ -35,14 +35,18 @@ def flaggedEvent(dir_path, frame):
     path = [path for path in paths if path.endswith('XX0002.ecsv')][0]
     with open(path) as f:
         lines = f.read().splitlines()
+
+    # Flag the frame as a flare
     for n, line in enumerate(lines):
         fields = line.split(',')
         if (not line.startswith('#')) and (fields[0] != 'datetime') and (int(fields[8]) == frame):
             fields[9] = 'True'
             lines[n] = ','.join(fields)
+
     with open(path, 'w') as f:
         f.write("\n".join(lines) + "\n")
 
+    # Solve the event
     jdt_ref, meteor_list = loadECSVs(paths)
     traj = solveTrajectoryGeneric(jdt_ref, meteor_list, str(dir_path), solver='original', monte_carlo=False, \
         save_results=False, show_plots=False, verbose=False, calc_orbit=True, gravity_correction=False, \
@@ -96,7 +100,10 @@ def testWithoutTheDragFitTheFlaresHaveNoPressure(tmp_path, monkeypatch, capsys):
     paths, traj = flaggedEvent(tmp_path, FRAGMENT_START + 5)
 
     def failingFit(traj):
+        """ Stand in for a drag fit which fails. """
+
         raise ValueError("no fit")
+
 
     monkeypatch.setattr(sys.modules['wmpl.Formats.ECSV'], 'DragFit', failingFit)
 
@@ -129,8 +136,8 @@ def flarePoint(station_id, t, frame_dt):
 
 
 def testFlaresOneFrameOfTheSlowerCameraApartAreConsistent():
-    """ Check that the same flare marked one frame apart by a 13 fps and a 25 fps camera is consistent, and two
-        frames apart not.
+    """ Check that the same flare marked one frame apart by a 13 fps and a 25 fps camera is consistent, and
+        two frames apart not.
     """
 
     one = flareReport([flarePoint('A', 0.5, 0.075), flarePoint('B', 0.575, 0.04)])
@@ -143,28 +150,38 @@ def testFlaresOneFrameOfTheSlowerCameraApartAreConsistent():
 
 
 def testTheRealErrorOfTheTimeOffsetsIsAddedWhenTheSolverEstimatedThem():
-    """ Check that the real error of the time offsets is added to the uncertainty of the time between the flares
-        of two stations when the solver estimated the offset of one of them, and not when the offsets were not
-        estimated or both are fixed: two 25 fps cameras 0.091 s apart are 3.1 sigma apart without it, after
-        taking off a frame, and 2.9 sigma with it.
+    """ Check that the real error of the time offsets is added to the uncertainty of the time between the
+        flares of two stations when the solver estimated the offset of one of them, and not when the offsets
+        were not estimated or both are fixed. Two 25 fps cameras 0.091 s apart are 3.1 sigma apart without
+        it, after taking off a frame, and 2.9 sigma with it.
     """
 
     flares = [flarePoint('A', 0.5, 0.04), flarePoint('B', 0.591, 0.04)]
 
+    # The solver estimated the offset of B
     estimated = flareReport(flares, ref_stations=['A'])
     assert "(2.9 and 0.0 sigma): consistent" in estimated
     assert "real error of\nthe time offsets the solver estimated, 7 ms" in estimated
 
+    # The offsets were not estimated, or both are fixed
     for ref_stations in ([], ['A', 'B']):
         report = flareReport(flares, ref_stations=ref_stations)
         assert "(3.1 and 0.0 sigma): NOT consistent" in report
         assert "real error" not in report
 
-    # The same for the heights compared at the same time, which the error of the offsets also moves: 250 m
-    #   apart are 3.5 sigma without it and 2.5 sigma with it
+    # The same for heights 250 m apart at the same time, 3.5 sigma without it and 2.5 sigma with it
     above = flarePoint('B', 0.5, 0.04)
     above['ht'] += 250.0
     flares = [flarePoint('A', 0.5, 0.04), above]
 
     assert "(0.0 and 2.5 sigma): consistent" in flareReport(flares, ref_stations=['A'])
     assert "(0.0 and 3.5 sigma): NOT consistent" in flareReport(flares, ref_stations=[])
+
+
+
+if __name__ == "__main__":
+
+    testFlaresOneFrameOfTheSlowerCameraApartAreConsistent()
+    testTheRealErrorOfTheTimeOffsetsIsAddedWhenTheSolverEstimatedThem()
+
+    print("All tests passed.")

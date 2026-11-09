@@ -16,8 +16,9 @@ import shutil
 import numpy as np
 
 from wmpl.Formats.ECSV import fragmentMatches, fragmentMatchReport
-from wmpl.Formats.Tests.test_ECSVUnsolvedFragments import META, MAIN, FRAGMENT, STATIONS, T0, FPS, N_FRAMES, \
-    FRAGMENT_START, DIRECTION, azAlt, mainPoint, solveMain
+from wmpl.Formats.Tests.SyntheticECSV import MAIN, FRAGMENT
+from wmpl.Formats.Tests.test_ECSVUnsolvedFragments import META, STATIONS, T0, FPS, N_FRAMES, FRAGMENT_START, \
+    DIRECTION, azAlt, mainPoint, solveMain
 
 
 
@@ -49,6 +50,7 @@ def writeEvent(dir_path, numbers, main_stations=('XX0001', 'XX0002', 'XX0003'), 
         rows = []
         for i in range(N_FRAMES):
 
+            # Point of the main fragment, if the station sees it
             when = (T0 + datetime.timedelta(seconds=i/FPS)).strftime("%Y-%m-%dT%H:%M:%S.%f")
             row = ['']*len(MAIN)
             if name in main_stations:
@@ -56,8 +58,10 @@ def writeEvent(dir_path, numbers, main_stations=('XX0001', 'XX0002', 'XX0003'), 
                 row = [when, '10.0', '-30.0', '{:.8f}'.format(azim), '{:.8f}'.format(alt), '100', '200', \
                     '2.0']
 
+            # Frame number and flags
             row += [str(i), 'False', 'True']
 
+            # Points of the fragments on their frames
             for number in sorted(fragments):
 
                 fragment = ['']*len(FRAGMENT)
@@ -71,6 +75,7 @@ def writeEvent(dir_path, numbers, main_stations=('XX0001', 'XX0002', 'XX0003'), 
 
             rows.append(",".join(row))
 
+        # Write the file
         header = MAIN + ['frame_number', 'flare', 'trajectory_use'] \
             + [column + str(number) for number in sorted(fragments) for column in FRAGMENT]
 
