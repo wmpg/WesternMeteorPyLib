@@ -33,10 +33,16 @@ import numpy as np
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Dcriteria import DERIVED_FROM_ELEMENTS, lookupCriterion, radiantCriterionMin
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcWhippleK, calcKresakP,
-    calcAphelionDistance, calcOrbitalEnergy, classifyNEO, isArjuna, classifyBorovicka, isProgrograde,
+    calcAphelionDistance, calcOrbitalEnergy, classifyNEO, isArjuna, classifyBorovicka,
     isRetrograde, isEarthCrossing, isSunApproaching, SUN_APPROACHING_Q_LIMIT, isCometaryQi,
     isCometaryEi, isCometaryTi, isCometaryPi, isCometaryKi, classifyTancrediComet,
     calcGiantPlanetMOIDs, classifyTancrediAsteroid, GIANT_PLANETS)
+
+# The review of #127 renamed isProgrograde() to isPrograde() in master; take whichever the module has
+try:
+    from wmpl.Utils.OrbitClassification import isPrograde
+except ImportError:
+    from wmpl.Utils.OrbitClassification import isProgrograde as isPrograde
 
 
 # The interval the clones are summarised by, in percent: 95% of them
@@ -693,7 +699,7 @@ def classifyOrbit(q, e, incl, node=None, peri=None):
 
     a = q/(1.0 - e)
 
-    direction = "prograde" if isProgrograde(incl) else ("retrograde" if isRetrograde(incl) else "polar")
+    direction = "prograde" if isPrograde(incl) else ("retrograde" if isRetrograde(incl) else "polar")
 
     dynamical, orbital, cometary, tancredi = CLASSIFICATION_SECTIONS
 
