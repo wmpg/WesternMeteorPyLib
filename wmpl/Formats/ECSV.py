@@ -118,8 +118,7 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
             for line in f:
                 if line.startswith("#"):
 
-                    # Take the key and the value of a metadata entry, e.g. "# - {obs_latitude: 45.0}", split
-                    #   at the first colon, so that a value with colons (e.g. a path) is kept whole
+                    # Split a metadata entry into its key and value at the first colon
                     entry = line.lstrip('#').strip()
                     if entry.startswith('-'):
                         entry = entry[1:].strip()
@@ -131,22 +130,23 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
                     key, value = [part.strip() for part in entry.split(':', 1)]
                     text = value.strip("'").strip('"')
 
-                    if key == "obs_latitude":
+                    # Take the station and the image file from their keys
+                    if key == 'obs_latitude':
                         station_lat = float(value)
 
-                    if key == "obs_longitude":
+                    if key == 'obs_longitude':
                         station_lon = float(value)
 
-                    if key == "obs_elevation":
+                    if key == 'obs_elevation':
                         station_ele = float(value)
 
                     if key == 'image_file':
                         image_file = text
 
-                    if key == "camera_id":
+                    if key == 'camera_id':
                         station_id = text
 
-                    if (station_id is None) and (key == "dfn_camera_codename"):
+                    if (station_id is None) and (key == 'dfn_camera_codename'):
                         station_id = text
                             
 
@@ -255,8 +255,7 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
             # Take the first time as reference time
             jdt_ref = datetime2JD(dt_list[0])
 
-            # Compute relative time from the differences of the times, which keeps their microseconds, unlike
-            #   the differences of their Julian dates
+            # Compute the relative times from the differences of the times, to the microsecond
             time_data = np.array([(dt - dt_list[0]).total_seconds() for dt in dt_list])
 
             # Compute the Julian date of every point
