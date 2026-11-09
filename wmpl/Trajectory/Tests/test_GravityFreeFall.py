@@ -3,9 +3,8 @@
 applyGravityDrop drops every point by g*t^2/2 along its own vertical. The meteor falls from the line along the
 whole path, while the vertical turns with the curvature of the Earth, so on a fireball of several seconds the
 line tilts by a few arcseconds. The solver now drops the points by the free fall from the line under the
-gravity of the Earth, a point mass with its oblateness (J2), with the velocity of drag alone (freeFallDrop,
-freeFallTable). The tests check the free fall against fireballs integrated in 3D with drag and gravity (with
-and without J2), against a dense integration where the
+gravity of a point mass, with the velocity of drag alone (freeFallDrop, freeFallTable). The tests check the
+free fall against fireballs integrated in 3D with drag and gravity, against a dense integration where the
 fitted velocity changes its slope and along a long path, and against the scale of a decelerating meteor; they
 solve fireballs without drag and with strong drag with and without it, and check the option, old pickles and
 the drag fit and the dynamic mass fit, which apply the same drop.
@@ -23,9 +22,7 @@ matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import G, applyGravityDrop, freeFallDrop, freeFallMoments, freeFallTable, \
     gravityDropScale
-from wmpl.Trajectory.Trajectory import GRAVITY_FREE_FALL_J2, GRAVITY_FREE_FALL_RE
-from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDragMeteor, BentDragMeteorJ2, \
-    observeMeteor, oblatenessAcceleration
+from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDragMeteor, observeMeteor
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 
@@ -42,23 +39,20 @@ EARTH_MASS = 5.9722e24
 
 
 
-def _meteor(params, j2=True):
+def _meteor(params):
     """ Integrate a fireball of the tests once.
 
     Arguments:
         params: [tuple] Arguments of BentDragMeteor.
 
-    Keyword arguments:
-        j2: [bool] With the oblateness of the Earth in its gravity (BentDragMeteorJ2). True by default.
-
     Return:
         [BentDragMeteor object] The fireball.
     """
 
-    if (params, j2) not in _METEORS:
-        _METEORS[(params, j2)] = (BentDragMeteorJ2 if j2 else BentDragMeteor)(*params)
+    if params not in _METEORS:
+        _METEORS[params] = BentDragMeteor(*params)
 
-    return _METEORS[(params, j2)]
+    return _METEORS[params]
 
 
 
@@ -81,8 +75,6 @@ def _dragVelocity(meteor, t_start):
 
     acc = np.gradient(vel, time_rel, axis=0)
     grav = -GM_EARTH*pos/np.linalg.norm(pos, axis=1)[:, None]**3
-    if getattr(meteor, 'j2', False):
-        grav += np.array([oblatenessAcceleration(p) for p in pos])
     rate = np.linalg.norm(acc - grav, axis=1)/np.linalg.norm(vel, axis=1)
 
     decay = np.r_[0.0, np.cumsum(0.5*(rate[1:] + rate[:-1])*np.diff(time_rel))]
@@ -113,11 +105,7 @@ def _denseFreeFall(eci_coord, t, radiant_eci, table, n=200001):
     q = np.linspace(0.0, t, n)
     back = np.interp(t, time_tab, len_tab) - np.interp(q, time_tab, len_tab)
     points = eci_coord[None, :] + back[:, None]*radiant_eci[None, :]
-    r2 = np.sum(points**2, axis=1)[:, None]
-    oblate = 1.5*GRAVITY_FREE_FALL_J2*GRAVITY_FREE_FALL_RE**2/r2
-    polar = 5.0*points[:, 2:3]**2/r2
-    grav = -G*EARTH_MASS*points/r2**1.5*(1.0 + oblate*(1.0 - polar))
-    grav[:, 2:3] = -G*EARTH_MASS*points[:, 2:3]/r2**1.5*(1.0 + oblate*(3.0 - polar))
+    grav = -G*EARTH_MASS*points/np.linalg.norm(points, axis=1)[:, None]**3
 
     return np.trapz((back/np.interp(q, time_tab, vel_tab))[:, None]*grav, q, axis=0)
 
@@ -166,9 +154,8 @@ def _solve(params, gravity_free_fall, seed=1):
 
 def testTheFreeFallFollowsIntegratedFireballs():
     """ The free fall from the tangent at the first point, with the velocity of drag alone, follows fireballs
-        integrated in 3D with the oblateness of the Earth, without drag and with strong drag, while the drop
-        along the vertical of the point, scaled for the deceleration, misses them across the path. The same
-        fireballs integrated without the oblateness differ from the free fall by more than 0.2 m.
+        integrated in 3D without drag and with strong drag, while the drop along the vertical of the point,
+        scaled for the deceleration, misses them across the path.
     """
 
     for params in (FIREBALL_NO_DRAG, FIREBALL_DRAG):
@@ -197,17 +184,6 @@ def testTheFreeFallFollowsIntegratedFireballs():
 
         assert worst_free_fall < 0.03, worst_free_fall
         assert worst_vertical > 0.5, worst_vertical
-
-        # The oblateness of the Earth is in the free fall
-        meteor_spherical = _meteor(params, j2=False)
-        time_rel, pos, vel, drag_vel = _dragVelocity(meteor_spherical, 0.02)
-        table = freeFallTable(time_rel, drag_vel)
-
-        x0, direction = pos[0], vel[0]/np.linalg.norm(vel[0])
-        worst_spherical = max(np.linalg.norm(pos[i] - freeFallDrop(x0 + direction*np.interp(time_rel[i], \
-            table[0], table[2]), time_rel[i], -direction, *table, 1.0)) for i in range(0, len(time_rel), 100))
-
-        assert worst_spherical > 0.2, worst_spherical
 
 
 

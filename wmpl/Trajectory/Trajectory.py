@@ -745,6 +745,28 @@ def numStationsNotIgnored(observations):
 
 
 
+def dropTimeOrigin(observations):
+    """ Find the time from which the gravity drop is computed: the first time of the stations which are used.
+        A station which is not used, e.g. because its clock is far off, does not set it.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+
+    Return:
+        [float] Time of the beginning of the meteor (s), the first time of all stations if none is used.
+    """
+
+    times = [obs.time_data[0] for obs in observations if not obs.ignore_station]
+
+    # Take all stations if none is used
+    if not times:
+        times = [obs.time_data[0] for obs in observations]
+
+
+    return min(times)
+
+
+
 def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     """ Compute the beginning point of the trajectory, from which the gravity drop is computed.
 
@@ -785,7 +807,7 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     radiant_eci = vectNorm(radiant_eci)
 
     # Find the earliest time, from which the drop is computed
-    t0 = min([obs.time_data[0] for obs in observations])
+    t0 = dropTimeOrigin(observations)
 
     dist_list = []
     for obs, i in first_picks:
@@ -836,12 +858,6 @@ GRAVITY_FREE_FALL_GL_WEIGHTS = np.array([5.0/9, 8.0/9, 5.0/9])
 # Time by which the table of the motion along the line for the free fall is extended before its first and
 #   after its last time, at the velocity there (s), so every point of the meteor falls within it
 GRAVITY_FREE_FALL_EXTEND = 1000.0
-
-# Second zonal harmonic of the gravity of the Earth, its oblateness, and the equatorial radius to which it
-#   refers (m), for the free fall (see freeFallDrop). WGS84: J2 = -sqrt(5) times the normalized C20 of
-#   -0.484166774985e-3 (NIMA 2000, Table 5.3)
-GRAVITY_FREE_FALL_J2 = 1.082626683e-3
-GRAVITY_FREE_FALL_RE = 6378137.0
 
 
 
@@ -1129,7 +1145,7 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     radiant_eci = np.ascontiguousarray(radiant_eci)
 
     # Find the earliest point in time
-    t0 = min([obs.time_data[0] for obs in observations])
+    t0 = dropTimeOrigin(observations)
 
     # Compute the model point modified due to gravity, assuming zero vertical velocity if it is not given
     if v0z is None:
@@ -3487,8 +3503,8 @@ def freeFallTable(time_rel, vel):
 
 @njit
 def freeFallDrop(eci_coord, t, radiant_eci, time_tab, vel_tab, len_tab, mom_tab, gravity_factor):
-    """ Drop a point of the fitted line by the free fall of the meteor from the line under the gravity of the
-        Earth, in place of the drop along the vertical of the point of applyGravityDrop.
+    """ Drop a point of the fitted line by the free fall of the meteor from the line under the gravity of a
+        point mass, in place of the drop along the vertical of the point of applyGravityDrop.
 
     The meteor moves along the line as in the table of freeFallTable, at the velocity v of drag alone.
     Gravity adds to its velocity, and drag slows down the added velocity at the same rate as the rest, so the
@@ -3497,21 +3513,15 @@ def freeFallDrop(eci_coord, t, radiant_eci, time_tab, vel_tab, len_tab, mom_tab,
         int_0^t g(b(q)) b(q)/v(q) dq,    b(q) = l(t) - l(q),
 
     where g(b) is the gravity of the Earth at the distance b back along the line from the point, and l the
-    length travelled. Gravity is that of a point mass with the oblateness of the Earth (GRAVITY_FREE_FALL_J2),
-    whose axis is the z axis of the ECI frame of date. At a constant velocity it is the free fall from the
-    line, int_0^t (t - q) g dq, and in a uniform field it is g times the drop of gravityDropScale. Unlike
-    g*t^2/2 along the vertical of the point, it follows the turn of the vertical along the path with the
-    curvature of the Earth, and the change of g with the height. Its part along the line is the velocity
-    gravity adds along the path.
+    length travelled. At a constant velocity it is the free fall from the line, int_0^t (t - q) g dq, and in a
+    uniform field it is g times the drop of gravityDropScale. Unlike g*t^2/2 along the vertical of the point,
+    it follows the turn of the vertical along the path with the curvature of the Earth, and the change of g
+    with the height. Its part along the line is the velocity gravity adds along the path.
 
     Gravity is interpolated by a cubic polynomial in b, through four equally spaced points from the point back
     to the beginning, so the integral is the sum of its coefficients times the integrals of b^(n + 1)/v,
     which follow from the moments of the table (see freeFallMoments). The velocity enters only through the
     moments, which keeps the integral exact where the fitted velocity changes its slope.
-
-    References:
-        National Imagery and Mapping Agency (2000). Department of Defense World Geodetic System 1984, its
-            definition and relationships with local geodetic systems. NIMA TR8350.2, 3rd edition, amendment 1.
 
     Arguments:
         eci_coord: [ndarray] (x, y, z) ECI coordinates of the point of the line at the time t (meters).
@@ -3552,18 +3562,16 @@ def freeFallDrop(eci_coord, t, radiant_eci, time_tab, vel_tab, len_tab, mom_tab,
     drop_x, drop_y, drop_z = 0.0, 0.0, 0.0
     for j in range(4):
 
-        # Gravity of a point mass at the point, with the oblateness of the Earth around the z axis
+        # Gravity of a point mass at the point
         x = eci_coord[0] + j*step*radiant_eci[0]
         y = eci_coord[1] + j*step*radiant_eci[1]
         z = eci_coord[2] + j*step*radiant_eci[2]
         r2 = x*x + y*y + z*z
         factor = weights[j]*gm/(r2*np.sqrt(r2))
-        oblate = 1.5*GRAVITY_FREE_FALL_J2*GRAVITY_FREE_FALL_RE**2/r2
-        polar = 5.0*z*z/r2
 
-        drop_x -= factor*x*(1.0 + oblate*(1.0 - polar))
-        drop_y -= factor*y*(1.0 + oblate*(1.0 - polar))
-        drop_z -= factor*z*(1.0 + oblate*(3.0 - polar))
+        drop_x -= factor*x
+        drop_y -= factor*y
+        drop_z -= factor*z
 
     dropped = np.empty(3)
     dropped[0] = eci_coord[0] + gravity_factor*drop_x
@@ -4207,7 +4215,7 @@ class Trajectory(object):
         _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
 
         # Time of the beginning of the meteor, from which the drop of a decelerating meteor is scaled
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
 
         # Motion along the line for the free fall of the meteor from the line
         free_fall = self.gravityFreeFall()
@@ -4285,7 +4293,7 @@ class Trajectory(object):
         """
 
         # Same reference time, beginning point and free fall as the line-of-sight fit
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
         if gravity:
             r0 = self.gravity_r0
             if r0 is None:
@@ -5005,7 +5013,7 @@ class Trajectory(object):
         """
 
         # Same reference time and beginning point as the line-of-sight fit
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
         r0 = self.gravity_r0
         if r0 is None:
             _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
@@ -5084,7 +5092,7 @@ class Trajectory(object):
         # Or take the lengths calcVelocity computed, with the times from the beginning of the meteor
         else:
 
-            t0 = min([obs.time_data[0] for obs in observations])
+            t0 = dropTimeOrigin(observations)
             used = [obs for obs in observations if (not obs.ignore_station) and np.any(obs.ignore_list == 0) \
                 and (getattr(obs, 'state_vect_dist', None) is not None)]
             if not used:
@@ -5202,7 +5210,7 @@ class Trajectory(object):
         ### Compute parameters for gravity drop ###
 
         # Determine the first time
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
 
         # Beginning point for the gravity drop, and the vertical velocity
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
@@ -5385,7 +5393,7 @@ class Trajectory(object):
         ### Compute parameters for gravity drop ###
 
         # Determine the first time of observation
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
 
         # Beginning point for the gravity drop, and the vertical velocity
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
