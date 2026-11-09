@@ -465,6 +465,23 @@ def testTheLineFitStopsAtItsLimitOfEvaluations():
 
 
 
+def testTheLineFitSaysWhenTheLineStillMoved():
+    """ Check that the fit keeps its success but says so in the message when the line still moved after the
+        last fresh simplex.
+    """
+
+    traj, begin, radiant = observeStraightMeteor(seed=20261108, calc_orbit=False)
+
+    # No move is small enough to stop the restarts
+    with _replaced(sys.modules['wmpl.Trajectory.Trajectory'], 'LOS_RESTART_TOLERANCE', -1.0):
+        result = scipy.optimize.minimize(minimizeAngleCost, np.r_[begin, radiant], \
+            args=(traj.observations,), method=nelderMeadLine)
+
+    assert result.success
+    assert 'still moved' in result.message
+
+
+
 def testTheLineFitStartedAlongALineOfSightGivesAFiniteLine():
     """ Check that a start line almost parallel to a line of sight, whose cost is NaN, gives a finite line
         without using up the evaluations of all fresh simplices.
@@ -553,7 +570,8 @@ if __name__ == "__main__":
         testEachRestartStartsFromThePreviousSolution, testAFailedRestartDoesNotReplaceAConvergedSolution, \
         testTheLineFrameMovesTheLineAtTheEndsOfTheMeteor, \
         testTheLineFitGivesAUnitRadiantAndTheBeginningOfTheMeteor, \
-        testTheLineFitStopsAtItsLimitOfEvaluations, testTheLineFitStartedAlongALineOfSightGivesAFiniteLine, \
+        testTheLineFitStopsAtItsLimitOfEvaluations, testTheLineFitSaysWhenTheLineStillMoved, \
+        testTheLineFitStartedAlongALineOfSightGivesAFiniteLine, \
         testTheLineFitEndsAtTheSameLineFromDifferentStarts, testSmallAnglesFromTheLineArePrecise]
 
     for test in test_list:

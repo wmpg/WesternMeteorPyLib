@@ -1534,7 +1534,8 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
         [OptimizeResult] Result of the last Nelder-Mead minimization, with the point on the line moved to the
             beginning of the meteor, a unit radiant vector, and the iterations and evaluations of all
             minimizations. Its cost is never higher than at the start, which is returned if no minimization
-            lowered it.
+            lowered it. If the line still moved after LOS_MAX_SIMPLICES fresh simplices, the success of the
+            last minimization is kept and the message says so.
     """
 
     observations = args[0]
@@ -1585,6 +1586,10 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
 
         # Scale the next simplex to the last move
         simplex_size = min(max(10*move, 1.0), LOS_SIMPLEX_SIZE)
+
+    # Say when the line still moved after the last fresh simplex, which is kept as it lowered the cost
+    if solution.success and (still_runs < 2):
+        solution.message = "The line still moved after {:d} fresh simplices".format(LOS_MAX_SIMPLICES)
 
     # Keep the start if the minimizations did not lower its cost
     if np.isfinite(start_cost) and (not (solution.fun <= start_cost)):
