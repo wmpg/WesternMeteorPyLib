@@ -973,7 +973,7 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
             (see gravityDropReference). If None, the distance of the point itself is used.
 
     Return:
-        (hres, vres): [tuple of floats] residuals in horizontal and vertical direction from the radiant line
+        (hres, vres): [tuple of floats] Residuals in horizontal and vertical direction from the radiant line.
 
     """
 
@@ -1023,7 +1023,7 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
     rad_RA,rad_Dec = eci2RaDec(radiant_eci)
     rad_azim,rad_elev = raDec2AltAz(rad_RA, rad_Dec, jd, lat, lon)
 
-    # Form an orthogonal right handed reference frame in ENU coordinates with the x axis pointing to the radiant.
+    # Form an orthogonal right handed ENU reference frame with the x axis pointing to the radiant
     # y axis pointing along horizon at 90 degrees counter-clockwise to radiant.
     # z-axis such that vz = hx^hy
 
@@ -1999,7 +1999,7 @@ def sampleMCVelocities(traj_list):
 
 def trajNoiseGenerator(traj, noise_sigma):
     """ Given a base trajectory object and the observation uncertainly, this generator will generate
-        new trajectory objects with noise-added observations. 
+        new trajectory objects with noise-added observations.
     
     Arguments:
         traj: [Trajectory] Trajectory instance.
@@ -2169,10 +2169,10 @@ def _MCTrajSolve(params):
 
 def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False, \
     plot_results=True, mc_cores=None, max_runs=None):
-    """ Estimates uncertainty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
+    """ Estimates uncertainty in the trajectory solution by doing Monte Carlo runs. The MC runs are done
         in parallel on all available computer cores.
 
-        The uncertainty is taken as the standard deviation of angular measurements. Each point is sampled 
+        The uncertainty is taken as the standard deviation of angular measurements. Each point is sampled
         mc_pick_multiplier times using a symmetric 2D Gaussian kernel.
 
     Arguments:
@@ -2244,7 +2244,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Break the function of there are no trajectories to process
     if len(mc_results) < 2:
-        print('!!! Not enough good Monte Carlo runs for uncertainty estimation!')
+        print("!!! Not enough good Monte Carlo runs for uncertainty estimation!")
         return traj, None
 
 
@@ -2616,7 +2616,7 @@ class Trajectory(object):
     """ Meteor trajectory solver designed at the University of Western Ontario.
 
     The solver makes a first estimate using the Ceplecha (1987) plane intersection approach, then refines the 
-    solution by minimizing the angles between the observed lines of sight and the radiant line. The best 
+    solution by minimizing the angles between the observed lines of sight and the radiant line. The best
     solution is found by adding noise to original measurements and doing Monte Carlo runs to find the 
     trajectory whose decelerations and velocity profiles match the best, as seen from individual stations.
     The initial velocity is estimated from time vs. length by iteratively fitting a line to it and choosing
@@ -2684,7 +2684,7 @@ class Trajectory(object):
             show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
-            gravity_factor: [float] Gravity correction factor. 1.0 by default (full correction). 
+            gravity_factor: [float] Gravity correction factor. 1.0 by default (full correction).
                 Can be between 0 - 1. Lower values used for lift compensation.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
@@ -2956,7 +2956,7 @@ class Trajectory(object):
         # Initial state vector covariance matrix
         self.state_vect_cov = None
 
-        # flag to indicate whether only phase 1 solving has been run
+        # Flag to indicate whether only phase 1 solving has been run
         # default False to handle existing trajectory data
         self.phase_1_only = False
 
@@ -4517,11 +4517,11 @@ class Trajectory(object):
 
             Arguments:
                 str_format: [str] String format for the uncertainty.
-                std_name: [str] Name of the uncertainty attribute, e.g. if it is 'x', then the uncertainty is 
+                std_name: [str] Name of the uncertainty attribute, e.g. if it is 'x', then the uncertainty is
                     stored in uncertainties.x.
         
             Keyword arguments:
-                multi: [float] Uncertainty multiplier. 1.0 by default. This is used to scale the uncertainty to
+                multi: [float] Uncertainty multiplier. 1.0 by default. Used to scale the uncertainty to
                     different units (e.g. from m/s to km/s).
                 deg: [bool] Convert radians to degrees if True. False by default.
                 """
@@ -6867,7 +6867,7 @@ class Trajectory(object):
 
 
         # If running a Monte Carlo runs, switch the observations to the original ones, so noise does not 
-        # influence anything except the radiant position
+        #   influence anything except the radiant position
         if _mc_run and (_orig_obs is not None):
                 
             # Store the noisy observations for later
