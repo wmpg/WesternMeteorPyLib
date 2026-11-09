@@ -1059,7 +1059,8 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Run the original MetSim ablation model using the meteor parameters in the input file hardcoded below.")
+    arg_parser = argparse.ArgumentParser(description="Run the original MetSim ablation model using the " \
+        "meteor parameters in the input file hardcoded below.")
 
     # Add the atmosphere model options
     addAtmosphereArguments(arg_parser)
