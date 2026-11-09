@@ -1,8 +1,8 @@
 """ Import all submodules. """
 
 
+import importlib
 import pkgutil
-import sys
 
 # Install pyximport before any submodule does, so the Cython modules are compiled in the build directory of
 #   this copy of wmpl (see wmpl.Utils.CythonBuild), not in one shared with other copies
@@ -20,8 +20,11 @@ except ImportError:
 exclude = ["MetSim.ML", "GUI", "Tests"]
 
 __all__ = []
-for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
-    
+for module_info in pkgutil.walk_packages(__path__, prefix=__name__ + '.'):
+
+    # Name of the module inside wmpl, e.g. Utils.Physics
+    module_name = module_info.name[len(__name__) + 1:]
+
     # Skip the config module
     if 'Config' in module_name:
         continue
@@ -44,9 +47,7 @@ for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
     ### ###
 
 
+    # Import the module under its full name, which also makes it an attribute of its package, so that it is
+    #   not loaded a second time under the name without wmpl
     __all__.append(module_name)
-    if sys.version_info.major <= 3 and sys.version_info.minor <= 11:
-        module = loader.find_module(module_name).load_module(module_name)
-    else:
-        module = loader.find_spec(module_name).loader.load_module(module_name)
-    exec('%s = module' % module_name)
+    importlib.import_module(module_info.name)
