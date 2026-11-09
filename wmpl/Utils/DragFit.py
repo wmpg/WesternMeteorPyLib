@@ -601,8 +601,7 @@ class DragFit(object):
         traj = self.traj
 
         # Take the time of the first point and the largest distance from the centre of the Earth of the first
-        #   points of the used stations as the reference, as the trajectory solver does (all stations if none
-        #   is used)
+        #   points of the used stations as the reference, as the trajectory solver does
         t0 = dropTimeOrigin(traj.observations)
         used = [obs for obs in traj.observations if not obs.ignore_station] or traj.observations
         r0 = max([vectMag(findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], self.state_vect, \
@@ -617,8 +616,7 @@ class DragFit(object):
         # Factor of the drop at each time, scaled for a decelerating meteor as in the solver
         drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: gravity_factor)
 
-        # Or the free fall of the meteor from the line, as in the solver. Trajectories solved before it was
-        #   added drop the points along their vertical
+        # Or the free fall of the meteor from the line, as in the solver, None for old trajectories
         free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
         radiant_eci = np.ascontiguousarray(self.radiant_eci, dtype=np.float64)
 
@@ -632,6 +630,7 @@ class DragFit(object):
         for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
             if np.isfinite(t) and (t > t0):
 
+                # Drop the point by its free fall from the line, or along its vertical
                 if free_fall is not None:
                     dropped = freeFallDrop(eci, t - t0, radiant_eci, *free_fall, gravity_factor)
                 else:

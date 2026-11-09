@@ -164,10 +164,8 @@ GM_EARTH = 3.986004418e14
 class BentDragMeteor(object):
     def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0, \
         air_rotation=False):
-        """ Integrate the motion of a meteor decelerated by drag and bent by gravity in 3D, in ECI coordinates.
-            Drag acts against the ECI velocity, or against the velocity relative to the air which rotates with
-            the Earth, and gravity is that of a point mass. The ballistic coefficient grows linearly with time
-            during the visible part.
+        """ Integrate the motion of a meteor decelerated by drag and bent by the gravity of a point mass, in
+            ECI coordinates. The ballistic coefficient grows linearly with time during the visible part.
 
         Arguments:
             v_init: [float] Velocity at the top of the simulation (m/s).
@@ -196,7 +194,7 @@ class BentDragMeteor(object):
         ra, dec = altAz2RADec(np.radians(azim), np.radians(elev), JDT_REF, lat, lon)
         radiant_eci = np.array(raDec2ECI(ra, dec))
 
-        # Tabulate the air density with the distance from the centre of the Earth, along the initial line
+        # Tabulate the air density with the distance from the centre of the Earth
         len_table = np.linspace(0, 400e3, 801)
         eci_table = top_eci[None, :] - np.outer(len_table, radiant_eci)
         geo_table = np.array([cartesian2Geo(JDT_REF, *eci) for eci in eci_table])
@@ -207,12 +205,14 @@ class BentDragMeteor(object):
         r_table, log_rho_table = r_table[order], np.log(rho_table[order])
 
 
-        def _acceleration(t, pos, vel):
+        def calcAcceleration(t, pos, vel):
+            """ Compute the acceleration by drag and gravity at the given time, position and velocity. """
 
             # Interpolate the ballistic coefficient linearly in the visible part
             frac = np.clip((t - t_vis_beg)/(t_vis_end - t_vis_beg), 0.0, 1.0)
             k = k_beg + frac*(k_end - k_beg)
 
+            # Interpolate the air density at the distance from the centre of the Earth
             r = np.sqrt(pos @ pos)
             rho = np.exp(np.interp(r, r_table, log_rho_table))
 
@@ -236,13 +236,13 @@ class BentDragMeteor(object):
             t, pos, vel = self.time[i], self.pos[i], self.vel[i]
 
             k1_pos = vel
-            k1_vel = _acceleration(t, pos, vel)
+            k1_vel = calcAcceleration(t, pos, vel)
             k2_pos = vel + dt/2*k1_vel
-            k2_vel = _acceleration(t + dt/2, pos + dt/2*k1_pos, vel + dt/2*k1_vel)
+            k2_vel = calcAcceleration(t + dt/2, pos + dt/2*k1_pos, vel + dt/2*k1_vel)
             k3_pos = vel + dt/2*k2_vel
-            k3_vel = _acceleration(t + dt/2, pos + dt/2*k2_pos, vel + dt/2*k2_vel)
+            k3_vel = calcAcceleration(t + dt/2, pos + dt/2*k2_pos, vel + dt/2*k2_vel)
             k4_pos = vel + dt*k3_vel
-            k4_vel = _acceleration(t + dt, pos + dt*k3_pos, vel + dt*k3_vel)
+            k4_vel = calcAcceleration(t + dt, pos + dt*k3_pos, vel + dt*k3_vel)
 
             self.pos[i + 1] = pos + dt/6*(k1_pos + 2*k2_pos + 2*k3_pos + k4_pos)
             self.vel[i + 1] = vel + dt/6*(k1_vel + 2*k2_vel + 2*k3_vel + k4_vel)
@@ -254,6 +254,7 @@ class BentDragMeteor(object):
                 self.vel = self.vel[:i + 2]
                 break
 
+        # Compute the speed at every step
         self.speed = np.linalg.norm(self.vel, axis=1)
 
         # Keep the visible part within the integration
