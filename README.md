@@ -24,7 +24,7 @@ List of features:
    * Monte Carlo method
  * Orbit computation
  * Meteor shower/trajectory simulaton
- * Obtaining atmosphere densities using the NRLMSISE-00 model
+ * Obtaining atmosphere densities using the NRL MSIS models (NRLMSISE-00 and NRLMSIS 2.x, through `pymsis`)
  * D criteria functions
  * Parent body search
  * Coordinate system transforms
@@ -41,6 +41,7 @@ Individual functions are documented in their docstrings, and every module can be
 the larger tools live in [wmpl/Docs](wmpl/Docs):
 
  * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
+ * [Drag fit of the motion along a trajectory](wmpl/Docs/DragFit.md) - the drag model of the motion along a solved trajectory, sampling it by height or time for dark flight, and interpreting the ballistic coefficient
  * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
  * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
  * [Orbit dissimilarity criteria](wmpl/Docs/OrbitSimilarity.md) - measuring how similar two orbits are, which criterion to pick, and why their thresholds are not interchangeable
@@ -78,6 +79,13 @@ conda install -y -c conda-forge watchdog h5py
 conda install -y -c conda-forge numba
 conda install -y -c conda-forge basemap basemap-data-hires
 conda install -y -c conda-forge cartopy paramiko
+```
+
+The atmosphere mass density is computed with the MSIS models through `pymsis`, which is only
+available on PyPI (it replaces the bundled `PythonNRLMSISE00` submodule, which is no longer used):
+
+```
+pip install "pymsis>=0.13"
 ```
 
 Optionally, if you want to use the REBOUND orbital integrator, install:
@@ -174,6 +182,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda install -y -c conda-forge basemap basemap-data-hires
  	conda install -y -c conda-forge cartopy paramiko
 	conda install -y -c astropy astropy
+	pip install "pymsis>=0.13"
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
@@ -203,7 +212,7 @@ If you experience any issues, please see the "Troubleshooting" section below.
 
 If you are getting the following error on Windows: ```Unable to find vcvarsall.bat```, that means you need to install [Visual C++ Build Tools 2015](http://go.microsoft.com/fwlink/?LinkId=691126) or 2022. 
 
-If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
+If you are getting this error: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file). The library itself no longer uses that submodule - the atmosphere densities come from `pymsis` - but the atmosphere regression test still compares against it.
 
 ##### ```KeyError: 'PROJ_LIB'```
 The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". 
@@ -267,6 +276,8 @@ If you want to use the most recent lists of comets and asteroids, download these
  * [MPC Apollos](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Apollos.html)
  * [MPC Atens](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Atens.html)
 
+The list of meteorites with photographic orbits (```wmpl/share/Meteorites_with_Orbits.csv```) is not part of that update, as it holds manual corrections. To check it against [meteoriteorbits.info](https://www.meteoriteorbits.info/), run ```python UpdateOrbitFiles.py --meteorites```: all the new meteorites are added, and for the ones already in the file it shows how each differs from the list and asks whether to update it (default no). The existing file is also kept if the page cannot be read completely.
+
 
 ## Usage
 
@@ -302,6 +313,12 @@ lasun = sollon.jd2SolLonJPL(jd_now)
 
 print(math.degrees(lasun), ' deg')
 ```
+
+
+## Contributing
+
+New code has to follow the [WMPL coding standard](CODING_STANDARD.md), so that it reads like the code around it.
+Pull requests that do not follow it will be asked to change before they are merged.
 
 
 ## Citations

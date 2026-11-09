@@ -9,8 +9,9 @@ import numpy as np
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
-from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, equatorialCoordPrecession_vect, raDec2AltAz_vect, \
-    jd2LST
+from wmpl.Config import config
+from wmpl.Utils.Earth import calcEquationOfEquinoxes
+from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST
 
 
 
@@ -29,6 +30,10 @@ class MeteorObservation(object):
 
         Keyword arguments:
             ff_name: [str] Name of the originating FF file.
+
+        Attributes:
+            radec_per_point: [bool] True when each R.A./Dec. was computed at its own point's time, as RMS
+                does, rather than all at jdt_ref, as CAMS does. False by default.
 
     """
     def __init__(self, jdt_ref, station_id, latitude, longitude, height, fps, ff_name=None):
@@ -52,6 +57,8 @@ class MeteorObservation(object):
         self.dec_data = []
         self.mag_data = []
         self.abs_mag_data = []
+
+        self.radec_per_point = False
 
 
 
@@ -200,9 +207,8 @@ def prepareObservations(meteor_list):
 
             jdt_ref_vect = np.zeros_like(meteor.ra_data) + jdt_ref
 
-            # Precess from J2000 to the epoch of date
-            ra_prec, dec_prec = equatorialCoordPrecession_vect(J2000_JD.days, jdt_ref_vect, meteor.ra_data, 
-                meteor.dec_data)
+            # Precess and nutate from J2000 to the epoch of date
+            ra_prec, dec_prec = equatorialCoordJ2000ToDate_vect(jdt_ref_vect, meteor.ra_data, meteor.dec_data)
 
             meteor.ra_data = ra_prec
             meteor.dec_data = dec_prec
@@ -272,9 +278,13 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
             if hasattr(meteor, "ff_name"):
                 comment = meteor.ff_name
 
+            radec_jd = None
+            if meteor.radec_per_point:
+                radec_jd = meteor.jdt_ref + meteor.time_data/86400.0
+
             traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
                 meteor.longitude, meteor.height, station_id=meteor.station_id, \
-                magnitudes=meteor.mag_data, comment=comment)
+                magnitudes=meteor.mag_data, comment=comment, radec_jd=radec_jd)
 
         elif solver.lower().startswith('gural'):
 
@@ -286,7 +296,14 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
                 # Default to the exponential model
                 velmodel = 3
 
-            traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
+            ra_data = meteor.ra_data
+
+            # The Gural solver places the cameras with the mean sidereal time, so subtract the equation of the
+            #   equinoxes from the R.A. (not with the legacy J2000 conversion, which did not do it)
+            if not config.legacy_j2000_precession_only:
+                ra_data = (ra_data - calcEquationOfEquinoxes(jdt_ref))%(2*np.pi)
+
+            traj.infillTrajectory(ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, \
                 meteor.longitude, meteor.height)
 
 
@@ -458,5 +475,27 @@ def addSolverOptions(arg_parser, skip_velpart=False):
 
     arg_parser.add_argument('-o', '--enableOSM', 
         help="Enable OSM based groung plots. Internet connection required.", action="store_true")
+
+    return arg_parser
+
+
+
+def addKMLOptions(arg_parser):
+    """ Add the options of the 3D KML to the command line arguments parser of a solver that passes them on to
+        Trajectory (save_kml and kml_measured).
+
+    Arguments:
+        arg_parser: [ArgumentParser object] Command line arguments parser.
+
+    Return:
+        arg_parser: [ArgumentParser object] Parser with the KML options.
+    """
+
+    arg_parser.add_argument('-k', '--kml', \
+        help="Save a 3D KML (*_3D.kml) with the trajectory of the drag fit.", action="store_true")
+
+    arg_parser.add_argument('--kmlmeas', \
+        help="Save the 3D KML with the projected points, lines of sight and residuals of the measurements " \
+        "as well.", action="store_true")
 
     return arg_parser
