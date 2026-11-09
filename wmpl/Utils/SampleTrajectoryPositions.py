@@ -141,8 +141,8 @@ class TrajectorySamples(object):
                 height. None by default.
             decel: [float] Deceleration of the drag model (m/s^2), positive when the meteor slows down. None
                 by default.
-            dyn_pressure: [float] Dynamic pressure rho*v^2, with the velocity relative to the air, assumed
-                at rest relative to the ground (Pa). None by default.
+            dyn_pressure: [float] Dynamic pressure rho*v^2, with the velocity relative to the ground (Pa).
+                None by default.
             k: [float] Ballistic coefficient of the drag model (m^2/kg). None by default.
             log_k_std: [float] Standard deviation of the natural logarithm of the ballistic coefficient. None
                 by default.
@@ -212,33 +212,32 @@ class TrajectorySamples(object):
 
         arrays = self.toArrays()
 
-        # Make the columns as the header, the values and the format
-        columns = [
-            ('Time (s)', arrays['t_est'], "{:.6f}"),
-            ('Time std (s)', arrays['time_std'], "{:.6f}"),
-            ('JD', self.traj.jdt_ref + arrays['t_est']/86400.0, "{:.10f}"),
-            ('Height (m)', arrays['ht'], "{:.2f}"),
-            ('Lat (deg)', np.degrees(arrays['lat']), "{:.8f}"),
-            ('Lon (deg)', np.degrees(arrays['lon']), "{:.8f}"),
-            ('Length (m)', arrays['length'], "{:.2f}"),
-            ('Length std (m)', arrays['len_std'], "{:.2f}"),
-            ('X ECI (m)', arrays['eci'][:, 0], "{:.2f}"),
-            ('Y ECI (m)', arrays['eci'][:, 1], "{:.2f}"),
-            ('Z ECI (m)', arrays['eci'][:, 2], "{:.2f}"),
-            ('Azim (deg)', np.degrees(arrays['azim_norot']), "{:.6f}"),
-            ('Elev (deg)', np.degrees(arrays['elev_norot']), "{:.6f}"),
-            ('Vel (m/s)', arrays['vel'], "{:.2f}"),
-            ('Vel std (m/s)', arrays['vel_std'], "{:.2f}"),
-            ('Vgnd (m/s)', arrays['vel_norot'], "{:.2f}"),
-            ('Decel (m/s^2)', arrays['decel'], "{:.4f}"),
-            ('Dyn pres (Pa)', arrays['dyn_pressure'], "{:.6e}"),
-            ('K (m^2/kg)', arrays['k'], "{:.6e}"),
-            ('ln K std', arrays['log_k_std'], "{:.4f}"),
-            ('Extrapolated', arrays['extrapolated'].astype(int), "{:d}"),
-            ]
+        # List the header, the values and the format of every column
+        columns = [('Time (s)', arrays['t_est'], "{:.6f}"), \
+            ('Time std (s)', arrays['time_std'], "{:.6f}"), \
+            ('JD', self.traj.jdt_ref + arrays['t_est']/86400.0, "{:.10f}"), \
+            ('Height (m)', arrays['ht'], "{:.2f}"), \
+            ('Lat (deg)', np.degrees(arrays['lat']), "{:.8f}"), \
+            ('Lon (deg)', np.degrees(arrays['lon']), "{:.8f}"), \
+            ('Length (m)', arrays['length'], "{:.2f}"), \
+            ('Length std (m)', arrays['len_std'], "{:.2f}"), \
+            ('X ECI (m)', arrays['eci'][:, 0], "{:.2f}"), \
+            ('Y ECI (m)', arrays['eci'][:, 1], "{:.2f}"), \
+            ('Z ECI (m)', arrays['eci'][:, 2], "{:.2f}"), \
+            ('Azim (deg)', np.degrees(arrays['azim_norot']), "{:.6f}"), \
+            ('Elev (deg)', np.degrees(arrays['elev_norot']), "{:.6f}"), \
+            ('Vel (m/s)', arrays['vel'], "{:.2f}"), \
+            ('Vel std (m/s)', arrays['vel_std'], "{:.2f}"), \
+            ('Vgnd (m/s)', arrays['vel_norot'], "{:.2f}"), \
+            ('Decel (m/s^2)', arrays['decel'], "{:.4f}"), \
+            ('Dyn pres (Pa)', arrays['dyn_pressure'], "{:.6e}"), \
+            ('K (m^2/kg)', arrays['k'], "{:.6e}"), \
+            ('ln K std', arrays['log_k_std'], "{:.4f}"), \
+            ('Extrapolated', arrays['extrapolated'].astype(int), "{:d}")]
 
         with open(file_path, 'w') as f:
 
+            # Write the header
             f.write("# Samples of the trajectory from the drag fit of wmpl.Utils.DragFit\n")
             f.write("# Reference Julian date: {:.10f}\n".format(self.traj.jdt_ref))
             f.write("# Azim and Elev are the radiant above a fixed ground, epoch of date\n")
@@ -246,6 +245,7 @@ class TrajectorySamples(object):
                 + "(no wind)\n")
             f.write(", ".join([col[0] for col in columns]) + "\n")
 
+            # Write one row per sample
             for i in range(len(arrays['t_est'])):
                 f.write(", ".join([fmt.format(values[i]) for _, values, fmt in columns]) + "\n")
 
@@ -286,7 +286,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         len_array = drag_fit.lengthAtTime(time_array)
         height_array = drag_fit.heightAtLength(len_array)
 
-        # Compute the uncertainties of the velocities and the lengths at the exact sampled times
+        # Compute the uncertainties at the exact sampled times
         vel_std_array, len_std_array = drag_fit.motionStdAtTime(time_array)
         time_std_array = np.zeros_like(time_array)
 
@@ -304,7 +304,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         len_array = drag_fit.lengthAtHeight(height_array)
         time_array = drag_fit.timeAtLength(len_array)
 
-        # Compute the uncertainties of the velocities and the times at the exact sampled heights
+        # Compute the uncertainties at the exact sampled heights
         vel_std_array, time_std_array = drag_fit.motionStdAtLength(len_array)
         len_std_array = np.zeros_like(len_array)
 
@@ -314,7 +314,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
     # Compute the velocity relative to the ground
     vel_norot_array = drag_fit.groundVelocityAtLength(len_array)
 
-    # Compute the deceleration, the air density and the ballistic coefficient of the drag model
+    # Compute the deceleration, the air density and the ballistic coefficient
     decel_array = drag_fit.decelerationAtLength(len_array)
     rho_array = drag_fit.airDensityAtLength(len_array)
     k_array, log_k_std_array = drag_fit.ballisticCoeffAtLength(len_array)
@@ -353,14 +353,12 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         jd = traj.jdt_ref + t_est/86400.0
         lat, lon, ele_geo = cartesian2Geo(jd, *height_eci)
 
-        # Compute the ground-fixed alt/az of the radiant along the path bent by the gravity drop. Drag acts
-        #   against the velocity relative to the air, so it does not turn the direction of motion above the
-        #   ground, and the radiant is derotated with the initial velocity, as in Orbit.calcOrbit and
-        #   DynamicMassFit. The ECI coordinates are already in the epoch of date, so no precession is applied
+        # Compute the ground-fixed alt/az of the radiant with the initial velocity, along the path bent by
+        #   the gravity drop (ECI coordinates of date, no precession)
         radiant_eci = drag_fit.radiantAtLength(len_val)[0]
         azim_norot, elev_norot, _ = derotatedRadiantAltAz(traj.v_init*radiant_eci, height_eci, jd, lat, lon)
 
-        # Compute the dynamic pressure with the velocity relative to the air, which moves with the ground
+        # Compute the dynamic pressure with the velocity relative to the ground
         vel_norot = vel_norot_array[i]
         dyn_pressure = rho_array[i]*vel_norot**2
 
@@ -408,17 +406,17 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
             + 'the drag model.')
         print("The horizontal coordinates are apparent above a fixed ground, not topocentric in J2000!")
         print('Vel is the velocity in the ECI frame, Vgnd the velocity relative to the ground.')
-        print('Vstd is the 1 sigma uncertainty of Vel from the noise of the points, without the ' \
-            + 'uncertainty of the trajectory solution or the bias of the drag model.')
-        print('Decel is the deceleration of the drag model, Dyn pres the dynamic pressure rho*Vgnd^2, ' \
-            + 'with the air at rest relative to the ground.')
+        print("Vstd is the 1 sigma uncertainty of Vel from the noise of the points, without the " \
+            + "uncertainty of the trajectory solution or the bias of the drag model.")
+        print("Decel is the deceleration of the drag model, Dyn pres the dynamic pressure rho*Vgnd^2, " \
+            + "with the air at rest relative to the ground.")
 
         # Report the largest dynamic pressure among the samples
         if traj_samples.t_est:
 
             arrays = traj_samples.toArrays()
             i_peak = np.nanargmax(arrays['dyn_pressure'])
-            print('Peak dynamic pressure of the samples: {:.3f} kPa at {:.3f} km, t = {:.3f} s'.format( \
+            print("Peak dynamic pressure of the samples: {:.3f} kPa at {:.3f} km, t = {:.3f} s".format( \
                 arrays['dyn_pressure'][i_peak]/1000, arrays['ht'][i_peak]/1000, arrays['t_est'][i_peak]))
 
         print()
