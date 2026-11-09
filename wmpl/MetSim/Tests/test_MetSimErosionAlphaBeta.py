@@ -581,6 +581,12 @@ def test_reported_height_curvature_and_gravity_drop():
     formula bug, it is the "iterative refinement" scenario the plan flagged as a possible future
     need, now with real numbers instead of a guess. Steep (10deg) and very shallow (75-85deg,
     shorter or much-more-curvature-dominated flights) cases are unaffected: <100m residual.
+
+    The heights are compared until the analytic body falls below m_kill, where a simulation kills it.
+    Its grid goes on to t_hi, an asymptotic end, with the height frozen: in the 75deg case, whose
+    body ablating in flat-earth geometry dies about 0.4 s before the curved one, the frozen height
+    was 5 km off by the end of the curved flight in the atmosphere of NRLMSIS 2.1, while in that of
+    NRLMSISE-00 t_hi happened to come first.
     """
 
     cases = [
@@ -608,6 +614,11 @@ def test_reported_height_curvature_and_gravity_drop():
         dt_tick = 0.005
         n_ticks = int(min(ts_true[-1], traj.t_hi)/dt_tick)
         qt = np.arange(n_ticks)*dt_tick
+
+        # Compare while the analytic body lasts: a simulation kills it at m_kill, while its grid runs on to an
+        #   asymptotic end (see AnalyticTrajectory.t_hi) where the height no longer follows a body. Its mass
+        #   only decreases, so this keeps the times up to its death
+        qt = qt[traj.massAt(qt) > Constants().m_kill]
 
         h_flat = traj.heightRealAt(qt)
         h_corrected = reportedHeightAt(traj, qt, h_init=h0, zenith_angle=zenith)
