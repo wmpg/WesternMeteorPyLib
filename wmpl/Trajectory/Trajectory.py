@@ -745,6 +745,28 @@ def numStationsNotIgnored(observations):
 
 
 
+def dropTimeOrigin(observations):
+    """ Find the time from which the gravity drop is computed: the first time of the stations which are used.
+        A station which is not used, e.g. because its clock is far off, does not set it.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+
+    Return:
+        [float] Time of the beginning of the meteor (s), the first time of all stations if none is used.
+    """
+
+    times = [obs.time_data[0] for obs in observations if not obs.ignore_station]
+
+    # Take all stations if none is used
+    if not times:
+        times = [obs.time_data[0] for obs in observations]
+
+
+    return min(times)
+
+
+
 def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     """ Compute the beginning point of the trajectory, from which the gravity drop is computed.
 
@@ -785,7 +807,7 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     radiant_eci = vectNorm(radiant_eci)
 
     # Find the earliest time, from which the drop is computed
-    t0 = min([obs.time_data[0] for obs in observations])
+    t0 = dropTimeOrigin(observations)
 
     dist_list = []
     for obs, i in first_picks:
@@ -812,8 +834,246 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
 
 
 
+# Number of times at which the scale of the gravity drop of a decelerating meteor is tabulated
+GRAVITY_DROP_SCALE_POINTS = 1001
+
+# Lowest velocity with which the gravity drop is scaled (m/s). Ablation essentially stops below about 3 km/s,
+#   while the fitted velocity can fall below it at the end when the last points scatter
+GRAVITY_DROP_MIN_VEL = 3000.0
+
+# Largest number of segments of the velocity fitted to the lengths for the gravity drop, and largest number of
+#   groups of points, consecutive in time, to which the points are averaged before the fit
+GRAVITY_DROP_VEL_SEGMENTS = 8
+GRAVITY_DROP_VEL_GROUPS = 500
+
+# Largest acceleration of a meteor along its path (m/s^2): drag only slows a meteor down, and gravity speeds
+#   it up by at most g, here at the surface of the Earth
+GRAVITY_DROP_MAX_ACC = 9.83
+
+
+
+def segmentedVelocity(time_rel, length, time_eval, max_segments=GRAVITY_DROP_VEL_SEGMENTS, \
+    n_groups=GRAVITY_DROP_VEL_GROUPS, max_acc=GRAVITY_DROP_MAX_ACC):
+    """ Velocity of a meteor from its lengths along the trajectory, without a model of its deceleration.
+
+    The lengths are fitted by least squares with a velocity which is constant, or linear in time over 1 to
+    max_segments segments with equal numbers of points, continuous where the segments meet. The number of
+    segments is chosen by the Bayesian information criterion, so the velocity stays constant when the points
+    do not show a change of velocity, and follows a deceleration of any shape, such as that of a fireball
+    which fragments, when they do. No model of the deceleration, the atmosphere or the heights is used. The
+    only bound is that the velocity does not increase faster than max_acc: drag only slows a meteor down, and
+    only gravity speeds it up. This keeps the velocity from following the scatter of few or noisy points.
+
+    Reference:
+        Schwarz, G. (1978). Estimating the dimension of a model. The Annals of Statistics, 6(2), 461-464.
+
+    Arguments:
+        time_rel: [ndarray] Times of the points (s).
+        length: [ndarray] Lengths of the points along the trajectory (m).
+        time_eval: [ndarray] Times at which the velocity is evaluated (s). Outside the times of the points,
+            the velocity at the nearest point is used.
+
+    Keyword arguments:
+        max_segments: [int] Largest number of segments of the velocity.
+        n_groups: [int] Largest number of groups of points, consecutive in time, whose times and lengths are
+            averaged before the fit.
+        max_acc: [float] Largest increase of the velocity with time (m/s^2).
+
+    Return:
+        vel: [ndarray] Velocity at the times time_eval (m/s). None if the points have fewer than 3 distinct
+            times.
+    """
+
+    # Average the lengths at equal times, as from several stations
+    time_unique, inverse = np.unique(np.asarray(time_rel, dtype=np.float64), return_inverse=True)
+    length_unique = np.bincount(inverse, weights=np.asarray(length, dtype=np.float64))/np.bincount(inverse)
+
+    if len(time_unique) < 3:
+        return None
+
+    # Average groups of consecutive points, which keeps the fit small for many points
+    if len(time_unique) > n_groups:
+        groups = np.array_split(np.arange(len(time_unique)), n_groups)
+        time_unique = np.array([np.mean(time_unique[grp]) for grp in groups])
+        length_unique = np.array([np.mean(length_unique[grp]) for grp in groups])
+
+    # Normalize the times to 0-1
+    n_points = len(time_unique)
+    time_beg, time_span = time_unique[0], time_unique[-1] - time_unique[0]
+    tau = (time_unique - time_beg)/time_span
+
+    # Fit the lengths with 0 (constant velocity) to max_segments segments of a linear velocity, and keep the
+    #   fit with the lowest Bayesian information criterion
+    best = None
+    for n_seg in range(max_segments + 1):
+
+        n_params = n_seg + 2
+        if n_points < n_params + 2:
+            break
+
+        # The velocity is b + sum(s_k*(time spent in segment k)), with the slope s_k of each segment, so the
+        #   length is a + b*tau + sum(s_k*(integral of the time spent in segment k)). The slope is at most
+        #   max_acc, in units of the normalized time
+        edges = np.r_[0.0, np.quantile(tau, np.arange(1, n_seg)/n_seg), 1.0]
+        columns = [np.ones(n_points), tau]
+        for edge_beg, edge_end in zip(edges[:n_seg], edges[1:n_seg + 1]):
+            in_segment = np.clip(tau - edge_beg, 0.0, edge_end - edge_beg)
+            columns.append(0.5*in_segment**2 + (edge_end - edge_beg)*np.maximum(tau - edge_end, 0.0))
+        design = np.column_stack(columns)
+
+        if n_seg == 0:
+            coeffs = np.linalg.lstsq(design, length_unique, rcond=None)[0]
+
+        else:
+            upper = np.r_[np.inf, np.inf, np.full(n_seg, max_acc*time_span**2)]
+            coeffs = scipy.optimize.lsq_linear(design, length_unique, bounds=(-np.inf, upper), \
+                method='bvls').x
+
+        rss = np.sum((length_unique - design @ coeffs)**2)
+        bic = n_points*np.log(max(rss/n_points, 1e-300)) + n_params*np.log(n_points)
+
+        if (best is None) or (bic < best[0]):
+            best = (bic, n_seg, coeffs, edges)
+
+    _, n_seg, coeffs, edges = best
+
+    # Differentiate the lengths. The time spent in each segment holds the velocity outside the times of the
+    #   points
+    time_eval = np.atleast_1d(np.asarray(time_eval, dtype=np.float64))
+    tau_eval = (time_eval - time_beg)/time_span
+    vel = np.full_like(tau_eval, coeffs[1])
+    for slope, edge_beg, edge_end in zip(coeffs[2:], edges[:n_seg], edges[1:n_seg + 1]):
+        vel += slope*np.clip(tau_eval - edge_beg, 0.0, edge_end - edge_beg)
+
+    return vel/time_span
+
+
+
+def gravityDropScale(time_rel, vel):
+    """ Ratio of the gravity drop of a decelerating meteor to the drop at a constant velocity.
+
+    Drag slows down the velocity which gravity adds across the path, like the rest of the velocity. The path
+    then bends by the angle theta, dtheta/dt = g_perp/v (as in wmpl.Utils.DragFit), and the drop across the
+    line is g_perp*integral(v*theta/g_perp dt) from the beginning of the meteor. At a constant velocity this
+    is g_perp*t^2/2, which applyGravityDrop assumes. The ratio does not depend on g_perp.
+
+    Arguments:
+        time_rel: [ndarray] Times from the beginning of the meteor (s), increasing from 0.
+        vel: [ndarray] Velocities at those times (m/s), all larger than 0.
+
+    Return:
+        scale: [ndarray] Drop of the decelerating meteor divided by the drop at a constant velocity, at the
+            given times. 1 at a constant velocity, below 1 for a decelerating meteor.
+    """
+
+    time_rel = np.asarray(time_rel, dtype=np.float64)
+    vel = np.asarray(vel, dtype=np.float64)
+
+    # Integrate theta/g_perp = integral(1/v dt), then the drop divided by g_perp, with the trapezoidal rule
+    dt = np.diff(time_rel)
+    theta = np.r_[0.0, np.cumsum(0.5*(1.0/vel[1:] + 1.0/vel[:-1])*dt)]
+    drop = np.r_[0.0, np.cumsum(0.5*(vel[1:]*theta[1:] + vel[:-1]*theta[:-1])*dt)]
+
+    # Divide by the drop at a constant velocity, which is 1 at the beginning in the limit
+    scale = np.ones_like(time_rel)
+    after = time_rel > 0
+    scale[after] = drop[after]/(0.5*time_rel[after]**2)
+
+    return scale
+
+
+
+@njit
+def angleSumPoints(time_data, meas_eci_los, stat_eci_los, ignore_list, point_factors, state_vect, \
+    radiant_eci, t0, gravity, r0, v0z, weight, angle_sum, weights_sum):
+    """ Add the angles between the lines of sight of one station and the radiant line to a running sum. It
+        is the loop over the points of angleSumMeasurements2Line, compiled with numba, which makes the cost of
+        the line-of-sight fit several times faster. The operations are the same and in the same order as in a
+        loop in Python, so the sum is the same to the last bit.
+
+    Arguments:
+        time_data: [ndarray] Times of the points (s).
+        meas_eci_los: [ndarray] Unit vectors of the lines of sight in ECI, one row per point.
+        stat_eci_los: [ndarray] ECI coordinates of the station at every point (meters), one row per point.
+        ignore_list: [ndarray] Points which are not used are marked with a value other than 0.
+        point_factors: [ndarray] Factor of the gravity drop of every point.
+        state_vect: [ndarray] ECI position of the state vector (meters).
+        radiant_eci: [ndarray] Unit vector of the radiant in ECI.
+        t0: [float] Time of the beginning of the meteor (s).
+        gravity: [bool] If True, the gravity drop is taken into account.
+        r0: [float] Distance of the beginning of the meteor from the centre of the Earth (meters). If NaN, the
+            distance of each point is used.
+        v0z: [float] Initial vertical velocity of the meteor (m/s).
+        weight: [float] Statistical weight of the station.
+        angle_sum: [float] Weighted sum of the angles so far (radians).
+        weights_sum: [float] Sum of the weights so far.
+
+    Return:
+        (angle_sum, weights_sum): [tuple of floats] The sums with the points of this station added.
+
+    """
+
+    # Go through all measured positions
+    for j in range(len(time_data)):
+
+        # Skip the point if it is to be ignored
+        if ignore_list[j]:
+            continue
+
+        stat_eci = stat_eci_los[j]
+        meas_eci = meas_eci_los[j]
+
+        # Get the ECI coordinates of the projection of the measurement line of sight on the radiant line
+        _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
+
+
+        # Take the gravity drop into account
+        #   Note: here we assume that the acceleration due to gravity is fixed at the given height,
+        #   which might cause an offset of a few meters for events longer than 5 seconds
+        if gravity:
+
+            # Calculate the time in seconds from the beginning of the meteor
+            t_rel = time_data[j] - t0
+
+            # Take the distance of the beginning of the meteor, or of the point itself if it is not given
+            r0_point = r0
+            if np.isnan(r0_point):
+                r0_point = vectMag(rad_cpa)
+
+            # If the distance is 0, set it to 1 to avoid a division by zero
+            if r0_point == 0:
+                r0_point = 1.0
+
+            rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, point_factors[j], v0z)
+            _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
+
+
+        # Calculate the unit vector pointing from the station to the point on the trajectory
+        station_ray = rad_cpa - stat_eci
+        station_ray = vectNorm(station_ray)
+
+        # Calculate the angle between the observed LoS as seen from the station and the radiant line
+        cosangle = np.dot(meas_eci, station_ray)
+
+        # Make sure the cosine is within limits, as np.clip does (a NaN stays NaN)
+        if cosangle > 1.0:
+            cosangle = 1.0
+
+        elif cosangle < -1.0:
+            cosangle = -1.0
+
+        # Calculate the angle
+        angle_sum += weight*np.arccos(cosangle)
+
+        weights_sum += weight
+
+
+    return angle_sum, weights_sum
+
+
+
 def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
-                              gravity_factor=1.0, v0z=None, r0=None):
+                              gravity_factor=1.0, v0z=None, r0=None, drop_scale=None):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -833,6 +1093,9 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
         r0: [float] Distance of the beginning of the meteor from the centre of the Earth, for the gravity drop
             (see gravityDropReference). Fixed rather than taken from the line being fitted, so the cost stays
             continuous. If None, the distance of each point is used.
+        drop_scale: [tuple] Times from the beginning of the meteor (s) and the scale of the gravity drop of a
+            decelerating meteor at those times (see Trajectory.calcGravityDropScale). The drop of every point
+            is multiplied by the scale at its time. If None, the drop at a constant velocity is used.
 
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
@@ -864,7 +1127,15 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     radiant_eci = np.ascontiguousarray(radiant_eci)
 
     # Find the earliest point in time
-    t0 = min([obs.time_data[0] for obs in observations])
+    t0 = dropTimeOrigin(observations)
+
+    # Compute the model point modified due to gravity, assuming zero vertical velocity if it is not given
+    if v0z is None:
+        v0z = 0.0
+
+    # Pass a distance of the beginning which is not given as NaN, then the distance of each point is used
+    if r0 is None:
+        r0 = np.nan
 
     angle_sum = 0.0
     weights_sum = 1e-10
@@ -872,56 +1143,17 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     # Go through all observations from all stations
     for i, obs in enumerate(observations):
         
-        # Go through all measured positions
-        for t, meas_eci, stat_eci, ignore in zip(obs.time_data, obs.meas_eci_los, obs.stat_eci_los, \
-            obs.ignore_list):
+        # Compute the factor of the gravity drop of every point, scaled for a decelerating meteor
+        point_factors = np.full(len(obs.time_data), gravity_factor, dtype=np.float64)
+        if gravity and (drop_scale is not None):
+            point_factors = gravity_factor*np.interp(obs.time_data - t0, *drop_scale)
 
-            # Skip the point if it is to be ignored
-            if ignore:
-                continue
-
-            # Get the ECI coordinates of the projection of the measurement line of sight on the radiant line
-            _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
-
-
-            # Take the gravity drop into account
-            #   Note: here we assume that the acceleration due to gravity is fixed at the given height,
-            #   which might cause an offset of a few meters for events longer than 5 seconds
-            if gravity:
-
-
-                # Calculate the time in seconds from the beginning of the meteor
-                t_rel = t - t0
-
-                # Compute the model point modified due to gravity, assuming zero vertical velocity
-                if v0z is None:
-                    v0z = 0.0
-
-                # Take the distance of the beginning of the meteor, or of the point itself if it is not given
-                r0_point = r0
-                if r0_point is None:
-                    r0_point = vectMag(rad_cpa)
-
-                # If the distance is 0, set it to 1 to avoid a division by zero
-                if r0_point == 0:
-                    r0_point = 1.0
-
-                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, gravity_factor, v0z)
-                _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
-
-
-
-            # Calculate the unit vector pointing from the station to the point on the trajectory
-            station_ray = rad_cpa - stat_eci
-            station_ray = vectNorm(station_ray)
-
-            # Calculate the angle between the observed LoS as seen from the station and the radiant line
-            cosangle = np.dot(meas_eci, station_ray)
-
-            # Make sure the cosine is within limits and calculate the angle
-            angle_sum += weights[i]*np.arccos(np.clip(cosangle, -1, 1))
-
-            weights_sum += weights[i]
+        # Add the angles of all points of the station (compiled loop)
+        angle_sum, weights_sum = angleSumPoints(np.asarray(obs.time_data, dtype=np.float64), \
+            np.ascontiguousarray(obs.meas_eci_los, dtype=np.float64), \
+            np.ascontiguousarray(obs.stat_eci_los, dtype=np.float64), np.asarray(obs.ignore_list), \
+            point_factors, state_vect, radiant_eci, float(t0), bool(gravity), float(r0), float(v0z), \
+            float(weights[i]), angle_sum, weights_sum)
 
 
     return angle_sum/weights_sum
@@ -930,13 +1162,13 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
-    r0=None):
+    r0=None, drop_scale=None):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
     
     return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity,\
-        gravity_factor=gravity_factor, v0z=v0z, r0=r0)
+        gravity_factor=gravity_factor, v0z=v0z, r0=r0, drop_scale=drop_scale)
 
 
 
@@ -2616,6 +2848,7 @@ class Trajectory(object):
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
+        gravity_decel=True, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
         save_kml=False, kml_measured=False):
@@ -2666,6 +2899,10 @@ class Trajectory(object):
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
             gravity_factor: [flat] Gravity correction factor. 1.0 by default (full correction). 
                 Can be between 0 - 1. Lower values used for lift compensation.
+            gravity_decel: [bool] Reduce the gravity drop of a decelerating meteor, as drag also slows down
+                the velocity which gravity adds across the path (see gravityDropScale). The velocity is fitted
+                to the lengths without a model of the deceleration (see segmentedVelocity). True by default.
+                If False, the drop assumes a constant velocity.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
@@ -2810,6 +3047,9 @@ class Trajectory(object):
         elif self.gravity_factor > 1:
             self.gravity_factor = 1
 
+        # Reduce the gravity drop of a decelerating meteor
+        self.gravity_decel = gravity_decel
+
         # Plot all spatial residuals on one plot
         self.plot_all_spatial_residuals = plot_all_spatial_residuals
 
@@ -2895,6 +3135,10 @@ class Trajectory(object):
         # Distance of the beginning of the meteor from the centre of the Earth, fixed for the gravity pass of
         #   the line-of-sight fit (see gravityDropReference)
         self.gravity_r0 = None
+
+        # Times from the beginning of the meteor and the scale of the gravity drop of a decelerating meteor at
+        #   those times (see calcGravityDropScale)
+        self.gravity_drop_scale = None
 
         # Calculated average velocity
         self.v_avg = None
@@ -3156,6 +3400,9 @@ class Trajectory(object):
         # The same beginning point for the gravity drop as the line-of-sight fit
         _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
 
+        # Time of the beginning of the meteor, from which the drop of a decelerating meteor is scaled
+        t0 = dropTimeOrigin(observations)
+
         # Go though observations from all stations
         for obs in observations:
 
@@ -3168,7 +3415,8 @@ class Trajectory(object):
 
                 # Calculate horizontal and vertical residuals
                 hres, vres = calcSpatialResidual(self.jdt_ref, jd, state_vect, radiant_eci, stat, meas, \
-                    gravity=self.gravity_correction, gravity_factor=self.gravity_factor, v0z=self.v0z, r0=r0)
+                    gravity=self.gravity_correction, gravity_factor=self.gravityDropFactor(t - t0), \
+                    v0z=self.v0z, r0=r0)
 
                 # Add residuals to the residual list
                 obs.h_residuals.append(hres)
@@ -3224,7 +3472,7 @@ class Trajectory(object):
         """
 
         # Same reference time and beginning point as the line-of-sight fit
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
         if gravity:
             r0 = self.gravity_r0
             if r0 is None:
@@ -3256,7 +3504,8 @@ class Trajectory(object):
                         if v0z is None:
                             v0z = 0.0
 
-                        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, r0, self.gravity_factor, v0z)
+                        drop_factor = self.gravityDropFactor(t - t0)
+                        rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, r0, drop_factor, v0z)
                         _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
                         rad_cpa = rad_cpa + rad_cpa_dropped - rad_cpa_grav
 
@@ -3925,6 +4174,146 @@ class Trajectory(object):
 
 
 
+    def calcDroppedLengths(self, observations, state_vect, radiant_eci):
+        """ Compute the lengths of the used points along a line dropped by the current gravity drop, as
+            calcVelocity computes them: the point of the line of sight closest to the dropped line, moved back
+            along the line by the drop.
+
+        Arguments:
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+            state_vect: [ndarray] (x, y, z) ECI coordinates of a point on the line (meters).
+            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector of the line.
+
+        Return:
+            (times, lengths): [tuple of ndarrays] Times of the used points from the beginning of the meteor
+                (s), and their lengths from state_vect down the trajectory (m).
+        """
+
+        # Same reference time and beginning point as the line-of-sight fit
+        t0 = dropTimeOrigin(observations)
+        r0 = self.gravity_r0
+        if r0 is None:
+            _, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
+
+        v0z = self.v0z
+        if v0z is None:
+            v0z = 0.0
+
+        times = []
+        lengths = []
+        for obs in observations:
+
+            # Skip the ignored stations and picks
+            if obs.ignore_station:
+                continue
+
+            for i in np.flatnonzero(obs.ignore_list == 0):
+
+                # Find the point on the dropped line and move the projected point along the line by the same
+                #   length
+                t_rel = obs.time_data[i] - t0
+                _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], state_vect, \
+                    radiant_eci)
+                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravityDropFactor(t_rel), v0z)
+                _, rad_cpa_dropped, _ = findClosestPoints(obs.stat_eci_los[i], obs.meas_eci_los[i], \
+                    rad_cpa_grav, radiant_eci)
+
+                # Take the length from the point on the line, down the trajectory
+                times.append(t_rel)
+                lengths.append(np.dot(state_vect - (rad_cpa + rad_cpa_dropped - rad_cpa_grav), radiant_eci))
+
+        return np.array(times), np.array(lengths)
+
+
+
+    def calcGravityDropScale(self, observations, state_vect=None, radiant_eci=None):
+        """ Compute the scale of the gravity drop of a decelerating meteor (self.gravity_drop_scale), from the
+            beginning of the meteor to its last used point. The velocity is fitted to the lengths of the used
+            points along the trajectory without a model of the deceleration (see segmentedVelocity), and is
+            held at GRAVITY_DROP_MIN_VEL or above. The scale is None, and the drop assumes a constant
+            velocity, if gravity_decel is off, if the points have no lengths or if the fitted velocity is
+            constant.
+
+        The lengths are those of a line with the drop: the ones calcVelocity computed, or, if a line is given,
+        lengths on it dropped by the current drop (see calcDroppedLengths). They do not hold the speed
+        gravity adds along the path, which does not bend it: without drag, the drop across the first
+        direction is g_perp*t^2/2 whatever the speed along it. The lengths on a line fitted without the drop,
+        as in the first pass, hold that speed, so they are not used.
+
+        Arguments:
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+
+        Keyword arguments:
+            state_vect: [ndarray] (x, y, z) ECI coordinates of a point on the line (meters). None by default,
+                when the lengths of calcVelocity are taken.
+            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector of the line.
+        """
+
+        # Trajectories pickled before the option was added keep the drop at a constant velocity
+        if not getattr(self, 'gravity_decel', False):
+            self.gravity_drop_scale = None
+            return None
+
+        self.gravity_drop_scale = None
+
+        # Compute the lengths on the given line, dropped by the current drop
+        if state_vect is not None:
+            times, lengths = self.calcDroppedLengths(observations, state_vect, radiant_eci)
+
+        # Or take the lengths calcVelocity computed, with the times from the beginning of the meteor
+        else:
+
+            t0 = dropTimeOrigin(observations)
+            used = [obs for obs in observations if (not obs.ignore_station) and np.any(obs.ignore_list == 0) \
+                and (getattr(obs, 'state_vect_dist', None) is not None)]
+            if not used:
+                return None
+
+            times = np.concatenate([obs.time_data[obs.ignore_list == 0] - t0 for obs in used])
+            lengths = np.concatenate([np.asarray(obs.state_vect_dist)[obs.ignore_list == 0] for obs in used])
+
+        if (len(times) == 0) or (np.max(times) <= 0) or (not np.all(np.isfinite(lengths))):
+            return None
+
+        time_rel = np.linspace(0.0, np.max(times), GRAVITY_DROP_SCALE_POINTS)
+        vel = segmentedVelocity(times, lengths, time_rel)
+        if (vel is None) or (not np.all(np.isfinite(vel))):
+            return None
+
+        # Keep the drop at a constant velocity if the lengths show no change of velocity
+        if np.ptp(vel) == 0:
+            return None
+
+        # Hold the velocity at the speed where ablation stops, which the last segment of the fit can fall
+        #   below
+        vel = np.maximum(vel, GRAVITY_DROP_MIN_VEL)
+
+        self.gravity_drop_scale = (time_rel, gravityDropScale(time_rel, vel))
+
+
+
+    def gravityDropFactor(self, t_rel):
+        """ Compute the factor by which the gravity drop is multiplied at the given times: the gravity factor,
+            scaled for a decelerating meteor if the scale was computed (see calcGravityDropScale).
+
+        Arguments:
+            t_rel: [float or ndarray] Times from the beginning of the meteor (s).
+
+        Return:
+            [float or ndarray] Factor of the gravity drop.
+        """
+
+        drop_scale = getattr(self, 'gravity_drop_scale', None)
+
+        if drop_scale is None:
+            return self.gravity_factor
+
+        return self.gravity_factor*np.interp(t_rel, *drop_scale)
+
+
+
     def calcLLA(self, state_vect, radiant_eci, observations):
         """ Calculate latitude, longitude and altitude of every point on the observer's line of sight, 
             which is closest to the radiant line.
@@ -3940,11 +4329,14 @@ class Trajectory(object):
         ### Compute parameters for gravity drop ###
 
         # Determine the first time
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
 
         # Beginning point for the gravity drop, and the vertical velocity
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
         self.calcV0z(eci0, radiant_eci)
+
+        # Scale of the drop of a decelerating meteor, from the lengths of the points
+        self.calcGravityDropScale(observations)
 
         ###########################################
 
@@ -3978,7 +4370,8 @@ class Trajectory(object):
                     t_rel = t - t0
 
                     # Apply the gravity drop
-                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravity_factor, self.v0z)
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravityDropFactor(t_rel), \
+                        self.v0z)
 
                     # Re-do the vector points of closest approach. This is really important!
                     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
@@ -4118,11 +4511,14 @@ class Trajectory(object):
         ### Compute parameters for gravity drop ###
 
         # Determine the first time of observation
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
 
         # Beginning point for the gravity drop, and the vertical velocity
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
         self.calcV0z(eci0, radiant_eci)
+
+        # Scale of the drop of a decelerating meteor, from the lengths of the points
+        self.calcGravityDropScale(observations)
 
         ####
 
@@ -4156,7 +4552,8 @@ class Trajectory(object):
                     t_rel = t - t0
 
                     # Apply the gravity drop
-                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravity_factor, self.v0z)
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravityDropFactor(t_rel), \
+                        self.v0z)
 
                     # Re-do find closest points after gravity drop. This is really important!
                     # The algorithm doesn't care which trajectory point is used to construct the line for the fit,
@@ -6515,7 +6912,7 @@ class Trajectory(object):
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
              self.best_conv_inter.radiant_eci, weights=weights, \
              gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, \
-             v0z=self.v0z, r0=self.gravity_r0
+             v0z=self.v0z, r0=self.gravity_r0, drop_scale=self.gravity_drop_scale
              )
 
         if self.verbose:
@@ -6528,7 +6925,7 @@ class Trajectory(object):
         # Perform the minimization of angle deviations. The gravity will only be compensated for in the second
         #   pass, which has the vertical velocity from the first
         minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), \
-            self.gravity_factor, self.v0z, self.gravity_r0)
+            self.gravity_factor, self.v0z, self.gravity_r0, self.gravity_drop_scale)
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
             method="Nelder-Mead")
 
@@ -6573,6 +6970,39 @@ class Trajectory(object):
                 if previous_solution.success or (not minimize_solution.success):
                     minimize_solution = previous_solution
 
+        # Scale the drop of a decelerating meteor with the lengths on the line found, dropped as it was
+        #   fitted, and minimize again from it with that drop. If that does not converge, the drop and the
+        #   solution are kept
+        if _rerun_timing and self.gravity_correction and getattr(self, 'gravity_decel', False) \
+            and minimize_solution.success:
+
+            drop_scale = self.gravity_drop_scale
+            self.calcGravityDropScale(self.observations, minimize_solution.x[:3], \
+                vectNorm(minimize_solution.x[3:]))
+
+            if (self.gravity_drop_scale is not None) or (drop_scale is not None):
+
+                rescaled_args = minimize_args[:6] + (self.gravity_drop_scale,) + minimize_args[7:]
+                rescaled_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
+                    args=rescaled_args, method="Nelder-Mead")
+
+                # Continue it from the beginning of the meteor on the line if it ran out of function
+                #   evaluations, as above
+                for _ in range(LOS_CONTINUE_RUNS):
+
+                    if rescaled_solution.success:
+                        break
+
+                    restart = np.r_[moveStateVector(rescaled_solution.x[:3], rescaled_solution.x[3:], \
+                        self.observations), vectNorm(rescaled_solution.x[3:])]
+                    rescaled_solution = scipy.optimize.minimize(minimizeAngleCost, restart, \
+                        args=rescaled_args, method="Nelder-Mead")
+
+                if rescaled_solution.success:
+                    minimize_solution = rescaled_solution
+                else:
+                    self.gravity_drop_scale = drop_scale
+
         unbounded_solution = minimize_solution
 
         # NOTE
@@ -6602,7 +7032,7 @@ class Trajectory(object):
             print('p0:', p0)
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
                 weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z, \
-                self.gravity_r0), bounds=bounds, method='SLSQP')
+                self.gravity_r0, self.gravity_drop_scale), bounds=bounds, method='SLSQP')
 
             # Keep the unbounded solution if it converged and the bounded one did not converge or is worse
             if unbounded_solution.success and ((not minimize_solution.success) or \
@@ -6763,6 +7193,16 @@ class Trajectory(object):
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights, \
             calc_res=(_rerun_timing and self.estimate_timing_vel), calc_lengths=False)
 
+
+        # Scale the gravity drop of the next pass for a decelerating meteor, with the lengths of this pass, so
+        #   each extra pass uses the lengths of the one before. The times do not change before the next pass.
+        #   The first pass fits its line without the drop, so the first pass with the drop starts without the
+        #   scale (see calcGravityDropScale)
+        if self.gravity_correction and getattr(self, 'gravity_decel', False):
+            if _rerun_timing:
+                self.calcGravityDropScale(self.observations)
+            else:
+                self.gravity_drop_scale = None
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
         ######################################################################################################

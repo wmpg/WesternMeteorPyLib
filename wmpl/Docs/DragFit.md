@@ -86,7 +86,8 @@ with the drag coefficient `Gamma`, the shape factor `A`, the mass `m` and the bu
   down. The model is computed until the path has bent by 5 deg from the first point. Further on, a
   dark flight model has to be used.
 - **Gravity drop.** If the trajectory was solved with the gravity correction, the positions in the
-  observed part are dropped from the line in the same way as in the trajectory solver. Below the end
+  observed part are dropped from the line in the same way as in the trajectory solver, which scales the
+  drop for the deceleration ([the gravity drop](Trajectory.md#the-gravity-drop)). Below the end
   the path continues along the direction bent by `theta`, and the radiant of the samples is bent by
   `theta`.
 - **Heights** are above the mean sea level, as everywhere in WMPL.

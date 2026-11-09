@@ -12,6 +12,7 @@ from wmpl.Utils.Physics import dynamicMass, groundSpeed, earthRotationVelocity, 
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
+from wmpl.Trajectory.Trajectory import dropTimeOrigin
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 
 
@@ -203,10 +204,13 @@ def pointOnTrajectory(traj, length, t):
     # Solutions without the gravity correction have a straight fitted line and nothing to add
     if getattr(traj, 'gravity_correction', True):
 
-        # The solver measures the drop from the first observation of the meteor
-        t0 = min(obs.time_data[0] for obs in traj.observations)
+        # The solver measures the drop from the first observation of the used stations
+        t0 = dropTimeOrigin(traj.observations)
 
-        drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), getattr(traj, 'gravity_factor', 1.0), \
+        # The factor of the drop, scaled for a decelerating meteor as in the solver
+        drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: getattr(traj, 'gravity_factor', 1.0))
+
+        drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), drop_factor(t - t0), \
             getattr(traj, 'v0z', None) or 0.0) - P
 
         # Keep only the component perpendicular to the fitted line
