@@ -5381,8 +5381,7 @@ class Trajectory(object):
             vel_max = max(np.max(obs.velocities[1:]/1000), vel_max)
             vel_min = min(np.min(obs.velocities[1:]/1000), vel_min)
 
-            # The heights of a station can be NaN, e.g. of an ignored station whose clock is far off, as its
-            #   gravity drop is computed at times far from those of the meteor
+            # Skip the NaN heights of an ignored station whose clock is far off
             if np.any(np.isfinite(obs.meas_ht)):
                 ht_max = max(np.nanmax(obs.meas_ht), ht_max)
                 ht_min = min(np.nanmin(obs.meas_ht), ht_min)
