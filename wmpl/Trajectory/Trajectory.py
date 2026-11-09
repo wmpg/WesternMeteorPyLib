@@ -495,19 +495,16 @@ class ObservedPoints(object):
 
 
     def planeFit(self):
-        """ Fits a plane through station position and observed points. The plane goes through the station and
-            its normal is the direction most perpendicular to the lines of sight, the right singular vector of
-            their smallest singular value.
-        """
+        """ Fits a plane through station position and observed points, by SVD of the lines of sight. """
 
-        # Take the unit vectors of the lines of sight, only of the non-ignored points
+        # Take the lines of sight of the non-ignored points
         meas_eci = self.meas_eci[self.ignore_list == 0]
 
         # Use all points if fewer than 2 are used
         if len(meas_eci) < 2:
             meas_eci = self.meas_eci
 
-        # Calculate the plane normal as the direction with the smallest projections of the lines of sight
+        # Take the normal most perpendicular to the lines of sight
         _, _, vh = np.linalg.svd(meas_eci)
         N = vh[-1]
 
@@ -533,7 +530,7 @@ def observedAngularLength(obs):
     if len(meas_eci) < 2:
         meas_eci = obs.meas_eci
 
-    # Compute the angle from the chord between the unit vectors, which is precise also for short tracks
+    # Compute the angle from the chord, precise also for short tracks
     return 2*np.arcsin(min(vectMag(meas_eci[-1] - meas_eci[0])/2, 1.0))
 
 
@@ -1413,7 +1410,7 @@ def moveStateVector(state_vect, radiant_eci, observations):
 
         # Calculate closest points of approach (observed line of sight to radiant line) of the first point
         # on the trajectory across all stations
-        _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[first], obs.meas_eci_los[first], state_vect, 
+        _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[first], obs.meas_eci_los[first], state_vect, \
             radiant_eci)
 
         rad_cpa_list.append(rad_cpa)

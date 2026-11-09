@@ -1,6 +1,5 @@
-""" Tests of the intersecting planes solution which seeds the line of sight fit in wmpl.Trajectory.Trajectory:
-    the plane of each station is fitted through it in any orientation, and the ignored picks do not set the
-    beginning of the trajectory or the angular length of a track.
+""" Tests that the intersecting planes solution fits the plane of a station in any orientation, and that the
+    ignored picks set neither the beginning nor the angular length of a track.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_IntersectingPlanesSeed.py -v
@@ -19,9 +18,11 @@ from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT
 from wmpl.Utils.Math import vectNorm
 
 
-class _Lines(object):
+class FakeLines(object):
+    """ Stand-in for the lines of sight of a station. """
+
     def __init__(self, meas_eci, ignore_list=None):
-        """ The attributes of a station which planeFit and observedAngularLength read.
+        """ Make the lines of sight.
 
         Arguments:
             meas_eci: [ndarray] Unit vectors of the lines of sight, one row per point.
@@ -35,7 +36,7 @@ class _Lines(object):
 
 
 
-def _arc(axis_a, axis_b, n_points=40, arc=np.radians(15.0)):
+def makeArc(axis_a, axis_b, n_points=40, arc=np.radians(15.0)):
     """ Make unit vectors along a great circle spanned by two orthonormal vectors.
 
     Arguments:
@@ -63,7 +64,7 @@ def testPlaneContainingTheZAxis():
     axis_z = np.array([0.0, 0.0, 1.0])
     true_normal = np.cross(axis_a, axis_z)
 
-    normal = ObservedPoints.planeFit(_Lines(_arc(axis_a, axis_z)))
+    normal = ObservedPoints.planeFit(FakeLines(makeArc(axis_a, axis_z)))
 
     assert abs(abs(np.dot(normal, true_normal)) - 1.0) < 1e-12
 
@@ -80,7 +81,7 @@ def testPlaneInAnyOrientation():
         axis_b = vectNorm(np.cross(axis_a, rng.normal(size=3)))
         true_normal = np.cross(axis_a, axis_b)
 
-        normal = ObservedPoints.planeFit(_Lines(_arc(axis_a, axis_b)))
+        normal = ObservedPoints.planeFit(FakeLines(makeArc(axis_a, axis_b)))
 
         assert abs(abs(np.dot(normal, true_normal)) - 1.0) < 1e-12
 
@@ -91,14 +92,17 @@ def testAngularLengthOfTheUsedPicks():
         rather than NaN for a single direction.
     """
 
-    meas_eci = _arc(np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]), n_points=11, arc=np.radians(10.0))
+    meas_eci = makeArc(np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]), n_points=11, \
+        arc=np.radians(10.0))
 
+    # Ignore the first and the last pick
     ignore_list = np.zeros(11, dtype=np.uint8)
     ignore_list[[0, 10]] = 1
-    assert abs(observedAngularLength(_Lines(meas_eci, ignore_list)) - np.radians(8.0)) < 1e-12
+    assert abs(observedAngularLength(FakeLines(meas_eci, ignore_list)) - np.radians(8.0)) < 1e-12
 
+    # Two picks in the same direction
     same = np.repeat(vectNorm(np.array([[0.3, 0.4, 0.5]])), 2, axis=0)
-    assert observedAngularLength(_Lines(same)) == 0.0
+    assert observedAngularLength(FakeLines(same)) == 0.0
 
 
 
@@ -107,7 +111,8 @@ def testIgnoredFirstPickDoesNotSetTheBeginning():
         beginning of the trajectory on the radiant line.
     """
 
-    def _solve(move_first):
+    def solve(move_first):
+        """ Solve the meteor with the first pick of station A ignored, and moved up the line if asked. """
 
         traj, begin, radiant_eci = observeStraightMeteor(noise=np.radians(10.0/3600), seed=2, \
             estimate_timing_vel=False, filter_picks=False)
@@ -126,6 +131,7 @@ def testIgnoredFirstPickDoesNotSetTheBeginning():
 
         obs.ignore_list[0] = 1
 
+        # Add the observations again to recompute the lines of sight
         obs_list = traj.observations
         traj.observations = []
         for obs in obs_list:
@@ -133,7 +139,18 @@ def testIgnoredFirstPickDoesNotSetTheBeginning():
 
         return traj.run()
 
-    moved = _solve(True)
-    kept = _solve(False)
+    moved = solve(True)
+    kept = solve(False)
 
     assert np.linalg.norm(moved.state_vect_mini - kept.state_vect_mini) < 1.0
+
+
+
+if __name__ == "__main__":
+
+    testPlaneContainingTheZAxis()
+    testPlaneInAnyOrientation()
+    testAngularLengthOfTheUsedPicks()
+    testIgnoredFirstPickDoesNotSetTheBeginning()
+
+    print("All tests passed.")
