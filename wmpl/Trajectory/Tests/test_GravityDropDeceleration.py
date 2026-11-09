@@ -19,33 +19,13 @@ matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MAX_ACC, GRAVITY_DROP_MIN_VEL, \
     GRAVITY_DROP_VEL_GROUPS, GRAVITY_DROP_VEL_SEGMENTS, Trajectory, gravityDropScale
-from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDragMeteor, observeMeteor, \
-    observeStraightMeteor
+from wmpl.Trajectory.Tests.SyntheticTrajectory import DECELERATING_FIREBALL, GM_EARTH, JDT_REF, \
+    bentDragMeteor, observeMeteor, observeStraightMeteor
 from wmpl.Utils.Math import angleBetweenVectors, segmentedVelocity
 
 
-# Fireball of the tests, 18 km/s at 45 deg slowing down to about 10 km/s in 3.3 s
-FIREBALL = (18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
-
-# Integrated fireball, shared by the tests
-METEOR_CACHE = []
-
 # Settings of the velocity fit of the solver
 VEL_FIT_SETTINGS = (GRAVITY_DROP_VEL_SEGMENTS, GRAVITY_DROP_VEL_GROUPS, GRAVITY_DROP_MAX_ACC)
-
-
-
-def integrateFireball():
-    """ Integrate the fireball of the tests once.
-
-    Return:
-        [BentDragMeteor object] The fireball.
-    """
-
-    if not METEOR_CACHE:
-        METEOR_CACHE.append(BentDragMeteor(*FIREBALL))
-
-    return METEOR_CACHE[0]
 
 
 
@@ -120,7 +100,7 @@ def solveFireball(gravity_decel, jacchia_fit=None):
             - perp_errors: [ndarray] Distances of the model points from the truth across the path (m).
     """
 
-    meteor = integrateFireball()
+    meteor = bentDragMeteor(*DECELERATING_FIREBALL)
 
     traj = observeMeteor(meteor, noise=0.0, gravity_correction=True, gravity_decel=gravity_decel, \
         calc_orbit=False)
@@ -192,7 +172,7 @@ def testTheScaleGivesTheDropOfABentPath():
         and gravity, from its tangent at the first point.
     """
 
-    meteor = integrateFireball()
+    meteor = bentDragMeteor(*DECELERATING_FIREBALL)
 
     time_rel = np.linspace(0.0, meteor.t_vis_end - meteor.t_vis_beg, 1001)
     pos = meteor.eciAtTime(time_rel)
