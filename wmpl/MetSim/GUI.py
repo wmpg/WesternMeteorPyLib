@@ -1559,6 +1559,10 @@ def saveConstants(const, dir_path, file_name):
     const = copy.deepcopy(const)
 
 
+    # Drop the winds, which are an object that can't be saved in JSON
+    if getattr(const, 'wind_profile', None) is not None:
+        const.wind_profile = None
+
     # Convert the density parameters to a list
     if isinstance(const.dens_co, np.ndarray):
         const.dens_co = const.dens_co.tolist()

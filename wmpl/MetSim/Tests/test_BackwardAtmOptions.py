@@ -283,6 +283,22 @@ def test_command_line_constants_do_not_warn():
         backwardStatesFromArguments(_traj(), [_stateVector(70e3, 20000.0)], args, 180000.0)
 
 
+def test_constants_without_the_options_of_the_run_back_run_as_before():
+    """ Constants saved before the run back was added, without t_kill, freeze_mass and erosion_body_only,
+        still run forwards, and give the same simulation. """
+
+    const = _noErosion()
+    frag, results, _ = runSimulation(copy.deepcopy(const))
+
+    for name in ("t_kill", "freeze_mass", "erosion_body_only"):
+        delattr(const, name)
+
+    frag_old, results_old, _ = runSimulation(const)
+
+    assert len(results_old) == len(results)
+    assert np.array_equal(np.array(results_old, dtype=float), np.array(results, dtype=float), equal_nan=True)
+
+
 def test_a_run_that_stops_before_its_height_is_an_error():
     """ MetSim stops under v_kill, 3 km/s, after one step: that used to give an end 5 ms from the start. A lower
         v_kill lets it through. """
