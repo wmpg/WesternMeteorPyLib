@@ -54,6 +54,7 @@ from wmpl.Utils.TrajConversions import (
 )
 from wmpl.Utils.Math import rotateVector
 from wmpl.Utils.Earth import calcTrueObliquity
+from wmpl.Utils.OrbitClassification import classifyBorovicka
 
 
 def _printReboundUnavailable(include_install_help=False):
@@ -230,6 +231,9 @@ HILL_RADII_AU = {
 # and the sunskirter zone of Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU, lies
 # inside it.
 SUN_ENCOUNTER_AU = 0.2
+
+# Semi-major axis of Jupiter of the Tisserand parameter and the orbital class of the report [AU]
+A_JUPITER_TISSERAND = 5.204267
 
 # Sun passages closer than this count in the WHFast warning, although the Sun is listed out to
 # SUN_ENCOUNTER_AU: WHFast's fixed step fails only much closer in. Measured with _integrateParticles
@@ -1054,6 +1058,29 @@ def radiationPressureBeta(radius_m, density_kgm3, q_pr=1.0):
     return 5.7425e-4*q_pr/(density_kgm3*radius_m)
 
 
+def equivalentSphereRadius(mass_kg, density_kgm3):
+    """ Compute the radius of the sphere with the given mass and bulk density,
+
+        s = (3*m/(4*pi*rho))^(1/3)
+
+    which is the size radiationPressureBeta needs, as meteor work gives a mass (photometric, or from
+    a MetSim fit) and an assumed bulk density. At a fixed mass beta goes as m^(-1/3)*rho^(-2/3), so a
+    factor of 2 in the mass changes it by a factor of 1.26.
+
+    Arguments:
+        mass_kg: [float] Meteoroid mass in kg.
+        density_kgm3: [float] Bulk density in kg/m^3.
+
+    Return:
+        [float] Radius of the equivalent sphere in metres.
+    """
+
+    if (mass_kg <= 0) or (density_kgm3 <= 0):
+        raise ValueError("The mass and the density must both be positive.")
+
+    return (3*mass_kg/(4*np.pi*density_kgm3))**(1/3.0)
+
+
 def tisserandParameterJupiter(a, e, inc):
     """ Compute the Tisserand parameter with respect to Jupiter, a quasi-invariant of the encounter
     geometry that is the standard way to classify the dynamical origin of a small body.
@@ -1081,7 +1108,7 @@ def tisserandParameterJupiter(a, e, inc):
             that the parameter is not defined.
     """
 
-    a_jupiter = 5.204267  # AU
+    a_jupiter = A_JUPITER_TISSERAND
 
     if (a is None) or (a <= 0) or (e is None) or (e >= 1):
         return None
@@ -1089,27 +1116,103 @@ def tisserandParameterJupiter(a, e, inc):
     return a_jupiter/a + 2.0*np.cos(inc)*np.sqrt((a/a_jupiter)*(1.0 - e**2))
 
 
-def tisserandClass(t_j):
-    """ Return the conventional dynamical class implied by a Tisserand parameter (see
-    tisserandParameterJupiter).
+def borovickaClass(a, e, inc):
+    """ Return the meteoroid orbital class of Borovicka et al. (2005) of an orbit, as
+    wmpl.Utils.OrbitClassification.classifyBorovicka gives it from the perihelion distance,
+    eccentricity and inclination: 'sun-approaching', 'halley-type', 'jupiter-family' or
+    'asteroidal-chondritic'. The fifth class, 'ecliptic-shower', is membership of a shower, which
+    the integration does not know, so it is never given here.
+
+    Unlike the Tisserand parameter, the class is defined for an unbound orbit too.
 
     Arguments:
-        t_j: [float or None] Tisserand parameter with respect to Jupiter.
+        a: [float] Semi-major axis in AU, negative for a hyperbolic orbit as REBOUND gives it.
+        e: [float] Eccentricity.
+        inc: [float] Inclination in radians.
 
     Return:
-        [str] A short description of the dynamical class.
+        [str] The class.
     """
 
+    return classifyBorovicka(a*(1.0 - e), e, inc, a_planet=A_JUPITER_TISSERAND)
+
+
+def tisserandAndClassSummary(orbits):
+    """ The Tisserand parameter with respect to Jupiter and the Borovicka et al. (2005) class of a set
+    of orbits, e.g. the clones' at the end of the run, with the spread of T_J given as the report gives
+    the spread of the elements: 1 sigma from the 95% interval, and the interval.
+
+    Arguments:
+        orbits: [list] Objects with a (AU, negative for a hyperbolic orbit), e and inc (radians), as
+            the outputs of reboundSimulate hold them.
+
+    Return:
+        [dict] {
+            "n": number of orbits,
+            "n_unbound": orbits without a finite T_J (unbound), left out of its statistics,
+            "tisserand_std": 1 sigma of T_J, (97.5% - 2.5%)/(2*1.96), or None without bound orbits,
+            "tisserand_95ci": [2.5%, 97.5%] of T_J, or None,
+            "classes": {class: fraction of the orbits}, the most frequent first,
+        }
+    """
+
+    # Leave the unbound and non-finite orbits out of the T_J statistics
+    t_j = [tisserandParameterJupiter(o.a, o.e, o.inc) for o in orbits]
+    t_j = np.array([x for x in t_j if (x is not None) and np.isfinite(x)], dtype=float)
+
+    classes = {}
+    for o in orbits:
+        name = str(borovickaClass(o.a, o.e, o.inc))
+        classes[name] = classes.get(name, 0) + 1
+
+    lo, hi = (np.percentile(t_j, 2.5), np.percentile(t_j, 97.5)) if len(t_j) else (None, None)
+
+    return {"n": len(orbits), "n_unbound": len(orbits) - len(t_j),
+            "tisserand_std": float((hi - lo)/2.0/1.96) if len(t_j) else None,
+            "tisserand_95ci": [float(lo), float(hi)] if len(t_j) else None,
+            "classes": {k: v/len(orbits) for k, v in sorted(classes.items(), key=lambda kv: -kv[1])}}
+
+
+def _tisserandAndClassReportLines(t_j, orbital_class, clones=None):
+    """ Make the lines of the report on the Tisserand parameter and the orbital class of the nominal at
+    the end of the run, with the spread of the clones when there are clones.
+
+    Arguments:
+        t_j: [float or None] Tisserand parameter of the nominal, None if it is unbound.
+        orbital_class: [str] Orbital class of the nominal.
+
+    Keyword arguments:
+        clones: [dict] Summary of the clones from tisserandAndClassSummary(). None by default.
+
+    Return:
+        lines: [list] Lines of the report.
+    """
+
+    if clones is None:
+        lines = ["Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the end "
+                 "of the run, nominal:"]
+    else:
+        lines = ["Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the end "
+                 "of the run,",
+                 "nominal +/- 1 sigma [95% CI] of the {:d} clones:".format(clones["n"])]
+
     if t_j is None:
-        return "undefined (unbound orbit)"
+        lines.append("  T_J   = undefined (unbound orbit)")
+    elif (clones is None) or (clones["tisserand_std"] is None):
+        lines.append("  T_J   = {:.6f}".format(t_j))
+    else:
+        lines.append("  T_J   = {:.6f} +/- {:.6f} [{:10.6f}, {:10.6f}]".format(
+            t_j, clones["tisserand_std"], *clones["tisserand_95ci"]))
+    if (clones is not None) and clones["n_unbound"]:
+        lines.append("          ({:d} unbound clones have no T_J)".format(clones["n_unbound"]))
 
-    if t_j > 3.0:
-        return "asteroidal (T_J > 3)"
+    if clones is None:
+        lines.append("  class = {:s}".format(orbital_class))
+    else:
+        lines.append("  class = {:s} (nominal); clones: {:s}".format(orbital_class, ", ".join(
+            "{:s} {:.1f}%".format(k, 100*v) for k, v in clones["classes"].items())))
 
-    if t_j > 2.0:
-        return "Jupiter-family-comet-like (2 < T_J < 3)"
-
-    return "Halley-type/long-period-comet-like (T_J < 2)"
+    return lines
 
 
 def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
@@ -2152,9 +2255,10 @@ def reboundSimulate(
             is done in the parent process, so results do not depend on the number of cores used.
         beta: [float] Ratio of solar radiation pressure to solar gravity for the integrated object.
             If given, radiation pressure and Poynting-Robertson drag are applied to the object (see
-            radiationPressureBeta to compute it from a size and density). None (default) leaves the
-            integration purely gravitational, since a trajectory solution does not constrain the
-            object's size and density.
+            radiationPressureBeta to compute it from a size and a density, and equivalentSphereRadius
+            to get that size from a mass). None (default) leaves the integration purely
+            gravitational, since a trajectory solution does not constrain the object's size and
+            density.
         integrator: [str] "ias15" (default), "whfast" or "trace" (see INTEGRATORS). IAS15 is adaptive
             and accurate to machine precision; the other two use a fixed timestep.
         dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
@@ -2476,18 +2580,26 @@ if __name__ == "__main__":
                         "Increase it for long integrations, where the default 500 samples are "
                         "coarse. Default: 500.")
 
-    parser.add_argument("--beta", type=float, default=None,
-                        help="Include solar radiation pressure and Poynting-Robertson drag with this "
-                        "beta (the ratio of radiation pressure to solar gravity). Mutually exclusive "
-                        "with --radius/--density, which compute beta instead.")
+    # The radiation forces need the object's size, which can be given as a beta, a radius or a mass
+    size_group = parser.add_mutually_exclusive_group()
 
-    parser.add_argument("--radius", type=float, default=None,
+    size_group.add_argument("--beta", type=float, default=None,
+                        help="Include solar radiation pressure and Poynting-Robertson drag with this "
+                        "beta (the ratio of radiation pressure to solar gravity).")
+
+    size_group.add_argument("--radius", type=float, default=None,
                         help="Object radius in metres, used with --density to compute beta and "
-                        "include radiation forces. Purely gravitational if not given.")
+                        "include radiation forces. Purely gravitational if none of --beta, --radius "
+                        "and --mass is given.")
+
+    size_group.add_argument("--mass", type=float, nargs="?", const=0.0, default=None,
+                        help="Object mass in kg, used with --density to compute beta. Given without "
+                        "a value, the photometric mass of the trajectory light curve is used, which is "
+                        "only as good as the trajectory's magnitudes.")
 
     parser.add_argument("--density", type=float, default=3000.0,
-                        help="Object bulk density in kg/m^3, used with --radius to compute beta. "
-                        "Default: 3000.")
+                        help="Object bulk density in kg/m^3, used with --radius or --mass to compute "
+                        "beta. Default: 3000.")
 
     parser.add_argument("--integrator", type=str.lower, default="ias15", choices=INTEGRATORS,
                         help="Integrator: ias15 (default; adaptive, accurate to machine precision), "
@@ -2525,19 +2637,6 @@ if __name__ == "__main__":
     # can be reproduced afterwards with --seed.
     random_seed = args.seed if args.seed is not None else int(np.random.SeedSequence().entropy % (2**32))
 
-    ### Non-gravitational forces (off by default) ###
-    if (args.beta is not None) and (args.radius is not None):
-        parser.error("Give either --beta or --radius (with --density), not both.")
-
-    beta = args.beta
-    if args.radius is not None:
-        beta = radiationPressureBeta(args.radius, args.density)
-        print("Radiation forces ON: radius {:.4g} m, density {:.0f} kg/m^3 -> beta = {:.4e}".format(
-            args.radius, args.density, beta))
-    elif beta is not None:
-        print("Radiation forces ON: beta = {:.4e}".format(beta))
-    ### ###
-
     ### Integrator ###
 
     # Fail before any ephemeris or integration work if the installed REBOUND cannot provide it
@@ -2574,6 +2673,36 @@ if __name__ == "__main__":
 
     # Load the trajectory data from a pickle file
     traj = loadPickle(*os.path.split(args.pickle_path))
+
+
+    ### Non-gravitational forces (off by default, as they need the object's size) ###
+    beta = args.beta
+    if ((args.mass is not None) or (args.radius is not None)) and (not (args.density > 0)):
+        parser.error("--density must be positive, got {:g} kg/m^3.".format(args.density))
+
+    if args.mass is not None:
+
+        if (args.mass < 0) or (not np.isfinite(args.mass)):
+            parser.error("--mass must be positive, got {:g} kg.".format(args.mass))
+
+        # Use the photometric mass of the light curve if --mass was given without a value
+        if args.mass == 0:
+            from wmpl.Trajectory.AggregateAndPlot import computeMass, P_0M
+
+            args.mass = computeMass(traj, P_0M)
+            if (not args.mass) or (not np.isfinite(args.mass)) or (args.mass < 0):
+                parser.error("The trajectory has no usable photometry, so --mass needs a value in kg.")
+            print("Photometric mass: {:.4g} kg (P_0m = {:g} W, tau = 0.7%).".format(args.mass, P_0M))
+
+        args.radius = equivalentSphereRadius(args.mass, args.density)
+
+    if args.radius is not None:
+        beta = radiationPressureBeta(args.radius, args.density)
+        print("Radiation forces ON: radius {:.4g} m, density {:.0f} kg/m^3 -> beta = {:.4e}".format(
+            args.radius, args.density, beta))
+    elif beta is not None:
+        print("Radiation forces ON: beta = {:.4e}".format(beta))
+    ### ###
 
 
     ### Set reference frame settings ###
@@ -2835,14 +2964,25 @@ if __name__ == "__main__":
     print("    node = {:>13.6f}{:s}  deg".format(node_val, Omega_ci_str))
     print("    f    = {:>13.6f}{:s}  deg".format(f_val, f_ci_str))
 
-    # Tisserand parameter with respect to Jupiter and the dynamical class it implies. Only
-    # meaningful for a heliocentric orbit.
+    # Tisserand parameter with respect to Jupiter and the meteoroid orbital class of Borovicka et
+    # al. (2005). Only meaningful for a heliocentric orbit. Like the elements, they are the nominal's,
+    # with the spread of the clones of the confidence intervals.
+    clone_classes = None
     if reference_frame == "heliocentric":
+        if len(sim_outputs_mc):
+            clone_classes = tisserandAndClassSummary([sim_outputs_mc[name][-1][2] for name in ci_names])
         t_j = tisserandParameterJupiter(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
         if t_j is None:
-            print("    T_J  =        undefined  ({:s})".format(tisserandClass(t_j)))
+            print("    T_J  =        undefined  (unbound orbit)")
+        elif (clone_classes is not None) and (clone_classes["tisserand_std"] is not None):
+            print("    T_J  = {:>13.6f} +/- {:.6f} [{:10.6f}, {:10.6f}]".format(
+                t_j, clone_classes["tisserand_std"], *clone_classes["tisserand_95ci"]))
         else:
-            print("    T_J  = {:>13.6f}       {:s}".format(t_j, tisserandClass(t_j)))
+            print("    T_J  = {:>13.6f}".format(t_j))
+        print("    class: {:s} (Borovicka et al. 2005){:s}".format(
+            borovickaClass(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc),
+            "" if clone_classes is None else "; clones: " + ", ".join(
+                "{:s} {:.1f}%".format(k, 100*v) for k, v in clone_classes["classes"].items())))
 
     print("-" * 78)
 
@@ -3087,16 +3227,12 @@ if __name__ == "__main__":
                 f.write("the full span. Clones that impacted or were ejected ended at a different\n")
                 f.write("epoch, so mixing their final elements in would blend different times.\n")
 
-        # Save the Tisserand parameter and the run's provenance
+        # Save the Tisserand parameter, the orbital class and the run's provenance
         if reference_frame == "heliocentric":
             t_j = tisserandParameterJupiter(sim_outputs[-1][2].a, sim_outputs[-1][2].e,
                                             sim_outputs[-1][2].inc)
-            if t_j is None:
-                f.write("\nTisserand parameter w.r.t. Jupiter: undefined ({:s})\n".format(
-                    tisserandClass(t_j)))
-            else:
-                f.write("\nTisserand parameter w.r.t. Jupiter: T_J = {:.6f}  -> {:s}\n".format(
-                    t_j, tisserandClass(t_j)))
+            f.write("\n" + "\n".join(_tisserandAndClassReportLines(t_j, borovickaClass(
+                sim_outputs[-1][2].a, sim_outputs[-1][2].e, sim_outputs[-1][2].inc), clone_classes)) + "\n")
 
         if len(sim_outputs_mc):
             f.write("\nMonte Carlo: {:d} realizations, random seed {:d} "
@@ -3468,6 +3604,10 @@ if __name__ == "__main__":
             "tisserand_jupiter": (tisserandParameterJupiter(
                 sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
                 if reference_frame == "heliocentric" else None),
+            "orbital_class": (borovickaClass(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
+                if reference_frame == "heliocentric" else None),
+            # The same for the clones of the confidence intervals (see tisserandAndClassSummary)
+            "clones_tisserand_and_class": clone_classes,
         },
         # One entry per passage, ordered by time. A body can appear more than once: before the
         #   encounter minima were refined between steps, only the deepest approach per body was kept.

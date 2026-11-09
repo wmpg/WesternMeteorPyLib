@@ -59,14 +59,15 @@ except ImportError:
     DYNESTY_FOUND = False
 
 from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
-from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin
+from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin, \
+    constantsRelativeToGround, constantsToInertial, atmDensityDescription
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
-from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
+from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
+    ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
 
 
 class TimeoutException(Exception):
@@ -338,8 +339,17 @@ def plotJSONDataVsObs(obs_data, out_folder, best_noise_lum=0, best_noise_lag=0):
         const_json_file = os.path.join(out_folder, const_json_name)
         try:
             # Load the constants from the JSON files
-            const_manual, _ = loadConstants(const_json_file)
+            const_manual, const_json_manual = loadConstants(const_json_file)
             const_manual.dens_co = np.array(const_manual.dens_co)
+
+            # Simulate each fit in the frame it was saved in, whatever the frame of the run
+            obs_data = copy.copy(obs_data)
+            obs_data.legacy_inertial_frame = 'v_rotation' not in const_json_manual
+
+            # Convert constants saved relative to the ground to the inertial frame of the observations
+            if not obs_data.legacy_inertial_frame:
+                const_manual.v_rotation = getattr(obs_data, 'v_rotation', 0.0)
+                constantsToInertial(const_manual)
             # # Run the simulation
             # frag_main, results_list, wake_results = runSimulation(const_manual, compute_wake=False)
             # simulation_manual_MetSim_object = SimulationResults(const_manual, frag_main, results_list, wake_results)
@@ -1957,7 +1967,12 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
     # find the index of m_init in variables
     i_m_init = variables.index('m_init')
-    tau = (calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), P_0m=obs_data.P_0m))*2/(samples_equal[:, i_m_init]*obs_data.velocities[0]**2)*100
+
+    # Compute the luminous efficiency of the samples with the initial speed relative to the ground
+    v_init_ground = obs_data.velocities[0] - getattr(obs_data, 'v_rotation', 0.0)
+    tau = calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), \
+        P_0m=obs_data.P_0m)*2/(samples_equal[:, i_m_init]*v_init_ground**2)*100
+
     # calculate the weights calculate the weighted median and the 95 CI for tau
     # tau_low95, tau_median, tau_high95 = _quantile(tau, [0.025, 0.5, 0.975],  weights=weights)
     tau_median, tau_low95, tau_high95 = _plot_distrib_weighted(
@@ -2319,7 +2334,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
                     "95_CI_upper": np.asarray(upper_95, dtype=np.float32).tolist(),
                     "rho_array": backup_data["rho_array"],
                     "rho_mass_weighted_estimate": {k: float(v) for k, v in backup_data["rho_mass_weighted_estimate"].items()},
-                    "const_backups": backup_data["const_backups"]
+                    "const_backups": backup_data["const_backups"],
+                    "ground_frame": not getattr(obs_data, 'legacy_inertial_frame', False)
                 },
 
                 "best_guess": {
@@ -3840,14 +3856,19 @@ class ObservationData:
         self.lag_files = lag_files
 
         v_init_list = []
+        v_rotation_list = []
         for curr_lag_file in lag_files:
             # take the v_init from the trajectory file
             traj=loadPickle(*os.path.split(curr_lag_file))
             # get the trajectory
             # v_avg = traj.v_avg
             v_init_list.append(traj.orbit.v_init+100)
+            v_rotation_list.append(earthRotationSpeed(traj))
         # do the mean of the v_init_list
         self.v_init = np.mean(v_init_list)
+
+        # Average the Earth's rotation along the path, which constructConstants() takes off v_init
+        self.v_rotation = np.mean(v_rotation_list)
 
         # sort base on the lag_data['height'] from the biggest to the smallest
         sorted_indices_lag = np.argsort(lag_data['height'])[::-1]
@@ -3949,8 +3970,16 @@ class ObservationData:
             lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
             jd_dat=traj.jdt_ref
 
-            # Fit the polynomail describing the density
+            # Fit the polynomial describing the density
             self.dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
+
+            # Tabulate the density over the whole simulation, used instead of the polynomial
+            atm_ht_max = max(ATM_TABLE_HT_MAX, dens_fit_ht_beg)
+            self.atm_table_ht, self.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, \
+                ATM_TABLE_HT_MIN, atm_ht_max, jd_dat)
+            self.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, jd_dat, height_max=atm_ht_max)
+            self.atm_density_model = 'table'
+
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4047,7 +4076,8 @@ class ObservationData:
                             except (IndexError, ValueError):
                                 continue
 
-                if not (lum_eff_type_val == 0 and lum_eff_type_fixed):
+                # Use the default also when the constant model is fixed without a lum_eff line
+                if (not (lum_eff_type_val == 0 and lum_eff_type_fixed)) or (luminous_efficiency is None):
                     luminous_efficiency = 0.7  # fallback default
 
             else:
@@ -4058,20 +4088,21 @@ class ObservationData:
             print("NOTE: The mass was computing using a constant luminous efficiency",luminous_efficiency,"%")
 
             # Compute the photometric mass
-            photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, tau=luminous_efficiency/100, P_0m=self.P_0m)
+            photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, \
+                tau=luminous_efficiency/100, P_0m=self.P_0m)
 
-            # run in case we have a different lum_eff_type than constant luminous efficiency to better estimate the correct mass range
-            if lum_eff_type_val is not None and not (lum_eff_type_val == 0 and lum_eff_type_fixed):
-                # Get the luminous efficiency
-                tau_lum_eff_type = luminousEfficiency(lum_eff_type_val, luminous_efficiency, self.v_init, photom_mass)
-                print("NOTE: Adjusting luminous efficiency for the given lum_eff_type new luminous efficiency =", tau_lum_eff_type)
-                if tau_lum_eff_type <= 0:
-                    print("WARNING: Computed non-physical luminous efficiency. Using constant value instead.")
-                else:
-                    # Recompute the photometric mass with the new luminous efficiency
-                    photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, tau=tau_lum_eff_type, P_0m=self.P_0m)
+            # Recompute the mass with the luminous efficiency model at the average ground-relative speed,
+            #   iterated by calcMass() to the mass it gives
+            if (lum_eff_type_val is not None) and (lum_eff_type_val != 0):
+                photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, \
+                    tau=int(lum_eff_type_val), P_0m=self.P_0m)
+                print("NOTE: Recomputed the mass with the luminous efficiency model lum_eff_type = {:d} at the " \
+                    "average speed: {:.4e} kg".format(int(lum_eff_type_val), photom_mass))
 
             m_init_list.append(photom_mass)
+
+        # Print the atmosphere the simulations use
+        print(atmDensityDescription(self))
 
         # do the mean of the zenith_angle_list and m_init_list
         self.zenith_angle = np.mean(zenith_angle_list)
@@ -4427,6 +4458,9 @@ class ObservationData:
             const, _ = loadConstants(self.file_name)
             const.dens_co = np.array(const.dens_co)
 
+            # Simulate a synthetic meteor on a non-rotating Earth
+            const.v_rotation = 0.0
+
             # const_nominal.P_0m = 935
 
             # const.disruption_on = False
@@ -4493,6 +4527,13 @@ class ObservationData:
             self.m_init = self.const.m_init
 
             self.dens_co = np.array(self.const.dens_co) 
+            self.atm_table_ht = getattr(self.const, 'atm_table_ht', None)
+            self.atm_table_log10_rho = getattr(self.const, 'atm_table_log10_rho', None)
+            self.atm_density_info = getattr(self.const, 'atm_density_info', None)
+            self.atm_density_model = getattr(self.const, 'atm_density_model', 'polynomial')
+
+            # Print the atmosphere the simulations use
+            print(atmDensityDescription(self))
 
             # Compute absolute magnitudes
             absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)
@@ -4858,6 +4899,8 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                     try:
                         dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                         dsampler_results = dsampler.results
+                        ground_frame = os.path.isfile(groundFrameMarkerPath(dynesty_file))
+                        restored_file = dynesty_file
                         
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
@@ -4868,7 +4911,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         backup_dynesty_file = os.path.join(out_folder, f"{base_name}_posterior_backup.pkl.gz")
                         if os.path.isfile(backup_dynesty_file):
                             try:
-                                dsampler_results, _ , _ = restoreBackupDynesty(backup_dynesty_file)
+                                dsampler_results, _ , backup_small = restoreBackupDynesty(backup_dynesty_file)
+                                ground_frame = backup_small['dynesty'].get('ground_frame', False)
+                                restored_file = backup_dynesty_file
                                 print(f"Loaded backup dynesty file: {backup_dynesty_file}")
                             except Exception as e:
                                 with open(log_file_path, "a") as log_file:
@@ -4878,6 +4923,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                             print(f"No backup dynesty file found at: {backup_dynesty_file}\n")
                         
                     try:
+                        replayInTheFrameOfTheRun(obs_data, ground_frame, restored_file)
                         plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
@@ -4915,6 +4961,8 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                 try:
                     dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                     dsampler_results = dsampler.results
+                    ground_frame = os.path.isfile(groundFrameMarkerPath(dynesty_file))
+                    restored_file = dynesty_file
 
                 except Exception as e:
                     with open(log_file_path, "a") as log_file:
@@ -4925,7 +4973,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                     backup_dynesty_file = os.path.join(out_folder, f"{base_name}_posterior_backup.pkl.gz")
                     if os.path.isfile(backup_dynesty_file):
                         try:
-                            dsampler_results, _ , _ = restoreBackupDynesty(backup_dynesty_file)
+                            dsampler_results, _ , backup_small = restoreBackupDynesty(backup_dynesty_file)
+                            ground_frame = backup_small['dynesty'].get('ground_frame', False)
+                            restored_file = backup_dynesty_file
                             print(f"Loaded backup dynesty file: {backup_dynesty_file}")
                         except Exception as e:
                             with open(log_file_path, "a") as log_file:
@@ -4935,6 +4985,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         print(f"No backup dynesty file found at: {backup_dynesty_file}")
 
                 # dsampler = dynesty oad DynamicNestedSampler by restore(dynesty_file)
+                replayInTheFrameOfTheRun(obs_data, ground_frame, restored_file)
                 plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
 
             else:
@@ -5103,6 +5154,10 @@ def setupDynestyOutputDir(out_folder, obs_data, bounds, flags_dict, fixed_values
     if not os.path.exists(dynesty_file_in_output_path) and os.path.isfile(dynesty_file):
         shutil.copy(dynesty_file, out_folder)
         print("dynesty file copied to output folder:", dynesty_file_in_output_path)
+
+        # Copy the ground-frame marker with the checkpoint
+        if os.path.isfile(groundFrameMarkerPath(dynesty_file)):
+            shutil.copy(groundFrameMarkerPath(dynesty_file), out_folder)
 
     if os.path.isfile(report_txt):
         # copy the report file to the output folder if not already there
@@ -5806,6 +5861,12 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
     # Assign the density coefficients
     const_nominal.dens_co = dens_co
 
+    # Assign the density model and table, where observations saved without them use the legacy polynomial
+    const_nominal.atm_density_model = getattr(real_event, 'atm_density_model', 'polynomial')
+    const_nominal.atm_table_ht = getattr(real_event, 'atm_table_ht', None)
+    const_nominal.atm_table_log10_rho = getattr(real_event, 'atm_table_log10_rho', None)
+    const_nominal.atm_density_info = getattr(real_event, 'atm_density_info', None)
+
     # # Turn on plotting of LCs of individual fragments 
     # const_nominal.fragmentation_show_individual_lcs = True
 
@@ -5868,6 +5929,10 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
         combined_frag_dic.update(fix_var_frag_dic)   # fixed values override if duplicated
         # use the function thaht add them in the const_nominal
         const_nominal = addFragToConst(const_nominal, combined_frag_dic)
+
+    # Convert the sampled inertial v_init and zenith angle to the ground, unless replaying an older run
+    if not getattr(real_event, 'legacy_inertial_frame', False):
+        constantsRelativeToGround(const_nominal, getattr(real_event, 'v_rotation', 0.0))
 
     if dir_path!="" and file_name!="":
         _, _, _ = runSimulation(const_nominal, compute_wake=False) # completes the some fields in const_nominal that will be saved
@@ -6261,6 +6326,44 @@ def priorDynesty(cube, bounds, flags_dict):
     return x
 
 
+
+def groundFrameMarkerPath(dynesty_file):
+    """ Compute the path of the file that marks a dynesty run as simulated relative to the ground.
+
+    Arguments:
+        dynesty_file: [str] Path to the dynesty checkpoint file.
+
+    Return:
+        [str] Path of the marker file.
+    """
+
+    return dynesty_file + '.ground_frame'
+
+
+
+def replayInTheFrameOfTheRun(obs_data, ground_frame, source):
+    """ Select the model with which the samples of a restored dynesty run are replayed. Runs made before
+        MetSim was simulated relative to the ground are replayed with the inertial speed, and the constants
+        of their replay keep the inertial values without v_rotation, as they were saved before.
+
+    Arguments:
+        obs_data: [ObservationData object] Observations, changed in place.
+        ground_frame: [bool] The run was simulated relative to the ground.
+        source: [str] Path of the restored checkpoint or backup, for the note.
+
+    Return:
+        None
+    """
+
+    obs_data.legacy_inertial_frame = not ground_frame
+
+    if not ground_frame:
+        print("NOTE: {:s} was made before MetSim was simulated relative to the ground, so its samples are " \
+            "replayed with the inertial speed. Start a new run for results relative to the ground." \
+            "".format(source))
+
+
+
 def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_core=1, output_folder="", 
                     base_name="",log_file_path="", pool_MPI=None, save_backup=True):
     """ Main function to run the Dynesty nested sampling.
@@ -6285,6 +6388,19 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
     """
 
     print("Starting dynesty run...")  
+
+    # Refuse to resume a run made before MetSim was simulated relative to the ground
+    marker_file = groundFrameMarkerPath(dynesty_file)
+    if os.path.exists(dynesty_file) and (not os.path.isfile(marker_file)) \
+        and getattr(obs_data, 'v_rotation', 0.0):
+
+        raise ValueError("{:s} was made before MetSim was simulated relative to the ground and cannot be " \
+            "resumed. Start a new run.".format(dynesty_file))
+
+    # Mark the run as simulated relative to the ground
+    with open(marker_file, 'w') as f:
+        f.write("MetSim simulated relative to the ground\n")
+
     # get variable names
     var_names = list(flags_dict.keys())
     # get the number of parameters
@@ -6373,6 +6489,7 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
     if output_folder != os.path.dirname(dynesty_file):
         print("Copying dynesty file to output folder...")
         shutil.copy(dynesty_file, output_folder)
+        shutil.copy(marker_file, output_folder)
         print("dynesty file copied to:", output_folder)
     
     plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, output_folder, base_name, log_file_path, n_core, save_backup=save_backup, finish_run=True)
@@ -6439,8 +6556,14 @@ if __name__ == "__main__":
     # Optional: suppress warnings
     # warnings.filterwarnings('ignore')
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     # check if the pick position is between 0 and 1
     if cml_args.pick_pos < 0 or cml_args.pick_pos > 1:

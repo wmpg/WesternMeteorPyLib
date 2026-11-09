@@ -1249,6 +1249,27 @@ def generateMonthyTimeBins(dt_beg, dt_end):
 ##############################################################################################################
 
 
+
+def expSegmentIntegral(rho_0, scale, dh):
+    """ Integrate rho_0*exp(scale*x) for x from 0 to dh, stably when scale*dh is near 0.
+
+    Arguments:
+        rho_0: [float or ndarray] Density at the bottom of the segment (kg/m^3).
+        scale: [float or ndarray] Exponential scale of the segment (1/m).
+        dh: [float or ndarray] Height above the bottom of the segment (m).
+
+    Return:
+        [float or ndarray] Air column (kg/m^2).
+    """
+
+    x = np.asarray(scale*dh, dtype=np.float64)
+    x_safe = np.where(x == 0, 1.0, x)
+
+    return rho_0*dh*np.where(x == 0, 1.0, np.expm1(x_safe)/x_safe)
+
+
+
+
 if __name__ == "__main__":
     import sys
     import matplotlib.pyplot as plt
