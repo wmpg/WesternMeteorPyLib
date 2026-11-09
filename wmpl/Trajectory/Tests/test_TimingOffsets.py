@@ -1,6 +1,5 @@
-""" Tests of the timing offsets between stations in wmpl.Trajectory.Trajectory. The residuals in time between
-    two stations at the same lengths are linear in their offsets, so the offsets are found by linear least
-    squares, with one used station held at 0, and the reported residuals are in seconds.
+""" Tests of the timing offsets between stations, estimated by linear least squares with one used station
+    held at 0, and of the time residuals reported in seconds.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_TimingOffsets.py -v
@@ -21,11 +20,12 @@ from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT
 # Clocks ahead of the true time (s)
 CLOCK_OFFSETS = {'A': 0.0, 'B': 0.037, 'C': -0.052}
 
-# Noise of the measurements (rad), 30 arcsec
+# Noise of the measurements, 30 arcsec (rad)
 NOISE = np.radians(30.0/3600)
 
 
-def _solve(**kwargs):
+
+def solveWithClockOffsets(**kwargs):
     """ Solve the straight meteor of SyntheticTrajectory with clock offsets.
 
     Keyword arguments:
@@ -43,7 +43,7 @@ def _solve(**kwargs):
 
 
 
-def _stationWeights(traj):
+def stationWeights(traj):
     """ Take the weights of the stations used by the solver.
 
     Arguments:
@@ -58,16 +58,13 @@ def _stationWeights(traj):
 
 
 def testCostStatistics():
-    """ Check that the residuals of all points of all pairs are averaged with the weights of the pairs, once.
-    """
+    """ Check that every point of every pair is averaged once, with the weight of its pair. """
 
-    pairs = [
-        (0, 1, np.array([0.001, -0.002, 0.003]), 1.0),
-        (0, 2, np.array([0.004, 0.001]), 0.5),
-        (1, 2, np.array([-0.001, 0.002, 0.0, 0.001]), 0.25),
-    ]
+    pairs = [(0, 1, np.array([0.001, -0.002, 0.003]), 1.0), (0, 2, np.array([0.004, 0.001]), 0.5), \
+        (1, 2, np.array([-0.001, 0.002, 0.0, 0.001]), 0.25)]
     offsets = np.array([0.0, 0.001, -0.002])
 
+    # Compute the statistics from all points at once
     residuals = [diffs + offsets[i] - offsets[j] for i, j, diffs, _ in pairs]
     weights = [np.zeros_like(res) + weight for res, (_, _, _, weight) in zip(residuals, pairs)]
     residuals, weights = np.concatenate(residuals), np.concatenate(weights)
@@ -82,11 +79,11 @@ def testCostStatistics():
 
 
 def testOffsetsAreTheLeastSquaresMinimum():
-    """ Check that the estimated clock offsets are found and that the reported residuals are their root mean
-        square, in seconds.
+    """ Check that the clock offsets are found at the least squares minimum, and that the reported residuals
+        are their root mean square in seconds.
     """
 
-    traj = _solve()
+    traj = solveWithClockOffsets()
 
     # A clock ahead by dt gets an offset of -dt, relative to station A
     offsets = timingOffsets(traj)
@@ -94,12 +91,12 @@ def testOffsetsAreTheLeastSquaresMinimum():
         assert abs(offsets[station_id] + clock_offset) < 1e-3
 
     # The offsets are applied, so the residuals at zero offsets are the final ones
-    pairs = timingDifferences(traj.observations, weights=_stationWeights(traj))
+    pairs = timingDifferences(traj.observations, weights=stationWeights(traj))
     zero = np.zeros(len(traj.observations))
     assert abs(traj.timing_stddev - timingCost(pairs, zero, stat='rms')) < 1e-12
     assert abs(traj.timing_avg_res - timingCost(pairs, zero, stat='mean_abs')) < 1e-12
 
-    # The least squares minimum has no gradient: shifting a station's offset increases the cost
+    # Shifting the offset of any station from the minimum increases the cost
     base = timingCost(pairs, zero)
     for k in range(len(traj.observations)):
         for shift in [-1e-5, 1e-5]:
@@ -110,9 +107,7 @@ def testOffsetsAreTheLeastSquaresMinimum():
 
 
 def testReferenceStationIsAUsedStation():
-    """ Check that the station held at a zero offset is not an ignored one, which would leave the offsets of
-        the used stations free to shift together.
-    """
+    """ Check that the station held at a zero offset is not an ignored one. """
 
     traj, _, _ = observeStraightMeteor(noise=NOISE, seed=3, clock_offsets=CLOCK_OFFSETS)
 
@@ -133,11 +128,11 @@ def testReferenceStationIsAUsedStation():
 
 
 def testFixedOffsetOfAnAbsentStation():
-    """ Check that a fixed offset given for a station which did not observe the meteor does not leave the
-        estimated offsets without a station held at 0.
+    """ Check that a fixed offset of a station which did not observe the meteor does not leave the estimated
+        offsets without a station held at zero.
     """
 
-    traj = _solve(fixed_times='X:0.1')
+    traj = solveWithClockOffsets(fixed_times='X:0.1')
 
     held = [station_id for station_id, value in traj.stations_time_dict.items() \
         if not isinstance(value, bool)]
@@ -150,7 +145,7 @@ def testFixedOffsetOfAnAbsentStation():
 
 
 
-def _observeSeparately(estimate_timing_vel):
+def observeSeparately(estimate_timing_vel):
     """ Observe the straight meteor with stations A and B seeing its first part and station C its last part,
         so that the lengths of C do not overlap with those of A or B.
 
@@ -171,11 +166,13 @@ def _observeSeparately(estimate_timing_vel):
 
     for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
 
+        # Take the first part of the meteor for A and B, and the last part for C
         if station_id == 'C':
             sel = slice(26, None)
         else:
             sel = slice(0, 24)
 
+        # Compute the noisy directions of the points as seen from the station
         jds = STRAIGHT_JDT_REF + times[sel]/86400.0
         azim, elev = stationAzimAlt(points[sel], jds, s_lat, s_lon, ele)
         azim = azim + rng.normal(0, NOISE, len(azim))/np.cos(elev)
@@ -189,11 +186,9 @@ def _observeSeparately(estimate_timing_vel):
 
 
 def testStationWithoutOverlapIsKeptWithoutTimingEstimation():
-    """ Check that a station whose lengths overlap with no other one is still used when the timing is not
-        estimated, as its clock is taken as given and its lines of sight are valid.
-    """
+    """ Check that a station which overlaps with no other one is kept when the timing is not estimated. """
 
-    traj = _observeSeparately(estimate_timing_vel=False).run()
+    traj = observeSeparately(estimate_timing_vel=False).run()
 
     assert not traj.observations[2].ignore_station
     assert np.isfinite(traj.timing_res)
@@ -201,12 +196,24 @@ def testStationWithoutOverlapIsKeptWithoutTimingEstimation():
 
 
 def testStationWithoutOverlapIsIgnoredWithTimingEstimation():
-    """ Check that a station whose lengths overlap with no other one is not used when the timing is estimated,
-        as its offset cannot be found.
-    """
+    """ Check that a station which overlaps with no other one is ignored when the timing is estimated. """
 
-    traj = _observeSeparately(estimate_timing_vel=True).run()
+    traj = observeSeparately(estimate_timing_vel=True).run()
 
     assert traj.observations[2].ignore_station
     assert not traj.observations[0].ignore_station
     assert not traj.observations[1].ignore_station
+
+
+
+
+if __name__ == "__main__":
+
+    testCostStatistics()
+    testOffsetsAreTheLeastSquaresMinimum()
+    testReferenceStationIsAUsedStation()
+    testFixedOffsetOfAnAbsentStation()
+    testStationWithoutOverlapIsKeptWithoutTimingEstimation()
+    testStationWithoutOverlapIsIgnoredWithTimingEstimation()
+
+    print("All tests passed.")
