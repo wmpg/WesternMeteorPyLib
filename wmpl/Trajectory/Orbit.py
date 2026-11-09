@@ -12,6 +12,7 @@ from jplephem.spk import SPK
 import wmpl
 from wmpl.Config import config
 from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
+from wmpl.Utils.EarthRotation import eciToInertial, inertialToECI
 from wmpl.Utils.OrbitConstants import GAUSS_K
 from wmpl.Utils.ShowerAssociation import associateShower
 from wmpl.Utils.SolarLongitude import jd2SolLonJPL
@@ -588,7 +589,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
 
 
 def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False, reference_init=True, \
-    rotation_correction=False, v_init_stddev_direct=None):
+    rotation_correction=False, v_init_stddev_direct=None, dut1=0.0):
     """ Calculate the meteor's orbit from the given meteor trajectory. The orbit of the meteoroid is defined 
         relative to the centre of the Sun (heliocentric).
 
@@ -626,6 +627,9 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             even if fixed station coordinates were used in the ECI coordinate system!
         v_init_stddev_direct: [float] Standard deviation of the direct velocity fit derived without Monte
             Carlo. None by default.
+        dut1: [float] UT1 - UTC (s). The ECI coordinates of wmpl turn with the Earth by UTC (see
+            wmpl.Utils.EarthRotation): the radiant and the reference point are turned into the inertial
+            frame, and the Earth by UT1. 0 by default, which takes UTC as UT1.
 
     Return:
         orb: [Orbit object] Object containing the calculated orbit.
@@ -637,7 +641,12 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     ##########################################################################################################
 
     eci_x, eci_y, eci_z = eci_ref
-    eci_ref = np.array(eci_ref)
+
+    # Turn the radiant and the reference point from the ECI coordinates of wmpl, which turn with the Earth by
+    #   UTC, into the inertial frame, and turn the Earth by UT1. The ephemerides keep the time of jd_ref
+    radiant_eci = eciToInertial(radiant_eci, dut1)
+    eci_ref = eciToInertial(eci_ref, dut1)
+    jd_rot = jd_ref + dut1/86400.0
 
     # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid) of the reference 
     # trajectory point
@@ -648,7 +657,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     jd_dyn = jd2DynamicalTimeJD(jd_ref)
 
     # Calculate the geographical coordinates of the reference trajectory ECI position
-    lat_ref, lon_ref, ht_ref = cartesian2Geo(jd_ref, *eci_ref)
+    lat_ref, lon_ref, ht_ref = cartesian2Geo(jd_rot, *eci_ref)
 
 
     # Initialize a new orbit structure and assign calculated parameters
@@ -663,7 +672,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     # Calculate the equatorial coordinates of east from the reference position on the trajectory
     azimuth_east = np.pi/2
     altitude_east = 0
-    ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd_ref, lat_ref, lon_ref)
+    ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd_rot, lat_ref, lon_ref)
 
 
     # Compute velocity components of the state vector
@@ -691,7 +700,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
         # Apparent azimuth and altitude (no rotation)
         orb.azimuth_apparent_norot, orb.elevation_apparent_norot = raDec2AltAz(orb.ra_norot, orb.dec_norot, \
-            jd_ref, lat_ref, lon_ref)
+            jd_rot, lat_ref, lon_ref)
 
         # Estimated average velocity (no rotation)
         orb.v_avg_norot = v_avg
@@ -738,7 +747,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         # Compute the radiant without Earth's rotation included
         orb.ra_norot, orb.dec_norot = eci2RaDec(vectNorm(v_ref_nocorr))
         orb.azimuth_apparent_norot, orb.elevation_apparent_norot = raDec2AltAz(orb.ra_norot, orb.dec_norot, \
-            jd_ref, lat_ref, lon_ref)
+            jd_rot, lat_ref, lon_ref)
         orb.v_init_norot = vectMag(v_ref_nocorr)
         orb.v_avg_norot = orb.v_init_norot - v_init + v_avg
 
@@ -790,7 +799,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
     # Calculate the apparent azimuth and altitude (geodetic latitude, because ra/dec are calculated from ECI,
     #   which is calculated from WGS84 coordinates)
-    orb.azimuth_apparent, orb.elevation_apparent = raDec2AltAz(orb.ra, orb.dec, jd_ref, lat_ref, lon_ref)
+    orb.azimuth_apparent, orb.elevation_apparent = raDec2AltAz(orb.ra, orb.dec, jd_rot, lat_ref, lon_ref)
 
     orb.jd_ref = jd_ref
     orb.lon_ref = lon_ref
@@ -819,7 +828,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ra_corr, dec_corr = eci2RaDec(vectNorm(v_ref_corr))
 
         # Calculate the Local Sidreal Time of the reference trajectory position
-        lst_ref = np.radians(jd2LST(jd_ref, np.degrees(lon_ref))[0])
+        lst_ref = np.radians(jd2LST(jd_rot, np.degrees(lon_ref))[0])
 
         # Calculate the apparent zenith angle
         zc = np.arccos(np.sin(dec_corr)*np.sin(lat_geocentric) \
@@ -839,10 +848,10 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ##########################################################################################################
 
         # Get the azimuth from the corrected RA and Dec
-        azimuth_corr, _ = raDec2AltAz(ra_corr, dec_corr, jd_ref, lat_geocentric, lon_ref)
+        azimuth_corr, _ = raDec2AltAz(ra_corr, dec_corr, jd_rot, lat_geocentric, lon_ref)
 
         # Calculate the geocentric radiant
-        ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_ref, lat_geocentric, lon_ref)
+        ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_rot, lat_geocentric, lon_ref)
         
 
         # Convert the ECI coordinates to J2000
@@ -1001,6 +1010,10 @@ if __name__ == "__main__":
     else:
         traj = None
 
+    # UT1 - UTC of the trajectory (see wmpl.Utils.EarthRotation). Without a trajectory, the given coordinates
+    #   are taken with UTC as UT1
+    dut1 = getattr(traj, 'dut1', 0.0) if traj is not None else 0.0
+
 
 
     parameter_missing_message = "To compute the orbit without the existing trajectory file, {:s} must also be provided!"
@@ -1115,8 +1128,9 @@ if __name__ == "__main__":
             if cml_args.j2000:
                 ra, dec = equatorialCoordJ2000ToDate(jd_ref, ra, dec)
 
-        # Compute the radiant vector in ECI coordinates
-        radiant_eci = np.array(raDec2ECI(ra, dec))
+        # Compute the radiant vector in ECI coordinates. Its R.A./Dec. are against the stars, as the orbit of
+        #   a trajectory gives them, so it is turned into the ECI coordinates of wmpl (see EarthRotation)
+        radiant_eci = inertialToECI(np.array(raDec2ECI(ra, dec)), dut1)
 
 
     else:
@@ -1178,7 +1192,7 @@ if __name__ == "__main__":
 
     # Compute the orbit
     orb = calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, reference_init=reference_init, \
-        rotation_correction=rotation_correction, stations_fixed=stations_fixed)
+        rotation_correction=rotation_correction, stations_fixed=stations_fixed, dut1=dut1)
 
     # Print the results
     print('Ref JD:', jd_ref)
