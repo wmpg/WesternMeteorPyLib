@@ -2670,10 +2670,8 @@ class Trajectory(object):
                 the other vs. length). False by default.
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
             traj_id: [str] Trajectory solution identifier. None by default.
-            reject_n_sigma_outliers: [float] Reject angular outliers that are n sigma outside the fit, i.e.
-                whose angular residual exceeds the mean plus n times the root mean square of the residuals of
-                the kept picks. As the residuals are absolute values, for normally distributed errors the
-                limit is about (0.8 + n) sigma. This value is 3 (sigma) by default.
+            reject_n_sigma_outliers: [float] Reject angular outliers whose residual is above the mean plus n
+                times the RMS of the residuals of the kept picks. This value is 3 (sigma) by default.
             mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel processing. None by default,
                 which means that all cores will be used.
             fixed_times: [dict] Dictionary of fixed times for each station. None by default, meaning that
@@ -6917,16 +6915,17 @@ class Trajectory(object):
                     if obs.ignore_station:
                         continue
 
-                    # Find the indices of the used picks which are within N sigma of the kept picks, again
-                    #   until no more picks are rejected, so that the outliers do not raise the limit
+                    # Find the used picks within N sigma of the kept picks, until no more are rejected
                     used = obs.ignore_list == 0
                     good_picks = np.copy(used)
                     for _ in range(len(obs.ang_res)):
 
+                        # Compute the limit from the kept picks
                         ang_res_rms = np.sqrt(np.mean(obs.ang_res[good_picks]**2))
                         kept = used & (obs.ang_res < (np.mean(obs.ang_res[good_picks]) \
                             + self.reject_n_sigma_outliers*ang_res_rms))
 
+                        # Stop when no more picks are rejected
                         if np.array_equal(kept, good_picks):
                             break
 
@@ -6936,7 +6935,7 @@ class Trajectory(object):
                     if np.count_nonzero(good_picks & used) < 4:
                         continue
 
-                    # Check if any picks which were used are rejected
+                    # Check if any used picks are rejected
                     rejected = used & (~good_picks)
                     if np.any(rejected):
                         picks_rejected += np.count_nonzero(rejected)
