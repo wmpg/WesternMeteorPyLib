@@ -427,8 +427,10 @@ def testTheAtmosphereIsDescribed():
     const.atm_density_info = atmDensityTableInfo(LAT, LON, JD, height_min=HT_MIN, height_max=HT_MAX)
     description = MetSimErosion.atmDensityDescription(const)
 
-    assert "NRLMSISE-00 table, 14.0 to 180.0 km every 500 m" in description
-    assert "Ap 4" in description
+    info = const.atm_density_info
+    assert "{:s} table, 14.0 to 180.0 km every 500 m".format(info['model']) in description
+    assert "F10.7 {:g}".format(info['f107']) in description
+    assert "({:s} space weather)".format(info['space_weather']) in description
 
 
 

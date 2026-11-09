@@ -58,6 +58,13 @@ python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s
 **Both are needed.** `rebound` alone is not enough — the general relativity correction, the Earth's
 gravitational harmonics and the radiation forces all come from `reboundx`.
 
+**Use REBOUNDx ≥ 4.4.0.** The simulations run in the ecliptic J2000 frame, and the Earth's J2/J4 are
+made symmetric about its rotation pole of date (precessed from J2000, about 20″ per year) through the
+`Omega` spin-axis parameter that REBOUNDx added in 4.4.0. Older versions ignore it and make them
+symmetric about the ecliptic pole, 23.4° off; the run then warns, and the summary printed at the end
+says so. The effect is a few m/s on the departure of a slow meteoroid (5.2 m/s for Winchcombe, at 14
+km/s).
+
 **`--no-build-isolation` is not optional.** `reboundx` publishes no wheels, so `pip` always compiles
 it, by default against the newest `rebound` on PyPI rather than the one you installed. When the two
 differ, their C simulation structures differ, `reboundx` writes its pointer outside the structure,
@@ -125,14 +132,15 @@ python -m wmpl.Rebound.REBOUND --help
 | `--horizons` | Use the JPL Horizons web service for planet positions instead of the local DE430 kernel. |
 | `--integrator {ias15,whfast,trace}` | Which integrator to use. Default: `ias15`. See [Choosing an integrator](#choosing-an-integrator). |
 | `--dt DAYS` | Timestep in days for `whfast` and `trace`. Default: `0.5`. Must be positive. Ignored by `ias15`. |
-| `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. Mutually exclusive with `--radius`/`--density`. |
-| `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
-| `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
+| `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. |
+| `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if none of `--beta`, `--radius` and `--mass` is given. |
+| `--mass [KG]` | Object mass in kg. With `--density`, beta is computed from it. Without a value, the photometric mass of the light curve is used. |
+| `--density KG_M3` | Bulk density in kg/m³, used with `--radius` or `--mass`. Default: `3000`. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
 | `--verbose` | Print the progress of the simulation. |
 
-`--beta` and `--radius` are mutually exclusive: give the beta directly, or give the size and density
-and let the code compute it, but not both.
+`--beta`, `--radius` and `--mass` are mutually exclusive: give the beta directly, or give a size or a
+mass (with the density) and let the code compute it, but only one of them.
 
 ---
 
@@ -220,6 +228,20 @@ or let it be computed from a size and a density:
 ```
 python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --radius 1e-5 --density 3000
 ```
+
+A size is not what a meteor solution gives, so a mass works too, either explicitly or — with no value
+— as the photometric mass computed from the trajectory's own light curve:
+
+```
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --mass 1e-6 --density 3000
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --mass --density 3000
+```
+
+The mass is turned into the radius of the sphere of that mass and density, `s = (3m/(4πρ))^(1/3)`.
+At a fixed mass, beta goes as `m^(-1/3)*rho^(-2/3)`. The mass, and through it the luminous efficiency
+of a photometric mass, enters as a cube root, so a factor of 2 in it changes beta by a factor of 1.26.
+The density enters more strongly: halving it raises beta by a factor of 1.59. `--mass 0` is the same
+as `--mass` without a value.
 
 For a spherical grain, `beta = 5.7425e-4*Q_pr/(rho*s)` with the density in kg/m³ and the radius in m.
 A 1 µm grain at 3000 kg/m³ gives beta = 0.19; a 1 cm meteoroid of the same density gives 1.9e-5. In
@@ -529,11 +551,19 @@ print(diagnostics[traj.traj_id]["megno"]["verdict"]["status"])
 `compute_megno=True` needs `return_diagnostics=True`, since the diagnostics are the only place the
 result is returned.
 
+**Units.** Each output row is `[t, state_vect_hel, orbit, planet_dists]`, in REBOUND's units: G = 1,
+lengths in AU, masses in solar masses, so the time unit is sqrt(AU³/GM☉) = 58.13244 days
+(`DAYS_PER_SIM_TIME`; REBOUND calls it `yr2pi`, a Gaussian year over 2π). Convert times with
+`simTimeToDays(t)` and `daysToSimTime(days)`. Do not use 365.25/(2π), the Julian year over 2π: it is
+1.9e-5 shorter, so with G = 1 it makes the Sun 3.8e-5 too massive and moves the Earth ~700 000 km off
+the ephemeris in 10 years.
+
 Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 
 | Function | Purpose |
 | :--- | :--- |
 | `radiationPressureBeta(radius_m, density_kgm3)` | Beta for a spherical grain. |
+| `equivalentSphereRadius(mass_kg, density_kgm3)` | The radius that beta needs, from a mass and a bulk density. |
 | `encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0)` | The close-encounter list from the closest-approach dictionaries, one entry per body, with the same gates as the integration (Hill radii, and `SUN_ENCOUNTER_AU` for the Sun). The per-particle `encounters` diagnostic lists every passage instead. |
 | `sunPassageSummary(encounters, max_listed=3)` / `formatSunPassageSummary(summary)` | Collapse more than `max_listed` Sun passages into one summary, and its report line. |
 | `cloneEncounterSummary(clone_diag)` | Per body, how many clones met it, how many passages they made, and the closest approach over all of them. |
@@ -560,6 +590,9 @@ Use WSL2. Installing only `rebound` is not enough.
 
 **`The installed REBOUND (4.3.0) does not provide the TRACE integrator.`** TRACE was added in REBOUND
 4.4.0. Upgrade, or use `--integrator ias15`.
+
+**`REBOUNDx ... cannot orient the Earth's J2/J4 along its rotation axis`.** REBOUNDx is older than
+4.4.0. Upgrade it with the `--force-reinstall` command in [Requirements](#requirements).
 
 **`--dt must be positive.`** A zero or negative step would silently collapse to a single step per
 output interval, so it is refused rather than accepted.

@@ -5,7 +5,11 @@ bounded solution was taken, and running out of function evaluations, after which
 by the intersecting planes. A fit which stops in a distant minimum after the timing was estimated must be
 minimized again from the solution of the pass before. The optional restarts of the Nelder-Mead minimization
 (los_restarts) are also tested. The tests solve a noisy straight trajectory seen from three stations, with
-scipy.optimize.minimize replaced to record or alter the minimizations of the fit.
+scipy.optimize.minimize replaced to record or alter the minimizations of the fit. The fit minimizes over the
+four degrees of freedom of a line (nelderMeadLine), as with the six parameters of a state vector and a radiant
+vector the simplex could collapse and stop short of the minimum with success=True. The frame of the four
+coordinates is tested, and that the fit ends at the same line from different starts. The angles from the line
+are tested to be precise when they are small, as they are at the minimum.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_LoSFit.py -v
@@ -23,7 +27,8 @@ import scipy.optimize
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import stateVectorDiverged
+from wmpl.Trajectory.Trajectory import angleSumMeasurements2Line, lineFrame, lineFromFrame, \
+    minimizeAngleCost, moveStateVector, nelderMeadLine, stateVectorDiverged
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.Math import angleBetweenVectors, vectNorm
 
@@ -50,7 +55,7 @@ def _replaced(obj, name, value):
 
 
 def _isLoSFit(fun, options):
-    """ Tell if a call of scipy.optimize.minimize is a Nelder-Mead minimization of the line-of-sight fit.
+    """ Tell if a call of scipy.optimize.minimize is a minimization of the line-of-sight fit.
 
     Arguments:
         fun: [function] Minimized function.
@@ -60,7 +65,24 @@ def _isLoSFit(fun, options):
         [bool] True if it is.
     """
 
-    return (getattr(fun, '__name__', '') == 'minimizeAngleCost') and (options.get('method') == 'Nelder-Mead')
+    return (getattr(fun, '__name__', '') == 'minimizeAngleCost') \
+        and (getattr(options.get('method'), '__name__', '') == 'nelderMeadLine')
+
+
+
+def _sameDirection(vect1, vect2):
+    """ Tell if two vectors point in the same direction to the rounding of their components. They are compared
+        directly, as the arccos of angleBetweenVectors cannot tell apart angles below about 2e-8 rad.
+
+    Arguments:
+        vect1: [ndarray] First vector.
+        vect2: [ndarray] Second vector.
+
+    Return:
+        [bool] True if their unit vectors differ by less than 1e-12.
+    """
+
+    return np.linalg.norm(vectNorm(vect1) - vectNorm(vect2)) < 1e-12
 
 
 
@@ -143,7 +165,7 @@ def testALineWhichRanOutOfEvaluationsIsContinued():
 
     assert not results[0].success
     assert len(results) >= 2
-    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, results[-1].x[3:])) < 1e-6
+    assert _sameDirection(traj.radiant_eci_mini, results[-1].x[3:])
 
 
 
@@ -209,7 +231,7 @@ def testABoundedSolutionIsOnlyTakenIfItIsBetter():
         traj, _ = _solve(worseBounded)
 
     assert bounded
-    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, fitted[-1].x[3:])) < 1e-6
+    assert _sameDirection(traj.radiant_eci_mini, fitted[-1].x[3:])
 
 
 
@@ -240,7 +262,7 @@ def testAFailedBoundedSolutionIsNotTaken():
         traj, _ = _solve(failedBounded)
 
     assert traj.los_mini_status
-    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, fitted[-1].x[3:])) < 1e-6
+    assert _sameDirection(traj.radiant_eci_mini, fitted[-1].x[3:])
 
 
 
@@ -282,7 +304,7 @@ def testAFitInADistantMinimumIsMinimizedAgainFromThePreviousSolution():
 
     # The third minimization starts from the solution of the first pass
     first = results[0].x
-    assert np.degrees(angleBetweenVectors(starts[2][3:], first[3:])) < 1e-6
+    assert _sameDirection(starts[2][3:], first[3:])
 
     assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, results[1].x[3:])) > 4
     assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, first[3:])) < 0.1
@@ -366,7 +388,173 @@ def testAFailedRestartDoesNotReplaceAConvergedSolution():
     assert results[0].success
     assert not results[1].success
     assert traj.los_mini_status
-    assert np.degrees(angleBetweenVectors(traj.radiant_eci_mini, results[0].x[3:])) < 1e-6
+    assert _sameDirection(traj.radiant_eci_mini, results[0].x[3:])
+
+
+
+def testTheLineFrameMovesTheLineAtTheEndsOfTheMeteor():
+    """ Check that a line frame gives the same line at zero, and that each of its coordinates moves the line
+        by its value across the line at the ends of the observed part of the meteor.
+    """
+
+    traj, begin, radiant = observeStraightMeteor(seed=20261108, calc_orbit=False)
+
+    # A radiant vector which is not a unit vector, and a point 10 km before the beginning
+    frame = lineFrame(begin + 10000.0*radiant, 2.0*radiant, traj.observations)
+    middle, half_length, unit_radiant, axes = frame
+
+    # The observed part is the length of the meteor
+    assert abs(2*half_length - 2.5*30000.0) < 100.0
+
+    # At zero the line is the same, with a unit radiant
+    params = lineFromFrame(np.zeros(4), frame)
+    assert np.linalg.norm(np.cross(params[:3] - begin, radiant)) < 1e-6
+    assert np.linalg.norm(params[3:] - radiant) < 1e-12
+
+    ends = [middle - half_length*unit_radiant, middle + half_length*unit_radiant]
+
+    for k in range(4):
+
+        # Move the line by 1 m along one coordinate
+        coords = np.zeros(4)
+        coords[k] = 1.0
+        params = lineFromFrame(coords, frame)
+
+        # The distance of both ends from the moved line is 1 m
+        for end in ends:
+            assert abs(np.linalg.norm(np.cross(end - params[:3], params[3:])) - 1.0) < 1e-6
+
+        # The middle stays on the line in a rotation, and moves by 1 m in a shift
+        expected = 1.0 if k >= 2 else 0.0
+        distance = np.linalg.norm(np.cross(middle - params[:3], params[3:]))
+        assert abs(distance - expected) < 1e-6
+
+
+
+def testTheLineFitGivesAUnitRadiantAndTheBeginningOfTheMeteor():
+    """ Check that the fit returns a unit radiant and the point of the line at the beginning of the meteor,
+        starting 10 km before it, 0.1 deg off and with a radiant vector of length 2.
+    """
+
+    traj, begin, radiant = observeStraightMeteor(seed=20261108, calc_orbit=False)
+
+    tilted = vectNorm(radiant + np.tan(np.radians(0.1))*vectNorm(np.cross(radiant, [0, 0, 1])))
+    p0 = np.r_[begin + 10000.0*radiant, 2.0*tilted]
+    result = scipy.optimize.minimize(minimizeAngleCost, p0, args=(traj.observations,), method=nelderMeadLine)
+
+    assert result.success
+    assert abs(np.linalg.norm(result.x[3:]) - 1) < 1e-12
+    begin_fit = moveStateVector(result.x[:3], result.x[3:], traj.observations)
+    assert np.linalg.norm(result.x[:3] - begin_fit) < 1e-6
+
+    # The noise of 20 arcsec per point leaves the radiant within a minute of arc
+    assert np.degrees(angleBetweenVectors(result.x[3:], radiant)) < 1/60
+
+
+
+def testTheLineFitStopsAtItsLimitOfEvaluations():
+    """ Check that the fit does not converge and does not exceed a given limit of evaluations of the cost. """
+
+    traj, begin, radiant = observeStraightMeteor(seed=20261108, calc_orbit=False)
+
+    result = scipy.optimize.minimize(minimizeAngleCost, np.r_[begin, radiant], args=(traj.observations,), \
+        method=nelderMeadLine, options={'maxfev': 50})
+
+    assert not result.success
+    assert result.nfev <= 50
+
+
+
+def testTheLineFitSaysWhenTheLineStillMoved():
+    """ Check that the fit keeps its success but says so in the message when the line still moved after the
+        last fresh simplex.
+    """
+
+    traj, begin, radiant = observeStraightMeteor(seed=20261108, calc_orbit=False)
+
+    # No move is small enough to stop the restarts
+    with _replaced(sys.modules['wmpl.Trajectory.Trajectory'], 'LOS_RESTART_TOLERANCE', -1.0):
+        result = scipy.optimize.minimize(minimizeAngleCost, np.r_[begin, radiant], \
+            args=(traj.observations,), method=nelderMeadLine)
+
+    assert result.success
+    assert 'still moved' in result.message
+
+
+
+def testTheLineFitStartedAlongALineOfSightGivesAFiniteLine():
+    """ Check that a start line almost parallel to a line of sight, whose cost is NaN, gives a finite line
+        without using up the evaluations of all fresh simplices.
+    """
+
+    traj, begin, radiant = observeStraightMeteor(seed=5, calc_orbit=False)
+    traj.run()
+
+    # Start 1 arcsec off the first line of sight of the first station
+    los = traj.observations[0].meas_eci_los[0]
+    p0 = np.r_[begin, vectNorm(los + 4e-6*vectNorm(np.cross(los, [0, 0, 1])))]
+    assert np.isnan(minimizeAngleCost(p0, traj.observations))
+
+    result = scipy.optimize.minimize(minimizeAngleCost, p0, args=(traj.observations,), method=nelderMeadLine)
+
+    assert np.all(np.isfinite(result.x))
+    assert np.isfinite(result.fun)
+    assert result.nfev < 1000
+
+
+
+def testTheLineFitEndsAtTheSameLineFromDifferentStarts():
+    """ Check that the fit ends at the same line from the true line and from two lines 300 m and 0.05 deg off
+        it. With these seeds, the Nelder-Mead minimization of the six parameters ended 0.4 and 0.1 arcsec
+        apart.
+    """
+
+    for seed in (14, 18):
+
+        traj, begin, radiant = observeStraightMeteor(seed=seed, calc_orbit=False)
+
+        side = vectNorm(np.cross(radiant, [0, 0, 1]))
+        up = np.cross(radiant, side)
+        tilt = np.tan(np.radians(0.05))
+        starts = [np.r_[begin, radiant], np.r_[begin + 300.0*side, vectNorm(radiant + tilt*up)], \
+            np.r_[begin - 300.0*up, vectNorm(radiant - tilt*side)]]
+
+        radiants = []
+        for p0 in starts:
+            result = scipy.optimize.minimize(minimizeAngleCost, p0, args=(traj.observations,), \
+                method=nelderMeadLine)
+            radiants.append(result.x[3:])
+
+        for other in radiants[1:]:
+            assert 3600*np.degrees(angleBetweenVectors(radiants[0], other)) < 0.05
+
+
+
+def testSmallAnglesFromTheLineArePrecise():
+    """ Check that the angles between the lines of sight and the line are precise down to 1e-9 rad, where the
+        arccos of the dot product has an error of up to 1.5e-8 rad. The minimum of the cost has a few angles
+        near zero, where that error makes the cost rough.
+    """
+
+    station = np.array([4.0e6, 3.0e6, 3.5e6])
+    state_vect = station + np.array([1.0e5, -2.0e4, 6.0e4])
+    radiant = vectNorm(np.array([0.3, 0.5, -0.8]))
+
+    # Lines of sight to points on the line, tilted by a known small angle out of the plane of the station
+    #   and the line
+    angles = np.array([1e-9, 3e-9, 1e-8, 3e-8, 1e-7, 1e-6])
+    meas = []
+    for i, ang in enumerate(angles):
+        ray = vectNorm(state_vect - 5000.0*i*radiant - station)
+        meas.append(np.cos(ang)*ray + np.sin(ang)*vectNorm(np.cross(ray, radiant)))
+
+    obs = SimpleNamespace(time_data=np.arange(len(angles))*0.1, meas_eci_los=np.array(meas), \
+        stat_eci_los=np.array([station]*len(angles)), ignore_list=np.zeros(len(angles), dtype=int), \
+        ignore_station=False)
+
+    angle_sum = angleSumMeasurements2Line([obs], state_vect, radiant)
+
+    assert abs(angle_sum - np.mean(angles))/np.mean(angles) < 1e-6
 
 
 
@@ -379,7 +567,12 @@ if __name__ == "__main__":
         testALineWhichWanderedOffAlongItselfIsContinuedFromTheMeteor, \
         testABoundedSolutionIsOnlyTakenIfItIsBetter, testAFailedBoundedSolutionIsNotTaken, \
         testAFitInADistantMinimumIsMinimizedAgainFromThePreviousSolution, testNoRestartByDefault, \
-        testEachRestartStartsFromThePreviousSolution, testAFailedRestartDoesNotReplaceAConvergedSolution]
+        testEachRestartStartsFromThePreviousSolution, testAFailedRestartDoesNotReplaceAConvergedSolution, \
+        testTheLineFrameMovesTheLineAtTheEndsOfTheMeteor, \
+        testTheLineFitGivesAUnitRadiantAndTheBeginningOfTheMeteor, \
+        testTheLineFitStopsAtItsLimitOfEvaluations, testTheLineFitSaysWhenTheLineStillMoved, \
+        testTheLineFitStartedAlongALineOfSightGivesAFiniteLine, \
+        testTheLineFitEndsAtTheSameLineFromDifferentStarts, testSmallAnglesFromTheLineArePrecise]
 
     for test in test_list:
         test()

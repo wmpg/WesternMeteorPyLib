@@ -34,9 +34,9 @@ from wmpl.Utils.Plotting import savePlot
 
 # Try importing Campbell-Brown & Koschny (2004) ablation code
 try:
-    from MetSim.MetSim import loadInputs, runSimulation
+    from wmpl.MetSim.MetSim import loadInputs, runSimulation
     METSIM_IMPORT = True
-except:
+except ImportError:
     METSIM_IMPORT = False
 
 
