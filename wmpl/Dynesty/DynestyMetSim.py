@@ -954,7 +954,7 @@ def _quantiles_from_samples(arr_2d, qs):
         out[name] = np.nanquantile(arr_2d, q, axis=0, method='linear')
     return out
 
-def weightedHistogramMode(x_valid, w_valid, smooth):
+def weightedHistogram(x_valid, w_valid, smooth):
     """ Compute the weighted histogram of samples, smoothed as dynesty does, to find their mode.
 
     Arguments:
@@ -2135,7 +2135,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             mode_value = mode_raw[i]
 
             # mode via corner logic
-            centers, hist = weightedHistogramMode(x_valid, w_valid, smooth)
+            centers, hist = weightedHistogram(x_valid, w_valid, smooth)
             mode_Ndim = centers[np.argmax(hist)]
 
             # now apply your log & unit transforms *after* computing stats
@@ -2593,7 +2593,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             continue
 
         # Compute histogram
-        centers, hist = weightedHistogramMode(x_valid, w_valid, smooth)
+        centers, hist = weightedHistogram(x_valid, w_valid, smooth)
 
         # Fill under the curve
         ax.fill_between(centers, hist, color='blue', alpha=0.6)
@@ -6249,7 +6249,8 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
     # find the integral of the luminosity in time in between FPS but not valid for CAMO narrowfield cameras as there is no smearing because it follows the meteor
     if (1/obs_metsim_obj.fps_lum > simulation_results.const.dt): # and (not any('1T' in station for station in obs_metsim_obj.stations_lum) or not any('2T' in station for station in obs_metsim_obj.stations_lum)): # FPS is lower than the simulation time step need to integrate the luminosity
         simulated_lc_intensity, _ = integrateLuminosity(all_simulated_time,obs_metsim_obj.time_lum,simulation_results.luminosity_arr,simulation_results.const.dt,obs_metsim_obj.fps_lum,obs_metsim_obj.P_0m)
-        # check if the length of the simulated_lc_intensity is the same as the length of the obs_metsim_obj.luminosity
+
+        # Reject the simulation if it does not cover all observed frames
         if np.sum(~np.isnan(simulated_lc_intensity)) != np.sum(~np.isnan(obs_metsim_obj.luminosity)):
             return -np.inf
     else:

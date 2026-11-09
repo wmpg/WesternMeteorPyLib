@@ -19,6 +19,7 @@ import pytest
 import wmpl.Dynesty.DynestyMetSim as DynestyMetSim
 
 
+
 def makeObs(**overrides):
     """ Make a stand-in for ObservationData with the attributes logLikelihoodDynesty() reads.
 
@@ -48,6 +49,7 @@ def makeObs(**overrides):
     return obs
 
 
+
 def makeSim(height_max=100000.0, height_min=80000.0, n=5, dt=1.0):
     """ Make a stand-in for SimulationResults, a straight descent sampled every time step.
 
@@ -72,11 +74,13 @@ def makeSim(height_max=100000.0, height_min=80000.0, n=5, dt=1.0):
     )
 
 
+
 def testSimulationEndingAboveTheObservationsIsRejected():
     """ Check that a simulation which ends at 80 km, above observations down to 70 km, is rejected. """
 
-    with patch.object(DynestyMetSim, "runSimulationDynesty", return_value=makeSim(height_min=80000.0)):
-        assert DynestyMetSim.logLikelihoodDynesty([1.0], makeObs(), {"v_init": []}, {}) == -np.inf
+    with patch.object(DynestyMetSim, 'runSimulationDynesty', return_value=makeSim(height_min=80000.0)):
+        assert DynestyMetSim.logLikelihoodDynesty([1.0], makeObs(), {'v_init': []}, {}) == -np.inf
+
 
 
 def testIntegratedLuminosityOutsideTheSimulationIsRejected():
@@ -90,12 +94,13 @@ def testIntegratedLuminosityOutsideTheSimulationIsRejected():
     obs = makeObs(height_lum=np.array([98000.0, 95000.0, 92000.0, 90000.0]), \
         time_lum=np.array([0.5, 1.5, 2.5, 100.0]), luminosity=np.array([100.0, 90.0, 80.0, 70.0]))
 
-    with patch.object(DynestyMetSim, "runSimulationDynesty", return_value=sim), warnings.catch_warnings():
+    with patch.object(DynestyMetSim, 'runSimulationDynesty', return_value=sim), warnings.catch_warnings():
 
         # The mean of the empty frame warns
-        warnings.simplefilter("ignore", category=RuntimeWarning)
+        warnings.simplefilter('ignore', category=RuntimeWarning)
 
-        assert DynestyMetSim.logLikelihoodDynesty([1.0], obs, {"v_init": []}, {}) == -np.inf
+        assert DynestyMetSim.logLikelihoodDynesty([1.0], obs, {'v_init': []}, {}) == -np.inf
+
 
 
 def testFailedSimulationIsRejected():
@@ -103,13 +108,14 @@ def testFailedSimulationIsRejected():
         being scored in its place.
     """
 
-    with patch.object(DynestyMetSim, "runSimulationDynesty", side_effect=ZeroDivisionError("division")):
-        assert DynestyMetSim.logLikelihoodDynesty([1.0], makeObs(), {"v_init": []}, {}) == -np.inf
+    with patch.object(DynestyMetSim, 'runSimulationDynesty', side_effect=ZeroDivisionError('division')):
+        assert DynestyMetSim.logLikelihoodDynesty([1.0], makeObs(), {'v_init': []}, {}) == -np.inf
 
-    with patch.object(DynestyMetSim, "constructConstants", return_value=SimpleNamespace()), \
-            patch.object(DynestyMetSim, "runSimulation", side_effect=ZeroDivisionError("division")):
+    with patch.object(DynestyMetSim, 'constructConstants', return_value=SimpleNamespace()), \
+            patch.object(DynestyMetSim, 'runSimulation', side_effect=ZeroDivisionError('division')):
         with pytest.raises(ZeroDivisionError):
-            DynestyMetSim.runSimulationDynesty([1.0], object(), ["v_init"], {})
+            DynestyMetSim.runSimulationDynesty([1.0], object(), ['v_init'], {})
+
 
 
 def testWeightedHistogramMode():
@@ -118,9 +124,10 @@ def testWeightedHistogramMode():
     x = np.random.default_rng(0).normal(loc=5.0, scale=1.0, size=5000)
     w = np.full(x.size, 1.0/x.size)
 
-    centers, hist = DynestyMetSim.weightedHistogramMode(x, w, smooth=0.02)
+    centers, hist = DynestyMetSim.weightedHistogram(x, w, smooth=0.02)
 
     assert abs(centers[np.argmax(hist)] - 5.0) < 0.5
+
 
 
 if __name__ == "__main__":
@@ -130,4 +137,4 @@ if __name__ == "__main__":
     testFailedSimulationIsRejected()
     testWeightedHistogramMode()
 
-    print("All tests passed.")
+    print('All tests passed.')
