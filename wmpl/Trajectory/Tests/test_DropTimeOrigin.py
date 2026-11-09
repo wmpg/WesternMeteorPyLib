@@ -1,6 +1,5 @@
-""" Tests of the time from which wmpl.Trajectory.Trajectory computes the gravity drop: the first time of the
-    stations which are used, so that a station which is not used, e.g. because its clock is far off, does not
-    move the drop of the others.
+""" Tests of the time from which the trajectory solver computes the gravity drop, the first time of the used
+    stations, so that a station which is not used, e.g. with its clock far off, does not move the drop.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_DropTimeOrigin.py -v
@@ -17,9 +16,9 @@ from wmpl.Trajectory.Trajectory import Trajectory, dropTimeOrigin
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 
 
-class _Station(object):
+class FakeStation(object):
     def __init__(self, time_data, ignore_station):
-        """ The attributes of a station which dropTimeOrigin reads.
+        """ Make a stand-in for a station with the attributes which dropTimeOrigin reads.
 
         Arguments:
             time_data: [ndarray] Times of the points (s).
@@ -34,7 +33,8 @@ class _Station(object):
 def testOriginIsTheFirstTimeOfTheUsedStations():
     """ Check that the stations which are not used do not set the origin, unless no station is used. """
 
-    stations = [_Station([0.1, 0.2], False), _Station([-1.0, 0.0], True), _Station([0.05, 0.3], False)]
+    stations = [FakeStation([0.1, 0.2], False), FakeStation([-1.0, 0.0], True), \
+        FakeStation([0.05, 0.3], False)]
     assert dropTimeOrigin(stations) == 0.05
 
     for station in stations:
@@ -44,9 +44,9 @@ def testOriginIsTheFirstTimeOfTheUsedStations():
 
 
 
-def _solve(clock_lead):
-    """ Solve a noise-free straight meteor dropped by gravity, with a fourth station which is not used and whose
-        clock is ahead by the given time.
+def solveWithIgnoredStation(clock_lead):
+    """ Solve a noise-free straight meteor dropped by gravity, with a fourth station which is not used and
+        whose clock is ahead by the given time.
 
     Arguments:
         clock_lead: [float] How far ahead the clock of the station which is not used is (s).
@@ -57,8 +57,8 @@ def _solve(clock_lead):
             - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
     """
 
-    observed, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=3.0, v_init=15000.0, elevation=30.0, \
-        gravity_drop=True)
+    observed, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=3.0, v_init=15000.0, \
+        elevation=30.0, gravity_drop=True)
 
     traj = Trajectory(observed.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
         gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
@@ -78,16 +78,26 @@ def _solve(clock_lead):
 
 
 def testStationWithAClockFarOffDoesNotMoveTheDrop():
-    """ Check that a station which is not used and whose clock is 1 s ahead does not change the solution.
-        When its first time set the origin of the drop, the radiant was 115 arcsec off and the residuals of the
-        used stations reached 22 m.
-    """
+    """ Check that a station which is not used and whose clock is 1 s ahead does not change the solution. """
 
-    traj, radiant_eci = _solve(1.0)
-    reference, _ = _solve(0.0)
+    traj, radiant_eci = solveWithIgnoredStation(1.0)
+    reference, _ = solveWithIgnoredStation(0.0)
 
+    # Check the solution against the one with the clock set
     assert np.allclose(traj.radiant_eci_mini, reference.radiant_eci_mini, rtol=0, atol=1e-12)
+
+    # Check the radiant against the truth
     assert np.allclose(traj.radiant_eci_mini, radiant_eci, rtol=0, atol=1e-6)
 
+    # Check the residuals of the used stations
     used = [obs for obs in traj.observations if not obs.ignore_station]
     assert max(np.max(np.hypot(obs.h_residuals, obs.v_residuals)) for obs in used) < 0.05
+
+
+
+if __name__ == "__main__":
+
+    testOriginIsTheFirstTimeOfTheUsedStations()
+    testStationWithAClockFarOffDoesNotMoveTheDrop()
+
+    print("All tests passed.")
