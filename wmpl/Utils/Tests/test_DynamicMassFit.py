@@ -16,6 +16,7 @@ Run under pytest, or directly:
 import io
 import os
 import contextlib
+import copy
 
 import numpy as np
 import pytest
@@ -169,6 +170,18 @@ def testGroundSpeedRemovesTheEarthRotationFromTheSolverSpeeds(traj):
 
         assert groundSpeed(traj, eci[1:], v_eci) == pytest.approx(v_ground, rel=1e-4)
         assert np.max(np.abs(v_eci - v_ground)) > 40, "the rotation is a sizeable part of the speed"
+
+
+def testGroundSpeedKeepsTheSpeedsOfFixedStations(traj):
+    """ A solution with fixed stations (a failed lines of sight fit) is already relative to the ground. """
+
+    traj_fixed = copy.copy(traj)
+    traj_fixed.orbit_los_success = False
+
+    obs = traj.observations[0]
+    vel = np.asarray(obs.velocities[1:])
+
+    assert np.array_equal(groundSpeed(traj_fixed, obs.model_eci[1:], vel), vel)
 
 
 def _ecef(lat, lon, ele_msl):
