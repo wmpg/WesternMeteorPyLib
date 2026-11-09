@@ -210,11 +210,12 @@ def testNamedParticlesAndHeartbeatWorkOnTheInstalledVersion(realReb):
 def testEndToEndIntegrationMatchesReference(realReb):
     """ Integrate the example trajectory 60 days back and compare with a reference solution.
 
-    The reference was computed with rebound 4.4.10 and reboundx 4.4.2, with the time unit consistent
-    with G = 1 (DAYS_PER_SIM_TIME) and the Earth's J2/J4 symmetric about its pole of date. With the
-    J2/J4 about the ecliptic pole instead, a was 10.99379 AU, and with the Julian time unit as well
-    10.98466 AU. The tolerance leaves room for floating-point differences between platforms, while
-    catching any real change in the dynamics. It needs REBOUNDx >= 4.4.0, which orients the J2/J4.
+    The reference was computed with rebound 4.4.11 and reboundx 4.5.0, with the J2000 coordinates
+    nutated as well as precessed to the epoch of date, the time unit consistent with G = 1
+    (DAYS_PER_SIM_TIME) and the Earth's J2/J4 symmetric about its pole of date. With the J2/J4 about
+    the ecliptic pole instead, a was 10.97452 AU. The tolerance leaves room for floating-point
+    differences between platforms, while catching any real change in the dynamics. It needs
+    REBOUNDx >= 4.4.0, which orients the J2/J4.
     """
 
     from wmpl.Config import config
@@ -240,19 +241,19 @@ def testEndToEndIntegrationMatchesReference(realReb):
 
     orbit = sim_outputs[-1][2]
     rtol = 1e-7
-    assert orbit.a == pytest.approx(10.999618455077444, rel=rtol)
-    assert orbit.e == pytest.approx(0.9470454373170485, rel=rtol)
-    assert np.degrees(orbit.inc) == pytest.approx(164.56525762377314, rel=rtol)
-    assert np.degrees(orbit.Omega) == pytest.approx(29.396553077832916, rel=rtol)
-    assert np.degrees(orbit.omega) == pytest.approx(81.51210470078942, rel=rtol)
+    assert orbit.a == pytest.approx(10.980329006441039, rel=rtol)
+    assert orbit.e == pytest.approx(0.9469427074080383, rel=rtol)
+    assert np.degrees(orbit.inc) == pytest.approx(164.56718435754058, rel=rtol)
+    assert np.degrees(orbit.Omega) == pytest.approx(29.396552954716274, rel=rtol)
+    assert np.degrees(orbit.omega) == pytest.approx(81.5021026119442, rel=rtol)
 
     # The Moon's closest approach comes from the heartbeat, so this also checks that it ran
     diag = next(iter(diagnostics.values()))
     assert diag["departed"]
     assert diag["impact"] is None
-    assert diag["min_dist_au"]["Luna"] == pytest.approx(0.001819247055906065, rel=rtol)
+    assert diag["min_dist_au"]["Luna"] == pytest.approx(0.001819103167554279, rel=rtol)
     # The within-step refinement added in #99 moves this off the step-end value it had before
-    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426152665, rel=1e-6)
+    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426193811, rel=1e-6)
 
 
 ### Units ###
@@ -278,7 +279,7 @@ def testTimeUnitIsTheOneOfGEqualsOne(realReb):
 
     # The conversions are inverses of each other, and a Julian year is not 2 pi
     assert realReb.simTimeToDays(realReb.daysToSimTime(123.4)) == pytest.approx(123.4, rel=1e-15)
-    assert realReb.daysToSimTime(365.25) == pytest.approx(2*np.pi*(1 - 1.89e-5), rel=1e-7)
+    assert realReb.daysToSimTime(365.25) == pytest.approx(2*np.pi*(1 - 1.8886e-5), rel=1e-8)
 
 
 def testPlanetsFollowTheEphemeris(realReb):
@@ -318,11 +319,12 @@ def testPlanetsFollowTheEphemeris(realReb):
         p = sim.particles[name]
         return np.array([p.x, p.y, p.z])
 
-    # Measured: Mercury 1 km, Venus 0, Earth 1, Mars 4, Jupiter 26, Moon (from the Earth) 62 km
+    # Measured: Mercury 1 km, Venus 0, Earth 3, Mars 4, Jupiter 26, and the Moon from the Earth 264 km,
+    #   mostly from the Earth's J2/J4 which this test leaves out
     au_km = 149597870.7
     for name, centre, limit_km in [("Mercury", "Sun", 20), ("Venus", "Sun", 20), ("Earth", "Sun", 20),
                                    ("Mars", "Sun", 40), ("Jupiter", "Sun", 100),
-                                   ("Luna", "Earth", 300)]:
+                                   ("Luna", "Earth", 500)]:
         ref = (np.array(realReb.ephemBodyStateRebound(name, jd + days, eph)[0][:3])
                - np.array(realReb.ephemBodyStateRebound(centre, jd + days, eph)[0][:3]))
         err_km = np.linalg.norm(position(name) - position(centre) - ref)*au_km
