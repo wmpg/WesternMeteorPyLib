@@ -1174,10 +1174,7 @@ def checkWeights(observations, weights):
 
 def timingDifferences(observations, weights=None):
     """ Compute the differences in time between pairs of stations at the same lengths along the trajectory.
-        For every pair of used stations, the time of the first station is interpolated at the lengths of the
-        points of the second station within its range of lengths, and the time of the second station is
-        subtracted. With the timing offsets t_i and t_j added to the times of the two stations, the residual
-        of each point is the difference plus t_i - t_j, so the residuals are linear in the timing offsets.
+        With the timing offsets t_i and t_j, the residuals are the differences plus t_i - t_j.
 
     Arguments:
         observations: [list] A list of ObservedPoints objects.
@@ -1186,9 +1183,8 @@ def timingDifferences(observations, weights=None):
         weights: [list] A list of statistical weights for every station. None by default.
 
     Return:
-        [list] (i, j, diffs, weight) for every pair of used stations whose lengths overlap in at least 4
-            points: the indices of the two stations in the list of observations, the differences in time (s)
-            and the weight of the pair.
+        pairs: [list] A tuple (i, j, diffs, weight) for every pair of used stations which overlap in at least
+            4 points, with the indices of the stations, the differences in time (s) and the pair weight.
     """
 
     # Make sure weight values are OK
@@ -1298,13 +1294,13 @@ def timingOffsetsFromParams(params, observations, time_dict):
 
     Arguments:
         params: [ndarray] Timing offsets of the stations whose offset is estimated, in the order of the
-            observations (NOTE: the stations with a fixed offset, such as the reference station, are not in
-            it).
+            observations, without the fixed ones (s).
         observations: [list] A list of ObservedPoints objects.
-        time_dict: [dict] Timing offset of every station ID: a number if it is fixed, True if it is estimated.
+        time_dict: [dict] Timing offset of every station ID, a number if it is fixed or True if it is
+            estimated.
 
     Return:
-        [ndarray] Timing offset of every station, in the order of the observations (s).
+        offsets: [ndarray] Timing offset of every station, in the order of the observations (s).
     """
 
     offsets = np.zeros(len(observations))
@@ -1327,25 +1323,24 @@ def timingOffsetsFromParams(params, observations, time_dict):
 
 
 def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=False):
-    """ Calculate the weighted mean of the squared differences in time between stations at the same lengths
-        along the trajectory, with the given timing offsets. The observations are not changed.
+    """ Calculate the weighted mean of the squared differences in time between stations at the same lengths,
+        with the given timing offsets.
 
     Arguments:
         params: [ndarray] Timing offsets of the stations whose offset is estimated (NOTE: the stations with a
             fixed offset, such as the reference station, should NOT be in this list).
         observations: [list] A list of ObservedPoints objects.
         time_dict: [dict] A dictionary of timing differences for every station. The keys are station IDs and
-            the values are the fixed timing differences, or True for the stations whose difference is
-            estimated.
+            the values are the fixed timing differences, or True for the estimated ones.
 
     Keyword arguments:
-        weights: [list] A list of statistical weights for every station.
-        ret_stddev: [bool] Returns the root mean square of the differences (s) instead of their mean square.
+        weights: [list] A list of statistical weights for every station. None by default.
+        ret_stddev: [bool] Return the root mean square of the differences (s) instead of their mean square.
+            False by default.
 
     Return:
         [float] Weighted mean of the squared differences in time (s^2), or their root mean square (s).
             Infinite if no two stations overlap.
-
     """
 
     # Assign the timing offset of every station
@@ -1377,6 +1372,7 @@ def stationsWithoutTimeOverlap(observations, pairs):
         [list] Indices of the stations, in the list of observations.
     """
 
+    # Collect the stations which overlap with another one
     overlapping = set()
     for i, j, _, _ in pairs:
         overlapping.update([i, j])
@@ -1386,16 +1382,14 @@ def stationsWithoutTimeOverlap(observations, pairs):
 
 
 def solveTimingOffsets(pairs, observations, time_dict, max_toffset):
-    """ Estimate the timing offsets of the stations by linear least squares. The residuals between two
-        stations are linear in their timing offsets (see timingDifferences), so the offsets which minimize the
-        weighted sum of their squares are found exactly, within +/- max_toffset. Each group of stations which
-        overlap with one another needs a station with a known offset: if a group has none, its station with
-        the most points is held at 0.
+    """ Estimate the timing offsets of the stations by linear least squares, within +/- max_toffset. In each
+        group of overlapping stations without a fixed offset, the one with the most points is held at zero.
 
     Arguments:
         pairs: [list] Differences in time between pairs of stations, see timingDifferences.
         observations: [list] A list of ObservedPoints objects.
-        time_dict: [dict] Timing offset of every station ID: a number if it is fixed, True if it is estimated.
+        time_dict: [dict] Timing offset of every station ID, a number if it is fixed or True if it is
+            estimated.
         max_toffset: [float] Largest timing offset allowed (s).
 
     Return:
@@ -1415,20 +1409,24 @@ def solveTimingOffsets(pairs, observations, time_dict, max_toffset):
     # Find the groups of stations which overlap with one another
     group = list(range(len(observations)))
 
-    def _root(k):
+    def findRoot(k):
+        """ Find the station which represents the group of the given station. """
+
         while group[k] != k:
             k = group[k]
+
         return k
 
+    # Join the groups of the stations in each pair
     for i, j, _, _ in pairs:
-        group[_root(i)] = _root(j)
+        group[findRoot(i)] = findRoot(j)
 
     # Hold the station with the most points at 0 in each group without a fixed offset
     estimated = [isinstance(time_dict[str(obs.station_id)], bool) for obs in observations]
     in_pairs = set([i for i, _, _, _ in pairs] + [j for _, j, _, _ in pairs])
-    for root in set(_root(k) for k in in_pairs):
+    for root in set(findRoot(k) for k in in_pairs):
 
-        members = [k for k in in_pairs if _root(k) == root]
+        members = [k for k in in_pairs if findRoot(k) == root]
 
         if all(estimated[k] for k in members):
             held = max(members, key=lambda k: observations[k].kmeas)
@@ -1441,7 +1439,7 @@ def solveTimingOffsets(pairs, observations, time_dict, max_toffset):
 
     column = {k: col for col, k in enumerate(free)}
 
-    # Construct the linear system, with each point weighted by the square root of the weight of its pair
+    # Construct the linear system, weighted by the square root of the pair weights
     rows = []
     rhs = []
     for i, j, diffs, weight in pairs:
@@ -1461,6 +1459,7 @@ def solveTimingOffsets(pairs, observations, time_dict, max_toffset):
     if not rows:
         return offsets, False
 
+    # Solve the bounded least squares problem
     solution = scipy.optimize.lsq_linear(np.vstack(rows), np.concatenate(rhs), \
         bounds=(-max_toffset, max_toffset), method='bvls')
 
@@ -3042,8 +3041,7 @@ class Trajectory(object):
         # Jacchia fit parameters for all observations combined
         self.jacchia_fit = None
 
-        # Weighted mean of the squared time residuals between the stations at the same lengths (s^2), the cost
-        #   of the timing offsets
+        # Weighted mean square of the time residuals between the stations (s^2)
         self.timing_res = None
 
         # Root mean square of the time residuals between the stations (s)
@@ -3766,8 +3764,7 @@ class Trajectory(object):
             # Compute the differences in time between the stations at the same lengths
             pairs = timingDifferences(observations, weights=weights)
 
-            # Do not use the stations whose lengths overlap with no other station, as their timing offset
-            #   cannot be estimated (only if there are more than 2 stations)
+            # Ignore the stations which overlap with no other station, if there are more than 2
             if len(observations) > 2:
                 for i in stationsWithoutTimeOverlap(observations, pairs):
 
@@ -3777,8 +3774,7 @@ class Trajectory(object):
                     observations[i].ignore_station = True
                     observations[i].ignore_list = np.ones(len(observations[i].time_data), dtype=np.uint8)
 
-            # If no used station has a fixed time, set the used station with the most points as the reference
-            #   station (time difference = 0)
+            # If no used station has a fixed time, take the one with the most points as the reference
             used_fixed = [obs for obs in observations if (not obs.ignore_station) \
                 and (not isinstance(self.stations_time_dict[str(obs.station_id)], bool))]
             used_indices = [i for i, obs in enumerate(observations) if not obs.ignore_station]
@@ -3789,11 +3785,11 @@ class Trajectory(object):
 
 
             if self.verbose:
-                print('Initial function evaluation:', timingCost(pairs, \
+                print("Initial function evaluation:", timingCost(pairs, \
                     timingOffsetsFromParams(np.zeros(len(observations)), observations, \
                     self.stations_time_dict)))
 
-            # Estimate the timing offsets by linear least squares, within +/- the given maximum time offset
+            # Estimate the timing offsets by linear least squares, within the maximum time offset
             timing_offsets, timing_success = solveTimingOffsets(pairs, observations, \
                 self.stations_time_dict, self.max_toffset)
 
