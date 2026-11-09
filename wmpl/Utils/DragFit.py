@@ -652,6 +652,15 @@ class DragFit(object):
             pos = pos - dlen*self._bentRadiant(np.array([theta]), pos[None, :])[0]
             drop_grid[i] = line_eci[i] - pos
 
+        # And keep moving it by drag against the rotating air, by the change of the displacement since the
+        #   last point
+        if (shift_at is not None) and (valid[-1] > self.i_last):
+            i_below = np.arange(self.i_last + 1, valid[-1] + 1)
+            t_last = self.time_grid[self.i_last] - t0
+            shift_change = shift_at(self.time_grid[i_below] - t0, self.radiant_eci) \
+                - shift_at(t_last, self.radiant_eci)
+            drop_grid[i_below] -= shift_change
+
         # Keep the drop constant outside the modelled part, so the heights stay continuous
         drop_grid[:valid[0]] = drop_grid[valid[0]]
         drop_grid[valid[-1] + 1:] = drop_grid[valid[-1]]

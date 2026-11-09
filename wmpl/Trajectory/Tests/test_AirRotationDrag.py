@@ -14,6 +14,7 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import sys
 
 import numpy as np
@@ -297,6 +298,38 @@ def testTheLengthsAreTakenOnTheMovedLine():
 
     assert np.max(np.abs(lengths - lengths_moved)) < 0.05
     assert np.max(np.abs(lengths - lengths_dropped)) > 10.0
+
+
+
+def testTheDragFitContinuesTheShiftBelowItsLastPoint():
+    """ Check that the drag fit, below its last point, keeps moving the path by drag against the rotating air:
+        the last pick of the meteor, rejected as the 3-sigma filter can do, is then extrapolated by the drag
+        fit and still on the model path of the solver to 1 m across the line. Without the displacement there
+        it is 4 m off, 0.04 s after the last point.
+    """
+
+    traj = copy.deepcopy(_solveFireball(True)[0])
+    t0 = min([obs.time_data[0] for obs in traj.observations])
+
+    # Reject the last pick of the station which saw the meteor last
+    obs = max(traj.observations, key=lambda o: o.time_data[-1])
+    obs.ignore_list = np.array(obs.ignore_list)
+    obs.ignore_list[-1] = 1
+
+    drag_fit = DragFit(traj)
+
+    length = (traj.state_vect_mini - np.array(obs.model_eci[-1])) @ traj.radiant_eci_mini
+    assert length > drag_fit.len_grid[drag_fit.i_last]
+
+    diff = drag_fit.eciAtLength(np.array([length]))[0] - np.array(obs.model_eci[-1])
+    diff -= (diff @ traj.radiant_eci_mini)*traj.radiant_eci_mini
+
+    assert np.linalg.norm(diff) < 1.0
+
+    # The displacement grows there
+    shift = traj.airRotationShiftAt(np.array([drag_fit.time_grid[drag_fit.i_last], obs.time_data[-1] - t0]), \
+        traj.radiant_eci_mini)
+    assert np.linalg.norm(shift[1] - shift[0]) > 2.0
 
 
 
