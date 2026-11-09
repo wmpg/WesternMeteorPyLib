@@ -109,8 +109,31 @@ height moves up by 41 m and the radiant by 27 arcsec. On fireballs integrated in
 which slow down to 4-10 km/s, the radiant error of a noise-free solution falls from 5-65 arcsec to 0.2-0.8
 arcsec, and the largest error of the positions across the path from 4-71 m to 0.1-1.3 m.
 
+The meteor falls from the line along the whole path, while the vertical turns with the curvature of the
+Earth, so dropping every point by `g*t^2/2` along its own vertical tilts the line, by about `0.08*t^2`
+arcsec after `t` seconds. The solver drops the points by the free fall of the meteor from the line under the
+gravity of the Earth instead, a point mass with its oblateness (J2 of WGS84, around the axis of the ECI frame
+of date):
+
+    displacement(t) = integral from 0 to t of g(L(q)) (l(t) - l(q))/v(q) dq
+
+where `L(q)` is the point of the line at the time `q`, `l` the length travelled and `v` the velocity of drag
+alone, the one fitted above. At a constant velocity this is the free fall from the line, and in a uniform
+field it is `g` times the scaled drop. Gravity is interpolated by a cubic in the distance along the line, and
+the velocity enters through integrals of the motion tabulated from the fit, so the displacement is exact where
+the fitted velocity changes its slope. It follows fireballs integrated in 3D with drag and gravity to 0.5-2.4
+cm, against 0.2-2.1 m for the scaled drop along the vertical. On the same fireballs, without noise, the
+radiant error falls from 0.6-3.6 arcsec to 0.00-0.18 arcsec and the largest error across the path from
+0.08-1.3 m to 0.01-0.26 m. The radiant of Winchcombe moves by 7.7 arcsec, where the two drops differ by up to
+2.8 m across the 97 km of the path. The oblateness accounts for 1 arcsec of it: on a sphere the drop across
+its path differs by up to 0.45 m.
+
 - `Trajectory(..., gravity_decel=False)` keeps the drop at a constant velocity. Trajectories pickled before
   the option was added keep it too.
+- `Trajectory(..., gravity_free_fall=False)` drops every point along its own vertical, as before.
+  Trajectories pickled before the option was added keep it too. `traj.gravityFreeFall()` gives the table of
+  the motion along the line for the free fall, and `traj.gravityDropPoint()` drops a point of the line as the
+  solver does.
 - `traj.gravity_drop_scale` holds the times from the first point and the scale at those times, and
   `traj.gravityDropFactor(t)` gives the factor of the drop at the time `t` from the first point. The drag
   fit and the dynamic mass fit apply the same drop as the solver with it.

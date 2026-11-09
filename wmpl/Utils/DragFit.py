@@ -55,7 +55,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
+from wmpl.Trajectory.Trajectory import dropTimeOrigin
 from wmpl.Trajectory.Trajectory import applyGravityDrop
+from wmpl.Trajectory.Trajectory import freeFallDrop
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.Physics import ballisticCoeffMass
@@ -599,10 +601,12 @@ class DragFit(object):
         traj = self.traj
 
         # Take the time of the first point and the largest distance from the centre of the Earth of the first
-        #   points of all stations as the reference, as the trajectory solver does
-        t0 = min([obs.time_data[0] for obs in traj.observations])
+        #   points of the used stations as the reference, as the trajectory solver does (all stations if none
+        #   is used)
+        t0 = dropTimeOrigin(traj.observations)
+        used = [obs for obs in traj.observations if not obs.ignore_station] or traj.observations
         r0 = max([vectMag(findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], self.state_vect, \
-            self.radiant_eci)[1]) for obs in traj.observations])
+            self.radiant_eci)[1]) for obs in used])
 
         v0z = getattr(traj, 'v0z', None)
         if v0z is None:
@@ -613,6 +617,11 @@ class DragFit(object):
         # Factor of the drop at each time, scaled for a decelerating meteor as in the solver
         drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: gravity_factor)
 
+        # Or the free fall of the meteor from the line, as in the solver. Trajectories solved before it was
+        #   added drop the points along their vertical
+        free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
+        radiant_eci = np.ascontiguousarray(self.radiant_eci, dtype=np.float64)
+
         # Displacement of the points by drag against the rotating air, as in the solver
         shift_at = getattr(traj, 'airRotationShiftAt', None)
 
@@ -622,7 +631,13 @@ class DragFit(object):
         drop_grid = np.zeros_like(line_eci)
         for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
             if np.isfinite(t) and (t > t0):
-                drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, drop_factor(t - t0), v0z)
+
+                if free_fall is not None:
+                    dropped = freeFallDrop(eci, t - t0, radiant_eci, *free_fall, gravity_factor)
+                else:
+                    dropped = applyGravityDrop(eci, t - t0, r0, drop_factor(t - t0), v0z)
+
+                drop_grid[i] = eci - dropped
                 if shift_at is not None:
                     drop_grid[i] -= shift_at(t - t0, self.radiant_eci)
 

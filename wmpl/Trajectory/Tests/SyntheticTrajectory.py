@@ -6,6 +6,7 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
+from wmpl.Trajectory.Trajectory import freeFallDrop, freeFallTable
 from wmpl.Trajectory.Trajectory import Trajectory, applyGravityDrop
 from wmpl.Trajectory.Trajectory import EARTH_ROTATION_RATE
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
@@ -158,6 +159,30 @@ class DragMeteor(object):
 # Gravitational parameter of the Earth, WGS84 (m^3/s^2)
 GM_EARTH = 3.986004418e14
 
+# Second zonal harmonic of the gravity of the Earth and the equatorial radius to which it refers (m), WGS84
+J2_EARTH = 1.082626683e-3
+R_EQUATOR = 6378137.0
+
+
+
+def oblatenessAcceleration(pos):
+    """ Compute the acceleration by the oblateness of the Earth (J2), around the z axis of the ECI frame of
+        date, which adds to the gravity of a point mass.
+
+    Arguments:
+        pos: [ndarray] (x, y, z) ECI coordinates (m).
+
+    Return:
+        [ndarray] (x, y, z) acceleration (m/s^2).
+    """
+
+    r2 = pos @ pos
+    oblate = 1.5*J2_EARTH*R_EQUATOR**2/r2
+    polar = 5.0*pos[2]**2/r2
+
+    return -GM_EARTH/r2**1.5*oblate*np.array([pos[0]*(1.0 - polar), pos[1]*(1.0 - polar), \
+        pos[2]*(3.0 - polar)])
+
 
 
 class BentDragMeteor(object):
@@ -221,6 +246,15 @@ class BentDragMeteor(object):
                 vel_air = vel - np.cross(np.array([0.0, 0.0, EARTH_ROTATION_RATE]), pos)
 
             return -k*rho*np.sqrt(vel_air @ vel_air)*vel_air - GM_EARTH*pos/r**3
+
+
+        # Add the oblateness of the Earth to the gravity (see BentDragMeteorJ2)
+        if getattr(self, 'j2', False):
+
+            _point_mass_acceleration = _acceleration
+
+            def _acceleration(t, pos, vel):
+                return _point_mass_acceleration(t, pos, vel) + oblatenessAcceleration(pos)
 
 
         # Integrate with the 4th order Runge-Kutta method
@@ -303,6 +337,15 @@ class BentDragMeteor(object):
         vel = np.array([np.interp(t + self.t_vis_beg, self.time, self.vel[:, i]) for i in range(3)])
 
         return -vel/np.sqrt(vel @ vel)
+
+
+
+class BentDragMeteorJ2(BentDragMeteor):
+    """ The fireball of BentDragMeteor, with the oblateness of the Earth (J2) in its gravity (see
+        oblatenessAcceleration).
+    """
+
+    j2 = True
 
 
 
@@ -408,7 +451,7 @@ STRAIGHT_STATIONS = [
 
 
 def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, elevation=55.0, \
-    gravity_drop=False):
+    gravity_drop=False, free_fall=False):
     """ Compute the points of a straight, constant-velocity meteor.
 
     Keyword arguments:
@@ -417,6 +460,8 @@ def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, ele
         elevation: [float] Elevation of the radiant at the beginning of the meteor (deg). 55 by default.
         gravity_drop: [bool] Drop the meteor by gravity with applyGravityDrop, so that it is not a straight
             line anymore. False by default.
+        free_fall: [bool] With gravity_drop, drop the meteor by its free fall from the line instead, under the
+            gravity of the Earth along the path (see freeFallDrop). False by default.
 
     Return:
         (times, points, begin, radiant_eci):
@@ -436,8 +481,14 @@ def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, ele
     times = np.linspace(0, duration, STRAIGHT_N_POINTS)
     points = begin - np.outer(v_init*times, radiant_eci)
 
-    # Drop the points by gravity, with the vertical component of the velocity
-    if gravity_drop:
+    # Drop the points by their free fall from the line
+    if gravity_drop and free_fall:
+        table = freeFallTable([0.0], [v_init])
+        points = np.array([freeFallDrop(point, t, radiant_eci, *table, 1.0) \
+            for point, t in zip(points, times)])
+
+    # Or along their vertical, with the vertical component of the velocity
+    elif gravity_drop:
         v0z = -v_init*np.sin(np.radians(elevation))
         points = np.array([applyGravityDrop(point, t, vectMag(begin), 1.0, v0z) \
             for point, t in zip(points, times)])
@@ -447,7 +498,7 @@ def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, ele
 
 
 def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, \
-    elevation=55.0, gravity_drop=False, clock_offsets=None, **kwargs):
+    elevation=55.0, gravity_drop=False, clock_offsets=None, free_fall=False, **kwargs):
     """ Observe a straight, constant-velocity meteor from three stations and make a trajectory object.
 
     Keyword arguments:
@@ -461,6 +512,8 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
             line anymore. False by default.
         clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
             default, when all clocks are exact.
+        free_fall: [bool] With gravity_drop, drop the meteor by its free fall from the line instead of along
+            the vertical of every point (see straightMeteorPoints). False by default.
         **kwargs: [dict] Keyword arguments of the Trajectory object, which replace the defaults (no timing
             offsets above 1 s, no gravity correction, no Monte Carlo, no plots and no saving).
 
@@ -478,7 +531,7 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
 
     # Compute the points along the trajectory
     times, points, begin, radiant_eci = straightMeteorPoints(duration=duration, v_init=v_init, \
-        elevation=elevation, gravity_drop=gravity_drop)
+        elevation=elevation, gravity_drop=gravity_drop, free_fall=free_fall)
 
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
         show_plots=False, save_results=False, verbose=False)
