@@ -7,74 +7,13 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
-import datetime
 import glob
 import os
 import subprocess
 import sys
 import tempfile
 
-import numpy as np
-
-from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, stationAzimAlt, \
-    straightMeteorPoints
-from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
-
-
-# Header of the files, with the station
-HEADER = """# %ECSV 0.9
-# ---
-# delimiter: ','
-# meta: !!omap
-# - {{obs_latitude: {:.6f}}}
-# - {{obs_longitude: {:.6f}}}
-# - {{obs_elevation: {:.1f}}}
-# - {{camera_id: '{:s}'}}
-"""
-COLUMNS = ['datetime', 'ra', 'dec', 'azimuth', 'altitude', 'x_image', 'y_image', 'mag_data']
-
-
-
-def writeECSVs(dir_path):
-    """ Write the noise-free straight meteor of SyntheticTrajectory as seen from each of its stations into an
-        ECSV file per station, with the azimuth and altitude at the time of each row.
-
-    Arguments:
-        dir_path: [str] Directory where the files are written.
-
-    Return:
-        [list] Paths to the files.
-    """
-
-    times, points, _, _ = straightMeteorPoints()
-
-    # Compute the times of the rows to the microsecond, as they are written, and their Julian dates
-    dt_ref = jd2Date(STRAIGHT_JDT_REF, dt_obj=True)
-    dt_list = [dt_ref + datetime.timedelta(microseconds=int(round(1e6*t))) for t in times]
-    jds = np.array([datetime2JD(dt) for dt in dt_list])
-
-    paths = []
-    for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
-
-        # Compute the direction of every row from the station
-        azim, alt = stationAzimAlt(points, jds, s_lat, s_lon, ele)
-
-        # Write a row per point, with the azimuth and altitude in degrees
-        rows = []
-        for i, dt in enumerate(dt_list):
-            rows.append(",".join([dt.strftime("%Y-%m-%dT%H:%M:%S.%f"), "0.0", "0.0", \
-                "{:.9f}".format(np.degrees(azim[i])), "{:+.9f}".format(np.degrees(alt[i])), "0.0", "0.0", \
-                "+0.00"]))
-
-        path = os.path.join(dir_path, "{:s}.ecsv".format(station_id))
-        with open(path, "w") as f:
-            f.write(HEADER.format(s_lat, s_lon, ele, station_id) + ",".join(COLUMNS) + "\n" \
-                + "\n".join(rows) + "\n")
-
-        paths.append(path)
-
-    return paths
-
+from wmpl.Formats.Tests.StraightMeteorECSV import writeStraightMeteorECSVs
 
 
 def solveECSVReport(los_fit):
@@ -90,7 +29,7 @@ def solveECSVReport(los_fit):
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
-        paths = writeECSVs(tmp_dir)
+        paths, _ = writeStraightMeteorECSVs(tmp_dir)
 
         # Run the ECSV command line without Monte Carlo runs
         command = [sys.executable, "-m", "wmpl.Formats.ECSV"] + paths + ["-d", "-x"]
