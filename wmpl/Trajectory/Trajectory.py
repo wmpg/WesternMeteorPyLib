@@ -2002,8 +2002,9 @@ def angleResidualsMeasurements2Line(observations, state_vect, radiant_eci, weigh
     radiant_eci = np.ascontiguousarray(vectNorm(np.array(radiant_eci, dtype=np.float64)))
     state_vect = np.ascontiguousarray(np.array(state_vect, dtype=np.float64))
 
-    # Find the earliest point in time
-    t0 = min([obs.time_data[0] for obs in observations])
+    # Take the gravity drop from the first time of the used stations, so that an ignored station does not
+    #   move it
+    t0 = dropTimeOrigin(observations)
 
     # Assume zero vertical velocity if it is not given, and pass a distance which is not given as NaN
     if v0z is None:
