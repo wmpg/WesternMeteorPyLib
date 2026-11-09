@@ -2628,8 +2628,8 @@ class Trajectory(object):
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
-        show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         dut1=None, \
+        show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
         save_kml=False, kml_measured=False):
@@ -2675,17 +2675,17 @@ class Trajectory(object):
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
-            show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
-            save_results: [bool] Save results of trajectory estimation to disk. True by default.
-            gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
-            gravity_factor: [float] Gravity correction factor. 1.0 by default (full correction). 
-                Can be between 0 - 1. Lower values used for lift compensation.
             dut1: [float] UT1 - UTC at the time of the meteor (s). None by default, which takes it from the
                 IERS tables (see wmpl.Utils.EarthRotation.deltaUT1). The Earth turns by UT1, and the
                 R.A./Dec. of the measurements are against the stars, with the azimuths and altitudes reduced
                 from them with UTC, as RMS and CAMS do. The lines of sight are turned by the rotation of the
                 Earth in UT1 - UTC, and the radiant and the orbit back. Give 0 for observations computed with
                 UTC as UT1, e.g. synthetic ones made with the conversions of wmpl.
+            show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
+            save_results: [bool] Save results of trajectory estimation to disk. True by default.
+            gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
+            gravity_factor: [float] Gravity correction factor. 1.0 by default (full correction). 
+                Can be between 0 - 1. Lower values used for lift compensation.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
@@ -2717,6 +2717,9 @@ class Trajectory(object):
 
         # Measurement type
         self.meastype = meastype
+
+        # UT1 - UTC (s), by which the lines of sight are turned into the ECI frame, which turns by UTC
+        self.dut1 = deltaUT1(jdt_ref) if dut1 is None else float(dut1)
 
         # Directory where the trajectory estimation results will be saved
         self.output_dir = output_dir
@@ -2821,9 +2824,6 @@ class Trajectory(object):
 
         # Apply the correction for gravity when estimating the trajectory
         self.gravity_correction = gravity_correction
-
-        # UT1 - UTC (s), by which the lines of sight are turned into the ECI frame, which turns by UTC
-        self.dut1 = deltaUT1(jdt_ref) if dut1 is None else float(dut1)
 
         # Gravity correction factor, limit to 0 - 1
         self.gravity_factor = gravity_factor
