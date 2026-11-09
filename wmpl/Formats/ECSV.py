@@ -373,9 +373,9 @@ if __name__ == "__main__":
         help="Legacy and incorrect, only to reproduce older solutions. Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed, which rotates each line of sight by the Earth's rotation since the reference time.", \
         action="store_true")
 
-    arg_parser.add_argument('--losfit', metavar='LOS_FIT', default='angles', \
+    arg_parser.add_argument('--losfit', metavar='LOS_FIT', default='huber', \
         choices=['angles', 'least_squares', 'huber'], \
-        help="Cost of the line-of-sight fit. 'angles' (default) minimizes the sum of the angles between the lines of sight and the line, 'least_squares' the sum of their squares, which also gives the formal uncertainty of the line, and 'huber' fits again with a Huber loss, which limits the pull of outlying picks.")
+        help="Cost of the line-of-sight fit. 'huber' (default) minimizes the sum of the squares of the angles between the lines of sight and the line, which also gives the formal uncertainty of the line, and fits again with a Huber loss, which limits the pull of outlying picks. 'least_squares' stops after the first fit, and 'angles' minimizes the sum of the angles, as before.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()

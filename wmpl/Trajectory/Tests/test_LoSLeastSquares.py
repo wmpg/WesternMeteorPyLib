@@ -256,12 +256,17 @@ def testReportHasTheFormalUncertainty():
 
 
 
-def testAnglesAreTheDefault():
-    """ Check that the line-of-sight fit minimizes the angles by default. """
+def testHuberIsTheDefault():
+    """ Check that the line-of-sight fit is the Huber fit by default, also of trajectories pickled before the
+        option existed, and that the angles are fitted when asked for.
+    """
 
     traj = Trajectory(2460600.25)
+    assert traj.lineOfSightMethod() == (leastSquaresLine, {'loss': 'huber'})
 
+    del traj.los_fit
+    assert traj.lineOfSightMethod() == (leastSquaresLine, {'loss': 'huber'})
+
+    traj = Trajectory(2460600.25, los_fit='angles')
     assert traj.lineOfSightMethod()[0] is nelderMeadLine
-    assert Trajectory(2460600.25, los_fit='huber').lineOfSightMethod() == \
-        (leastSquaresLine, {'loss': 'huber'})
     assert traj.losFormalUncertainty() == (None, None)

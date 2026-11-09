@@ -105,9 +105,9 @@ def _solveReport(los_fit):
 
 
 def testLosFitOptionPicksTheFit():
-    """ Check that --losfit huber solves the line-of-sight fit with the Huber loss, which the report names
-        with its formal uncertainty, and that the fit of the angles stays the default.
+    """ Check that the line-of-sight fit is the Huber fit by default, which the report names with its formal
+        uncertainty, and that --losfit angles fits the angles, which have no formal uncertainty.
     """
 
-    assert "Formal 1 sigma of the line-of-sight fit (huber)" in _solveReport("huber")
-    assert "Formal 1 sigma of the line-of-sight fit" not in _solveReport(None)
+    assert "Formal 1 sigma of the line-of-sight fit (huber)" in _solveReport(None)
+    assert "Formal 1 sigma of the line-of-sight fit" not in _solveReport("angles")

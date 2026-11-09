@@ -3630,7 +3630,7 @@ class Trajectory(object):
         gravity_decel=True, gravity_free_fall=True, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
-        save_kml=False, kml_measured=False, los_fit='angles'):
+        save_kml=False, kml_measured=False, los_fit='huber'):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -3709,13 +3709,14 @@ class Trajectory(object):
                 trajectory of the drag fit, see Utils.TrajectoryKML.trajectoryToKML(). False by default.
             kml_measured: [bool] Add the projected points, lines of sight and residuals of the measurements to
                 the 3D KML. False by default.
-            los_fit: [str] Cost of the line-of-sight fit. 'angles' (default) minimizes the weighted sum of
-                the angles between the lines of sight and the line with Nelder-Mead (see nelderMeadLine).
-                'least_squares' minimizes the weighted sum of their squares, signed across the line, with
-                scipy.optimize.least_squares, and gives the formal covariance of the line (see
-                leastSquaresLine and losFormalUncertainty). 'huber' fits it again with a Huber loss, which
-                limits the pull of outlying picks. The formal covariance holds the random errors of the
-                picks; systematic errors of a station, e.g. of its calibration, are not in it.
+            los_fit: [str] Cost of the line-of-sight fit. 'huber' (default) minimizes the weighted sum of the
+                squares of the angles between the lines of sight and the line, signed across the line, with
+                scipy.optimize.least_squares, and fits it again with a Huber loss, which limits the pull of
+                outlying picks. It gives the formal covariance of the line (see leastSquaresLine and
+                losFormalUncertainty). 'least_squares' stops after the first fit. 'angles', the default
+                before, minimizes the weighted sum of the angles with Nelder-Mead (see nelderMeadLine); its
+                minimum is flat, so it ends farther from the true line. The formal covariance holds the random
+                errors of the picks; systematic errors of a station, e.g. of its calibration, are not in it.
 
         """
 
@@ -7565,8 +7566,8 @@ class Trajectory(object):
             (method, options): The method for scipy.optimize.minimize and its options.
         """
 
-        # Trajectories pickled before the option existed are fitted by the angles
-        los_fit = getattr(self, 'los_fit', 'angles')
+        # Trajectories pickled before the option existed take the default
+        los_fit = getattr(self, 'los_fit', 'huber')
 
         if los_fit == 'least_squares':
             return leastSquaresLine, {'loss': 'linear'}
