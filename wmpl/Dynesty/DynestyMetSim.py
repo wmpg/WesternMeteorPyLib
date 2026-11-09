@@ -66,7 +66,7 @@ from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
-    ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX
+    ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -6556,8 +6556,14 @@ if __name__ == "__main__":
     # Optional: suppress warnings
     # warnings.filterwarnings('ignore')
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     # check if the pick position is between 0 and 1
     if cml_args.pick_pos < 0 or cml_args.pick_pos > 1:

@@ -34,7 +34,8 @@ from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSim
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, getAtmDensityTable, \
-    atmDensTable, atmDensityTableInfo, ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX
+    atmDensTable, atmDensityTableInfo, ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, \
+    msisModelName, setAtmosphere
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -2711,7 +2712,7 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
 
 class MetSimGUI(QMainWindow):
     def __init__(self, traj_path, const_json_file=None, ecsv_files=None, met_path=None, lc_path=None, 
-                 wid_files=None, usg_input=False):
+                 wid_files=None, usg_input=False, refit_atm=False):
         """ GUI tool for MetSim. 
     
         Arguments:
@@ -2725,6 +2726,8 @@ class MetSimGUI(QMainWindow):
             wid_files: [str] Mirfit wid files containing the meteor wake information.
             usg_input: [bool] Instead of a trajectory pickle file, a special input file for CNEOS data is 
                 given.
+            refit_atm: [bool] Refit the atmosphere density polynomial of a legacy constants file from the MSIS
+                model instead of using the saved polynomial. False by default.
         """
         
 
@@ -3040,12 +3043,23 @@ class MetSimGUI(QMainWindow):
 
         # Fit the polynomial of the density and tabulate the density
         dens_co, atm_table, atm_info = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
-        self.const.dens_co = dens_co
         self.const.atm_table_ht, self.const.atm_table_log10_rho = atm_table
         self.const.atm_density_info = atm_info
 
-        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
-            self.dens_fit_ht_end/1000, self.dens_fit_ht_beg/1000))
+        # Keep the saved polynomial of a legacy constants file unless it is refitted
+        if (const_json_file is not None) and (self.const.atm_density_model == 'polynomial') \
+            and (not refit_atm):
+
+            self.const.dens_co = np.array(self.const.dens_co)
+            self.const.atm_density_info = None
+            print("Using the atmosphere density polynomial saved in the constants file, give --refitatm to " \
+                "refit it from the MSIS model.")
+
+        else:
+            self.const.dens_co = dens_co
+
+            print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+                self.dens_fit_ht_end/1000, self.dens_fit_ht_beg/1000))
 
         # Print the atmosphere the simulation uses
         print(atmDensityDescription(self.const))
@@ -5365,18 +5379,17 @@ class MetSimGUI(QMainWindow):
         # Generate a height array
         height_arr = np.linspace(self.dens_fit_ht_beg, self.dens_fit_ht_end, 200)
 
-        # Get atmosphere densities from NRLMSISE-00 (use log values for the fit)
-        atm_densities = np.array([getAtmDensity(lat_mean, lon_mean, ht, self.traj.jdt_ref) \
-            for ht in height_arr])
+        # Get atmosphere densities from the MSIS model (use log values for the fit)
+        atm_densities = getAtmDensity(lat_mean, lon_mean, height_arr, self.traj.jdt_ref)
 
 
         # Get atmosphere densities from the fitted polynomial
         atm_densities_poly = atmDensPoly(height_arr, self.const.dens_co)
 
 
-        # Plot the MSISE density
+        # Plot the MSIS density
         self.mpw.canvas.axes.semilogx(atm_densities, height_arr/1000, \
-            label="NRLMSISE-00", color='k')
+            label=msisModelName(), color='k')
 
         # Plot the density table and mark the model the simulation uses
         if usesAtmDensityTable(self.const):
@@ -6445,8 +6458,18 @@ if __name__ == "__main__":
         """, \
         action="store_true")
 
+    arg_parser.add_argument('--refitatm', action="store_true", \
+        help="Refit the atmosphere density polynomial of a legacy constants file, saved without " \
+        "atm_density_model, from the MSIS model instead of using the saved polynomial.")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
@@ -6676,7 +6699,7 @@ if __name__ == "__main__":
     # Init the MetSimGUI application
     main_window = MetSimGUI(traj_pickle_file, const_json_file=load_file,
         ecsv_files=ecsv_files, met_path=met_file, lc_path=cml_args.lc, wid_files=wid_files, 
-        usg_input=cml_args.usg)
+        usg_input=cml_args.usg, refit_atm=cml_args.refitatm)
 
 
     main_window.show()
