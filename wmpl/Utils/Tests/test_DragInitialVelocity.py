@@ -360,22 +360,25 @@ def test_a_height_limit_alone_is_the_only_limit_and_both_end_at_the_first_reache
 
 def test_drag_fit_records_the_atmosphere_model_it_used():
     """ The fit records the atmosphere its densities came from, read from the module that evaluates them:
-        NRLMSISE-00 by default, or the MSIS version and date set by setAtmosphere() where the model can be chosen
-        (pymsis), set here directly in that module, and the report lists it. """
+        the MSIS model, its solar activity and its time, set here directly in that module, and the report
+        lists it.
+    """
 
     # The module the fit evaluates its densities with
     atm = atmosphereDescription.__globals__["fitAtmPoly"].__globals__
-    saved = {key: atm[key] for key in ("MSIS_VERSION", "MSIS_JD") if key in atm}
+    keys = ("MSIS_VERSION", "MSIS_JD", "MSIS_SPACE_WEATHER")
+    saved = {key: atm[key] for key in keys if key in atm}
 
     try:
-        atm["MSIS_VERSION"], atm["MSIS_JD"] = "00", None
-        assert atmosphereDescription() == "NRLMSISE-00, at the trajectory's time"
+        atm["MSIS_VERSION"], atm["MSIS_JD"], atm["MSIS_SPACE_WEATHER"] = "00", None, "constant"
+        assert atmosphereDescription() == "NRLMSISE-00 with constant solar activity, at the trajectory's time"
 
-        atm["MSIS_VERSION"], atm["MSIS_JD"] = "2.1", 2460310.5
-        assert atmosphereDescription() == "NRLMSIS 2.1, at 2024-01-01 00:00:00 UTC (--atmtime)"
+        atm["MSIS_VERSION"], atm["MSIS_JD"], atm["MSIS_SPACE_WEATHER"] = "2.1", 2460310.5, "real"
+        assert atmosphereDescription() == \
+            "NRLMSIS 2.1 with the measured solar activity, at 2024-01-01 00:00:00 UTC"
 
     finally:
-        for key in ("MSIS_VERSION", "MSIS_JD"):
+        for key in keys:
             atm.pop(key, None)
         atm.update(saved)
 

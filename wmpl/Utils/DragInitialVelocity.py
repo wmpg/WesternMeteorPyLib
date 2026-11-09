@@ -146,6 +146,7 @@ import scipy.optimize
 from wmpl.MetSim.BackwardAtmIntegration import backwardConstants
 from wmpl.MetSim.MetSimErosion import atmDensity, runSimulation
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, getAtmDensityTable
+from wmpl.Utils.AtmosphereDensity import msisModelName
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.TrajConversions import jd2Date
 
@@ -291,20 +292,27 @@ def estimateLineBias(traj):
 
 
 def atmosphereDescription():
-    """ The atmosphere model the fit's densities come from, as the module that evaluates them is set: the MSIS
-        version and date chosen with --atm and --atmtime (wmpl.Utils.AtmosphereDensity.setAtmosphere), or
-        NRLMSISE-00 where the version cannot be chosen. It is read from the globals of fitAtmPoly itself, so it is
-        the model actually used, in this process and in each Monte Carlo one. """
+    """ The atmosphere model the fit's densities come from: the MSIS model of wmpl.Utils.AtmosphereDensity,
+        NRLMSIS 2.1 with the measured solar and geomagnetic activity by default. The solver's command lines
+        do not choose it; the environment variables WMPL_MSIS_VERSION (e.g. 00), WMPL_MSIS_SPACE_WEATHER
+        (constant) and WMPL_MSIS_JD do, as for the processes started after setAtmosphere(). It is read from
+        the module of fitAtmPoly itself, so it is the model actually used, in this process and in each Monte
+        Carlo one.
+
+    Return:
+        [str] Name of the model, its solar activity and the time it is evaluated at.
+    """
 
     atm = fitAtmPoly.__globals__
-    version = atm.get("MSIS_VERSION")
-    name = "NRLMSISE-00" if version in (None, "00") else "NRLMSIS " + version
+
+    activity = "constant" if atm.get("MSIS_SPACE_WEATHER") == "constant" else "the measured"
+    name = "{:s} with {:s} solar activity".format(msisModelName(), activity)
 
     jd = atm.get("MSIS_JD")
     if jd is None:
         return name + ", at the trajectory's time"
 
-    return name + ", at " + jd2Date(jd, dt_obj=True).strftime("%Y-%m-%d %H:%M:%S") + " UTC (--atmtime)"
+    return name + ", at " + jd2Date(jd, dt_obj=True).strftime("%Y-%m-%d %H:%M:%S") + " UTC"
 
 
 def _metsimLengths(const, v0, drag_coeff, sigma, t_lo, t_hi, v_rotation, profile=False):
