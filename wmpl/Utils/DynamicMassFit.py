@@ -17,6 +17,27 @@ from wmpl.Trajectory.Trajectory import applyGravityDrop
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, atm_table=None):
+    """ Simulate a single-body fragment from the given point until it slows to 3 km/s or reaches 15 km.
+
+    Arguments:
+        mass: [float] Initial mass (kg).
+        density: [float] Bulk density of the meteoroid (kg/m^3).
+        lat: [float] Latitude of the starting point (deg).
+        lon: [float] Longitude of the starting point (deg).
+        jd: [float] Julian date of the starting point.
+        ht_beg: [float] Starting height (m).
+        v_init: [float] Starting speed (m/s).
+        entry_angle: [float] Entry angle above the horizon (deg).
+        gamma_a: [float] Product of the drag coefficient and the shape factor of the dynamic mass. Not used
+            by the simulation, which keeps its own.
+
+    Keyword arguments:
+        atm_table: [tuple] Air density table (table_ht, table_log10_rho) of an atmosphere profile (see
+            loadAtmosphereProfile()). None by default (MSIS model).
+
+    Return:
+        sr: [SimulationResults] Results of the simulation.
+    """
 
     # Init simulation constants
     const = Constants()
@@ -61,10 +82,10 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     
 
 
-    # Take the air density from the atmosphere profile if one is given, which has to cover the simulated
-    #   heights, as the table would be extrapolated beyond them
+    # Take the air density from the atmosphere profile if one is given
     if atm_table is not None:
 
+        # Check that the profile covers the simulated heights, so the table is not extrapolated
         if (ht_beg > atm_table[0][-1]) or (const.h_kill < atm_table[0][0]):
             raise ValueError("The atmosphere profile ({:.1f} to {:.1f} km) does not cover the simulated " \
                 "heights ({:.1f} to {:.1f} km)".format(atm_table[0][0]/1000, atm_table[0][-1]/1000, \
@@ -251,8 +272,8 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, atm_table
             used by the simulation itself, see runFragSim().
 
     Keyword arguments:
-        atm_table: [tuple] Air density table (table_ht, table_log10_rho) of an atmosphere profile, see
-            loadAtmosphereProfile(). None by default, for the MSIS model.
+        atm_table: [tuple] Air density table (table_ht, table_log10_rho) of an atmosphere profile (see
+            loadAtmosphereProfile()). None by default (MSIS model).
 
     Return:
         (sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev): [tuple]
@@ -533,7 +554,7 @@ if __name__ == "__main__":
                             type=float, default=50)
 
     arg_parser.add_argument('--atm_profile', metavar='PROFILE_PATH', type=str, default=None, \
-        help="Take the air density from an atmosphere profile instead of the MSIS model, e.g. the ERA5 profile of the event that OpenDarkflight downloads. It is a CSV file in the format OpenDarkflight writes for model profiles (its wrf type), of which the height (m) and density (kg/m^3) columns are used. The winds are not used.")
+        help='Take the air density from an atmosphere profile instead of the MSIS model, e.g. the ERA5 profile of the event that OpenDarkflight downloads. It is a CSV file in the format OpenDarkflight writes for model profiles (its wrf type), of which the height (m) and density (kg/m^3) columns are used. The winds are not used.')
 
     # Add the atmosphere model options
     addAtmosphereArguments(arg_parser)
@@ -735,10 +756,11 @@ if __name__ == "__main__":
     if decel_hi < 0:
         decel_hi = 0
 
-    # Take the air density at the evaluation point from the atmosphere profile, which has to reach it
+    # Take the air density at the evaluation point from the atmosphere profile, if given
     atm_dens = None
     if atm_table is not None:
 
+        # Check that the profile reaches the evaluation point
         if (ht_eval < atm_table[0][0]) or (ht_eval > atm_table[0][-1]):
             raise ValueError("The atmosphere profile ({:.1f} to {:.1f} km) does not reach the evaluation " \
                 "point at {:.2f} km".format(atm_table[0][0]/1000, atm_table[0][-1]/1000, ht_eval/1000))
@@ -849,7 +871,7 @@ if __name__ == "__main__":
     print("Density = {:d} kg/m^3".format(int(bulk_density)))
     print("Gamma*A = {:.2f}".format(gamma_a))
 
-    # Name the source of the air density
+    # Print the source of the air density
     if atm_table is not None:
         print("Air density from the atmosphere profile: {:s}".format(cml_args.atm_profile))
     else:

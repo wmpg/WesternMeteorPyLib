@@ -1,10 +1,11 @@
-""" Tests for the air density of an atmosphere profile in DynamicMassFit (--atm_profile): the profile reader,
-the dynamic mass and the fragment simulation.
+""" Tests of the air density of an atmosphere profile in DynamicMassFit (--atm_profile), in the profile
+    reader, the dynamic mass and the fragment simulation.
 
-Run under pytest, or directly:
-
-    python -m wmpl.Utils.Tests.test_DynamicMassFitAtmProfile
+Run with pytest:
+    python -m pytest wmpl/Utils/Tests/test_DynamicMassFitAtmProfile.py -v
 """
+
+from __future__ import print_function, division, absolute_import
 
 import io
 import os
@@ -40,8 +41,8 @@ PROFILE_HEADER = "height,temperature,pressure,relative_humidity,wind_horizontal,
 
 # A solved trajectory shipped with the repository
 EXAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), \
-    "Dynesty", "examples", "20191023_091225")
-EXAMPLE_PICKLE = "20191023_091225_trajectory.pickle"
+    'Dynesty', 'examples', '20191023_091225')
+EXAMPLE_PICKLE = '20191023_091225_trajectory.pickle'
 
 
 
@@ -86,9 +87,13 @@ def msisProfile(tmp_path, scale):
 
 
 def testProfileIsReadAsADensityTable(tmp_path):
-    """ The levels are sorted by height, and a level without a density is skipped. """
+    """ Check that the levels are sorted by height and that a level without a density is skipped.
 
-    file_path = str(tmp_path/"profile.csv")
+    Arguments:
+        tmp_path: [Path] Temporary directory of pytest.
+    """
+
+    file_path = str(tmp_path/'profile.csv')
     writeProfile(file_path, [3000.0, 1000.0, 2000.0, 4000.0], [0.9, 1.1, np.nan, 0.8])
 
     table_ht, table_log10_rho = loadAtmosphereProfile(file_path)
@@ -99,7 +104,11 @@ def testProfileIsReadAsADensityTable(tmp_path):
 
 
 def testMsisProfileGivesTheMsisMass(tmp_path):
-    """ With a profile of the MSIS density, the dynamic mass is the one of the MSIS model. """
+    """ Check that a profile of the MSIS density gives the dynamic mass of the MSIS model.
+
+    Arguments:
+        tmp_path: [Path] Temporary directory of pytest.
+    """
 
     atm_table = msisProfile(tmp_path, 1.0)
 
@@ -113,7 +122,11 @@ def testMsisProfileGivesTheMsisMass(tmp_path):
 
 
 def testMassGoesAsTheCubeOfTheAirDensity(tmp_path):
-    """ In air 9.4% denser, the dynamic mass is 1.094^3 = 1.31 times larger. """
+    """ Check that in air 9.4% denser the dynamic mass is 1.094^3 = 1.31 times larger.
+
+    Arguments:
+        tmp_path: [Path] Temporary directory of pytest.
+    """
 
     mass_list = []
     for scale in [1.0, DENSER]:
@@ -127,9 +140,11 @@ def testMassGoesAsTheCubeOfTheAirDensity(tmp_path):
 
 
 def testFragSimRunsInTheProfileAtmosphere(tmp_path):
-    """ The fragment simulation takes the air density of the profile. In the MSIS profile it ends where it
-        does with the MSIS model. In denser air, a body heavier by the cube of the density decelerates and
-        ablates in the same way, so it ends at the same point with its mass scaled by the same factor.
+    """ Check that the fragment simulation in the MSIS profile ends where it does with the MSIS model, and
+        that in denser air a body heavier by the cube of the density ends at the same point.
+
+    Arguments:
+        tmp_path: [Path] Temporary directory of pytest.
     """
 
     with contextlib.redirect_stdout(io.StringIO()):
@@ -142,13 +157,18 @@ def testFragSimRunsInTheProfileAtmosphere(tmp_path):
     assert sr_table.frag_main.h == pytest.approx(sr_msis.frag_main.h, abs=50.0)
     assert sr_table.frag_main.m == pytest.approx(sr_msis.frag_main.m, rel=0.01)
 
+    # In denser air the end is the same, with the mass scaled by the density cubed
     assert sr_dense.frag_main.h == pytest.approx(sr_table.frag_main.h, abs=1.0)
     assert sr_dense.frag_main.m/sr_table.frag_main.m == pytest.approx(DENSER**3, rel=1e-6)
 
 
 
 def testFragSimRefusesAProfileBelowItsStart(tmp_path):
-    """ A profile which does not reach the starting height is refused, as it would be extrapolated. """
+    """ Check that a profile which does not reach the starting height is refused.
+
+    Arguments:
+        tmp_path: [Path] Temporary directory of pytest.
+    """
 
     table_ht, table_log10_rho = msisProfile(tmp_path, 1.0)
     n_low = np.searchsorted(table_ht, 25000.0)
@@ -160,8 +180,8 @@ def testFragSimRefusesAProfileBelowItsStart(tmp_path):
 
 
 def testFragEndParamsTakesTheProfile():
-    """ computeFragEndParams() passes the profile to the fragment simulation, so the end point is the same
-        in denser air with the mass scaled by the cube of the density.
+    """ Check that computeFragEndParams() passes the profile to the fragment simulation, so the end point is
+        the same in denser air with the mass scaled by the cube of the density.
     """
 
     traj = loadPickle(EXAMPLE_DIR, EXAMPLE_PICKLE)
@@ -179,8 +199,9 @@ def testFragEndParamsTakesTheProfile():
 
 
 
-
 if __name__ == "__main__":
 
-    import sys
-    sys.exit(pytest.main([__file__, "-q"]))
+    # Run the tests which need no pytest fixtures
+    testFragEndParamsTakesTheProfile()
+
+    print("All tests passed.")

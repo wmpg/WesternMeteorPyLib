@@ -89,8 +89,8 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
             - hemisphere  = 1.92
             - cube        = 1.0
             - brick 2:3:5 = 1.55
-        atm_dens: [float] Air density at the point (kg/m^3), e.g. from a measured atmosphere profile. None by
-            default, for the density of the MSIS model.
+        atm_dens: [float] Air density at the point (kg/m^3), e.g. from an atmosphere profile. If None, the
+            density of the MSIS model is used. None by default.
 
     Return:
         dyn_mass: [float] Dynamic mass in kg.
