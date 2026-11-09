@@ -15,7 +15,7 @@ import scipy.interpolate
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import Constants
 from wmpl.MetSim.MetSimErosion import runSimulation as runSimulationErosion
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import padOrTruncate
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.TrajConversions import J2000_JD
@@ -390,6 +390,9 @@ class ErosionSimContainer(object):
         # Init simulation constants
         self.const = Constants()
         self.const.dens_co = self.params.dens_co
+
+        # Use the polynomial atmosphere, on which the pretrained networks were trained
+        self.const.atm_density_model = 'polynomial'
         self.const.P_0M = self.params.P_0M
 
         # Set tau to CAMO faint meteor model
@@ -955,8 +958,14 @@ if __name__ == "__main__":
     arg_parser.add_argument('--cores', metavar='CORES', type=int, default=None, \
         help="Number of cores to use. All by default.")
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 

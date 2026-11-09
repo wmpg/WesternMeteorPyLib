@@ -9,8 +9,8 @@ import datetime
 
 import numpy as np
 
-from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
-    prepareObservations, writeMiligInputFileMeteorObservation
+from wmpl.Formats.GenericFunctions import addKMLOptions, addSolverOptions, solveTrajectoryGeneric, \
+    MeteorObservation, prepareObservations, writeMiligInputFileMeteorObservation
 from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
 
 
@@ -356,6 +356,7 @@ if __name__ == "__main__":
 
     # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
+    arg_parser = addKMLOptions(arg_parser)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
         help="Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.", \
@@ -472,5 +473,7 @@ if __name__ == "__main__":
         show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
         show_jacchia=cml_args.jacchia,
         estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-        fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, enable_OSM_plot=cml_args.enableOSM)
+        fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, \
+        enable_OSM_plot=cml_args.enableOSM, save_kml=(cml_args.kml or cml_args.kmlmeas), \
+        kml_measured=cml_args.kmlmeas)
 
