@@ -208,13 +208,13 @@ def pointOnTrajectory(traj, length, t):
         # The solver measures the drop from the first observation of the used stations
         t0 = dropTimeOrigin(traj.observations)
 
-        # The free fall of the meteor from the line, as in the solver. Trajectories solved before it was added
-        #   drop the points along their vertical
+        # Drop the point by the free fall of the meteor from the line, as in the solver
         free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
         if free_fall is not None:
             drop = freeFallDrop(P, t - t0, np.ascontiguousarray(traj.radiant_eci_mini, dtype=np.float64), \
                 *free_fall, getattr(traj, 'gravity_factor', 1.0)) - P
 
+        # Or along its vertical, in trajectories solved without the free fall
         else:
 
             # The factor of the drop, scaled for a decelerating meteor as in the solver

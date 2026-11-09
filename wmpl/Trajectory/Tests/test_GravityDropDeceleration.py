@@ -1,12 +1,10 @@
 """ Tests of the gravity drop of a decelerating meteor in the trajectory solver.
 
-Drag also slows down the velocity which gravity adds across the path, so a decelerating meteor drops less
-than one at a constant velocity, which applyGravityDrop assumes. The solver scales the drop with a velocity
-fitted to the lengths without a deceleration model such as the Jacchia fit (gravityDropScale,
-segmentedVelocity, Trajectory.calcGravityDropScale). The tests check the scale against analytic cases and
-against a fireball integrated in 3D with drag and gravity, solve that fireball with and without the scale,
-and check the velocity of a fireball which fragments, of a meteor at a constant velocity, of one whose
-velocity changes by gravity alone, and of few noisy points.
+Drag also slows down the velocity which gravity adds across the path, so a decelerating meteor drops less than
+one at a constant velocity. The solver scales the drop with a velocity fitted to the lengths without a
+deceleration model (gravityDropScale, segmentedVelocity, Trajectory.calcGravityDropScale). The tests check the
+scale against analytic cases and against a fireball integrated in 3D with drag and gravity, solve that
+fireball with and without the scale, and check the fitted velocity of several meteors.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityDropDeceleration.py -v
@@ -26,29 +24,29 @@ from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDra
 from wmpl.Utils.Math import angleBetweenVectors
 
 
-# Fireball of the tests: 18 km/s at 45 deg, slowing down to about 10 km/s in 3.3 s
+# Fireball of the tests, 18 km/s at 45 deg slowing down to about 10 km/s in 3.3 s
 FIREBALL = (18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
 
 # Integrated fireball, shared by the tests
-_METEOR = []
+METEOR_CACHE = []
 
 
 
-def _fireball():
+def integrateFireball():
     """ Integrate the fireball of the tests once.
 
     Return:
         [BentDragMeteor object] The fireball.
     """
 
-    if not _METEOR:
-        _METEOR.append(BentDragMeteor(*FIREBALL))
+    if not METEOR_CACHE:
+        METEOR_CACHE.append(BentDragMeteor(*FIREBALL))
 
-    return _METEOR[0]
+    return METEOR_CACHE[0]
 
 
 
-def _perpendicularErrors(traj, meteor):
+def perpendicularErrors(traj, meteor):
     """ Compute the distances of the model points of a solution from the true positions, across the path.
 
     Arguments:
@@ -59,8 +57,7 @@ def _perpendicularErrors(traj, meteor):
         [ndarray] Distances across the path, of all points of all stations (m).
     """
 
-    # The solver takes its first frame as the reference time, which comes after the beginning of the visible
-    #   part by the phase of the frames
+    # Take the time of the solver's first frame from the beginning of the visible part
     t_off = (traj.jdt_ref - JDT_REF)*86400.0
 
     errors = []
@@ -78,7 +75,7 @@ def _perpendicularErrors(traj, meteor):
 
 
 
-def _decelerate(traj, v_beg, v_end):
+def decelerateLengths(traj, v_beg, v_end):
     """ Replace the lengths of the points of a solved trajectory by those of a meteor which slows down
         linearly in time.
 
@@ -88,7 +85,9 @@ def _decelerate(traj, v_beg, v_end):
         v_end: [float] Velocity at the last point (m/s).
 
     Return:
-        (t0, t_end): [tuple of float] Times of the first and of the last point (s).
+        (t0, t_end):
+            - t0: [float] Time of the first point (s).
+            - t_end: [float] Time of the last point (s).
     """
 
     t0 = min([obs.time_data[0] for obs in traj.observations])
@@ -103,7 +102,7 @@ def _decelerate(traj, v_beg, v_end):
 
 
 
-def _solveFireball(gravity_decel, jacchia_fit=None):
+def solveFireball(gravity_decel, jacchia_fit=None):
     """ Solve the noise-free fireball with the gravity correction.
 
     Arguments:
@@ -111,7 +110,7 @@ def _solveFireball(gravity_decel, jacchia_fit=None):
 
     Keyword arguments:
         jacchia_fit: [ndarray] Parameters a1 and a2 which the Jacchia fit of the lag returns instead of the
-            fit, for every station and for all of them. None by default, the fit is done.
+            fit, for every station and for all of them. None by default, when the fit is done.
 
     Return:
         (traj, radiant_error, perp_errors):
@@ -121,7 +120,7 @@ def _solveFireball(gravity_decel, jacchia_fit=None):
             - perp_errors: [ndarray] Distances of the model points from the truth across the path (m).
     """
 
-    meteor = _fireball()
+    meteor = integrateFireball()
 
     traj = observeMeteor(meteor, noise=0.0, gravity_correction=True, gravity_decel=gravity_decel, \
         calc_orbit=False)
@@ -131,16 +130,19 @@ def _solveFireball(gravity_decel, jacchia_fit=None):
 
     else:
 
-        # Replace the Jacchia fit on the class of this object (wmpl loads every module twice)
+        # Replace the Jacchia fit on the class of the trajectory object
         traj_class = type(traj)
         original = traj_class.fitJacchiaLag
 
-        def _replacedFit(self, observations):
+        def replacedFit(self, observations):
+            """ Set the given Jacchia fit instead of fitting it. """
+
             for obs in observations:
                 obs.jacchia_fit = np.array(jacchia_fit)
+
             return np.array(jacchia_fit)
 
-        traj_class.fitJacchiaLag = _replacedFit
+        traj_class.fitJacchiaLag = replacedFit
 
         try:
             traj.run()
@@ -148,10 +150,11 @@ def _solveFireball(gravity_decel, jacchia_fit=None):
         finally:
             traj_class.fitJacchiaLag = original
 
+    # Compare the radiant with the direction of motion at the solver's first frame
     t_off = (traj.jdt_ref - JDT_REF)*86400.0
     radiant_error = 3600*np.degrees(np.linalg.norm(traj.radiant_eci_mini - meteor.radiantAtTime(t_off)))
 
-    return traj, radiant_error, _perpendicularErrors(traj, meteor)
+    return traj, radiant_error, perpendicularErrors(traj, meteor)
 
 
 
@@ -166,7 +169,7 @@ def testTheScaleIsOneAtAConstantVelocity():
 
 
 def testTheScaleOfALinearDeceleration():
-    """ Check the scale against the analytic drop of a linear deceleration, v = v0*(1 - a*t), which is
+    """ Check that the scale matches the analytic drop of a linear deceleration v = v0*(1 - a*t), which is
         g_perp*((u^2*ln(u)/2 - u^2/4) + 1/4)/a^2 with u = 1 - a*t.
     """
 
@@ -174,6 +177,7 @@ def testTheScaleOfALinearDeceleration():
     time_rel = np.linspace(0.0, 5.0, 1001)
     scale = gravityDropScale(time_rel, 20000.0*(1 - a*time_rel))
 
+    # Compute the analytic scale
     u = 1 - a*time_rel[1:]
     drop = ((u**2*np.log(u)/2 - u**2/4) + 1/4)/a**2
     expected = drop/(0.5*time_rel[1:]**2)
@@ -190,7 +194,7 @@ def testTheScaleGivesTheDropOfABentPath():
         and gravity, from its tangent at the first point.
     """
 
-    meteor = _fireball()
+    meteor = integrateFireball()
 
     time_rel = np.linspace(0.0, meteor.t_vis_end - meteor.t_vis_beg, 1001)
     pos = meteor.eciAtTime(time_rel)
@@ -204,6 +208,7 @@ def testTheScaleGivesTheDropOfABentPath():
     g_vec = -GM_EARTH*pos[0]/np.linalg.norm(pos[0])**3
     g_perp = np.linalg.norm(g_vec - (g_vec @ direction)*direction)
 
+    # Compute the drop at a constant velocity and the scaled drop
     drop_const = 0.5*g_perp*time_rel**2
     drop_scaled = gravityDropScale(time_rel, meteor.velocityAtTime(time_rel))*drop_const
 
@@ -217,14 +222,16 @@ def testTheSolverRecoversABentFireball():
         the scaled drop, and not with the drop at a constant velocity.
     """
 
-    traj, radiant_error, perp_errors = _solveFireball(True)
+    # Check the solution with the scaled drop
+    traj, radiant_error, perp_errors = solveFireball(True)
 
     assert traj.gravity_drop_scale is not None
     assert 0.8 < traj.gravity_drop_scale[1][-1] < 0.9
     assert radiant_error < 1.0
     assert np.max(perp_errors) < 1.0
 
-    traj_const, radiant_error_const, perp_errors_const = _solveFireball(False)
+    # Check the solution with the drop at a constant velocity
+    traj_const, radiant_error_const, perp_errors_const = solveFireball(False)
 
     assert traj_const.gravity_drop_scale is None
     assert radiant_error_const > 3.0
@@ -233,12 +240,13 @@ def testTheSolverRecoversABentFireball():
 
 
 def testTheDropFactorIsTheGravityFactorTimesTheScale():
-    """ Check the factor of the drop at given times, with and without a scale. """
+    """ Check that the factor of the drop is the gravity factor times the scale, if there is one. """
 
     traj = Trajectory(JDT_REF, gravity_factor=0.5, show_plots=False, save_results=False, verbose=False)
     assert traj.gravity_decel
     assert traj.gravityDropFactor(1.0) == 0.5
 
+    # Set a scale which falls from 1 to 0.6 in 2 s
     traj.gravity_drop_scale = (np.array([0.0, 2.0]), np.array([1.0, 0.6]))
 
     assert np.allclose(traj.gravityDropFactor(np.array([-1.0, 0.0, 1.0, 2.0, 3.0])), \
@@ -247,24 +255,24 @@ def testTheDropFactorIsTheGravityFactorTimesTheScale():
 
 
 def testNoScaleWithoutTheOptionOrInOldPickles():
-    """ Check that the drop is not scaled with gravity_decel off, or in a trajectory pickled before the option
-        was added.
-    """
+    """ Check that the drop is not scaled with gravity_decel off, or in a trajectory pickled without it. """
 
     traj, _, _ = observeStraightMeteor(gravity_correction=True)
     traj.run()
 
-    # The lengths of a decelerating meteor
-    _decelerate(traj, 20000.0, 10000.0)
+    # Set the lengths of a decelerating meteor
+    decelerateLengths(traj, 20000.0, 10000.0)
 
     traj.gravity_decel = True
     traj.calcGravityDropScale(traj.observations)
     assert traj.gravity_drop_scale is not None
 
+    # Check that the option turns the scale off
     traj.gravity_decel = False
     traj.calcGravityDropScale(traj.observations)
     assert traj.gravity_drop_scale is None
 
+    # Check an old pickle without the option
     del traj.gravity_decel
     traj.calcGravityDropScale(traj.observations)
     assert traj.gravity_drop_scale is None
@@ -279,12 +287,13 @@ def testTheVelocityIsHeldAboveWhereAblationStops():
     traj, _, _ = observeStraightMeteor(gravity_correction=True)
     traj.run()
 
-    # The lengths of a meteor which slows down linearly from 20 to 1 km/s
-    t0, t_end = _decelerate(traj, 20000.0, 1000.0)
+    # Set the lengths of a meteor which slows down linearly from 20 to 1 km/s
+    t0, t_end = decelerateLengths(traj, 20000.0, 1000.0)
 
     traj.calcGravityDropScale(traj.observations)
     time_rel, scale = traj.gravity_drop_scale
 
+    # Compare the scale with that of the true velocity, held and not held
     vel = 20000.0 - 19000.0*time_rel/(t_end - t0)
     held = gravityDropScale(time_rel, np.maximum(vel, GRAVITY_DROP_MIN_VEL))[-1]
     not_held = gravityDropScale(time_rel, vel)[-1]
@@ -293,8 +302,7 @@ def testTheVelocityIsHeldAboveWhereAblationStops():
     assert abs(scale[-1] - held) < 0.002
     assert abs(held - not_held) > 0.02
 
-    # The scale is the same when the times do not start at 0, as when the first point is not at the
-    #   reference time
+    # Check that the scale is the same when the times do not start at 0
     for obs in traj.observations:
         obs.time_data = obs.time_data + 0.7
 
@@ -304,7 +312,7 @@ def testTheVelocityIsHeldAboveWhereAblationStops():
 
 
 
-def _lengths(profile, times, duration):
+def integrateLengths(profile, times, duration):
     """ Integrate a velocity profile to the lengths at the given times.
 
     Arguments:
@@ -324,9 +332,9 @@ def _lengths(profile, times, duration):
 
 
 
-def _twoStations(duration, fps=25.0):
-    """ Times of the points of two stations, one until 70% of the duration and one from 25%, whose frames
-        are not simultaneous.
+def twoStationTimes(duration, fps=25.0):
+    """ Make the times of the points of two stations, one until 70% of the duration and one from 25%, whose
+        frames are not simultaneous.
 
     Arguments:
         duration: [float] Duration of the meteor (s).
@@ -335,7 +343,9 @@ def _twoStations(duration, fps=25.0):
         fps: [float] Frame rate (frames per second). 25 by default.
 
     Return:
-        (times, n_first): [tuple] Times of the points (s), and the number of points of the first station.
+        (times, n_first):
+            - times: [ndarray] Times of the points (s).
+            - n_first: [int] Number of points of the first station.
     """
 
     times_first = np.arange(0.0, 0.7*duration, 1.0/fps)
@@ -346,8 +356,8 @@ def _twoStations(duration, fps=25.0):
 
 
 def testTheVelocityFollowsAFragmentingFireball():
-    """ Check the velocity fitted to noisy lengths of two stations against the true velocity of a fireball
-        which fragments, a deceleration which an exponential does not follow.
+    """ Check that the velocity fitted to noisy lengths of two stations follows a fireball which fragments,
+        a deceleration which an exponential does not follow.
     """
 
     duration = 8.0
@@ -355,6 +365,8 @@ def testTheVelocityFollowsAFragmentingFireball():
 
     # A slow deceleration, and 4 km/s lost in about 1 s at 5 s
     def profile(t):
+        """ Velocity of the fireball (m/s) at the time t (s). """
+
         return 16000.0 - 300.0*t - 2000.0*(1 + np.tanh((t - 5.0)/0.3))
 
     vel_true = profile(time_eval)
@@ -363,8 +375,8 @@ def testTheVelocityFollowsAFragmentingFireball():
 
         # 50 m of noise, and an offset of 30 m between the stations
         rng = np.random.default_rng(seed)
-        times, n_first = _twoStations(duration)
-        lengths = _lengths(profile, times, duration) + rng.normal(0.0, 50.0, len(times))
+        times, n_first = twoStationTimes(duration)
+        lengths = integrateLengths(profile, times, duration) + rng.normal(0.0, 50.0, len(times))
         lengths[n_first:] += 30.0
 
         vel = segmentedVelocity(times, lengths, time_eval)
@@ -372,12 +384,12 @@ def testTheVelocityFollowsAFragmentingFireball():
         assert np.sqrt(np.mean((vel - vel_true)**2)) < 100.0
         assert abs(gravityDropScale(time_eval, vel)[-1] - gravityDropScale(time_eval, vel_true)[-1]) < 0.002
 
-        # Outside the times of the points, the velocity at the nearest point
+        # Check that the velocity is held outside the times of the points
         outside = segmentedVelocity(times, lengths, np.array([-1.0, np.min(times), np.max(times), \
             np.max(times) + 1.0]))
         assert (outside[0] == outside[1]) and (outside[2] == outside[3])
 
-    # Fewer than 3 distinct times give no velocity
+    # Check that fewer than 3 distinct times give no velocity
     assert segmentedVelocity(np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 2.0]), time_eval) is None
 
 
@@ -392,8 +404,9 @@ def testNoChangeOfVelocityIsFoundAtAConstantVelocity():
 
     for seed in range(10):
 
+        # 100 m of noise, and an offset of 30 m between the stations
         rng = np.random.default_rng(seed)
-        times, n_first = _twoStations(duration)
+        times, n_first = twoStationTimes(duration)
         lengths = 15000.0*times + rng.normal(0.0, 100.0, len(times))
         lengths[n_first:] += 30.0
 
@@ -417,16 +430,20 @@ def testAChangeOfVelocityByGravityAloneIsFollowed():
     for acc in (8.0, -8.0):
 
         def profile(t):
+            """ Velocity of the meteor (m/s) at the time t (s). """
+
             return 11000.0 + acc*t
 
+        # Check that the true scale differs from 1
         scale_true = gravityDropScale(time_eval, profile(time_eval))[-1]
         assert abs(scale_true - 1.0) > 0.002
 
         for seed in range(5):
 
+            # 30 m of noise
             rng = np.random.default_rng(seed)
-            times, _ = _twoStations(duration)
-            lengths = _lengths(profile, times, duration) + rng.normal(0.0, 30.0, len(times))
+            times, _ = twoStationTimes(duration)
+            lengths = integrateLengths(profile, times, duration) + rng.normal(0.0, 30.0, len(times))
 
             vel = segmentedVelocity(times, lengths, time_eval)
 
@@ -445,6 +462,8 @@ def testFewNoisyPointsDoNotMakeTheVelocityOscillate():
     time_eval = np.linspace(0.0, duration, 1001)
 
     def profile(t):
+        """ Velocity of the meteor (m/s) at the time t (s). """
+
         return 70000.0 - 3000.0*t
 
     for seed in range(10):
@@ -453,7 +472,7 @@ def testFewNoisyPointsDoNotMakeTheVelocityOscillate():
         rng = np.random.default_rng(seed)
         times = [np.arange(0.0, 0.6, 0.04), np.arange(0.3, duration, 0.15) + 0.01, \
             np.arange(2.4, 3.1, 0.04) + 0.02]
-        lengths = [_lengths(profile, t, duration) + rng.normal(0.0, 400.0, len(t)) for t in times]
+        lengths = [integrateLengths(profile, t, duration) + rng.normal(0.0, 400.0, len(t)) for t in times]
         lengths[1] += 300.0
         lengths[2] -= 300.0
 
@@ -469,8 +488,8 @@ def testTheScaleDoesNotUseTheJacchiaFit():
         one far from the deceleration of the fireball.
     """
 
-    traj, radiant_error, _ = _solveFireball(True)
-    traj_jacchia, radiant_error_jacchia, _ = _solveFireball(True, jacchia_fit=[500.0, 5.0])
+    traj, radiant_error, _ = solveFireball(True)
+    traj_jacchia, radiant_error_jacchia, _ = solveFireball(True, jacchia_fit=[500.0, 5.0])
 
     assert np.allclose(traj_jacchia.jacchia_fit, [500.0, 5.0])
     assert np.array_equal(traj.gravity_drop_scale[1], traj_jacchia.gravity_drop_scale[1])
@@ -480,9 +499,8 @@ def testTheScaleDoesNotUseTheJacchiaFit():
 
 
 def testAMeteorWithoutDecelerationIsNotScaled():
-    """ Check that a straight meteor at a constant velocity keeps the drop at a constant velocity, without
-        noise and with about 20 arcsec of noise. With noise, the lengths show no change of velocity, and the
-        solution is the same as without the scale.
+    """ Check that a straight meteor at a constant velocity, without and with about 20 arcsec of noise, keeps
+        the drop at a constant velocity.
     """
 
     for kwargs in (dict(noise=0.0), dict(seed=1), dict(seed=2)):
@@ -492,6 +510,7 @@ def testAMeteorWithoutDecelerationIsNotScaled():
 
         assert (traj.gravity_drop_scale is None) or (np.min(traj.gravity_drop_scale[1]) > 0.999)
 
+        # Check that the noisy solution is the same as without the scale
         if 'seed' in kwargs:
 
             unscaled, _, _ = observeStraightMeteor(gravity_correction=True, gravity_decel=False, **kwargs)
@@ -505,11 +524,7 @@ def testAMeteorWithoutDecelerationIsNotScaled():
 
 def testTheSpeedGravityAddsAlongThePathDoesNotScaleTheDrop():
     """ Check that a noise-free meteor at a constant velocity, dropped by gravity, is solved as well with the
-        scale as without it, also when the picks of the first 2 s are ignored. Gravity also speeds the meteor
-        up along its path, which does not bend it, and the lengths on the straight line of the first pass
-        hold that speed: when they gave the scale, the radiant was 0.10 arcsec off, and 0.71 arcsec with the
-        first picks ignored, against 0.004 and 0.003 arcsec without the scale. The second limit leaves room
-        for the line-of-sight fit, which can stop away from the minimum with these picks (see #154).
+        scale as without it, also when the picks of the first 2 s are ignored.
     """
 
     for ignore_before, radiant_limit in ((0.0, 0.03), (2.0, 0.2)):
@@ -535,9 +550,8 @@ def testTheSpeedGravityAddsAlongThePathDoesNotScaleTheDrop():
 
             errors.append(3600*np.degrees(angleBetweenVectors(solved.radiant_eci_mini, radiant_eci)))
 
-        # Check the radiant with the scale, against the truth and against the solution without it. The margin
-        #   of the second check is above the precision of the line-of-sight fit, whose tolerances (#194) leave
-        #   the fits about 0.01 arcsec apart on this meteor
+        # Check the radiant with the scale against the truth, and against the solution without it to the
+        #   precision of the line-of-sight fit
         assert errors[1] < radiant_limit
         assert errors[1] < max(errors[0], 0.01) + 0.01
 
