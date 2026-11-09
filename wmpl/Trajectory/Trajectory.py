@@ -2288,12 +2288,7 @@ def _MCTrajSolve(params):
 
 def timingWeightedRun(mc_results, traj):
     """ Choose the Monte Carlo run nearest the mean of the runs weighted by the likelihood of their timing
-        residuals. Each run fits the lines of sight with added noise, so the runs sample the lines which the
-        measurements allow, and the timing residuals of the original measurements on the line of a run tell
-        how well its lengths agree between the stations. Weighted by exp(-chi2/2) of their timing residuals,
-        the runs give the mean of the solutions allowed by both (Vida et al. 2020 choose the run with the
-        lowest timing residuals instead, which is the most extreme of many noisy runs and so less accurate).
-        The run nearest that mean is returned, so that all values of the solution come from one line.
+        residuals, exp(-chi2/2), rather than the run with the lowest timing residuals (Vida et al. 2020).
 
     References:
         Vida, D., Gural, P. S., Brown, P. G., Campbell-Brown, M., & Wiegert, P. (2020). Estimating
@@ -2302,24 +2297,24 @@ def timingWeightedRun(mc_results, traj):
 
     Arguments:
         mc_results: [list] Trajectory objects of the Monte Carlo runs, which may include the original one.
-        traj: [Trajectory object] Original solution. Its timing residuals, the mean square of the residuals
-            at its timing offsets, give the variance of a residual.
+        traj: [Trajectory object] Original solution, whose timing residuals give the variance of a residual.
 
     Return:
         [int] Index of the chosen run in mc_results.
     """
 
+    # Take the timing residuals of the runs, infinite if they are missing
     timing_res = np.array([np.inf if traj_tmp.timing_res is None else traj_tmp.timing_res \
         for traj_tmp in mc_results], dtype=np.float64)
     finite = np.isfinite(timing_res)
 
-    # The run with the lowest timing residuals, used without a scale of the residuals
+    # Find the run with the lowest timing residuals, used without a scale of the residuals
     lowest = int(np.argmin(np.where(finite, timing_res, np.inf)))
 
-    # Count the timing residuals of the original solution. The timing residuals of a run are their weighted
-    #   mean square, so chi2 is their count times the ratio of the mean squares
+    # Count the timing residuals of the original solution
     res_count = sum([len(diffs) for _, _, diffs, _ in timingDifferences(traj.observations)])
 
+    # Return the lowest run if the residuals cannot be scaled
     if (traj.timing_res is None) or (not np.isfinite(traj.timing_res)) or (traj.timing_res <= 0) \
         or (res_count <= 0) or (np.count_nonzero(finite) < 3):
 
@@ -2331,6 +2326,7 @@ def timingWeightedRun(mc_results, traj):
     weights = np.exp(-(chi2 - np.min(chi2))/2)
     weights /= np.sum(weights)
 
+    # Take the radiants and the state vectors of the runs with finite timing residuals
     runs = [traj_tmp for traj_tmp, ok in zip(mc_results, finite) if ok]
     radiants = np.array([vectNorm(traj_tmp.radiant_eci_mini) for traj_tmp in runs])
     state_vects = np.array([traj_tmp.state_vect_mini for traj_tmp in runs])
@@ -2439,7 +2435,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         return traj, None
 
 
-    # Choose the run nearest the mean of the runs weighted by the likelihood of their timing residuals
+    # Choose the run nearest the mean of the runs weighted by their timing residuals
     best_traj_ind = timingWeightedRun(mc_results, traj)
 
     # Choose the best trajectory
