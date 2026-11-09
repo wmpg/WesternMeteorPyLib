@@ -122,10 +122,9 @@ class ObservedPoints(object):
                 computed at jdt_ref, as CAMS does. Give it for data that follows the passage of time during
                 the meteor, as RMS does: otherwise each line of sight is rotated by the Earth's rotation
                 since jdt_ref.
-            dut1: [float] UT1 - UTC (s). The directions of the measurements are converted from the frame of
-                the stars to the ECI coordinates of wmpl, which turn with the Earth by UTC (see
-                wmpl.Utils.EarthRotation). 0 by default, which takes the directions as turning with the
-                Earth by UTC already, e.g. azimuths and altitudes computed from a model in those coordinates.
+            dut1: [float] UT1 - UTC (s), by which the measured directions are turned from the frame of the
+                stars into the ECI coordinates of wmpl (see wmpl.Utils.EarthRotation). 0.0 by default (no
+                rotation).
         """
 
         ### INPUT DATA ###
@@ -144,7 +143,7 @@ class ObservedPoints(object):
         if radec_jd is not None:
             self.radec_jd = np.array(radec_jd, dtype=np.float64)
 
-        # UT1 - UTC (s), by which the directions measured against the stars are turned into the ECI frame
+        # UT1 - UTC (s)
         self.dut1 = dut1
 
 
@@ -491,10 +490,7 @@ class ObservedPoints(object):
 
 
     def calcECI(self):
-        """ Calculate Earth-centered inertial coordinates from RA and Dec. The R.A./Dec. are against the
-            stars, and the ECI coordinates of wmpl turn with the Earth by UTC, so they are turned by
-            UT1 - UTC.
-        """
+        """ Calculate Earth-centered inertial coordinates from RA and Dec, turned by UT1 - UTC. """
 
         # Calculate measurement ECI coordinates for the planes intersection method
         self.meas_eci = inertialToECI(np.array(raDec2ECI(self.ra_data, self.dec_data)).T, self.dut1)
@@ -2070,7 +2066,7 @@ def trajNoiseGenerator(traj, noise_sigma):
 
                 ###
 
-                # Calculate RA, Dec for the given point, against the stars as the measurements are
+                # Calculate RA, Dec for the given point against the stars
                 ra, dec = eci2RaDec(eciToInertial(meas_eci_noise, getattr(obs, 'dut1', 0.0)))
 
                 # Calculate azimuth and altitude of this direction vector
@@ -2675,12 +2671,9 @@ class Trajectory(object):
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
-            dut1: [float] UT1 - UTC at the time of the meteor (s). None by default, which takes it from the
-                IERS tables (see wmpl.Utils.EarthRotation.deltaUT1). The Earth turns by UT1, and the
-                R.A./Dec. of the measurements are against the stars, with the azimuths and altitudes reduced
-                from them with UTC, as RMS and CAMS do. The lines of sight are turned by the rotation of the
-                Earth in UT1 - UTC, and the radiant and the orbit back. Give 0 for observations computed with
-                UTC as UT1, e.g. synthetic ones made with the conversions of wmpl.
+            dut1: [float] UT1 - UTC at the time of the meteor (s), by which the lines of sight are turned
+                into the ECI coordinates of wmpl (see wmpl.Utils.EarthRotation). If None, it is read from
+                the IERS tables. Give 0 for observations computed with UTC as UT1. None by default.
             show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
@@ -2718,7 +2711,7 @@ class Trajectory(object):
         # Measurement type
         self.meastype = meastype
 
-        # UT1 - UTC (s), by which the lines of sight are turned into the ECI frame, which turns by UTC
+        # UT1 - UTC (s), read from the IERS tables if not given
         self.dut1 = deltaUT1(jdt_ref) if dut1 is None else float(dut1)
 
         # Directory where the trajectory estimation results will be saved
@@ -4568,7 +4561,7 @@ class Trajectory(object):
         
         out_str += "\n"
 
-        # UT1 - UTC, by which the lines of sight were turned into the ECI frame (see EarthRotation)
+        # Write UT1 - UTC
         out_str += "UT1 - UTC: {:+.4f} s\n\n".format(getattr(self, 'dut1', 0.0))
 
 

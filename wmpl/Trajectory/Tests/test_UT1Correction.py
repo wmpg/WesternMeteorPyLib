@@ -1,6 +1,7 @@
-""" Tests of the correction for UT1 - UTC (wmpl.Utils.EarthRotation) in the trajectory solver and the orbit.
-    Cameras calibrated on the stars measure directions against them, while the ECI coordinates of wmpl turn
-    with the Earth by UTC, which the Earth does not follow: it turns by UT1.
+""" Tests of the UT1 - UTC correction (wmpl.Utils.EarthRotation) of the trajectory solver and the orbit.
+
+The observations are directions measured against the stars, while the ECI coordinates of wmpl turn with the
+Earth by UTC instead of UT1.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_UT1Correction.py -v
@@ -30,7 +31,7 @@ DUT1 = 0.5
 
 
 
-def _angleArcsec(vect1, vect2):
+def angleArcsec(vect1, vect2):
     """ Compute the angle between two directions from their chord, precise for small angles.
 
     Arguments:
@@ -47,17 +48,16 @@ def _angleArcsec(vect1, vect2):
 
 
 
-def _observeAgainstTheStars(dut1, meastype=1, **kwargs):
-    """ Observe the straight meteor of SyntheticTrajectory as cameras calibrated on the stars do: the
-        directions are those of the ECI coordinates of wmpl turned by the rotation of the Earth in DUT1, given
-        as R.A./Dec. (meastype 1), or as the azimuths and altitudes reduced from them with UTC (meastype 2).
+def observeAgainstTheStars(dut1, meastype=1, **kwargs):
+    """ Observe the straight meteor of SyntheticTrajectory against the stars, with the Earth turned by DUT1
+        of UT1 - UTC, as R.A./Dec. or as the azimuths and altitudes reduced from them with UTC.
 
     Arguments:
         dut1: [float] UT1 - UTC given to the solver (s).
 
     Keyword arguments:
         meastype: [int] 1 for R.A./Dec., 2 for azimuths and altitudes. 1 by default.
-        **kwargs: Other arguments of the Trajectory object.
+        kwargs: [dict] Other arguments of the Trajectory object.
 
     Return:
         (traj, begin, radiant_eci):
@@ -92,7 +92,7 @@ def _observeAgainstTheStars(dut1, meastype=1, **kwargs):
 
 
 
-def _distanceFromLine(point, begin, radiant_eci):
+def distanceFromLine(point, begin, radiant_eci):
     """ Compute the distance of a point from the line through the beginning of the meteor.
 
     Arguments:
@@ -110,31 +110,32 @@ def _distanceFromLine(point, begin, radiant_eci):
 
 
 
-@pytest.mark.parametrize("meastype", [1, 2])
+@pytest.mark.parametrize('meastype', [1, 2])
 def testDirectionsAgainstTheStarsGiveTheTrueLine(meastype):
-    """ Check that directions measured against the stars, as R.A./Dec. or as the azimuths and altitudes
-        reduced from them with UTC, give the true line and radiant, and that the radiant of the orbit is the
-        true one against the stars.
+    """ Check that directions measured against the stars give the true line and radiant, and that the
+        radiant of the orbit is the true one against the stars.
+
+    Arguments:
+        meastype: [int] 1 for R.A./Dec., 2 for azimuths and altitudes.
     """
 
-    traj, begin, radiant_eci = _observeAgainstTheStars(DUT1, meastype=meastype, monte_carlo=False)
+    traj, begin, radiant_eci = observeAgainstTheStars(DUT1, meastype=meastype, monte_carlo=False)
     traj = traj.run()
 
-    assert _distanceFromLine(traj.state_vect_mini, begin, radiant_eci) < 0.01
-    assert _angleArcsec(traj.radiant_eci_mini, radiant_eci) < 0.01
+    assert distanceFromLine(traj.state_vect_mini, begin, radiant_eci) < 0.01
+    assert angleArcsec(traj.radiant_eci_mini, radiant_eci) < 0.01
 
-    # The apparent radiant of the orbit, and the R.A./Dec. of the radiant of the line-of-sight fit, are
-    #   against the stars
+    # The radiants of the orbit and of the line-of-sight fit are against the stars
     radiant_stars = eciToInertial(radiant_eci, DUT1)
-    assert _angleArcsec(raDec2ECI(traj.orbit.ra, traj.orbit.dec), radiant_stars) < 0.01
-    assert _angleArcsec(raDec2ECI(*traj.radiant_eq_mini), radiant_stars) < 0.01
+    assert angleArcsec(raDec2ECI(traj.orbit.ra, traj.orbit.dec), radiant_stars) < 0.01
+    assert angleArcsec(raDec2ECI(*traj.radiant_eq_mini), radiant_stars) < 0.01
 
     # The modelled directions are those of the measurements
     for obs in traj.observations:
         for azim, elev, model_azim, model_elev in zip(obs.azim_data, obs.elev_data, obs.model_azim, \
             obs.model_elev):
 
-            assert _angleArcsec(raDec2ECI(model_azim, model_elev), raDec2ECI(azim, elev)) < 0.01
+            assert angleArcsec(raDec2ECI(model_azim, model_elev), raDec2ECI(azim, elev)) < 0.01
 
     report = traj.saveReport(None, None, save_results=False, verbose=False)
     assert "UT1 - UTC: +0.5000 s" in report
@@ -142,31 +143,31 @@ def testDirectionsAgainstTheStarsGiveTheTrueLine(meastype):
 
 
 def testWithoutTheCorrectionTheLineIsOff():
-    """ Check that the same observations solved with UTC as UT1 are off by the amounts documented in
-        Trajectory.md (3.7 m and 2.7 arcsec for 0.5 s), so that the test above measures the correction.
+    """ Check that the same observations solved with UTC as UT1 are off by 3.7 m and 2.7 arcsec, as
+        documented in Trajectory.md.
     """
 
-    traj, begin, radiant_eci = _observeAgainstTheStars(0.0, monte_carlo=False)
+    traj, begin, radiant_eci = observeAgainstTheStars(0.0, monte_carlo=False)
     traj = traj.run()
 
-    assert 3.0 < _distanceFromLine(traj.state_vect_mini, begin, radiant_eci) < 4.5
-    assert 2.0 < _angleArcsec(traj.radiant_eci_mini, radiant_eci) < 3.5
+    assert 3.0 < distanceFromLine(traj.state_vect_mini, begin, radiant_eci) < 4.5
+    assert 2.0 < angleArcsec(traj.radiant_eci_mini, radiant_eci) < 3.5
 
 
 
 def testMonteCarloRunsKeepTheFrame():
-    """ Check that the Monte Carlo runs, whose noisy directions are converted back to azimuths and altitudes,
-        are turned as the measurements are, so that the solution they give stays on the true line.
+    """ Check that the noisy directions of the Monte Carlo runs are turned as the measurements are, so that
+        the solution stays on the true line.
     """
 
-    traj, begin, radiant_eci = _observeAgainstTheStars(DUT1, monte_carlo=True, mc_runs=4, mc_cores=1, \
+    traj, begin, radiant_eci = observeAgainstTheStars(DUT1, monte_carlo=True, mc_runs=4, mc_cores=1, \
         geometric_uncert=True)
     traj = traj.run()
 
-    assert _distanceFromLine(traj.state_vect_mini, begin, radiant_eci) < 0.05
-    assert _angleArcsec(traj.radiant_eci_mini, radiant_eci) < 0.05
+    assert distanceFromLine(traj.state_vect_mini, begin, radiant_eci) < 0.05
+    assert angleArcsec(traj.radiant_eci_mini, radiant_eci) < 0.05
 
-    # The runs are around the solution, not turned by the rotation of the Earth in UT1 - UTC
+    # The runs are not turned by the rotation of the Earth in UT1 - UTC
     un = traj.uncertainties
     assert 3600*np.degrees(np.hypot(un.ra*np.cos(traj.orbit.dec), un.dec)) < 0.05
 
@@ -174,7 +175,7 @@ def testMonteCarloRunsKeepTheFrame():
 
 def testOrbitIsComputedInTheInertialFrame():
     """ Check that the orbit turns the radiant by the rotation of the Earth in UT1 - UTC, and that the
-        Earth-fixed values, computed from the ECI coordinates of wmpl, do not change.
+        Earth-fixed values do not change.
     """
 
     _, _, begin, radiant_eci = straightMeteorPoints()
@@ -182,20 +183,21 @@ def testOrbitIsComputedInTheInertialFrame():
     orb_utc = calcOrbit(radiant_eci, STRAIGHT_V_INIT, STRAIGHT_V_INIT, begin, STRAIGHT_JDT_REF)
     orb = calcOrbit(radiant_eci, STRAIGHT_V_INIT, STRAIGHT_V_INIT, begin, STRAIGHT_JDT_REF, dut1=DUT1)
 
-    # To the resolution of a Julian date in a float, 4e-10 days, in which the Earth turns by 3e-9 rad
+    # Earth-fixed values agree to the resolution of a float Julian date (3e-9 rad)
     for name in ['lat_ref', 'lon_ref', 'azimuth_apparent', 'elevation_apparent', 'zc']:
         assert np.isclose(getattr(orb, name), getattr(orb_utc, name), rtol=0, atol=1e-8), name
 
     assert np.isclose(orb.ht_ref, orb_utc.ht_ref, rtol=0, atol=1e-3)
     assert np.isclose(orb.v_g, orb_utc.v_g, rtol=0, atol=1e-6)
 
+    # The radiant and the sidereal time turn by the rotation of the Earth
     rotation = utcRotationAngle(DUT1)
     assert np.isclose(orb.ra - orb_utc.ra, rotation, rtol=0, atol=1e-12)
     assert np.isclose(orb.dec, orb_utc.dec, rtol=0, atol=1e-12)
     assert np.isclose(orb.lst_ref - orb_utc.lst_ref, rotation, rtol=0, atol=1e-9)
 
-    # The geocentric radiant (J2000) turns by the same angle, as seen from the pole of the date
-    geocentric = _angleArcsec(raDec2ECI(orb.ra_g, orb.dec_g), raDec2ECI(orb_utc.ra_g, orb_utc.dec_g))
+    # The geocentric radiant (J2000) turns by the same angle
+    geocentric = angleArcsec(raDec2ECI(orb.ra_g, orb.dec_g), raDec2ECI(orb_utc.ra_g, orb_utc.dec_g))
     expected = 3600*np.degrees(rotation)*np.cos(orb.dec)
     assert abs(geocentric - expected) < 0.05*expected
 
@@ -220,9 +222,11 @@ def testFramesAreTurnedAroundThePole():
 
 
 def testUT1MinusUTCFromTheIERSTables(monkeypatch):
-    """ Check that UT1 - UTC is read from the IERS tables, across the leap second at the end of 2016, which
-        made it jump by one second, that it is 0 where the tables do not reach, and that the environment
-        variable gives it instead.
+    """ Check that UT1 - UTC is read from the IERS tables across the leap second at the end of 2016, that it
+        is 0 where the tables do not reach, and that the environment variable gives it instead.
+
+    Arguments:
+        monkeypatch: [object] Pytest fixture which sets the environment variable.
     """
 
     monkeypatch.delenv(DUT1_ENV, raising=False)
@@ -236,7 +240,7 @@ def testUT1MinusUTCFromTheIERSTables(monkeypatch):
     # Before the tables (1858)
     assert deltaUT1(2400000.5) == 0.0
 
-    monkeypatch.setenv(DUT1_ENV, "0.25")
+    monkeypatch.setenv(DUT1_ENV, '0.25')
     assert deltaUT1(datetime2JD(datetime.datetime(2016, 12, 31, 12))) == 0.25
 
 
@@ -244,6 +248,9 @@ def testUT1MinusUTCFromTheIERSTables(monkeypatch):
 def testTheSolverReadsTheTablesByDefault(monkeypatch):
     """ Check that the solver takes UT1 - UTC from the tables unless it is given, or set to 0 by the
         environment.
+
+    Arguments:
+        monkeypatch: [object] Pytest fixture which sets the environment variable.
     """
 
     # 2021-02-28, 21:54 UTC
@@ -253,5 +260,19 @@ def testTheSolverReadsTheTablesByDefault(monkeypatch):
     assert Trajectory(jd).dut1 == deltaUT1(jd) != 0
     assert Trajectory(jd, dut1=0.3).dut1 == 0.3
 
-    monkeypatch.setenv(DUT1_ENV, "0")
+    monkeypatch.setenv(DUT1_ENV, '0')
     assert Trajectory(jd).dut1 == 0.0
+
+
+
+if __name__ == "__main__":
+
+    # Run the tests which need no pytest fixtures
+    testDirectionsAgainstTheStarsGiveTheTrueLine(1)
+    testDirectionsAgainstTheStarsGiveTheTrueLine(2)
+    testWithoutTheCorrectionTheLineIsOff()
+    testMonteCarloRunsKeepTheFrame()
+    testOrbitIsComputedInTheInertialFrame()
+    testFramesAreTurnedAroundThePole()
+
+    print("All tests passed.")

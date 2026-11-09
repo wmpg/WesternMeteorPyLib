@@ -1,10 +1,9 @@
 """ Settings of the tests of wmpl, run with pytest. """
 
+from __future__ import print_function, division, absolute_import
+
 import os
 
 
-# The synthetic observations of the tests are computed with the conversions of wmpl, which take UTC as UT1,
-#   and the reference values of the tests were computed in the same way. So the trajectories are solved
-#   without UT1 - UTC (see wmpl.Utils.EarthRotation), unless the environment gives it. The tests of the
-#   correction give it to the solver themselves.
-os.environ.setdefault("WMPL_UT1_UTC", "0")
+# Solve the trajectories of the tests with UTC as UT1, unless the environment gives UT1 - UTC
+os.environ.setdefault('WMPL_UT1_UTC', '0')

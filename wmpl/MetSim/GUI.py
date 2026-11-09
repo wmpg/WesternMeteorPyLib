@@ -273,7 +273,7 @@ class ECSVObservations(object):
                     # Compute the station coordinates at the given time
                     stat = np.array(geo2Cartesian(meteor.latitude, meteor.longitude, meteor.height, jd))
 
-                    # Compute measurement rays in cartesian coordinates, in the frame of the trajectory
+                    # Compute measurement rays in cartesian coordinates in the frame of the trajectory
                     meas = inertialToECI(np.array(raDec2ECI(ra, dec)), getattr(self.traj, 'dut1', 0.0))
 
 
@@ -402,7 +402,7 @@ class MetObservations(object):
                     # Compute the station coordinates at the given time
                     stat = np.array(geo2Cartesian(met.lat[site], met.lon[site], met.elev[site], jd))
 
-                    # Compute measurement rays in cartesian coordinates, in the frame of the trajectory
+                    # Compute measurement rays in cartesian coordinates in the frame of the trajectory
                     meas = inertialToECI(np.array(raDec2ECI(ra, dec)), getattr(self.traj, 'dut1', 0.0))
 
 
@@ -1863,7 +1863,7 @@ def loadWakeFile(traj, file_path):
             stat = np.array(geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
                 traj.jdt_ref))
 
-            # Compute measurement rays in cartesian coordinates, in the frame of the trajectory
+            # Compute measurement rays in cartesian coordinates in the frame of the trajectory
             meas = inertialToECI(np.array(raDec2ECI(ra, dec)), getattr(traj, 'dut1', 0.0))
 
             # Calculate closest points of approach (observed line of sight to radiant line)

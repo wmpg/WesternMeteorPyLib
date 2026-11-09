@@ -348,7 +348,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
             # Convert azim/elev to RA/Dec
             ra, dec = altAz2RADec_vect(azim, elev, jd_data, exact.lat, exact.lon)
 
-            # Convert RA/Dec to ECI direction vector, in the frame of the trajectory (see EarthRotation)
+            # Convert RA/Dec to ECI direction vector in the frame of the trajectory
             x_eci, y_eci, z_eci = inertialToECI(np.array(raDec2ECI(ra, dec)).T, getattr(traj, 'dut1', 0.0)).T
 
             # Convert station geocoords to ECEF coordinates

@@ -627,9 +627,8 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             even if fixed station coordinates were used in the ECI coordinate system!
         v_init_stddev_direct: [float] Standard deviation of the direct velocity fit derived without Monte
             Carlo. None by default.
-        dut1: [float] UT1 - UTC (s). The ECI coordinates of wmpl turn with the Earth by UTC (see
-            wmpl.Utils.EarthRotation): the radiant and the reference point are turned into the inertial
-            frame, and the Earth by UT1. 0 by default, which takes UTC as UT1.
+        dut1: [float] UT1 - UTC (s), by which the radiant and the reference point are turned into the
+            inertial frame (see wmpl.Utils.EarthRotation). 0.0 by default (UTC taken as UT1).
 
     Return:
         orb: [Orbit object] Object containing the calculated orbit.
@@ -642,10 +641,11 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
     eci_x, eci_y, eci_z = eci_ref
 
-    # Turn the radiant and the reference point from the ECI coordinates of wmpl, which turn with the Earth by
-    #   UTC, into the inertial frame, and turn the Earth by UT1. The ephemerides keep the time of jd_ref
+    # Turn the radiant and the reference point into the inertial frame
     radiant_eci = eciToInertial(radiant_eci, dut1)
     eci_ref = eciToInertial(eci_ref, dut1)
+
+    # Turn the Earth by UT1 (the ephemerides keep jd_ref)
     jd_rot = jd_ref + dut1/86400.0
 
     # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid) of the reference 
@@ -1010,8 +1010,7 @@ if __name__ == "__main__":
     else:
         traj = None
 
-    # UT1 - UTC of the trajectory (see wmpl.Utils.EarthRotation). Without a trajectory, the given coordinates
-    #   are taken with UTC as UT1
+    # UT1 - UTC of the trajectory, 0 without a trajectory
     dut1 = getattr(traj, 'dut1', 0.0) if traj is not None else 0.0
 
 
@@ -1128,8 +1127,7 @@ if __name__ == "__main__":
             if cml_args.j2000:
                 ra, dec = equatorialCoordJ2000ToDate(jd_ref, ra, dec)
 
-        # Compute the radiant vector in ECI coordinates. Its R.A./Dec. are against the stars, as the orbit of
-        #   a trajectory gives them, so it is turned into the ECI coordinates of wmpl (see EarthRotation)
+        # Compute the radiant vector in ECI coordinates from the R.A./Dec. against the stars
         radiant_eci = inertialToECI(np.array(raDec2ECI(ra, dec)), dut1)
 
 

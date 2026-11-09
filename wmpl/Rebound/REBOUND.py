@@ -2297,8 +2297,7 @@ def reboundSimulate(
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
 
-        # Extract the state vector from the trajectory, turned from the ECI coordinates of wmpl, which turn
-        #   with the Earth by UTC, into the inertial frame (see wmpl.Utils.EarthRotation)
+        # Extract the state vector from the trajectory in the inertial frame
         dut1 = getattr(traj, 'dut1', 0.0)
         x, y, z = eciToInertial(traj.state_vect_mini, dut1)
         vx, vy, vz = eciToInertial(traj.v_init*traj.radiant_eci_mini, dut1)
