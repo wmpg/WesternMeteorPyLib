@@ -24,13 +24,29 @@ List of features:
    * Monte Carlo method
  * Orbit computation
  * Meteor shower/trajectory simulaton
- * Obtaining atmosphere densities using the NRLMSISE-00 model
+ * Obtaining atmosphere densities using the NRL MSIS models (NRLMSISE-00 and NRLMSIS 2.x, through `pymsis`)
  * D criteria functions
  * Parent body search
  * Coordinate system transforms
  * Solar longitude calculation (forward and inverse)
  * Orbit visualizations
  * Python 2 and 3 compatible
+
+
+
+## Documentation
+
+Individual functions are documented in their docstrings, and every module can be run directly, so
+```python -m wmpl.<Package>.<Module> --help``` is usually the quickest answer. Task-oriented manuals for
+the larger tools live in [wmpl/Docs](wmpl/Docs):
+
+ * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
+ * [Drag fit of the motion along a trajectory](wmpl/Docs/DragFit.md) - the drag model of the motion along a solved trajectory, sampling it by height or time for dark flight, and interpreting the ballistic coefficient
+ * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
+ * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
+ * [Orbit dissimilarity criteria](wmpl/Docs/OrbitSimilarity.md) - measuring how similar two orbits are, which criterion to pick, and why their thresholds are not interchangeable
+ * [Classifying a single orbit](wmpl/Docs/OrbitClassification.md) - the Tisserand parameter, the cometary tests, and the Tancredi scheme for asteroids in cometary orbits
+ * [Choosing a D-criterion threshold](wmpl/Docs/DThresholds.md) - the other half of a stream search, and why the traditional threshold is too permissive to use
 
 
 
@@ -65,13 +81,43 @@ conda install -y -c conda-forge basemap basemap-data-hires
 conda install -y -c conda-forge cartopy paramiko
 ```
 
+The atmosphere mass density is computed with the MSIS models through `pymsis`, which is only
+available on PyPI (it replaces the bundled `PythonNRLMSISE00` submodule, which is no longer used):
+
+```
+pip install "pymsis>=0.13"
+```
+
 Optionally, if you want to use the REBOUND orbital integrator, install:
 
 ```
 conda install -y -c conda-forge astropy
 conda install -y -c conda-forge rebound
-pip install reboundx
+pip install --no-build-isolation reboundx
 ```
+
+`reboundx` has no prebuilt wheels, so `pip` always compiles it. `--no-build-isolation` makes it
+compile against the `rebound` you just installed (it needs `setuptools`; run
+`pip install setuptools` if it is missing). Without it, `pip` compiles against the newest
+`rebound` on PyPI instead. The same mismatch happens if `rebound` is upgraded after `reboundx` was
+compiled. `reboundx` then fails to import, or fails to attach to the simulation (with
+`rebound` 4.3.0 this shows up as
+`Need to attach reboundx.Extras instance to simulation before setting params`).
+To repair it, recompile `reboundx` against the installed `rebound`:
+
+```
+pip install --force-reinstall --no-deps --no-build-isolation --no-binary reboundx reboundx
+```
+
+This installs the latest `reboundx`, which needs `rebound` 5 or newer, so update `rebound` first
+with the tool you installed it with. To keep an older `rebound`, pin the `reboundx` released with
+it instead (e.g. `reboundx==4.3.0` for `rebound==4.3.0`); a newer `reboundx` does not compile
+against an older `rebound`. The code works with both REBOUND 4 and 5.
+
+Both are also listed in `requirements.txt`, deliberately without version pins: `pip` resolves the
+build dependency and the runtime dependency to the same newest `rebound`, which is the one case
+where the default build isolation produces a working `reboundx`. Pinning `rebound` there does not
+work, because `reboundx` still builds against the newest one.
 
 **Platform note:** this works on **Linux and macOS**. It does **not** work on native
 Windows: `reboundx` has no Windows wheel and no conda-forge build, so `pip` compiles it
@@ -82,7 +128,7 @@ use the **Windows Subsystem for Linux (WSL2)** — install an Ubuntu distributio
 with `gcc`. Installing only `rebound` is not enough — `reboundx` must import too. Verify with:
 
 ```
-python -c "import rebound, reboundx; print('ok')"
+python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s); print('ok' if s.extras else 'reboundx not attached: reinstall it as described above')"
 ```
 
 
@@ -103,7 +149,7 @@ python setup.py install
 
 this step might take a while because it will download the DE430 ephemerids.
 
-Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` enviroment by:
+Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` environment by:
 ```
 conda activate wmpl
 ```
@@ -136,6 +182,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda install -y -c conda-forge basemap basemap-data-hires
  	conda install -y -c conda-forge cartopy paramiko
 	conda install -y -c astropy astropy
+	pip install "pymsis>=0.13"
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
@@ -153,7 +200,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	python setup.py install
 	```
 
-Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` enviroment by:
+Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` environment by:
 ```
 conda activate wmpl
 ```
@@ -165,7 +212,7 @@ If you experience any issues, please see the "Troubleshooting" section below.
 
 If you are getting the following error on Windows: ```Unable to find vcvarsall.bat```, that means you need to install [Visual C++ Build Tools 2015](http://go.microsoft.com/fwlink/?LinkId=691126) or 2022. 
 
-If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
+If you are getting this error: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file). The library itself no longer uses that submodule - the atmosphere densities come from `pymsis` - but the atmosphere regression test still compares against it.
 
 ##### ```KeyError: 'PROJ_LIB'```
 The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". 
@@ -184,7 +231,7 @@ For example on my Windows PC, the location is
 and on my Linux server it is 
 ```$HOME/miniconda3/pkgs/proj-9.3.1-he5811b7_0/share/proj```
 
-Restart any terminal, CMD or Powershell windows, and you should find that the error has been resolved.  If not, try one of the other versions of proj thats probably in your pkgs folder. 
+Restart any terminal, CMD or Powershell windows, and you should find that the error has been resolved.  If not, try one of the other versions of proj that's probably in your pkgs folder. 
 
 ##### Missing epsg file
 If you get this error:
@@ -196,7 +243,7 @@ then you have to manually download the ```epsg``` file ([LINK](https://raw.githu
 
 #### ```ImportError: cannot import name 'dedent' from 'matplotlib.cbook'``` error
 
-In the recent matplotlib versions, the maintainters really droped the ball and started shipping buggy versions. Fortunately, we can revert to an old matplotlib version to fix this:
+In the recent matplotlib versions, the maintainers really dropped the ball and started shipping buggy versions. Fortunately, we can revert to an old matplotlib version to fix this:
 
 ```
 conda install -c conda-forge matplotlib=3.1.2
@@ -229,6 +276,8 @@ If you want to use the most recent lists of comets and asteroids, download these
  * [MPC Apollos](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Apollos.html)
  * [MPC Atens](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Atens.html)
 
+The list of meteorites with photographic orbits (```wmpl/share/Meteorites_with_Orbits.csv```) is not part of that update, as it holds manual corrections. To check it against [meteoriteorbits.info](https://www.meteoriteorbits.info/), run ```python UpdateOrbitFiles.py --meteorites```: all the new meteorites are added, and for the ones already in the file it shows how each differs from the list and asks whether to update it (default no). The existing file is also kept if the page cannot be read completely.
+
 
 ## Usage
 
@@ -238,7 +287,15 @@ Module interfaces are not 100% complete yet, but individual functions are well d
 python -m wmpl.Trajectory.Trajectory
 ```
 
-or, you can use functions from the library in other scripts. E.g. if you want to run a particular function from the library, you can create a new .py file and do:
+Some modules take command line arguments. E.g. to integrate a solved trajectory 100 years back through the solar system, run:
+
+```
+python -m wmpl.Rebound.REBOUND /path/to/trajectory.pickle --days 36525 --outputs 5000
+```
+
+See [wmpl/Docs](wmpl/Docs) for the manuals covering these in full.
+
+Alternatively, you can use functions from the library in other scripts. E.g. if you want to run a particular function from the library, you can create a new .py file and do:
 
 ```
 import datetime
@@ -256,6 +313,12 @@ lasun = sollon.jd2SolLonJPL(jd_now)
 
 print(math.degrees(lasun), ' deg')
 ```
+
+
+## Contributing
+
+New code has to follow the [WMPL coding standard](CODING_STANDARD.md), so that it reads like the code around it.
+Pull requests that do not follow it will be asked to change before they are merged.
 
 
 ## Citations

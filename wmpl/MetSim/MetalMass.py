@@ -77,7 +77,7 @@ if __name__ == '__main__':
     # Name of the met file
     file_name = 'state.met'
 
-    # Frames per second of the sysem
+    # Frames per second of the system
     fps = 80.0
 
     # Average velocity (m/s)

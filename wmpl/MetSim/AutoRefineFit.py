@@ -14,8 +14,10 @@ import scipy.optimize
 from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants, loadedConstantsRelativeToGround, \
+    atmDensityDescription
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
+    ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Pickling import loadPickle
 
@@ -62,13 +64,13 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
         bounds_error=False, fill_value='extrapolate')
 
     
-    # Find the simulated length at the trajectory begining
+    # Find the simulated length at the trajectory beginning
     sim_len_beg = sim_len_interp(traj.rbeg_ele)
 
-    # Find the simulated time at the trajectory begining
+    # Find the simulated time at the trajectory beginning
     sim_time_beg = sim_time_interp(traj.rbeg_ele)
 
-    # Find the simulated velocity at the trajectory begining
+    # Find the simulated velocity at the trajectory beginning
     sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
 
     # Set the simulated length at the beginning of observations to zero
@@ -108,11 +110,15 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
         # Set a default filter which takes all observations
         mag_filter = np.ones(len(obs.model_ht), dtype=bool)
+        len_filter = np.ones(len(obs.model_ht), dtype=bool)
 
         if obs.absolute_magnitudes is not None:
 
             # Filter out observations with magnitude fainter than +9 or with NaN magnitudes
             mag_filter = (obs.absolute_magnitudes < 9) & (~np.isnan(obs.absolute_magnitudes))
+
+            # The lengths of the points without a magnitude are still used
+            len_filter = ~(obs.absolute_magnitudes >= 9)
 
             # Sample the simulated magnitude at the observation heights
             sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
@@ -123,11 +129,11 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
 
         # Sample the simulated normalized length at observed times
-        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[mag_filter])
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[len_filter])
 
-        # Compute the length residual
-        len_res_sum += np.sum(np.abs(obs.state_vect_dist[mag_filter] - sim_norm_len_sampled))
-        len_res_count += len(obs.state_vect_dist)
+        # Compute the length residual, averaged only over the points used
+        len_res_sum += np.sum(np.abs(obs.state_vect_dist[len_filter] - sim_norm_len_sampled))
+        len_res_count += np.sum(len_filter)
 
 
         # Plot the observed and simulated magnitudes
@@ -143,18 +149,18 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
             # ax_len.scatter(obs.state_vect_dist[mag_filter], obs.model_ht[mag_filter]/1000, 
             #   label=obs.station_id)
             # ax_len.plot(sim_norm_len_sampled, obs.model_ht[mag_filter]/1000)
-            ax_lenres.scatter(obs.state_vect_dist[mag_filter] - sim_norm_len_sampled, 
-                              obs.model_ht[mag_filter]/1000)
+            ax_lenres.scatter(obs.state_vect_dist[len_filter] - sim_norm_len_sampled, 
+                              obs.model_ht[len_filter]/1000)
 
             # Compute the simulated lag
-            sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[mag_filter]
+            sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[len_filter]
 
             # Compute the observed lag using the simulated velocity
-            obs_lag = obs.state_vect_dist[mag_filter] - sim_vel_beg*obs.time_data[mag_filter]
+            obs_lag = obs.state_vect_dist[len_filter] - sim_vel_beg*obs.time_data[len_filter]
 
             # Plot the lag
-            ax_lag.scatter(obs_lag, obs.model_ht[mag_filter]/1000, label=obs.station_id)
-            ax_lag.plot(sim_lag, obs.model_ht[mag_filter]/1000)
+            ax_lag.scatter(obs_lag, obs.model_ht[len_filter]/1000, label=obs.station_id)
+            ax_lag.plot(sim_lag, obs.model_ht[len_filter]/1000)
 
 
 
@@ -183,11 +189,13 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
                 ax_magres.scatter(abs_mag_data - sim_mag_sampled, height_data/1000)
 
 
-    # Compute the average magnitude residual
+    # Compute the average magnitude residual, zero without photometry
+    mag_res = 0
     if mag_res_count > 0:
         mag_res = mag_res_sum/mag_res_count
     
     # Compute the average length residual
+    len_res = 0
     if len_res_count > 0:
         len_res = len_res_sum/len_res_count
 
@@ -437,7 +445,7 @@ Exiting...
 ******************************************************************************
         """.format(param_name)
         
-        # If the intial parameter value is outside the bounds, then throw an error
+        # If the initial parameter value is outside the bounds, then throw an error
         if (bound_min is not None) and (param_val < bound_min):
             print(bound_error_text)
             print("Initial parameter value is smaller than the lower bound: {} < {}".format(
@@ -542,10 +550,20 @@ if __name__ == "__main__":
         help="Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.")
 
     arg_parser.add_argument('--updated', action='store_true', \
-        help="Load the updated simulation JSON file insted of the original one.")
+        help="Load the updated simulation JSON file instead of the original one.")
+
+    arg_parser.add_argument('--refitatm', action="store_true", \
+        help="Refit the atmosphere density polynomial of a legacy constants file, saved without " \
+        "atm_density_model, from the MSIS model instead of using the saved polynomial.")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
@@ -709,10 +727,13 @@ if __name__ == "__main__":
         raise Exception("Could not find the simulation params file in {}".format(dir_path))
 
     # Load the simulation constants
-    const, _ = loadConstants(sim_params_path)
+    const, const_json = loadConstants(sim_params_path)
     print()
     print("Loaded simulation constants from: {}".format(sim_params_path))
     print()
+
+    # Convert constants saved with the inertial speed to the ground
+    loadedConstantsRelativeToGround(const, const_json, traj)
         
     ### ###
 
@@ -726,9 +747,6 @@ if __name__ == "__main__":
     if dens_fit_ht_end < 15000:
         dens_fit_ht_end = 15000
 
-    print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
-        dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
-
     # Take mean meteor lat/lon as reference for the atmosphere model
     lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
     lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
@@ -737,8 +755,26 @@ if __name__ == "__main__":
     dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, traj.jdt_ref)
 
 
-    # Assign the density coefficients
-    const.dens_co = dens_co
+    # Tabulate the density over the whole simulation, which is used if the constants have the table model
+    atm_ht_max = max(ATM_TABLE_HT_MAX, dens_fit_ht_beg)
+    const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, ATM_TABLE_HT_MIN, \
+        atm_ht_max, traj.jdt_ref)
+    const.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, traj.jdt_ref, height_max=atm_ht_max)
+
+    # Keep the saved polynomial of a legacy constants file unless it is refitted
+    if (const.atm_density_model == 'polynomial') and (not cml_args.refitatm):
+        const.dens_co = np.array(const.dens_co)
+        const.atm_density_info = None
+        print("Using the atmosphere density polynomial saved in the constants file, give --refitatm to " \
+            "refit it from the MSIS model.")
+
+    else:
+        const.dens_co = dens_co
+        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+            dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
+
+    # Print the atmosphere the simulation uses
+    print(atmDensityDescription(const))
 
     ### ###
 
@@ -802,13 +838,13 @@ if __name__ == "__main__":
         bounds_error=False, fill_value='extrapolate')
 
 
-    # Find the simulated length at the trajectory begining
+    # Find the simulated length at the trajectory beginning
     sim_len_beg = sim_len_interp(traj.rbeg_ele)
 
-    # Find the simulated time at the trajectory begining
+    # Find the simulated time at the trajectory beginning
     sim_time_beg = sim_time_interp(traj.rbeg_ele)
 
-    # Find the simulated velocity at the trajectory begining
+    # Find the simulated velocity at the trajectory beginning
     sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
 
     # Set the simulated length at the beginning of observations to zero

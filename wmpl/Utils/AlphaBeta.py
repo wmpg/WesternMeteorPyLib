@@ -19,7 +19,7 @@ import scipy.interpolate
 
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Physics import dynamicPressure, dynamicMass
-from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
+from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere
 
 
 # Scale height
@@ -234,8 +234,13 @@ def expLinearVelocity(t, v0, a1, a2, t0, decel):
     return vel
 
 
-def lagFitVelocity(time_data, lag_data, vel_data, v0):
-    """ Fit a smooth model to the lag data, to improve the alpha-beta fit. """
+def lagFitVelocity(time_data, lag_data, vel_data, v0, seed=0):
+    """ Fit a smooth model to the lag data, to improve the alpha-beta fit.
+
+    Keyword arguments:
+        seed: [int or None] Random seed for the basinhopping global optimizer, so that repeated runs
+            on the same data give the same fit. None draws a fresh seed on every call.
+    """
 
 
     def _lagMinimization(params, time_data, lag_data, weights):
@@ -273,7 +278,7 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
 
     # Use robust fitting
     res = scipy.optimize.basinhopping(_lagMinimization, p0, niter=200, T=2.0,\
-        minimizer_kwargs={'args':(time_data, lag_data, weights), 'method':'Nelder-Mead'})
+        minimizer_kwargs={'args':(time_data, lag_data, weights), 'method':'Nelder-Mead'}, seed=seed)
     fit_params = res.x
 
     # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, sharex=True)
@@ -5052,10 +5057,14 @@ if __name__ == "__main__":
         help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
         type=float, default=0.55)
 
+    arg_parser.add_argument('-r', '--robust', action="store_true", \
+        help="Fit alpha-beta with the robust velocity-residual fit (method='robust') instead of "
+        "the default Q4 fit. Implied by --errors, which always uses the robust fit.")
+
     arg_parser.add_argument('-e', '--errors', action="store_true", \
-        help="Estimate and report alpha/beta and initial/final mass uncertainties. Forces a "
-        "robust fit (method='robust'), propagates the fitted (ln alpha, ln beta) covariance into "
-        "the masses, and draws an uncertainty ellipse on the survival diagram.")
+        help="Estimate and report alpha/beta and initial/final mass uncertainties. Always uses "
+        "the robust fit (method='robust'), propagates the fitted (ln alpha, ln beta) covariance "
+        "into the masses, and draws an uncertainty ellipse on the survival diagram.")
 
     arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
         help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
@@ -5065,8 +5074,21 @@ if __name__ == "__main__":
         help="1-sigma uncertainty on the bulk density, in kg/m^3, folded into the mass error "
         "estimate when --errors is set. Default: the density is treated as exactly known.")
 
+    arg_parser.add_argument('-x', '--hideplots', action="store_true", \
+        help="Don't show the plots on the screen. Combine with --saveplots to only write them to disk.")
+
+    arg_parser.add_argument('-s', '--saveplots', action="store_true", \
+        help="Save the plots as PNGs to the trajectory pickle directory, named after the trajectory "
+        "timestamp (e.g. 20191023_091225_alpha_beta_fit.png).")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
@@ -5076,6 +5098,20 @@ if __name__ == "__main__":
 
         # Load the trajectory pickle
         traj = loadPickle(*os.path.split(cml_args.traj_path))
+
+        # Plots are saved next to the trajectory pickle
+        dir_path = os.path.dirname(cml_args.traj_path)
+
+        def _finishPlot(fig, suffix):
+            """ Save the figure (if --saveplots) and show it (unless --hideplots). """
+
+            if cml_args.saveplots:
+                fig.savefig(os.path.join(dir_path, traj.file_name + "_" + suffix + ".png"), dpi=300)
+
+            if cml_args.hideplots:
+                plt.close(fig)
+            else:
+                plt.show()
 
         # Dictionary for storing time, height, and velocity data per station
         ht_data_dict = {}
@@ -5157,7 +5193,8 @@ if __name__ == "__main__":
             v_init, alpha, beta, fit_errors = fitAlphaBeta(vel_input, ht_data_rescaled, \
                 v_init=traj.v_init, method='robust', estimate_errors=True)
         else:
-            v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init)
+            v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init, \
+                method='robust' if cml_args.robust else 'q4')
             fit_errors = None
 
         # Estimate the final velocity from the fitted alpha-beta solution
@@ -5218,11 +5255,11 @@ if __name__ == "__main__":
                 if --errors produced a (finite) estimate for it, plain otherwise.
             """
             if (mass_err is not None) and np.isfinite(mass_err[key + '_std_rel']):
-                print("    {:s} = {:.2e} kg (+/-{:.1%})  [{:.3g}% CI: {:.2e} - {:.2e}]".format(
+                print("    {:s} = {:.3e} kg (+/-{:.1%})  [{:.3g}% CI: {:.3e} - {:.3e}]".format(
                     label, mass, mass_err[key + '_std_rel'], mass_err['ci'],
                     mass_err[key + '_ci_wald_lower'], mass_err[key + '_ci_wald_upper']))
             else:
-                print("    {:s} = {:.2e} kg".format(label, mass))
+                print("    {:s} = {:.3e} kg".format(label, mass))
 
         print("  mu = 0:")
         _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init')
@@ -5279,11 +5316,37 @@ if __name__ == "__main__":
             rng = np.random.RandomState(0)
             log_draws = rng.multivariate_normal(np.log([alpha, beta]), fit_errors['cov_log'], \
                 size=500)
-            vel_draws = np.array([alphaBetaVelocity(ht_arr, np.exp(la), np.exp(lb), v_init) \
-                for la, lb in log_draws])
-            vel_lo, vel_hi = np.percentile(vel_draws, [15.865, 84.135], axis=0)
-            ax_ab.fill_betweenx(ht_arr/1000, vel_lo/1000, vel_hi/1000, color='k', alpha=0.15, \
-                zorder=1, label=r"1$\sigma$ ($\alpha$, $\beta$) band")
+            alpha_draws, beta_draws = np.exp(log_draws[:, 0]), np.exp(log_draws[:, 1])
+
+            # Exclude the draws outside ALPHA_BETA_BOUNDS, the same way plotAlphaBeta() does - a
+            #   large enough beta overflows Ei(beta) and the velocity inversion fails on the NaN
+            (a_lo, a_hi), (b_lo, b_hi) = ALPHA_BETA_BOUNDS
+            is_valid = ((alpha_draws >= a_lo) & (alpha_draws <= a_hi) &
+                (beta_draws >= b_lo) & (beta_draws <= b_hi))
+            n_rejected = len(log_draws) - int(np.sum(is_valid))
+            rejected_frac = n_rejected/len(log_draws)
+
+            if n_rejected > 0:
+                msg = "{:d}/{:d} sampled (alpha, beta) draws fell outside ALPHA_BETA_BOUNDS and " \
+                    "were excluded".format(n_rejected, len(log_draws))
+
+            # Too many draws out of bounds means the fit sits on a bound, where the Gaussian
+            #   approximation is not meaningful - skip the band rather than draw it from what remains
+            if rejected_frac > 0.05:
+                print()
+                print("WARNING: {:s} ({:.1%}) - the local Gaussian approximation is likely "
+                    "unreliable this close to a bound. Not drawing the 1-sigma velocity "
+                    "band.".format(msg, rejected_frac))
+
+            else:
+                if n_rejected > 0:
+                    print("{:s}.".format(msg))
+
+                vel_draws = np.array([alphaBetaVelocity(ht_arr, a, b, v_init) \
+                    for a, b in zip(alpha_draws[is_valid], beta_draws[is_valid])])
+                vel_lo, vel_hi = np.percentile(vel_draws, [15.865, 84.135], axis=0)
+                ax_ab.fill_betweenx(ht_arr/1000, vel_lo/1000, vel_hi/1000, color='k', alpha=0.15, \
+                    zorder=1, label=r"1$\sigma$ ($\alpha$, $\beta$) band")
 
         ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
 
@@ -5375,7 +5438,7 @@ if __name__ == "__main__":
 
         plt.subplots_adjust(wspace=0)
 
-        plt.show()
+        _finishPlot(fig, "alpha_beta_fit")
 
 
 
@@ -5386,9 +5449,13 @@ if __name__ == "__main__":
         #   block used to have, which didn't track --dens/--ga at all
         #   With --errors, fit_errors carries the (ln alpha, ln beta) covariance, so an
         #   uncertainty ellipse is drawn around the point too (fit_errors is None otherwise)
+        #   The axes are passed in so that the function doesn't call plt.show() itself
+        fig_surv, ax_surv = plt.subplots(figsize=(7.5, 6))
         plotAlphaBetaSurvivalDiagram(alpha, beta, slope, \
             mass_thresholds=(1.0, 0.05), dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-            errors=fit_errors)
+            errors=fit_errors, axes=ax_surv)
+
+        _finishPlot(fig_surv, "alpha_beta_survival")
 
 
 
@@ -5404,7 +5471,20 @@ if __name__ == "__main__":
         # Compute the dynamic pressure with the lag fit
         dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data_rescaled, traj.jdt_ref, 
             vel_data_smooth)
-        
+
+        def findPeakDynPressure(dyn_pressure, ht_arr):
+            """Find the peak dynamic pressure. """
+            peak_dyn_pressure_index = np.argmax(dyn_pressure)
+            peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
+            peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
+            return peak_dyn_pressure_index, peak_dyn_pressure, peak_dyn_pressure_ht
+
+        # Find the alpha-beta and the lag fit dyn pressure peaks
+        peak_dyn_pressure_index, peak_dyn_pressure, peak_dyn_pressure_ht = findPeakDynPressure( \
+            dyn_pressure, ht_arr)
+        peak_dyn_pressure_index_lag, peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = \
+            findPeakDynPressure(dyn_pressure_lag, ht_data_rescaled)
+
 
         # Print height, model velocity (from alpha-beta and lag), and the dynamic pressure computed from both
         print()
@@ -5436,26 +5516,27 @@ if __name__ == "__main__":
                 )
                 )
 
+        print()
+        print("Peak dynamic pressure:")
+        print("----------------------")
+        print("AlphaBeta model = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
+            peak_dyn_pressure, peak_dyn_pressure_ht, vel_arr[peak_dyn_pressure_index]/1000))
+        print("Lag fit         = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
+            peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag,
+            vel_data_smooth[peak_dyn_pressure_index_lag]/1000))
+        print("----------------------")
+
 
         # Plot dyn pressure
+        fig_dyn = plt.figure()
         plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k', label='AlphaBeta')
         plt.plot(dyn_pressure_lag/1e6, ht_data_rescaled/1000, color='r', label='Lag fit')
 
-        def findPeakDynPressure(dyn_pressure, ht_arr):
-            """Find the peak dynamic pressure. """
-            peak_dyn_pressure_index = np.argmax(dyn_pressure)
-            peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
-            peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
-            return peak_dyn_pressure, peak_dyn_pressure_ht
-
-        # Compute and mark alpha-beta dyn pressure peak on the graph
-        peak_dyn_pressure, peak_dyn_pressure_ht = findPeakDynPressure(dyn_pressure, ht_arr)
+        # Mark alpha-beta dyn pressure peak on the graph
         plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', \
             label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht))
 
-        # Compute and mark lag fit dyn pressure peak on the graph
-        peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = findPeakDynPressure(dyn_pressure_lag, 
-            ht_data_rescaled)
+        # Mark lag fit dyn pressure peak on the graph
         plt.scatter(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, c='r', \
             label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag))
 
@@ -5465,7 +5546,7 @@ if __name__ == "__main__":
         plt.ylabel("Height (km)")
         plt.xlabel("Dynamic pressure (MPa)")
 
-        plt.show()
+        _finishPlot(fig_dyn, "alpha_beta_dyn_pressure")
 
 
         ### ###
@@ -5473,6 +5554,8 @@ if __name__ == "__main__":
 
         ### Plot magnitude vs dynamic pressure ###
 
+        fig_mag = plt.figure()
+        mag_plotted = False
         for obs in traj.observations:
 
             if obs.absolute_magnitudes is not None:
@@ -5490,17 +5573,23 @@ if __name__ == "__main__":
 
                     # Plot the magnitude
                     plt.plot(dyn_pres_station[mag_filter]/1e6, obs.absolute_magnitudes[mag_filter], label=obs.station_id)
+                    mag_plotted = True
 
 
 
+        # Skip the plot if no station had magnitudes
+        if mag_plotted:
 
-        plt.xlabel("Dynamic pressure (MPa)")
-        plt.ylabel("Absolute magnitude")
-        plt.gca().invert_yaxis()
+            plt.xlabel("Dynamic pressure (MPa)")
+            plt.ylabel("Absolute magnitude")
+            plt.gca().invert_yaxis()
 
-        plt.legend()
+            plt.legend()
 
-        plt.show()
+            _finishPlot(fig_mag, "alpha_beta_mag_vs_dyn_pressure")
+
+        else:
+            plt.close(fig_mag)
 
 
 

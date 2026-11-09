@@ -20,14 +20,14 @@
 
 ## Overview
 
-The tool searches a specified input directory for `.pickle` data files. If multiple matching pickle files are found for the same input folder or any other subfolders, unite all the data together in a single dataset and run dynamic nested sampling (implemented via dynesty https://dynesty.readthedocs.io/en/v3.0.0/), each event found in the input directory is one by one proces and saved in a separate folder.
+The tool searches a specified input directory for `.pickle` data files. If multiple matching pickle files are found for the same input folder or any other subfolders, unite all the data together in a single dataset and run dynamic nested sampling (implemented via dynesty https://dynesty.readthedocs.io/en/v3.0.0/), each event found in the input directory is one by one process and saved in a separate folder.
 
 **Key Features:**
 * **Automated Data Fusion:** Combines .pickle trajectory data automatically based on timestamps.
 * **Robust Execution:** Designed as a "run and forget" tool. If a run fails, it logs the error and proceeds to the next solution without halting (the log file will be called log_error_ ).
 * **Resume Capability:** If interrupted, the code can resume from the existing `.dynesty` file without overwriting previous progress. Note: .dynesty files can be finicky and may fail to load if they were created on a different machine or under a slightly different conda environment.
 * **MetSim Compatibility:** Supports MetSim JSON data as inputs for model validation if specified as input, the code will introduce noise (if requested) to test how the posteriory distribution is affectd by noise.
-* **LogL for Metsim json files :** The code computes the logL likelyhood for the json files in the MetSim format found in the input directory, initially with the first guess of lag and luminoisty noise and later when the simulations are done recomputs them again with the best guess of the noise found.
+* **LogL for Metsim json files :** The code computes the logL likelihood for the json files in the MetSim format found in the input directory, initially with the first guess of lag and luminoisty noise and later when the simulations are done recomputs them again with the best guess of the noise found.
 
 ---
 
@@ -41,7 +41,7 @@ The tool searches a specified input directory for `.pickle` data files. If multi
 
 ## installation--setup
 
-Install Dynesty in wmpl conda enviroment.
+Install Dynesty in wmpl conda environment.
 ```text
 pip install dynesty
 ```
@@ -78,9 +78,9 @@ remember if you put both PATH_TO_INPUT_FOLDER_1 and PATH_TO_INPUT_FOLDER_2 in th
 | `--pick_pos` | Adjusts the pick position in the meteor frame (0 to 1). <br>• `0`: Leading edge (default).<br>• `0.5`: Centroid (recommended for fireballs). |
 | `--cores` | Specify the number of CPU cores to use. Default uses all available cores. |
 | `-new` | Forces a new simulation in the output folder does not continue the dynesty simulation if interrupted. Prevents mixing data if a `.dynesty` file already exists (though separate folders are recommended). |
-| `-all` | Merges all available data from multiple cameras, only necesary if using EMCCD and CAMO narrow-field, wide-field data! By default the code will take lightcurve from EMCCD if not present it will combine CAMO narrow-field with wide-field data, while for the decelaration (lag) the code will take first CAMO narrow-field, then if not present EMCCD and if neither are present it will use CAMO wide-field. |
+| `-all` | Merges all available data from multiple cameras, only necessary if using EMCCD and CAMO narrow-field, wide-field data! By default the code will take lightcurve from EMCCD if not present it will combine CAMO narrow-field with wide-field data, while for the deceleration (lag) the code will take first CAMO narrow-field, then if not present EMCCD and if neither are present it will use CAMO wide-field. |
 | `-plot` | Generates plots based on the current state of the `.dynesty` file without running the simulation. Useful to make sure everything is loaded correctly and when .dynesty file is created to check on progress. |
-| `-NoBackup` | Skips the generation of the `posterior_backup.pkl.gz` file (gets ovewritten at the end of a run, it must save the backup). Saves ~5-20 minutes if extended data is not needed (if `posterior_backup.pkl.gz` is already present it's not going to generate a new file in any case, only if a run has finished). |
+| `-NoBackup` | Skips the generation of the `posterior_backup.pkl.gz` file (gets overwritten at the end of a run, it must save the backup). Saves ~5-20 minutes if extended data is not needed (if `posterior_backup.pkl.gz` is already present it's not going to generate a new file in any case, only if a run has finished). |
 
 ### Monitoring Progress
 When the simulation is running, the terminal will display a status line (Dynesty progress):
@@ -180,7 +180,7 @@ noise_lum, 5, n_lum0, invgamma      # Luminosity noise [J/s] (Inverse Gamma)
 ```
 
 **Notes on Specific Settings:**
-* **Fragmentation:** To disable double fragmentation, remove the second fragmentation parameters from the prior file (it will be set at 1 km effectivelly disabling it).
+* **Fragmentation:** To disable double fragmentation, remove the second fragmentation parameters from the prior file (it will be set at 1 km effectively disabling it).
 * **Camera Settings:** If using non-standard cameras, fix the Zero Magnitude Power and FPS (these will be the same values share across all the cameras if more than one camera type are present):
     ```properties
     P_0m, 840, fix
@@ -188,7 +188,7 @@ noise_lum, 5, n_lum0, invgamma      # Luminosity noise [J/s] (Inverse Gamma)
     ```
 
 ### Advanced Configuration
-For greater flexibility, use the `--extraprior` flag with a specialized file. This allows tuning of over 30 variables, including dust release and specific erosion height changes (usefull for fireballs or to introduce a third fragmentation).
+For greater flexibility, use the `--extraprior` flag with a specialized file. This allows tuning of over 30 variables, including dust release and specific erosion height changes (useful for fireballs or to introduce a third fragmentation).
 * *Warning:* Adding too many variables (>30) may prevent Dynesty from converging on a solution.
 
 ---
@@ -218,7 +218,7 @@ When finished, a `_results` folder is generated (e.g., `20191023_091225_results`
 
 ## Programmatic Data Access
 
-The `posterior_backup.pkl.gz` file contains detailed simulation data stored in a dictionary structure. This way if the .dynesty cannot be open in an other machine is always possible to open the `posterior_backup.pkl.gz` file and load the results. All plots can be recreated from the backup file except for 2 plots from dynesty that require to open the oiginal .dynesty file (i.e. _dynesty_runplot.png and _trace_plot.png).
+The `posterior_backup.pkl.gz` file contains detailed simulation data stored in a dictionary structure. This way if the .dynesty cannot be open in an other machine is always possible to open the `posterior_backup.pkl.gz` file and load the results. All plots can be recreated from the backup file except for 2 plots from dynesty that require to open the original .dynesty file (i.e. _dynesty_runplot.png and _trace_plot.png).
 
 ### Structure of Backup Data
 ```python

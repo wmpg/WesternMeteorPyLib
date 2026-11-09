@@ -202,7 +202,7 @@ class FitSimAnalyzer(object):
         """ Updates the plots with the given range of densities. 
     
         Keyword arguments:
-            init: [bool] If True, plots will be shown with no constrain on density. False by defualt.
+            init: [bool] If True, plots will be shown with no constrain on density. False by default.
 
         """
 
@@ -228,7 +228,7 @@ class FitSimAnalyzer(object):
             # Extract initial velocities
             v_init_all = solutions[:, 1]
 
-            # Idenfity unique initial velocities
+            # Identify unique initial velocities
             v_init_unique = np.unique(v_init_all)
 
 

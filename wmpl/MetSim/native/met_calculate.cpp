@@ -487,7 +487,7 @@ void ablate(meteor &met,constscl &cs,ofstream &outstream,ofstream &accelout)
         	/ met.m;
        	qa4=cs.dt * Gamma * cs.shape_fact * pow(met.Vtot,2/3.0)* rho_atmo * pow((met.v+qa3),2)
         	/ met.m;
-	a_current = (qa1/6.0 + qa2/3.0 + qa3/3.0 + qa4/6.0) / cs.dt;   //decelaration in m/(s*s)
+	a_current = (qa1/6.0 + qa2/3.0 + qa3/3.0 + qa4/6.0) / cs.dt;   //deceleration in m/(s*s)
 
 	printf("a_current %e\n", a_current);
 
@@ -499,7 +499,7 @@ void ablate(meteor &met,constscl &cs,ofstream &outstream,ofstream &accelout)
     printf("v_dot %e\n", v_dot);
 
 
-    //Check to make sure dm is less than m for each component, otherwise nonexistant mass will be ablated
+    //Check to make sure dm is less than m for each component, otherwise nonexistent mass will be ablated
     for (i=0;i<met.ncmp;i++)
 		if ((m_dotcm[i]*cs.dt) > met.mcmp[i]) 
 			m_dotcm[i] = met.mcmp[i]/cs.dt;		//ablate only what's there

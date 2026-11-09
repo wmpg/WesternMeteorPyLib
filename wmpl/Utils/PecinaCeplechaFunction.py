@@ -5,11 +5,32 @@ import scipy.special
 import scipy.integrate
 import scipy.interpolate
 
-from wmpl.Utils.AtmosphereDensity import atmDensPoly, fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import AtmDensityTableInterp, getAtmDensityTable
 
 
 # Define the ceiling height (assumed to be h_inf in terms of the air density)
 HT_CEILING = 180
+
+
+
+def airColumn(dens_interp, ht_low, ht_high):
+    """ Integrate the air density between two heights.
+
+    Arguments:
+        dens_interp: [func] Function which takes the height in meters and returns the air density in kg/m^3.
+            If it provides the exact column (e.g. AtmDensityTableInterp), it is used instead of quadrature.
+        ht_low: [float] Lower height (m).
+        ht_high: [float] Upper height (m).
+
+    Return:
+        [float] Air mass column (kg/m^2).
+    """
+
+    column = getattr(dens_interp, 'column', None)
+    if column is not None:
+        return float(column(ht_low, ht_high))
+
+    return scipy.integrate.quad(dens_interp, ht_low, ht_high)[0]
 
 
 
@@ -74,7 +95,7 @@ def velFromHtPhysicalParams(ht_arr, v_inf, m_inf, sigma, zr, K, dens_interp):
     """
 
 
-    # Convert to km as it keeps the values in the Ei intergral small
+    # Convert to km as it keeps the values in the Ei integral small
     ht_arr = np.array(ht_arr)/1000
     v_inf /= 1000
     sigma *= 1e6
@@ -86,7 +107,7 @@ def velFromHtPhysicalParams(ht_arr, v_inf, m_inf, sigma, zr, K, dens_interp):
     for ht in ht_arr:
 
         # Integrate the air density (compute in kg/m^3)
-        air_dens_integ = scipy.integrate.quad(dens_interp, 1000*ht, 1000*HT_CEILING)[0]
+        air_dens_integ = airColumn(dens_interp, 1000*ht, 1000*HT_CEILING)
 
         # Compute the Ei((sigma*v**2)/6) term
         eiv_term = scipy.special.expi((sigma*v_inf**2)/6) - (2*K*np.exp((sigma*v_inf**2)/6))/((m_inf**(1/3.0))*np.cos(zr))*air_dens_integ
@@ -133,12 +154,12 @@ def velFromHtPhysicalParams(ht_arr, v_inf, m_inf, sigma, zr, K, dens_interp):
 def velFromHt(ht_arr, h0, v0, v_inf, sigma, c, zr, dens_interp):
     """ Compute the velocity given the height and parameters as defined by Pecina & Ceplecha (1984) model. 
     
-    Arugments:
+    Arguments:
         ht_arr: [ndarray] Height in km.
         h0: [float] Height of the reference point (seconds).
         v0: [float] Velocity at the reference point (km/s).
         v_inf: [float] Velocity at infinity (km/s).
-        sigma: [float] Ablation coefficeint km^2/s^2.
+        sigma: [float] Ablation coefficient km^2/s^2.
         c: [float] Height-length constant (km).
         zr: [float] Zenith angle (radians).
         dens_interp: [scipy.interpol handle] Interpolation handle for the air mass density in kg/m^3 where input is in meters.
@@ -155,10 +176,10 @@ def velFromHt(ht_arr, h0, v0, v_inf, sigma, c, zr, dens_interp):
     for ht in ht_arr:
 
         # Integrate the air density from the reference point to infinity (compute in kg/m^3)
-        air_dens_integ_h0 = scipy.integrate.quad(dens_interp, 1000*h0, 1000*HT_CEILING)[0]
+        air_dens_integ_h0 = airColumn(dens_interp, 1000*h0, 1000*HT_CEILING)
 
         # Integrate the air density from the given height to infinity (compute in kg/m^3)
-        air_dens_integ_ht = scipy.integrate.quad(dens_interp, 1000*ht, 1000*HT_CEILING)[0]
+        air_dens_integ_ht = airColumn(dens_interp, 1000*ht, 1000*HT_CEILING)
 
         # Compute the Ei((sigma*v**2)/6) term
         eiv_term = scipy.special.expi((sigma*v_inf**2)/6) - (scipy.special.expi((sigma*v_inf**2)/6) \
@@ -198,13 +219,13 @@ def velFromHt(ht_arr, h0, v0, v_inf, sigma, c, zr, dens_interp):
 def timeFromLen(len_arr, t0, l0, v0, v_inf, sigma, c, zr, dens_interp):
     """ Compute the time given the length of a Pecina & Ceplecha (1984) model.
 
-    Arugments:
+    Arguments:
         len_arr: [ndarray] Length in km.
         t0: [float] Time of the reference point (seconds).
         l0: [float] Length of the reference point (km).
         v0: [float] Velocity at the reference point (km/s).
         v_inf: [float] Velocity at infinity (km/s).
-        sigma: [float] Ablation coefficeint km^2/s^2.
+        sigma: [float] Ablation coefficient km^2/s^2.
         c: [float] Height-length constant (km).
         zr: [float] Zenith angle (radians).
         dens_interp: [scipy.interpol handle] Interpolation handle for the air mass density in kg/m^3 where input is in meters.
@@ -280,17 +301,15 @@ def fitPecinaCeplecha84Model(lat, lon, jd, time_data, ht_data, len_data, dens_in
         l0: [float] Length of the reference point (km).
         v0: [float] Velocity at the reference point (km/s).
         v_inf: [float] Velocity at infinity (km/s).
-        sigma: [float] Ablation coefficeint km^2/s^2.
+        sigma: [float] Ablation coefficient km^2/s^2.
         c: [float] Height-length constant (km).
         zr: [float] Zenith angle (radians).
-        dens_interp: [scipy.interpol handle] Interpolation handle for the air mass density in kg/m^3 where 
-            input is in meters.
+        dens_interp: [AtmDensityTableInterp] Callable air mass density in kg/m^3 where input is in meters.
     """
 
     ### FIT THE AIR DENSITY MODEL ###
 
-    # Fit a 7th order polynomial to the air mass density from NRL-MSISE from the ceiling height to 3 km below
-    #   the fireball - limit the height to 12 km
+    # Tabulate the density from the ceiling height to 3 km below the fireball, but not below 12 km
     ht_min = np.min(ht_data) - 3
     if ht_min < 12:
         ht_min = 12
@@ -298,12 +317,9 @@ def fitPecinaCeplecha84Model(lat, lon, jd, time_data, ht_data, len_data, dens_in
 
     if dens_interp is None:
 
-        # Compute the poly fit
-        print("Fitting atmosphere polynomial...")
-        dens_co = fitAtmPoly(lat, lon, 1000*ht_min, 1000*HT_CEILING, jd)
-
-        # Create a convinience function for compute the density at the given height
-        dens_interp = lambda h: atmDensPoly(h, dens_co)
+        # Tabulate the density, with the exact air column
+        print("Tabulating atmosphere density...")
+        dens_interp = AtmDensityTableInterp(*getAtmDensityTable(lat, lon, 1000*ht_min, 1000*HT_CEILING, jd))
 
         print("   ... done!")
 
@@ -718,19 +734,15 @@ if __name__ == "__main__":
 
     ### FIT THE AIR DENSITY MODEL ###
 
-    # Fit a 7th order polynomial to the air mass density from NRL-MSISE from the ceiling height to 3 km below
-    #   the fireball - limit the height to 12 km
+    # Tabulate the density from the ceiling height to 3 km below the fireball, but not below 12 km
     ht_min = np.min(ht_data) - 3
     if ht_min < 12:
         ht_min = 12
 
 
-    # Compute the poly fit
-    print("Fitting atmosphere polynomial...")
-    dens_co = fitAtmPoly(lat, lon, 1000*ht_min, 1000*HT_CEILING, jd)
-
-    # Create a convinience function for compute the density at the given height
-    dens_interp = lambda h: atmDensPoly(h, dens_co)
+    # Tabulate the density, with the exact air column
+    print("Tabulating atmosphere density...")
+    dens_interp = AtmDensityTableInterp(*getAtmDensityTable(lat, lon, 1000*ht_min, 1000*HT_CEILING, jd))
 
     print("   ... done!")
 

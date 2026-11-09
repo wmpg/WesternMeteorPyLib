@@ -34,7 +34,7 @@
 //  in an iteration. Embedded in a while loop, the user computes the cost function for
 //  a test vector pso.xtest[*] that gets updated internally in the PSO structure. For
 //  each processing pass, the while loop runs sequentially over iterations and particles.  
-//  Convergence criteria are based on either acheiving a consistently small change in
+//  Convergence criteria are based on either achieving a consistently small change in
 //  the cost function, a low variance in the best parameter set, or a maximum iteration
 //  limit is reached. Any of the three conditions halts the processing by terminating 
 //  the while loop. A pseudo-code example is shown below.
@@ -82,7 +82,7 @@
 //
 //  Do something with minimized solution stored in vector  pso.gbest[*]
 //
-//  Number of cost fucntion evaluations = pso.ncostevals
+//  Number of cost function evaluations = pso.ncostevals
 //
 //  Halting condition = pso.processing
 //
@@ -118,7 +118,7 @@ struct  PSOparameters            // Parameters read from a PSO config file
 	int         distro_flag;     // Initial particle distribution flag: 0 = random, 1 = gaussian
 
 	double      winertia_init;   // PSO weight for inertia - initially (typically 0.8)
-	double      wstubborness;    // PSO weight for stubborness (typically 1.0)
+	double      wstubborness;    // PSO weight for stubbornness (typically 1.0)
 	double      wgrouppressure;  // PSO weight for grouppressure (typically 2.0)
 	double      eps_convergence; // Convergence criteria of the cost function (typically 1.0e-10)
 };
@@ -138,7 +138,7 @@ struct  particleswarming
 
 	double      winertia;        // PSO weight for inertia - adjusted down per iteration
 	double      winertia_init;   // PSO weight for inertia - initially (typically 0.8)
-	double      wstubborness;    // PSO weight for stubborness (typically 1.0)
+	double      wstubborness;    // PSO weight for stubbornness (typically 1.0)
 	double      wgrouppressure;  // PSO weight for grouppressure (typically 2.0)
 	double      eps_convergence; // Convergence criteria of the cost function (typically 1.0e-10)
 
@@ -194,7 +194,7 @@ struct  particleswarming
 
 //------ "processing" and resultant halting conditions
 #define   CONTINUE_PROCESSING      1  // Indicator that particle looping and iterations should continue
-#define   ACCURACY_LIMIT           2  // Processing halted due to accuracy convergence acheived
+#define   ACCURACY_LIMIT           2  // Processing halted due to accuracy convergence achieved
 #define   ITERATION_LIMIT          3  // Processing halted due to max iteration count exceeded
 #define   VARIANCE_LIMIT           4  // Processing halted due to variance dropped below threshold
 

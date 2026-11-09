@@ -35,7 +35,7 @@
 //                  FitsFileInfoMemAllocation
 //-------------------------------------------------------------------------
 //
-// Purpose:   Function to inquire into existance of an image data file and 
+// Purpose:   Function to inquire into existence of an image data file and 
 //            retrieve header information for data set size. Assumes FITS 
 //            format and checks for two-dimensional imagery. Also allocates
 //            memory for an unsigned short array of dimension given in the
@@ -126,7 +126,7 @@ int   FitsFileInfoMemAllocation( char *pathname, int *totalrows, int *totalcols,
 //                       FitsImageDimensions
 //-------------------------------------------------------------------------
 //
-// Purpose:   Function to inquire into existance of an image data file and 
+// Purpose:   Function to inquire into existence of an image data file and 
 //            retrieve header information for data set size. Assumes FITS 
 //            format and checks for two-dimensional imagery. 
 //

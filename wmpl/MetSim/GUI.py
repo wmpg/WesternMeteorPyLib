@@ -29,12 +29,15 @@ from PyQt5.uic import loadUi
 from wmpl.Formats.Met import loadMet
 from wmpl.Formats.ECSV import loadECSVs
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin, \
+    constantsRelativeToGround, loadedConstantsRelativeToGround, usesAtmDensityTable, atmDensityDescription
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, getAtmDensityTable, \
+    atmDensTable, atmDensityTableInfo, ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, \
+    msisModelName, setAtmosphere
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
-from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
+from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
 from wmpl.Utils.TrajConversions import unixTime2JD, datetime2JD, jd2Date, geo2Cartesian, cartesian2Geo, \
@@ -118,7 +121,7 @@ class SimulationResults(object):
                     frag_entry.main_abs_mag = -2.5*np.log10(np.array(frag_entry.main_luminosity)
                                                                 /self.const.P_0m)
 
-                    # Compute the luminosity weigthed tau
+                    # Compute the luminosity weighted tau
                     frag_entry.main_tau = np.array(frag_entry.main_tau_over_lum)\
                                             /np.array(frag_entry.main_luminosity)
 
@@ -135,7 +138,7 @@ class SimulationResults(object):
                     frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)
                                                                 /self.const.P_0m)
 
-                    # Compute the luminosity weigthed tau
+                    # Compute the luminosity weighted tau
                     frag_entry.grains_tau = np.array(frag_entry.grains_tau_over_lum) \
                                                 /np.array(frag_entry.grains_luminosity)
 
@@ -153,6 +156,16 @@ class SimulationResults(object):
 
 
         ###
+
+
+        # Add the Earth's rotation along the path to give the lengths and speeds in the inertial frame of the
+        #   trajectory solver, as MetSim simulates the motion relative to the ground
+        self.v_rotation = getattr(self.const, 'v_rotation', 0.0)
+        if self.v_rotation:
+            for name in ('brightest', 'leading_frag', 'main'):
+                setattr(self, name + '_length_arr', getattr(self, name + '_length_arr') \
+                    + self.v_rotation*self.time_arr)
+                setattr(self, name + '_vel_arr', getattr(self, name + '_vel_arr') + self.v_rotation)
 
 
     def writeCSV(self, dir_path, file_name):
@@ -181,6 +194,12 @@ class SimulationResults(object):
                   "log10 Lum total (W), log10 Lum main (W), log10 Lum grain (W), "+\
                   "log10 Electron line density (-/m), Mass total (kg), Mass main (kg)"
 
+        # Note the frame of the lengths and speeds
+        if self.v_rotation:
+            header += "\nLengths and speeds are in the inertial frame of the trajectory solver. Subtract " \
+                "the Earth's rotation along the path, v_rotation = {:.2f} m/s, for the speeds relative to " \
+                "the air.".format(self.v_rotation)
+
 
         # If the file cannot be opened, throw an error message
         try:
@@ -203,6 +222,7 @@ class SimulationResults(object):
 
             # Write the data
             np.savetxt(f, out_arr, fmt='%.5e', delimiter=',', newline='\n', header=header, comments="# ")
+
 
 
 class ECSVObservations(object):
@@ -539,7 +559,7 @@ class WakePoint(object):
 
 class WakeContainter(object):
     def __init__(self, site_id, frame_n):
-        """ Containter for wake profile data extracted from mirfit wid files. 
+        """ Container for wake profile data extracted from mirfit wid files. 
         
         Arguments:
             site_id: [str] Name of the site.
@@ -575,7 +595,7 @@ class FragmentationEntry(object):
         ### STATUS FLAGS ###
 
 
-        # Unique identifer of the fragmentation entry, will be assigned at the beginning of simulation
+        # Unique identifier of the fragmentation entry, will be assigned at the beginning of simulation
         self.id = None
 
         # Indicates that the fragmentation was not performed yet
@@ -922,7 +942,7 @@ class FragmentationContainer(object):
 
 
     def loadFragmentationFile(self):
-        """ Load fragmentation paramters from the fragmentation file. """
+        """ Load fragmentation parameters from the fragmentation file. """
 
         string = ""
         with open(self.fragmentation_file_path) as f:
@@ -963,7 +983,7 @@ class FragmentationContainer(object):
 #
 #                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)                                  #
 # ------------------------------------------------------------------------------------------------------ # ------------------------------------------------------------------ #
-# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn pres, Velocity, Parent mass, Mass (kg), Final mass #
+# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn press, Velocity, Parent mass, Mass (kg), Final mass #
 #     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #          ,  (kPa)   , (km/s)  , (kg)       ,          , (kg)       #
 #-----,------------,-------,---------,---------------,------,--------------,----------,----------,-------#----------,----------,---------,------------,----------,----------- #
 """
@@ -1043,7 +1063,7 @@ class FragmentationContainer(object):
         self.loadFragmentationFile()
 
 
-        # Change paramters of the main fragment
+        # Change parameters of the main fragment
         if frag_type == "M":
             frag_entry = FragmentationEntry(frag_type=frag_type,
                                             height=100000.0000,
@@ -1057,7 +1077,7 @@ class FragmentationContainer(object):
                                             mass_index=None
                                             )
 
-        # Change paramters of all fragments
+        # Change parameters of all fragments
         elif frag_type == "A":
             frag_entry = FragmentationEntry(frag_type=frag_type,
                                             height=100000.0,
@@ -1184,7 +1204,7 @@ class MinimizationParameterNormalization(object):
 
 
     def normalizeScaling(self, scaling_list, bounds=None):
-        """ Normalize the parameters by specifying a scale for every paramter. 
+        """ Normalize the parameters by specifying a scale for every parameter. 
     
         Arguments:
             scaling_list: [list] A list of values used for scaling each parameter to approx the 0 to 1 range
@@ -1196,9 +1216,9 @@ class MinimizationParameterNormalization(object):
 
         Return;
             if bounds is None:
-                params_normed: [list] A list of scaled paramters.
+                params_normed: [list] A list of scaled parameters.
             else:
-                params_normed: [list] A list of scaled paramters.
+                params_normed: [list] A list of scaled parameters.
                 bounds_normed: [list] A list of scaled boundaries.
         """
 
@@ -1254,7 +1274,7 @@ class MinimizationParameterNormalization(object):
 
                 bound_min, bound_max = bound
 
-                # Denormalize the paramer to original bounds
+                # Denormalize the parameter to original bounds
                 p = p_normed*(bound_max - bound_min) + bound_min
 
                 params.append(p)
@@ -1349,9 +1369,9 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
 
     ### Compute the residuals ###
 
-    # Count the total number of length and magnitude points
-    mag_point_count = len(~np.isnan(fit_input_data[:, 1]))
-    lag_point_count = len(~np.isnan(fit_input_data[:, 2]))
+    # Count the length and magnitude points with a measurement
+    mag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 1])), 1)
+    lag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 2])), 1)
 
     # Interpolate simulated magnitude and length
     len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr, \
@@ -1392,15 +1412,16 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # if np.isnan(mag_res):
         #     mag_res = 10.0
 
-        # Compute the magnitude residual in linear luminosity units
+        # Compute the magnitude residual in linear luminosity units, for the points with a magnitude
+        mag_res = 0
         if not np.isnan(mag):
             lum_obs = const.P_0m*10**(-0.4*mag)
             lum_sim = const.P_0m*10**(-0.4*mag_sim)
 
             mag_res = mag_weight*(lum_obs - lum_sim)**2
 
-        if np.isnan(mag_res):
-            mag_res = 1e6**2
+            if np.isnan(mag_res):
+                mag_res = 1e6**2
 
 
         # Choose the lag weight
@@ -1477,7 +1498,7 @@ def loadConstants(sim_fit_json):
         # constants
         if 'const' in const_json:
             
-            # Open the constants parameter part of .json file for simulaitons
+            # Open the constants parameter part of .json file for simulations
             for key in const_json['const']:
                 setattr(const, key, const_json['const'][key])
 
@@ -1485,6 +1506,13 @@ def loadConstants(sim_fit_json):
         for key in const_json:
             setattr(const, key, const_json[key])
 
+
+    # Use the legacy polynomial atmosphere for constants saved without the density model
+    if ('atm_density_model' not in const_json) and ('atm_density_model' not in const_json.get('const', {})):
+        const.atm_density_model = 'polynomial'
+        print("NOTE: The constants were saved without atm_density_model, so the legacy polynomial " \
+            "atmosphere is used to reproduce them. Set atm_density_model to 'table' for the tabulated MSIS " \
+            "atmosphere.")
 
     if 'fragmentation_entries' in const_json:
 
@@ -1507,7 +1535,7 @@ def loadConstants(sim_fit_json):
     if isinstance(const.wake_psf, float):
         const.wake_psf = [const.wake_psf]
 
-    # If the wake PSF wake list lenght is different from the wake PSF list lenght, set all weights to 1
+    # If the wake PSF wake list length is different from the wake PSF list length, set all weights to 1
     if len(const.wake_psf) != len(const.wake_psf_weights):
         const.wake_psf_weights = np.ones(len(const.wake_psf))
         
@@ -1535,7 +1563,12 @@ def saveConstants(const, dir_path, file_name):
     if isinstance(const.dens_co, np.ndarray):
         const.dens_co = const.dens_co.tolist()
 
-    # Remove fragments from entries becuase they can't be saved in JSON
+    # Convert the density table to lists
+    for table_key in ['atm_table_ht', 'atm_table_log10_rho']:
+        if isinstance(getattr(const, table_key, None), np.ndarray):
+            setattr(const, table_key, getattr(const, table_key).tolist())
+
+    # Remove fragments from entries because they can't be saved in JSON
     for frag_entry in const.fragmentation_entries:
         del frag_entry.fragments
         frag_entry.resetOutputParameters()
@@ -1611,7 +1644,7 @@ def loadUSGInputFile(dir_path, usg_file):
     # Get the reference point in ECI
     eci_ref = np.array(geo2Cartesian(np.radians(data.lat), np.radians(data.lon), 1000*data.ht, data.jd))
 
-    # Get the radiant in ECI coordiantes
+    # Get the radiant in ECI coordinates
     ra_rad, dec_rad = altAz2RADec(np.radians(data.azimuth), np.radians(data.entry_angle), data.jd, \
         np.radians(data.lat), np.radians(data.lon))
     eci_rad = vectNorm(np.array(raDec2ECI(ra_rad, dec_rad)))
@@ -2117,7 +2150,7 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
     # Define plot properties for CAMO (wake_containers are given or "camo" is True)
     if (wake_containers is not None) or camo:
 
-        # Set the camo varaible to True if any wake is given, so the correct plot parameters are used
+        # Set the camo variable to True if any wake is given, so the correct plot parameters are used
         camo = True
 
         plot_params_dict["sites-narrow"] = \
@@ -2221,13 +2254,13 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
     sim_vel_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_vel_arr,
                                                 bounds_error=False, fill_value='extrapolate')
 
-    # Find the simulated length at the trajectory begining
+    # Find the simulated length at the trajectory beginning
     sim_len_beg = sim_len_interp(traj.rbeg_ele)
 
-    # Find the simulated time at the trajectory begining
+    # Find the simulated time at the trajectory beginning
     sim_time_beg = sim_time_interp(traj.rbeg_ele)
 
-    # Find the simulated velocity at the trajectory begining
+    # Find the simulated velocity at the trajectory beginning
     sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
 
     # Set the simulated length at the beginning of observations to zero
@@ -2282,17 +2315,21 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
 
         # Set a default filter which takes all observations
         mag_filter = np.ones(len(obs.model_ht), dtype=bool)
+        len_filter = np.ones(len(obs.model_ht), dtype=bool)
 
         if obs.absolute_magnitudes is not None:
 
             # Filter out observations with magnitude fainter than +9 or with NaN magnitudes
             mag_filter = (obs.absolute_magnitudes < 9) & (~np.isnan(obs.absolute_magnitudes))
 
+            # The lengths of the points without a magnitude are still plotted
+            len_filter = ~(obs.absolute_magnitudes >= 9)
+
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
 
         # Sample the simulated normalized length at observed times
-        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[mag_filter])
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[len_filter])
 
 
         # Select plot parameters for the current station
@@ -2331,33 +2368,33 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
             # sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[mag_filter]
 
             # Compute the observed lag using the simulated velocity
-            obs_lag = obs.state_vect_dist[mag_filter] - sim_vel_beg*obs.time_data[mag_filter]
+            obs_lag = obs.state_vect_dist[len_filter] - sim_vel_beg*obs.time_data[len_filter]
 
             # Plot the observed lag
-            ax_lenres.plot(obs_lag, obs.model_ht[mag_filter]/1000, **plot_params)
+            ax_lenres.plot(obs_lag, obs.model_ht[len_filter]/1000, **plot_params)
             
             # ax_lenres.plot(sim_lag, obs.model_ht[mag_filter]/1000, **plot_params_dict["sim"])
 
         else:
 
             # Compute the length residuals
-            len_residuals = obs.state_vect_dist[mag_filter] - sim_norm_len_sampled
+            len_residuals = obs.state_vect_dist[len_filter] - sim_norm_len_sampled
 
             # Demean the residuals
             len_residuals = len_residuals - np.median(len_residuals)
 
             # Plot the length residuals
-            ax_lenres.plot(len_residuals, obs.model_ht[mag_filter]/1000, **plot_params)
+            ax_lenres.plot(len_residuals, obs.model_ht[len_filter]/1000, **plot_params)
 
 
-        if len(obs.model_ht[mag_filter]):
+        if len(obs.model_ht[len_filter]):
             # Keep track of the observed height range
-            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
-            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
+            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[len_filter]))
+            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[len_filter]))
 
             # Keep track of the observed time range
-            time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
-            time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
+            time_obs_max = max(time_obs_max, np.max(obs.time_data[len_filter]))
+            time_obs_min = min(time_obs_min, np.min(obs.time_data[len_filter]))
 
 
     # Compute the magnitude residuals from the ECSV files
@@ -2366,9 +2403,13 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
         # Plot additional magnitudes for all sites
         for site in ecsv_obs.sites:
 
-            # Extract data (filter out inf values)
-            height_data = ecsv_obs.height_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
-            abs_mag_data = ecsv_obs.abs_mag_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
+            # Extract data (filter out inf values and the points without a magnitude)
+            height_data = ecsv_obs.height_data[site][np.isfinite(ecsv_obs.abs_mag_data[site])]
+            abs_mag_data = ecsv_obs.abs_mag_data[site][np.isfinite(ecsv_obs.abs_mag_data[site])]
+
+            # Skip the sites without magnitudes
+            if len(abs_mag_data) == 0:
+                continue
 
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(height_data)
@@ -2671,7 +2712,7 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
 
 class MetSimGUI(QMainWindow):
     def __init__(self, traj_path, const_json_file=None, ecsv_files=None, met_path=None, lc_path=None, 
-                 wid_files=None, usg_input=False):
+                 wid_files=None, usg_input=False, refit_atm=False):
         """ GUI tool for MetSim. 
     
         Arguments:
@@ -2685,6 +2726,8 @@ class MetSimGUI(QMainWindow):
             wid_files: [str] Mirfit wid files containing the meteor wake information.
             usg_input: [bool] Instead of a trajectory pickle file, a special input file for CNEOS data is 
                 given.
+            refit_atm: [bool] Refit the atmosphere density polynomial of a legacy constants file from the MSIS
+                model instead of using the saved polynomial. False by default.
         """
         
 
@@ -2929,6 +2972,9 @@ class MetSimGUI(QMainWindow):
                 if const_json['erosion_sigma_change'] != const_json['sigma']:
                     self.erosion_different_sigma = True
 
+            # Convert constants saved with the inertial speed to the ground
+            loadedConstantsRelativeToGround(self.const, const_json, self.traj)
+
             # if 'fragmentation_string' in const_json:
             #     if const_json['fragmentation_string'] is not None:
             #         self.fragmentation = FragmentationContainer(self, os.path.join(self.dir_path, \
@@ -2971,9 +3017,12 @@ class MetSimGUI(QMainWindow):
             self.const.erosion_on = False
             self.const.disruption_on = False
 
-            # Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
+            # Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into
             # account
             self.computeSimZenithAngle()
+
+            # Convert the inertial speed and zenith angle to the ground
+            constantsRelativeToGround(self.const, earthRotationSpeed(self.traj))
 
             # Calculate the photometric mass
             _, self.const.m_init = self.calcPhotometricMass()
@@ -2992,12 +3041,28 @@ class MetSimGUI(QMainWindow):
         if self.dens_fit_ht_end < 14000:
             self.dens_fit_ht_end = 14000
 
-        # Fit the polynomail describing the density
-        dens_co = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
-        self.const.dens_co = dens_co
+        # Fit the polynomial of the density and tabulate the density
+        dens_co, atm_table, atm_info = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
+        self.const.atm_table_ht, self.const.atm_table_log10_rho = atm_table
+        self.const.atm_density_info = atm_info
 
-        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
-            self.dens_fit_ht_end/1000, self.dens_fit_ht_beg/1000))
+        # Keep the saved polynomial of a legacy constants file unless it is refitted
+        if (const_json_file is not None) and (self.const.atm_density_model == 'polynomial') \
+            and (not refit_atm):
+
+            self.const.dens_co = np.array(self.const.dens_co)
+            self.const.atm_density_info = None
+            print("Using the atmosphere density polynomial saved in the constants file, give --refitatm to " \
+                "refit it from the MSIS model.")
+
+        else:
+            self.const.dens_co = dens_co
+
+            print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+                self.dens_fit_ht_end/1000, self.dens_fit_ht_beg/1000))
+
+        # Print the atmosphere the simulation uses
+        print(atmDensityDescription(self.const))
 
         ### ###
 
@@ -3113,11 +3178,18 @@ class MetSimGUI(QMainWindow):
 
 
     def fitAtmosphereDensity(self, dens_fit_ht_beg, dens_fit_ht_end):
-        """ Fit the atmosphere density coefficients for the given day and location. 
+        """ Fit the atmosphere density coefficients and tabulate the density for the given day and location.
         
         Arguments:
             dens_fit_ht_beg: [float] Begin height (top) for which the fit is valid (meters).
             dens_fit_ht_end: [float] End height - bottom (meters).
+
+        Return:
+            (dens_co, atm_table, atm_info):
+                - dens_co: [list] Polynomial coefficients over the fit range, see fitAtmPoly().
+                - atm_table: [tuple] Heights and log10 of the densities of the table over the whole
+                    simulation, see getAtmDensityTable().
+                - atm_info: [dict] Model and inputs of the table, see atmDensityTableInfo().
 
         """
 
@@ -3125,7 +3197,14 @@ class MetSimGUI(QMainWindow):
         lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
         lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
 
-        return fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
+        dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
+
+        # Tabulate the density over the whole simulation, also above the beginning and below the end
+        ht_max = max(ATM_TABLE_HT_MAX, dens_fit_ht_beg)
+        atm_table = getAtmDensityTable(lat_mean, lon_mean, ATM_TABLE_HT_MIN, ht_max, self.traj.jdt_ref)
+        atm_info = atmDensityTableInfo(lat_mean, lon_mean, self.traj.jdt_ref, height_max=ht_max)
+
+        return dens_co, atm_table, atm_info
     
     def computeSimZenithAngle(self):
         """ Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
@@ -3240,7 +3319,16 @@ class MetSimGUI(QMainWindow):
             print("No photometry, assuming default mass:", self.const.m_init)
             return 0, self.const.m_init
 
-        print("NOTE: The mass was computing using a constant luminous efficiency defined in the GUI!")
+        # Use the constant luminous efficiency from the GUI
+        if self.const.lum_eff_type == 0:
+            tau = self.const.lum_eff/100
+            print("NOTE: The mass was computed using the constant luminous efficiency defined in the GUI!")
+
+        # Pass the code of the chosen model, which calcMass() evaluates at the average ground-relative speed
+        else:
+            tau = int(self.const.lum_eff_type)
+            print("NOTE: The mass was computed using the luminous efficiency model chosen in the GUI " \
+                "(lum_eff_type = {:d}) at the average speed relative to the ground!".format(tau))
 
         # Sort array by time
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
@@ -3251,13 +3339,18 @@ class MetSimGUI(QMainWindow):
         # Average out the magnitudes
         time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
 
+        # A light curve of a single point cannot be integrated, so the default mass is used
+        if len(np.unique(time_arr)) < 2:
+            print("Too few photometry points, assuming default mass:", self.const.m_init)
+            return 0, self.const.m_init
+
 
         # Calculate the radiated energy
         radiated_energy = calcRadiatedEnergy(np.array(time_arr), np.array(mag_arr), P_0m=self.const.P_0m)
 
         # Compute the photometric mass
-        photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, \
-            tau=self.const.lum_eff/100, P_0m=self.const.P_0m)
+        photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg_norot, \
+            tau=tau, P_0m=self.const.P_0m)
 
         
         return radiated_energy, photom_mass
@@ -3298,7 +3391,10 @@ class MetSimGUI(QMainWindow):
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
         self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         
+        # Block the signal so that showing the previous simulation does not change the current model
+        self.lumEffComboBox.blockSignals(True)
         self.lumEffComboBox.setCurrentIndex(const.lum_eff_type)
+        self.lumEffComboBox.blockSignals(False)
 
         # Enable/disable the constant tau box (index 0 = constant tau)
         self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
@@ -3414,12 +3510,32 @@ class MetSimGUI(QMainWindow):
 
 
     def updateLumEffType(self):
-        """ Update the luminous efficiency type. """
+        """ Update the luminous efficiency type and rescale the initial mass by the change in the photometric
+            mass, as updateInitialMass() does for the constant luminous efficiency.
+        """
 
-        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
+        # Skip if the type did not change
+        lum_eff_type = self.lumEffComboBox.currentIndex()
+        if lum_eff_type == self.const.lum_eff_type:
+            return
+
+        # Read the edits in the other input boxes, which the refresh below would discard
+        lum_eff_type_old = self.const.lum_eff_type
+        self.readInputBoxes()
+        self.const.lum_eff_type = lum_eff_type_old
+
+        # Compute the photometric mass with the old and the new luminous efficiency
+        _, photom_mass_old = self.calcPhotometricMass()
+        self.const.lum_eff_type = lum_eff_type
+        _, photom_mass_new = self.calcPhotometricMass()
 
         # Enable/disable the constant tau box (index 0 = constant tau)
         self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
+
+        # Rescale the initial mass, which does not change without photometry
+        self.const.m_init *= photom_mass_new/photom_mass_old
+
+        self.updateInputBoxes()
 
 
     def updateGrainDiameters(self):
@@ -3683,7 +3799,7 @@ class MetSimGUI(QMainWindow):
         self.const.zenith_angle = np.radians(self._tryReadBox(self.inputZenithAngle, \
             np.degrees(self.const.zenith_angle)))
 
-        # If the bulk density is higher than the grain density, set the grain density to the bulk denisty
+        # If the bulk density is higher than the grain density, set the grain density to the bulk density
         if self.const.rho > self.const.rho_grain:
             self.const.rho_grain = self.const.rho
 
@@ -4078,9 +4194,11 @@ class MetSimGUI(QMainWindow):
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x', 
                     linestyle='dashed', label=str(site), markersize=5, linewidth=1)
 
-                # Keep track of the faintest and the brightest magnitude
-                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
-                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+                # Keep track of the faintest and the brightest magnitude, skipping the points without one
+                abs_mag_finite = abs_mag_data[np.isfinite(abs_mag_data)]
+                if len(abs_mag_finite):
+                    mag_brightest = min(mag_brightest, np.min(abs_mag_finite))
+                    mag_faintest = max(mag_faintest, np.max(abs_mag_finite))
 
 
         # Plot additional observations from the .met file (if available)
@@ -4234,6 +4352,11 @@ class MetSimGUI(QMainWindow):
 
         self.magnitudePlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, \
             self.plot_beg_ht + BEG_HT_PAD])
+        # Use the default limits if no magnitudes were plotted
+        if not (np.isfinite(mag_brightest) and np.isfinite(mag_faintest)):
+            mag_brightest = -2.0
+            mag_faintest = 6.0
+
         self.magnitudePlot.canvas.axes.set_xlim([mag_brightest - 1, mag_faintest + 1])
         self.magnitudePlot.canvas.axes.invert_xaxis()
 
@@ -4278,13 +4401,13 @@ class MetSimGUI(QMainWindow):
                 bounds_error=False, fill_value='extrapolate')
 
 
-            # Find the simulated length at the trajectory begining
+            # Find the simulated length at the trajectory beginning
             self.sim_len_beg = self.sim_len_interp(self.traj.rbeg_ele)
 
-            # Find the simulated time at the trajectory begining
+            # Find the simulated time at the trajectory beginning
             self.sim_time_beg = self.sim_time_interp(self.traj.rbeg_ele)
 
-            # Find the simulated velocity at the trajectory begining
+            # Find the simulated velocity at the trajectory beginning
             self.sim_vel_beg = self.sim_vel_interp(self.traj.rbeg_ele)
 
             # Set the simulated length at the beginning of observations to zero
@@ -4439,10 +4562,10 @@ class MetSimGUI(QMainWindow):
         self.lagPlot.canvas.figure.clear()
 
 
-        # Update the observed initial velocity label
-        # NOTE: The ECI, not the ground-fixed velocity needs to be used, as the meteor model does not
-        #   include Earth's rotation!
-        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init/1000))
+        # Update the observed initial velocity label, relative to the ground and inertial
+        v_rotation = getattr(self.const, 'v_rotation', 0.0)
+        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s ({:.3f} ECI)".format( \
+            (self.traj.orbit.v_init - v_rotation)/1000, self.traj.orbit.v_init/1000))
 
 
         # Compute things needed for the simulated lag
@@ -5256,22 +5379,31 @@ class MetSimGUI(QMainWindow):
         # Generate a height array
         height_arr = np.linspace(self.dens_fit_ht_beg, self.dens_fit_ht_end, 200)
 
-        # Get atmosphere densities from NRLMSISE-00 (use log values for the fit)
-        atm_densities = np.array([getAtmDensity(lat_mean, lon_mean, ht, self.traj.jdt_ref) \
-            for ht in height_arr])
+        # Get atmosphere densities from the MSIS model (use log values for the fit)
+        atm_densities = getAtmDensity(lat_mean, lon_mean, height_arr, self.traj.jdt_ref)
 
 
         # Get atmosphere densities from the fitted polynomial
         atm_densities_poly = atmDensPoly(height_arr, self.const.dens_co)
 
 
-        # Plot the MSISE density
+        # Plot the MSIS density
         self.mpw.canvas.axes.semilogx(atm_densities, height_arr/1000, \
-            label="NRLMSISE-00", color='k')
+            label=msisModelName(), color='k')
+
+        # Plot the density table and mark the model the simulation uses
+        if usesAtmDensityTable(self.const):
+            atm_densities_table = atmDensTable(height_arr, self.const.atm_table_ht, \
+                self.const.atm_table_log10_rho)
+            self.mpw.canvas.axes.semilogx(atm_densities_table, height_arr/1000, \
+                label="Table (used by the simulation)", color='tab:blue', linestyle="dotted")
+            poly_label = "Polynomial fit (not used)"
+        else:
+            poly_label = "Polynomial fit (legacy, used by the simulation)"
 
         # Poly poly fit
         self.mpw.canvas.axes.semilogx(atm_densities_poly, height_arr/1000, \
-            label="Polynomial fit", color='red', linestyle="dashed")
+            label=poly_label, color='red', linestyle="dashed")
 
 
         self.mpw.canvas.axes.legend()
@@ -5310,9 +5442,9 @@ class MetSimGUI(QMainWindow):
 
             # Compute the dynamic pressure
             brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
-                self.traj.jdt_ref, sr.brightest_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.brightest_vel_arr - sr.v_rotation, gamma=self.const.gamma)
             leading_frag_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.leading_frag_height_arr, \
-                self.traj.jdt_ref, sr.leading_frag_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.leading_frag_vel_arr - sr.v_rotation, gamma=self.const.gamma)
 
 
             # Plot dyn pressure
@@ -5443,9 +5575,9 @@ class MetSimGUI(QMainWindow):
 
             # Compute the dynamic pressure
             brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
-                self.traj.jdt_ref, sr.brightest_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.brightest_vel_arr - sr.v_rotation, gamma=self.const.gamma)
             main_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.main_height_arr, \
-                self.traj.jdt_ref, sr.main_vel_arr, gamma=self.const.gamma)
+                self.traj.jdt_ref, sr.main_vel_arr - sr.v_rotation, gamma=self.const.gamma)
 
 
             # Filter out very small masses
@@ -5643,7 +5775,7 @@ class MetSimGUI(QMainWindow):
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, frag_main, results_list, wake_results)
 
-        # Save simulated parametrs to file
+        # Save simulated parameters to file
         self.simulation_results.writeCSV(self.dir_path, SIM_RESULTS_CSV)
         print("Saved simulation results to:", os.path.join(self.dir_path, SIM_RESULTS_CSV))
 
@@ -6041,10 +6173,8 @@ class MetSimGUI(QMainWindow):
     def saveUpdatedOrbit(self):
         """ Save updated orbit and trajectory to file. """
 
-        # Compute the difference between the model and the measured initial velocity
-        # NOTE: The ECI, not the ground-fixed velocity needs to be used, as the meteor model does not
-        #   include Earth's rotation!
-        v_init_diff = self.const.v_init - self.traj.orbit.v_init
+        # Compute the difference between the model and the measured initial velocity in the inertial frame
+        v_init_diff = self.const.v_init + getattr(self.const, 'v_rotation', 0.0) - self.traj.orbit.v_init
 
         # Recompute the orbit with an increased initial velocity
         # Reuse the same frame convention (moving vs fixed stations) that the original orbit solve used,
@@ -6273,7 +6403,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('traj_pickle', metavar='TRAJ_PICKLE', type=str, \
         help="Either the .pickle file with the trajectory solution and the magnitudes, or the path to the \
         folder when the --all option is given. If the --usg option is given, the trajectory will be loaded \
-        from a file specifing a reference points and a light curve.")
+        from a file specifying a reference points and a light curve.")
 
     arg_parser.add_argument('--usg', \
         help=""" Flag for US government (CNEOS) data. The trajectory is given in a special input file \
@@ -6328,8 +6458,18 @@ if __name__ == "__main__":
         """, \
         action="store_true")
 
+    arg_parser.add_argument('--refitatm', action="store_true", \
+        help="Refit the atmosphere density polynomial of a legacy constants file, saved without " \
+        "atm_density_model, from the MSIS model instead of using the saved polynomial.")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
@@ -6498,7 +6638,7 @@ if __name__ == "__main__":
     load_file = None
     if cml_args.load == '.':
 
-        # Extract the directory (or more) where the JSON file with fit parametrs could be
+        # Extract the directory (or more) where the JSON file with fit parameters could be
         if os.path.isfile(cml_args.traj_pickle):
             dir_path = os.path.abspath(os.path.dirname(cml_args.traj_pickle))
 
@@ -6513,7 +6653,7 @@ if __name__ == "__main__":
             if not os.path.isdir(dir_path):
                 continue
 
-            # Find the file with fit parametres (but not the latest file, just the saved parameters)
+            # Find the file with fit parameters (but not the latest file, just the saved parameters)
             for file_name in sorted(os.listdir(dir_path)):
 
                 if file_name.endswith("sim_fit.json"):
@@ -6559,7 +6699,7 @@ if __name__ == "__main__":
     # Init the MetSimGUI application
     main_window = MetSimGUI(traj_pickle_file, const_json_file=load_file,
         ecsv_files=ecsv_files, met_path=met_file, lc_path=cml_args.lc, wid_files=wid_files, 
-        usg_input=cml_args.usg)
+        usg_input=cml_args.usg, refit_atm=cml_args.refitatm)
 
 
     main_window.show()

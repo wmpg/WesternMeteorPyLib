@@ -179,7 +179,7 @@ def orbitalElements2Cartesian(a, e, I, peri, node, E):
     
 
 
-    # If the orbit is an elipse
+    # If the orbit is an ellipse
     if e < 1.0:
 
         # Distance from the Sun to the point on orbit

@@ -1,7 +1,7 @@
 # MetSim fragmentation file priors.
 # Any of the parameter can be given a range if not given a range and is a REQUIRED value it will be fix
 # you can give a range of min and max give range with a normal distribution or invgamma or a log distribution
-# usefull for parameters that vary multiple order of magnitudes as expalin in the .prior file
+# useful for parameters that vary multiple order of magnitudes as explain in the .prior file
 # Types of entries:
 #   - M    - Main fragment - parameter change.
 #           - REQUIRED: height. 
@@ -21,7 +21,7 @@
 # (if nan the value will be : height= try to find possible flare onset range if fix first frame, 
 #   number=from a single fragment to 3 if fix 1, mass_percent=percent mass loss 10% to 100% or if fix 10%, 
 #	gamma=from 0.4 to 2.4 or if fix 1.2, mass_index,sigma,erosion_coeff,grain_mass_min,grain_mass_max= take the rage 
-#   from priors or if fix take the same value of the current simulation or if not in bound take defaul value)
+#   from priors or if fix take the same value of the current simulation or if not in bound take default value)
 # Define the type of entry e.g - M or - A (can be multiple one after an other) in the next line define name and ranges:
 # name var, min, max, options
 - M

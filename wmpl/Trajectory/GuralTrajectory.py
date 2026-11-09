@@ -15,9 +15,11 @@ from matplotlib.pyplot import cm
 
 
 from wmpl.Trajectory.Orbit import calcOrbit
+from wmpl.Config import config
+from wmpl.Utils.Earth import calcEquationOfEquinoxes
 from wmpl.Utils.TrajConversions import geo2Cartesian, raDec2ECI, altAz2RADec_vect, \
     raDec2AltAz_vect, jd2Date
-from wmpl.Utils.Math import vectMag, findClosestPoints, sphericalToCartesian, lineFunc
+from wmpl.Utils.Math import vectMag, findClosestPoints, sphericalToCartesian, lineFunc, rotationMatrixZ
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 
@@ -46,7 +48,7 @@ PPPDOUBLE = ct.POINTER(PPDOUBLE)
 
 
 class PSO_info(ct.Structure):
-    """ Mimicks PSO_info structure from the TrajectorySolution.h file, in Python-understandable
+    """ Mimics PSO_info structure from the TrajectorySolution.h file, in Python-understandable
         ctypes format.
     """
 
@@ -65,7 +67,7 @@ class PSO_info(ct.Structure):
 
 
 class TrajectoryInfo(ct.Structure):
-    """ Mimicks the TrajectoryInfo structure from the TrajectorySolution.h file, in Python-understandable
+    """ Mimics the TrajectoryInfo structure from the TrajectorySolution.h file, in Python-understandable
         ctypes format.
     """
 
@@ -533,9 +535,9 @@ class GuralTrajectory(object):
         self.dec_sigma = 0
         # Standard deviation of vbegin in km/sec
         self.vbegin_sigma = 0
-        # Standard deviation of decceleration term 1
+        # Standard deviation of deceleration term 1
         self.decel1_sigma = 0
-        # Standard deviation of decceleration term 2
+        # Standard deviation of deceleration term 2
         self.decel2_sigma = 0
 
         # Array of geodetic latitudes closest to trail for each measurement
@@ -1210,7 +1212,7 @@ class GuralTrajectory(object):
             file_name: [str] Name of the report time.
 
         Keyword arguments:
-            uncertainties: [MCUncertainties object] (UNUSED) Object contaning uncertainties of every parameter.
+            uncertainties: [MCUncertainties object] (UNUSED) Object containing uncertainties of every parameter.
             verbose: [bool] Print the report to the screen. True by default.
             save_results: [bool] If True, the results will be saved to a file.
         """
@@ -1602,9 +1604,15 @@ class GuralTrajectory(object):
         jd_first = np.min([np.min(jd_data) for jd_data in self.JD_data_cameras])
 
 
+        # The Gural solver places the cameras with the mean sidereal time, so rotate its frame by the
+        #   equation of the equinoxes to the one of calcOrbit (not with the legacy J2000 conversion)
+        sidereal_rot = np.eye(3)
+        if not config.legacy_j2000_precession_only:
+            sidereal_rot = rotationMatrixZ(-calcEquationOfEquinoxes(jd_first))
+
         # Calculate the orbit
-        self.orbit = calcOrbit(self.radiant_eci, self.vbegin*1000, v_avg, self.state_vect, jd_first,
-            stations_fixed=False, reference_init=True)
+        self.orbit = calcOrbit(sidereal_rot.dot(self.radiant_eci), self.vbegin*1000, v_avg, \
+            sidereal_rot.dot(self.state_vect), jd_first, stations_fixed=False, reference_init=True)
         print(self.orbit)
 
 

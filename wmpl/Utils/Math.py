@@ -30,7 +30,7 @@ def lineFunc(x, m, k):
     """A line function.
 
     Arguments:
-        x: [float] Independant variable.
+        x: [float] Independent variable.
         m: [float] Slope.
         k: [float] Intercept.
 
@@ -133,6 +133,39 @@ def getRotMatrix(v1, v2):
     return R
 
 
+
+def rotationMatrixX(angle):
+    """ Rotation matrix of the coordinate frame about the X axis.
+
+    Arguments:
+        angle: [float] Angle of rotation of the frame (radians).
+
+    Return:
+        [3x3 ndarray] Rotation matrix, applied to column vectors.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+
+    return np.array([[1, 0, 0], [0, c, s], [0, -s, c]])
+
+
+
+def rotationMatrixZ(angle):
+    """ Rotation matrix of the coordinate frame about the Z axis.
+
+    Arguments:
+        angle: [float] Angle of rotation of the frame (radians).
+
+    Return:
+        [3x3 ndarray] Rotation matrix, applied to column vectors.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+
+    return np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+
+
+
 def angleBetweenVectors(a, b):
     """Compute the angle between two vectors.
 
@@ -144,7 +177,8 @@ def angleBetweenVectors(a, b):
         [float] Angle between a and b (radians).
     """
 
-    return np.arccos(np.dot(a, b) / (vectMag(a) * vectMag(b)))
+    # Clip the cosine, which can be slightly above 1 for parallel vectors due to rounding
+    return np.arccos(np.clip(np.dot(a, b) / (vectMag(a) * vectMag(b)), -1.0, 1.0))
 
 
 def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
@@ -157,7 +191,7 @@ def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
     Arguments:
         pos: [ndarray] Initial position vector.
         dir_path: [ndarray] Direction unit vector.
-        angle: [float] Angle between the inital and the final position vectors (radians).
+        angle: [float] Angle between the initial and the final position vectors (radians).
 
     Return:
         [ndarray] Final position vector.
@@ -200,7 +234,7 @@ def circPercentile(data, percentile, q0=None):
     Source: https://github.com/circstat/pycircstat/blob/53d2efdf54c394fd9ecff8d47eaae165c1458fb0/pycircstat/descriptive.py#L375
 
     Arguments:
-        data: [array-like] Angles in radians.
+        data: [array-like] Angles in radians, in any range (e.g. 0 to 2 pi or -pi to pi).
         percentile: [float] Percentile in the [0, 100] range.
 
     Keyword arguments:
@@ -215,6 +249,15 @@ def circPercentile(data, percentile, q0=None):
     data = np.array(data)
 
     if q0 is None:
+
+        # Wrap the angles to 0-360, so angles from -180 to 180 (e.g. longitudes) are also taken, in double
+        #   precision so the order of the samples is kept
+        data = data.astype(np.float64)%(2*np.pi)
+
+        # Without a value for every sample (e.g. the anomalies of a hyperbolic orbit), the percentile is NaN
+        if np.any(np.isnan(data)):
+            return np.nan
+
         # If the data is on the 0/360 discontinuity, adjust the 0th percentile
         if np.abs(np.min(data) - np.max(data)) > np.pi:
             q0 = np.min(data[data > np.pi])
@@ -283,7 +326,7 @@ def polarToCartesian(theta, phi):
         phi: [float] Azimuth angle in radians.
 
     Return:
-        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartesian coordinates.
     """
 
     x = np.sin(phi) * np.cos(theta)
@@ -302,7 +345,7 @@ def sphericalToCartesian(r, theta, phi):
         phi: [float] Azimuth angle in radians.
 
     Return:
-        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartesian coordinates.
     """
 
     x = r * np.sin(theta) * np.cos(phi)
@@ -482,7 +525,7 @@ def findClosestPoints(P, u, Q, v):
 
 
 def lineAndSphereIntersections(centre, radius, origin, direction):
-    """Finds intersections between a sphere of given radius and coordiantes of the centre and a line
+    """Finds intersections between a sphere of given radius and coordinates of the centre and a line
         defined by an origin and a direction vector.
 
     Source: http://www.lighthouse3d.com/tutorials/maths/ray-sphere-intersection/
@@ -802,8 +845,39 @@ def RMSD(x, weights=None):
     return np.sqrt(np.sum(weights * x**2) / np.sum(weights))
 
 
+
+def medianStddev(stddev_list, n_samples=100000):
+    """ Compute the standard deviation of the median of independent normally distributed values, by
+        sampling them. A fixed seed is used, so the result is repeatable and the global random state is not
+        changed.
+
+    Arguments:
+        stddev_list: [list] Standard deviations of the individual values. Values which are None or not
+            finite are taken as exact.
+
+    Keyword arguments:
+        n_samples: [int] Number of samples. 100000 by default.
+
+    Return:
+        [float] Standard deviation of the median.
+    """
+
+    # Take values without a valid standard deviation as exact
+    stddev_list = np.array([sd if ((sd is not None) and np.isfinite(sd)) else 0.0 for sd in stddev_list])
+
+    if len(stddev_list) == 0:
+        return 0.0
+
+    # Sample the values and compute the spread of their median
+    rng = np.random.RandomState(0)
+    samples = rng.normal(0, 1, (n_samples, len(stddev_list)))*stddev_list
+
+    return np.std(np.median(samples, axis=1))
+
+
+
 def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method="avg"):
-    """Finds if points have similar sample values on the independant axis x (if they are within delta) and
+    """Finds if points have similar sample values on the independent axis x (if they are within delta) and
         averages all y values.
 
     Arguments:
@@ -915,8 +989,8 @@ def checkContinuity(sequence):
         sequence: [list] A list of 0s and 1s.
 
     Return:
-        (status, first_index, last_index): [bool], [int], [int] True if the sequence contains exaclty one
-            continous string of 1s, False otherwise. first_index and last_index are indices of the beginning
+        (status, first_index, last_index): [bool], [int], [int] True if the sequence contains exactly one
+            continuous string of 1s, False otherwise. first_index and last_index are indices of the beginning
             and the end of the sequence.
 
     Examples:
@@ -939,7 +1013,7 @@ def checkContinuity(sequence):
     # Compute element-wise differences
     diffs = sequence[:-1] - sequence[1:]
 
-    # Check if the number of differences is 2 or less, indicating one continous sequence
+    # Check if the number of differences is 2 or less, indicating one continuous sequence
     if np.count_nonzero(diffs) == 0:
         # Make sure there are more then one 1s in the sequence
         if np.count_nonzero(sequence == 1) > 1:
@@ -957,7 +1031,7 @@ def checkContinuity(sequence):
             return True, 0, change_indx
 
     elif np.count_nonzero(diffs) == 2:
-        # Check if that continous sequence is a sequence of ones, or a sequence of zeros
+        # Check if that continuous sequence is a sequence of ones, or a sequence of zeros
         first, last = np.argwhere(diffs != 0)
 
         if np.count_nonzero(sequence[first[0] + 1: last[0]] == 1):
@@ -985,8 +1059,8 @@ def histogramEdgesEqualDataNumber(x, nbins):
 def padOrTruncate(array, size):
     """Given the array, either pad ti with zeros or cut it to the given size.
 
-    Argumetns:
-        array: [ndarray] Inpout numpy array.
+    Arguments:
+        array: [ndarray] Input numpy array.
         size: [int] Output array size.
 
     Return:
@@ -1015,7 +1089,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
 
     Keyword arguments:
         conf: [float] Confidence interval (fraction, 0.0 to 1.0).
-        x_array: [ndarray] Array for evaluating the confidence interval on. Usually used as an independant
+        x_array: [ndarray] Array for evaluating the confidence interval on. Usually used as an independent
             variable array for plotting.
         func: [function] Function to fit. None by default, which means a line will be fit.
 
@@ -1173,6 +1247,27 @@ def generateMonthyTimeBins(dt_beg, dt_end):
 
 
 ##############################################################################################################
+
+
+
+def expSegmentIntegral(rho_0, scale, dh):
+    """ Integrate rho_0*exp(scale*x) for x from 0 to dh, stably when scale*dh is near 0.
+
+    Arguments:
+        rho_0: [float or ndarray] Density at the bottom of the segment (kg/m^3).
+        scale: [float or ndarray] Exponential scale of the segment (1/m).
+        dh: [float or ndarray] Height above the bottom of the segment (m).
+
+    Return:
+        [float or ndarray] Air column (kg/m^2).
+    """
+
+    x = np.asarray(scale*dh, dtype=np.float64)
+    x_safe = np.where(x == 0, 1.0, x)
+
+    return rho_0*dh*np.where(x == 0, 1.0, np.expm1(x_safe)/x_safe)
+
+
 
 
 if __name__ == "__main__":

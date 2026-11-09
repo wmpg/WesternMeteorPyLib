@@ -205,7 +205,7 @@ class GroundMap(object):
         if plot_scale:
             ## Plot the map scale
             
-            # Get XY cordinate of the lower left corner
+            # Get XY coordinate of the lower left corner
             ll_x, _ = ax.get_xlim()
             ll_y, _ = ax.get_ylim()
 

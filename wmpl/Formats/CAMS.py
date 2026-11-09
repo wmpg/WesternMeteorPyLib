@@ -10,7 +10,7 @@ import sys
 import argparse
 import numpy as np
 
-from wmpl.Formats.GenericFunctions import addSolverOptions, MeteorObservation, \
+from wmpl.Formats.GenericFunctions import addKMLOptions, addSolverOptions, MeteorObservation, \
     prepareObservations, solveTrajectoryGeneric
 from wmpl.Formats.Milig import StationData, writeMiligInputFile
 from wmpl.Utils.TrajConversions import date2JD
@@ -478,12 +478,12 @@ def cams2MiligInput(meteor_list, file_path):
 
 
 def computeAbsoluteMagnitudes(traj, meteor_list):
-    """ Given the trajectory, compute the absolute mangitude (visual mangitude @100km). """
+    """ Given the trajectory, compute the absolute magnitude (visual magnitude @100km). """
 
     # Go though every observation of the meteor
     for i, meteor_obs in enumerate(meteor_list):
 
-        # Go through all magnitudes and compute absolute mangitudes
+        # Go through all magnitudes and compute absolute magnitudes
         for dist, mag in zip(traj.observations[i].model_range, meteor_obs.mag_data):
 
             # Skip nonexistent magnitudes
@@ -515,6 +515,7 @@ if __name__ == "__main__":
 
     # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
+    arg_parser = addKMLOptions(arg_parser)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
         help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.', \
@@ -600,7 +601,7 @@ if __name__ == "__main__":
     # meteor2 = meteor_list[2:4]
 
     
-    # Assume all entires in the FTPdetectinfo path should be used for one meteor
+    # Assume all entries in the FTPdetectinfo path should be used for one meteor
     meteor_proc_list = [meteor_list]
 
 
@@ -624,7 +625,9 @@ if __name__ == "__main__":
             show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
             show_jacchia=cml_args.jacchia, \
             estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-            fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, enable_OSM_plot=cml_args.enableOSM)
+            fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, \
+            enable_OSM_plot=cml_args.enableOSM, save_kml=(cml_args.kml or cml_args.kmlmeas), \
+            kml_measured=cml_args.kmlmeas)
 
 
     # ### PERFORM PHOTOMETRY
@@ -635,7 +638,7 @@ if __name__ == "__main__":
     # # Override default DPI for saving from the interactive window
     # matplotlib.rcParams['savefig.dpi'] = 300
 
-    # # Compute absolute mangitudes
+    # # Compute absolute magnitudes
     # computeAbsoluteMagnitudes(traj, meteor)
 
     # # List of photometric uncertainties per station

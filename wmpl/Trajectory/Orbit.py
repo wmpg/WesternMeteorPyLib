@@ -12,13 +12,14 @@ from jplephem.spk import SPK
 import wmpl
 from wmpl.Config import config
 from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
+from wmpl.Utils.OrbitConstants import GAUSS_K
 from wmpl.Utils.ShowerAssociation import associateShower
 from wmpl.Utils.SolarLongitude import jd2SolLonJPL
 from wmpl.Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, \
     jd2LST, jd2Date, jd2DynamicalTimeJD, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo,\
-    equatorialCoordPrecession, eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD, \
-    geo2Cartesian
-from wmpl.Utils.Math import vectNorm, vectMag, rotateVector, cartesianToSpherical, sphericalToCartesian
+    eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD, \
+    geo2Cartesian, equatorialCoordDateToJ2000, equatorialCoordJ2000ToDate, eciDateToJ2000
+from wmpl.Utils.Math import vectNorm, vectMag, rotateVector
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.Pickling import loadPickle
 
@@ -375,7 +376,7 @@ def calcLatitudeOfPerihelion(peri, node, incl):
     ra_p = np.arctan2(Bp, Ap)%(2*np.pi)
     dec_p = np.arcsin(Cp)
     
-    # Longitue of perihelion
+    # Longitude of perihelion
     # pi_t = np.arctan2(np.sin(ra_p)*np.cos(J2000_OBLIQUITY) + np.tan(dec_p)*np.sin(J2000_OBLIQUITY), np.cos(ra_p))%(2*np.pi)
     
     # Latitude of perihelion
@@ -386,7 +387,7 @@ def calcLatitudeOfPerihelion(peri, node, incl):
 
 
 def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
-    """ Compute keplerian orbital elements (+ a few other parametrs), given the geocentric radiant and
+    """ Compute keplerian orbital elements (+ a few other parameters), given the geocentric radiant and
         a reference ECI location.
 
     Arguments:
@@ -394,7 +395,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
         eci_ref: [ndarry] X, Y, Z components of ECI coordinates at the reference Julian date (meters) in J2000.
         ra_g: [float] Geocentric radiant, right ascension (J2000, radians).
         dec_g: [float] Geocentric radiant, declination (J2000, radians).
-        v_g: [float] Geocentic velocity (m/s).
+        v_g: [float] Geocentric velocity (m/s).
 
     Return:
         (tuple): orbital elements
@@ -565,7 +566,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
     # Calculate the time in days since the last perihelion passage of the meteoroid
     # not meaningful for non-closed orbits
     if a > 0:
-        dt_perihelion = (mean_anomaly*a**(3.0/2))/0.01720209895
+        dt_perihelion = (mean_anomaly*a**(3.0/2))/GAUSS_K
     else:
         dt_perihelion = np.nan
 
@@ -620,7 +621,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             trajectory, where the meteor has the velocity v_init. If False, then the reference point is the
             average point on the trajectory, and the average velocity will be used to do the corrections.
         rotation_correction: [bool] If True, the correction of the initial velocity for Earth's rotation will
-            be performed. False by default. This should ONLY be True if the coordiante system for trajectory
+            be performed. False by default. This should ONLY be True if the coordinate system for trajectory
             estimation was ECEF, i.e. did not rotate with the Earth. In all other cases it should be False, 
             even if fixed station coordinates were used in the ECI coordinate system!
         v_init_stddev_direct: [float] Standard deviation of the direct velocity fit derived without Monte
@@ -806,7 +807,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     # Make sure the velocity of the meteor is larger than the escape velocity
     if v_init_corr**2 > (2*6.67408*5.9722)*1e13/vectMag(eci_ref):
 
-        # Calculate the geocentric velocity (sqrt of squared inital velocity minus the square of the Earth escape 
+        # Calculate the geocentric velocity (sqrt of squared initial velocity minus the square of the Earth escape 
         # velocity at the height of the trajectory), units are m/s.
         # Square of the escape velocity is: 2GM/r, where G is the 2014 CODATA-recommended value of 
         # 6.67408e-11 m^3/(kg s^2), and the mass of the Earth is M = 5.9722e24 kg
@@ -844,22 +845,11 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_ref, lat_geocentric, lon_ref)
         
 
-        ### Precess ECI coordinates to J2000 ###
-
-        # Convert rectangular to spherical coordiantes
-        re, delta_e, alpha_e = cartesianToSpherical(*eci_ref)
-
-        # Precess coordinates to J2000
-        alpha_ej, delta_ej = equatorialCoordPrecession(jd_ref, J2000_JD.days, alpha_e, delta_e)
-
-        # Convert coordinates back to rectangular
-        eci_ref = sphericalToCartesian(re, delta_ej, alpha_ej)
-        eci_ref = np.array(eci_ref)
-
-        ######
+        # Convert the ECI coordinates to J2000
+        eci_ref = eciDateToJ2000(jd_ref, eci_ref)
 
         # Precess the geocentric radiant to J2000
-        ra_g, dec_g = equatorialCoordPrecession(jd_ref, J2000_JD.days, ra_g, dec_g)
+        ra_g, dec_g = equatorialCoordDateToJ2000(jd_ref, ra_g, dec_g)
 
 
         # Compute the orbital elements
@@ -990,7 +980,7 @@ if __name__ == "__main__":
         action="store_true")
 
     arg_parser.add_argument('-s', '--statfixed', \
-        help="Shoud be used if the stations were fixed during trajectory estimation (e.g. with MILIG).", \
+        help="Should be used if the stations were fixed during trajectory estimation (e.g. with MILIG).", \
         action="store_true")
 
     arg_parser.add_argument('-m', '--milig', \
@@ -1123,7 +1113,7 @@ if __name__ == "__main__":
 
             # Precess to epoch of date if given in J2000
             if cml_args.j2000:
-                ra, dec = equatorialCoordPrecession(J2000_JD.days, jd_ref, ra, dec)
+                ra, dec = equatorialCoordJ2000ToDate(jd_ref, ra, dec)
 
         # Compute the radiant vector in ECI coordinates
         radiant_eci = np.array(raDec2ECI(ra, dec))

@@ -25,7 +25,7 @@ from wmpl.Utils.TrajConversions import datetime2JD, raDec2AltAz_vect
 
 ### CONSTANTS ###
 
-# Use a fixed FPS (not really important in the grand scheme of things, it's just for combatibility with
+# Use a fixed FPS (not really important in the grand scheme of things, it's just for compatibility with
 #   used functions)
 FPS = 15
 

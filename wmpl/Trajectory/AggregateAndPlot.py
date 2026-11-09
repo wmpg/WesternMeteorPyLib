@@ -23,10 +23,10 @@ except ImportError:
 
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
 from wmpl.Trajectory.Trajectory import addTrajectoryID
-from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
+from wmpl.Utils.Math import meanAngle, sphericalPointFromHeadingAndDistance, \
     angleBetweenSphericalCoords, generateMonthyTimeBins
 from wmpl.Utils.OSTools import mkdirP, walkDirsToDepth
-from wmpl.Utils.Physics import calcMass
+from wmpl.Utils.Physics import calcMass, trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import MapColorScheme
@@ -84,47 +84,15 @@ P_0M = 1210
 def computeMass(traj, P_0m):
     """ Compute the mass given the trajectory and a power of a zero magnitude meteor. """
 
-
-    time_mag_arr = []
-    avg_t_diff_max = 0
-    for obs in traj.observations:
-
-        # Skip ignored stations
-        if obs.ignore_station:
-            continue
-
-        # If there are not magnitudes for this site, skip it
-        if obs.absolute_magnitudes is None:
-            continue
-
-        # Compute average time difference
-        avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
-
-        # Exclude magnitudes fainter than mag +8
-        mag_filter = obs.absolute_magnitudes < 8
-
-        # If all magnitudes are fainter than 8, skip the station
-        if not np.any(mag_filter):
-            continue
-
-        for t, mag in zip(obs.time_data[mag_filter], obs.absolute_magnitudes[mag_filter]):
-            if (mag is not None) and (not np.isnan(mag)):
-                time_mag_arr.append([t, mag])
+    # Extract the light curve
+    time_arr, mag_arr, _ = trajectoryLightCurve(traj)
 
     # If there are no magnitudes, return 0
-    if len(time_mag_arr) == 0:
+    if time_arr is None:
         return 0
 
-    # Compute the mass
-    time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
-    time_arr, mag_arr = time_mag_arr.T
-    
-    # Take the brightest magnitudes, which mitigates saturation effects. Note that this assumes that the
-    #   photometric calibration was done well
-    time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='min')
-
     # Compute the photometric mass
-    mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
+    mass = calcMass(time_arr, mag_arr, traj.orbit.v_avg_norot, P_0m=P_0m)
 
 
     return mass
@@ -132,16 +100,36 @@ def computeMass(traj, P_0m):
 
 
 def computePeakMagHt(traj):
-    """ Compute the peak magnitude and peak height. """
+    """ Compute the peak magnitude and peak height. Points without a magnitude (NaN) are skipped.
 
-    # Compute peak magnitude from all stations
-    peak_mags = [np.min(obs.absolute_magnitudes[obs.ignore_list == 0]) for obs in traj.observations 
-        if obs.ignore_station is False]
-    peak_mag = np.min(peak_mags)
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
 
-    # Compute the peak height
-    peak_ht = [obs.model_ht[np.argmin(obs.absolute_magnitudes[obs.ignore_list == 0])] 
-        for obs in traj.observations if obs.ignore_station is False][np.argmin(peak_mags)]
+    Return:
+        (peak_mag, peak_ht): Peak absolute magnitude and its height (m), NaN if no point has a magnitude.
+    """
+
+    peak_mag = np.nan
+    peak_ht = np.nan
+
+    # Find the brightest point of all stations
+    for obs in traj.observations:
+
+        if obs.ignore_station or (obs.absolute_magnitudes is None):
+            continue
+
+        used = obs.ignore_list == 0
+        abs_mags = np.array(obs.absolute_magnitudes, dtype=np.float64)[used]
+        heights = np.array(obs.model_ht)[used]
+
+        finite = np.isfinite(abs_mags)
+        if not np.any(finite):
+            continue
+
+        i_peak = np.argmin(np.where(finite, abs_mags, np.inf))
+        if np.isnan(peak_mag) or (abs_mags[i_peak] < peak_mag):
+            peak_mag = abs_mags[i_peak]
+            peak_ht = heights[i_peak]
 
 
     return peak_mag, peak_ht
@@ -188,7 +176,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
         Keyword arguments:
             multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
                 different units (e.g. from m/s to km/s).
-            deg: [bool] Converet radians to degrees if True. False by defualt.
+            deg: [bool] Converet radians to degrees if True. False by default.
             max_val: [float] Larger number to use the given format. If the value is larger than that, the
                 max_val_format is used.
             max_val_format: [str]
@@ -591,7 +579,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir,
 
             ### Plot a circle around the shower centre ###
 
-            # If the shower dispersion is availabe, use it. Over otherwise, use a default value
+            # If the shower dispersion is available, use it. Over otherwise, use a default value
             if shower_obj.dispersion is not None:
                 shower_radius = np.degrees(shower_obj.dispersion)
             else:
@@ -931,7 +919,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
         min_members: [int] Minimum number of shower members to plot the shower. 30 by default
         max_radiant_err: [float] Maximum radiant error in degrees. 0.5 deg by default
         P_0m: [float] Power of a zero magnitue meteors (watts) in the given camera bandpass. 1210 W by 
-            defualt.
+            default.
 
     """
 
@@ -1586,7 +1574,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                         print("Loaded {:d} trajectories...".format(loaded_trajs_count))
 
 
-                ### DELETE UNECESSARY OBJECTS AND ARGUMENTS TO CONSERVE MEMORY ###
+                ### DELETE UNNECESSARY OBJECTS AND ARGUMENTS TO CONSERVE MEMORY ###
 
                 # Delete all stored MC runs to conserve memory
                 if traj.uncertainties is not None:
@@ -2217,10 +2205,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-a', '--auto', metavar='PREV_SOLS', type=int, default=None, const=10, 
         nargs='?', 
-        help="""Run continously taking the data in the last PREV_SOLS degrees of solar longitudes to generate new plots and reports, and update old ones.""")
+        help="""Run continuously taking the data in the last PREV_SOLS degrees of solar longitudes to generate new plots and reports, and update old ones.""")
 
     arg_parser.add_argument('-f', '--autofirst', metavar='FIRST_PREV_SOLS', type=int, 
-        help="""During the first continous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run.""")
+        help="""During the first continuous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run.""")
 
     arg_parser.add_argument('-p', '--plot_all_showers', action="store_true", 
         help="""Plot showers on the maps showing the whole date ramge.""")
@@ -2231,7 +2219,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--output', metavar='OUTPUT_DIR', type=str, 
         help="""Output directory. If not given, the data directory will be used.""")
     
-    # Add custom specifcation for the trajectory quality parameters
+    # Add custom specification for the trajectory quality parameters
     arg_parser.add_argument('--min_traj_points', metavar='MIN_POINTS', type=int,
         help='Minimum number of points on the trajectory for the station with the most points.')
     

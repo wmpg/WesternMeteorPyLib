@@ -56,7 +56,7 @@ if __name__ == "__main__":
 
 
 
-    # Number of historgram bins
+    # Number of histogram bins
     conv_hist_bins = 30
 
 

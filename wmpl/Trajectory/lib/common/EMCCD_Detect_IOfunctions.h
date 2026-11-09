@@ -175,7 +175,7 @@ FILE    *ParametersReadFile;
     }
 
 
-	//======== Read the remainer of the configuration parametersr
+	//======== Read the remainder of the configuration parametersr
 
 	fscanf( ParametersReadFile, "%[^=]= %lf",         text, &params->sample_time_sec );
 	fscanf( ParametersReadFile, "%[^=]= %ld",         text, &params->interleave );
@@ -294,7 +294,7 @@ time_t  processedtime;
 	fprintf( CandidateDetectWriteFile, "Dedupe rel velocity (%%)    = %lf\n", params->RelVelocityPercentage );
 	fprintf( CandidateDetectWriteFile, "Dedupe max distance (pix)  = %lf\n", params->DistanceLimitPixels );
 	fprintf( CandidateDetectWriteFile, "TRT Threshold              = %lf\n", params->TRT_threshold );
-	fprintf( CandidateDetectWriteFile, "MLE Threashold (dB)        = %lf\n", params->MLEdb_threshold );
+	fprintf( CandidateDetectWriteFile, "MLE Threshold (dB)        = %lf\n", params->MLEdb_threshold );
     fprintf( CandidateDetectWriteFile, "----------------------------------------------------------------------------------------------\n");
     fprintf( CandidateDetectWriteFile, "Imagery_pathname   V=pixels/frame\n");
 	fprintf( CandidateDetectWriteFile, "DetectID  Npts  BNRorTRT  SNRorMLE  Xcol  Xrow  Vcol  Vrow  Lin  Model  Ref#\n");
@@ -319,7 +319,7 @@ time_t  processedtime;
 //            pathname        File pathname of the imagery sequence
 //            track           Pointer to the trackerinfo structure
 //            seqnumber       Vector of sequence numbers per measurement
-//            sample_time_sec Time spacing betwen adjacent-in-time frame (seconds)
+//            sample_time_sec Time spacing between adjacent-in-time frame (seconds)
 //            trackmeasurements     Pointer to the EMCCDtrackdata structure
 //            refnumber       Reference number to relate back to a BMP file
 //
@@ -533,7 +533,7 @@ char   camchar, text[256], datetimetext[256];
 //                               "MFIL" = matched filter detection
 //            pathname      File pathname of the imagery sequence
 //            track         Pointer to the trackerinfo structure
-//            jdt_startmeas Julian date/time fo the 1st measurement
+//            jdt_startmeas Julian date/time for the 1st measurement
 //            trackmeasurements   Pointer to the EMCCDtrackdata structure
 //
 //
@@ -662,7 +662,7 @@ unsigned char  *red_ptr, *grn_ptr, *blu_ptr, uchar_datum;
 
             for( kcol=0; kcol<ncols; kcol++ )  {
 
-				//-------- Scale the image down to a resonable range = [0,255]
+				//-------- Scale the image down to a reasonable range = [0,255]
 
 				double_datum = *image_ptr++ / 2.0;
 
@@ -761,7 +761,7 @@ unsigned char  *red_ptr, *grn_ptr, *blu_ptr, uchar_datum;
 //            params             Pointer to the EMCCDparameters structure
 //            nummeas            Number of measurements
 //            seqnumber          Vector of sequence numbers per measurement
-//            sample_time_sec    Time spacing betwen adjacent-in-time frame (seconds)
+//            sample_time_sec    Time spacing between adjacent-in-time frame (seconds)
 //            trackmeasurements  Pointer to the EMCCDtrackdata structure
 //
 // Outputs:   ASGARD detection file

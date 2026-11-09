@@ -153,7 +153,7 @@ ctypedef np.float64_t FLOAT_TYPE_t
 #         # Meteoroid compressive strength (Pa)
 #         self.compressive_strength = 2000
 
-#         # Height of disruption (will be assigned when the disruption occures)
+#         # Height of disruption (will be assigned when the disruption occurs)
 #         self.disruption_height = -1
 
 #         # Erosion coefficient to use after disruption
@@ -396,8 +396,8 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
         v_init: [double] Pre-atmospheric velocity (m/s), only used by the Revelle & Ceplecha (2001)
             models (types 1-3). If <= 0 (default -1), the deceleration correction term
             0.26*ln(dv) + 0.0042*ln(dv)^3, where dv = (v_init - vel) in km/s, is not applied.
-            The correction diverges as dv -> 0, so for 0 < dv < 0.1 km/s it is linearly tapered
-            to zero, and for vel >= v_init it is set to zero (instead of producing a NaN).
+            The correction diverges as dv -> 0, so dv is floored at 0.1 km/s. The floor also
+            covers vel >= v_init (instead of producing a NaN).
 
     Return:
         tau: [double] Luminous efficiency (ratio).
@@ -406,8 +406,8 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
 
     cdef double c1, c2, lv, decel, dv
 
-    # Velocity difference (km/s) below which the Revelle & Ceplecha (2001) deceleration correction is
-    # linearly tapered to zero, keeping it bounded as it otherwise diverges to -inf as dv -> 0
+    # Velocity difference (km/s) at which the Revelle & Ceplecha (2001) deceleration correction is
+    # floored, keeping it bounded as it otherwise diverges to -inf as dv -> 0
     cdef double dv_min = 0.1
 
     # Constant luminous efficiency
@@ -441,14 +441,13 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
 
             dv = (v_init - vel)/1000.0
 
-            if dv >= dv_min:
-                decel = 0.26*log(dv) + 0.0042*log(dv)**3
-
-            # Taper the correction linearly to zero below dv_min (it diverges as dv -> 0), and
-            # disable it for vel >= v_init (physically inconsistent input, avoid log of a
+            # Hold the correction at its dv_min value below dv_min, where it diverges as dv -> 0.
+            # This also covers vel >= v_init (physically inconsistent input, avoid log of a
             # non-positive number)
-            elif dv > 0:
-                decel = (dv/dv_min)*(0.26*log(dv_min) + 0.0042*log(dv_min)**3)
+            if dv < dv_min:
+                dv = dv_min
+
+            decel = 0.26*log(dv) + 0.0042*log(dv)**3
 
         # Slow meteoroids
         if vel < 25372:
@@ -581,3 +580,100 @@ cpdef atmDensityPoly(double ht, np.ndarray[FLOAT_TYPE_t, ndim=1] dens_co):
                + dens_co[5]*(ht/1e6)**5
                + dens_co[6]*(ht/1e6)**6
                )
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef double tableDensity(double ht, const double[::1] table_ht, const double[::1] table_log10_rho) nogil:
+    """ Interpolate log10 of the density linearly in height in a table, extrapolating the end segments. """
+
+    cdef Py_ssize_t n = table_ht.shape[0]
+    cdef Py_ssize_t lo = 0
+    cdef Py_ssize_t hi = n - 1
+    cdef Py_ssize_t mid
+
+    # Find the last table point at or below the height, keeping the end segments outside the table
+    if ht >= table_ht[n - 1]:
+        lo = n - 2
+
+    else:
+        while hi - lo > 1:
+            mid = (lo + hi)//2
+            if table_ht[mid] <= ht:
+                lo = mid
+            else:
+                hi = mid
+
+    return 10**(table_log10_rho[lo] + (ht - table_ht[lo])*(table_log10_rho[lo + 1] - table_log10_rho[lo]) \
+        /(table_ht[lo + 1] - table_ht[lo]))
+
+
+
+def checkTableShape(table_ht, table_log10_rho):
+    """ Check that a density table has at least 2 points and as many densities as heights.
+
+    Arguments:
+        table_ht: [ndarray] Table heights in meters.
+        table_log10_rho: [ndarray] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        None
+    """
+
+    if (len(table_ht) < 2) or (len(table_ht) != len(table_log10_rho)):
+        raise ValueError("The density table needs at least 2 points and as many densities as heights, got " \
+            "{:d} heights and {:d} densities".format(len(table_ht), len(table_log10_rho)))
+
+
+
+cdef class AtmDensityTableCy:
+    """ Atmosphere density table for the simulation loop, which holds the table so that a call does not
+        convert it, and which the Cython code can evaluate without the Python overhead.
+    """
+
+    cdef const double[::1] table_ht
+    cdef const double[::1] table_log10_rho
+
+    def __init__(self, table_ht, table_log10_rho):
+        """ Store the table as contiguous arrays.
+
+        Arguments:
+            table_ht: [ndarray] Table heights in meters, ascending, at least 2 points.
+            table_log10_rho: [ndarray] log10 of the densities (kg/m^3) at the table heights.
+        """
+
+        table_ht = np.ascontiguousarray(table_ht, dtype=np.float64)
+        table_log10_rho = np.ascontiguousarray(table_log10_rho, dtype=np.float64)
+        checkTableShape(table_ht, table_log10_rho)
+
+        self.table_ht = table_ht
+        self.table_log10_rho = table_log10_rho
+
+
+    cpdef double density(self, double ht):
+        """ Calculates the atmospheric density in kg/m^3 at the given height in meters. """
+
+        return tableDensity(ht, self.table_ht, self.table_log10_rho)
+
+
+
+cpdef double atmDensityTable(double ht, const double[::1] table_ht, const double[::1] table_log10_rho):
+    """ Calculates the atmospheric density in kg/m^3 from a tabulated profile, interpolating log10 of the
+        density linearly in height, which is an exponential atmosphere between the table points. Outside the
+        table, the end segments are extrapolated. The simulation loop uses AtmDensityTableCy instead, which
+        does not convert the table on every call.
+
+    Arguments:
+        ht: [double] Height in meters.
+        table_ht: [ndarray] Table heights in meters, ascending, at least 2 points.
+        table_log10_rho: [ndarray] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        [double] Atmosphere density at height h (kg/m^3)
+
+    """
+
+    checkTableShape(table_ht, table_log10_rho)
+
+    return tableDensity(ht, table_ht, table_log10_rho)

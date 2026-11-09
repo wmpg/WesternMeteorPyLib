@@ -94,7 +94,7 @@ def simGoodness(sim_time, sim_height, sim_length, obs_time, obs_height, obs_leng
     # Take simulated time only in the range of observed lengths
     sim_time_obs = sim_time[sim_max_i:sim_min_i]
 
-    # Project the first observed height to the simulated lenghts
+    # Project the first observed height to the simulated lengths
     model_ht_interpol_full = scipy.interpolate.CubicSpline(-sim_height_obs, sim_length_obs, extrapolate=True)
     first_point_length = model_ht_interpol_full(-ht_max)
 
@@ -115,7 +115,7 @@ def simGoodness(sim_time, sim_height, sim_length, obs_time, obs_height, obs_leng
     sim_time_obs -= sim_time_obs[0]
 
 
-    # Penalize the occurence when the simulated length does not cover the whole range of observed data
+    # Penalize the occurrence when the simulated length does not cover the whole range of observed data
     # (if it covers the whole range, the penalization should not influence the end result)
     #penal = (obs_height[0] - obs_height[-1])/(sim_height_obs[1]  - sim_height_obs[-1])
     penal = 1.0
@@ -125,7 +125,7 @@ def simGoodness(sim_time, sim_height, sim_length, obs_time, obs_height, obs_leng
     # print('Penal:', penal)
 
 
-    # NOTE: heights are negative because the CubicSpline function requires that the independant variable
+    # NOTE: heights are negative because the CubicSpline function requires that the independent variable
     # (heights in our case) must be increasing, but that does not influence the end cost function value
 
 
@@ -515,10 +515,10 @@ def findBestSolution(solutions, top_N=20):
     # Go through every parameter in the top N solutions
     for param in top_solutions.T:
 
-        # Find the unique parameters in the list and find the number of their occurence
+        # Find the unique parameters in the list and find the number of their occurrence
         unique, counts = np.unique(param,  return_counts=True)
 
-        # Take the parameter which the highest number of occurences
+        # Take the parameter which the highest number of occurrences
         top_params.append(unique[counts.argmax()])
 
 
@@ -606,7 +606,7 @@ def showAllResults(results_file, met, consts, v_init, zc, obs_height, obs_length
 
 
 
-# TEST FUNCTON
+# TEST FUNCTION
 def showBestResult(results_file, met, consts, v_init, zc, obs_time, obs_height, obs_length):
 
     # Load the numpy array with the results from a file

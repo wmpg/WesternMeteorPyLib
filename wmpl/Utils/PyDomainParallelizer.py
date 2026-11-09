@@ -203,7 +203,7 @@ def mpWorker(inputs, wait_time):
 
     """
 
-    print(" Processs %s\tWaiting %s seconds" % (inputs, wait_time))
+    print(" Process %s\tWaiting %s seconds" % (inputs, wait_time))
 
     time.sleep(int(wait_time))
 

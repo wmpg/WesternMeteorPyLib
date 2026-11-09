@@ -278,7 +278,7 @@ def readWdata(dir_path, file_name, begin_time, sps, nsamples=-1, datatype='s4', 
 
 
 def loadCSSseismicData(dir_path, site_file, wfdisc_file):
-    """ Load the data from a CSS seismic data format and returns a list containing infromation about
+    """ Load the data from a CSS seismic data format and returns a list containing information about
         the stations and the waveform data itself. 
     
     Arguments:

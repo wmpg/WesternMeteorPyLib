@@ -750,7 +750,7 @@ class FileMonitorApp(QMainWindow):
                     ignored_times = obs.time_data[1:][obs.ignore_list[1:] > 0]
                     ignored_velocities = obs.velocities[1:][obs.ignore_list[1:] > 0]
 
-                    # Set the label only for the first occurence
+                    # Set the label only for the first occurrence
                     if first_ignored_plot:
 
                         self.ax_vel.scatter(ignored_velocities/1000, ignored_times, facecolors='none', edgecolors='k', \

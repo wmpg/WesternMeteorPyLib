@@ -115,7 +115,7 @@ def calcEarthRectangularCoordJPL(jd, jpl_data, sun_centre_origin=False):
 
     Return:
         position, velocity: [tuple of ndarrays] position and velocity of Earth in kilometers and km/s, in 
-            ecliptic rectangular cordinates, in J2000.0 epoch.
+            ecliptic rectangular coordinates, in J2000.0 epoch.
 
     """
 
@@ -412,6 +412,23 @@ def calcTrueObliquity(jd):
 
 
     return eps
+
+
+
+def calcEquationOfEquinoxes(julian_date):
+    """ Calculate the equation of the equinoxes, the apparent minus the mean sidereal time.
+
+    Arguments:
+        julian_date: [float] Julian date.
+
+    Return:
+        [float] Equation of the equinoxes (radians).
+    """
+
+    # Calculate Earth's nutation components
+    delta_psi, _ = calcNutationComponents(wmpl.Utils.TrajConversions.jd2DynamicalTimeJD(julian_date))
+
+    return delta_psi*np.cos(calcTrueObliquity(julian_date))
 
 
 

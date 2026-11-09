@@ -6,14 +6,14 @@
 # - norm    : considers instead of uniform distribution a normal distribution and substitutes min and max with mean and sigma, good for velocity or zenith angle
 # - invgamma: considers instead of uniform distribution a inverse gamma distribution that peak around the mode and have a long trail so it substitutes min and max with alpha and mode, good for noise uncertanty
 # - log     : cosider the log10 of the range given consider it for priors that extend for multiple order of magnitude (if 0.0 is set to 1e-12)
-# - fix     : fix the value to the first value given so it is not estimated by dynesty, the assumend noise in lag (noise_lag) for EMCCD is 40 m and CAMO is 5 m while for both in luminosity (noise_lum) is 2.5 J/s
+# - fix     : fix the value to the first value given so it is not estimated by dynesty, the assumed noise in lag (noise_lag) for EMCCD is 40 m and CAMO is 5 m while for both in luminosity (noise_lum) is 2.5 J/s
 # You can also reference observation-based helper variables in expressions:
 # h_beg (begin height, default=max(height)), h_end (end height, default=min(height)), h_peak (peak luminosity height),
 # plus v_0/m_0/zc_0 (initial speed/mass/zenith-angle guesses) and n_lag0/n_lum0 (initial noise guesses for lag/lum)
-# what is writen after '#' is ignored
+# what is written after '#' is ignored
 # name var, min/sigma/alpha, max/mean/mode, options
 
-v_init,500,v_0,norm   		 	    												# v_init [m/s] (gausian distribution)
+v_init,500,v_0,norm   		 	    												# v_init [m/s] (gaussian distribution)
 zenith_angle,zc_0,fix 	            											  	# zenith_angle [rad] (fix by default)
 lum_eff_type,7,fix 	                    											# lum eff efficiency type Borovicka et Al. (2020) (fix by default)
 m_init, 10**(np.floor(np.log10(m_0)-1)), 2*10**(np.floor(np.log10(m_0)+1))			# m_init [kg]

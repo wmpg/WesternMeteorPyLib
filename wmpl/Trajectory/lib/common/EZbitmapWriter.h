@@ -18,14 +18,14 @@ unsigned char bmpfileheader[14] = { 'B','M',       // BMP file identifier
 
 unsigned char bmpinfoheader[40] = { 40,0,0,0,      // info hd size
 	                                0,0,0,0,       // width
-									0,0,0,0,       // heigth
+									0,0,0,0,       // height
 									1,0,           // number color planes
 									24,0,          // bits per pixel (default RGB)
 	                                0,0,0,0,       // compression is none
 									0,0,0,0,       // padded image size in bytes
 									0x13,0x0B,0,0, // horz resoluition in pixel / m 
 									0x13,0x0B,0,0, // vert resolutions (0x03C3 = 96 dpi, 0x0B13 = 72 dpi)
-									0,0,0,0,       // #colors in pallete
+									0,0,0,0,       // #colors in palette
 									0,0,0,0 };     // #important colors
 
 unsigned char bmppad[3] = { 0, 0, 0 };

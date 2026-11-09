@@ -31,7 +31,7 @@ from wmpl.Utils.remoteDataHandling import collectRemoteTrajectories, moveRemoteT
 
 ### CONSTANTS ###
 
-# Name of the ouput trajectory directory
+# Name of the output trajectory directory
 OUTPUT_TRAJ_DIR = "trajectories"
 
 # Name of json file with the list of processed directories
@@ -196,7 +196,7 @@ class DatabaseJSON(object):
                         db_is_ok = True
 
                 except Exception:
-                    log.warning('unable to find a useable trajectory database')
+                    log.warning('unable to find a usable trajectory database')
                     db_is_ok = False
 
             # Overwrite the database path with the saved one
@@ -382,7 +382,7 @@ class MeteorPointRMS(object):
         # Relative time
         self.time_rel = time_rel
 
-        # Image coordinats
+        # Image coordinates
         self.x = x
         self.y = y
         
@@ -460,7 +460,7 @@ class MeteorObsRMS(object):
 
             self.fov_beg = True
 
-        # If the starting point is not inside the FOV, exlude the first point
+        # If the starting point is not inside the FOV, exclude the first point
         else:
             self.data = self.data[1:]
 
@@ -501,7 +501,7 @@ class MeteorObsRMS(object):
 
 
         # Generate a unique observation ID, the format is: STATIONID_YYYYMMDD-HHMMSS.us_CHECKSUM
-        #  where CHECKSUM is the last four digits of the sum of all observation image X cordinates
+        #  where CHECKSUM is the last four digits of the sum of all observation image X coordinates
         checksum = int(np.sum([entry.x for entry in self.data]) % 10000)
         self.id = "{:s}_{:s}_{:04d}".format(self.station_code, self.mean_dt.strftime("%Y%m%d-%H%M%S.%f"), 
             checksum)
@@ -610,7 +610,7 @@ class RMSDataHandle(object):
             self.dt_range=[dt_beg, dt_end]
             self.db = None
 
-        ### Define country groups to speed up the proceessing ###
+        ### Define country groups to speed up the processing ###
 
         north_america_group = ["CA", "US", "MX"]
 
@@ -1313,7 +1313,7 @@ class RMSDataHandle(object):
             max_toffset: [float] Maximum offset in time (seconds) for pairing.
 
         Return:
-            [list] A list of MeteorObsRMS instances with are offten in time less than max_toffset from 
+            [list] A list of MeteorObsRMS instances with are often in time less than max_toffset from 
                 met_obs.
         """
 
@@ -1376,7 +1376,7 @@ class RMSDataHandle(object):
 
         # Generate a list of station codes
         if isinstance(traj, TrajectoryReduced):
-            # If the reducted trajectory object is given
+            # If the reduced trajectory object is given
             station_list = traj.participating_stations
 
         else:
@@ -1755,7 +1755,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     arg_parser.add_argument('-a', '--auto', metavar='PREV_DAYS', type=float, default=None, const=5.0, 
         nargs='?', 
-        help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones. The default time range is 5 days.""")
+        help="""Run continuously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones. The default time range is 5 days.""")
 
     arg_parser.add_argument("--cpucores", type=int, default=-1,
         help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",)
@@ -1788,6 +1788,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="Remote host to collect and return MC phase solutions to. Supports internet-distributed processing.")
     
     arg_parser.add_argument('--verbose', '--verbose', help='Verbose logging.', default=False, action="store_true")
+
+    arg_parser.add_argument('--radec_at_ref', \
+        help="Legacy and incorrect, only to reproduce older solutions. Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed, which rotates each line of sight by the Earth's rotation since the reference time.", \
+        action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -2030,7 +2034,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                         dh.removeDuplicateTrajectories(dt_range=[bin_beg, bin_end])
 
                     # Run the trajectory correlator
-                    tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
+                    tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, \
+                        enableOSM=cml_args.enableOSM, radec_per_point=(not cml_args.radec_at_ref))
                     bin_time_range = [bin_beg, bin_end]
                     tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode, bin_time_range=bin_time_range)
             else:
