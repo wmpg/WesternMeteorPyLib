@@ -47,14 +47,14 @@ from wmpl.Config import config
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
     J2000_OBLIQUITY,
-    equatorialCoordPrecession,
-    jd2DynamicalTimeJD,
+    equatorialCoordDateToJ2000,
     eci2RaDec,
     vectMag,
     raDec2ECI
 )
 from wmpl.Utils.Math import rotateVector
 from wmpl.Utils.Earth import calcTrueObliquity
+from wmpl.Utils.OrbitClassification import classifyBorovicka
 
 
 def _printReboundUnavailable(include_install_help=False):
@@ -223,12 +223,24 @@ HILL_RADII_AU = {
 }
 
 # The Sun has no Hill sphere, so a close approach to it is flagged by distance instead: a perihelion
-# passage closer than this is listed with the other close encounters. 0.1 AU is where the thermal
-# processing of meteoroids is established: Na is thermally desorbed at q < 0.1 AU (Kasuga et al.
-# 2006, A&A 453, L17; the Na-free population of Borovicka et al. 2005), asteroids disrupt at
-# q ~ 0.076 AU (Granvik et al. 2016, Nature 530, 303), and it lies inside the sunskirter zone of
-# Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU.
-SUN_ENCOUNTER_AU = 0.1
+# passage closer than this is listed with the other close encounters. 0.2 AU is the limit of the
+# Sun-approaching orbital class of Borovicka et al. (2005, Icarus 174, 15), the one meteor studies
+# use: almost all meteoroids inside it are Na-free or Na-poor (Vojacek et al. 2019, A&A 621, A68,
+# sect. 3.3). Inside 0.1 AU all of them are, the sodium being thermally desorbed (Kasuga et al.
+# 2006, A&A 453, L17), asteroids disrupt at q ~ 0.076 AU (Granvik et al. 2016, Nature 530, 303),
+# and the sunskirter zone of Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU, lies
+# inside it.
+SUN_ENCOUNTER_AU = 0.2
+
+# Semi-major axis of Jupiter of the Tisserand parameter and the orbital class of the report [AU]
+A_JUPITER_TISSERAND = 5.204267
+
+# Sun passages closer than this count in the WHFast warning, although the Sun is listed out to
+# SUN_ENCOUNTER_AU: WHFast's fixed step fails only much closer in. Measured with _integrateParticles
+# and the default 0.5 d step against IAS15 over 100 yr (the Sun and five planets, gr_full, a = 1.27
+# and 2.6 AU, i = 25 deg), the error in a was 9e-4 to 1e-2 at q = 0.07 AU, 5e-6 to 6e-6 at 0.10 AU,
+# 1e-6 to 4e-6 at 0.14 AU and below 7e-7 from 0.17 AU.
+WHFAST_SUN_WARNING_AU = 0.1
 
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
@@ -701,7 +713,7 @@ def formatSunPassageSummary(summary):
         summary: [dict] As returned by sunPassageSummary.
 
     Return:
-        [str] E.g. "Sun      24 perihelion passages < 0.10 AU: q = 0.0441-0.0645 AU (9.5-13.9 R_Sun),
+        [str] E.g. "Sun      24 perihelion passages < 0.20 AU: q = 0.0441-0.0645 AU (9.5-13.9 R_Sun),
             t = +3.1 to +99.6 d".
     """
 
@@ -719,7 +731,8 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
     a close encounter: measured over flybys inside 0.1 Hill radii, the error in the semi-major axis
     afterwards was 0.3% to 200%, where TRACE stayed within 4e-6. The nominal solution and every Monte
     Carlo clone are checked, since a clone can pass much closer to a planet than the nominal
-    solution does.
+    solution does. A Sun passage counts only inside WHFAST_SUN_WARNING_AU, closer than the
+    SUN_ENCOUNTER_AU out to which it is listed.
 
     Arguments:
         diagnostics: [dict] {particle name: diagnostics} as returned by reboundSimulate with
@@ -747,8 +760,12 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
         for enc in diag.get("encounters", []):
 
             # The list already holds every passage; only the ones inside the threshold count (the
-            #   Sun's threshold is fixed, so all of its passages do)
+            #   Sun has no Hill radius, and is tested on its distance below)
             if (enc["n_hill"] is not None) and (enc["n_hill"] >= n_hill):
+                continue
+
+            # The Sun is listed out to SUN_ENCOUNTER_AU, but the fixed step fails only much closer
+            if (enc["body"] == "Sun") and (enc["min_dist_au"] >= WHFAST_SUN_WARNING_AU):
                 continue
 
             # Times run along a signed axis (negative for a backward run), so the comparison is
@@ -765,7 +782,7 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
             "either, so the orbits after them can be wrong (measured: 0.3% to 200% in a after "
             "flybys inside 0.1 R_Hill; an orbit with q = 0.07 AU was ejected within 100 yr at the "
             "default 0.5 d step). Rerun with --integrator trace or ias15.".format(
-                n_encounters, n_hill, SUN_ENCOUNTER_AU))
+                n_encounters, n_hill, WHFAST_SUN_WARNING_AU))
 
 
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
@@ -1041,6 +1058,29 @@ def radiationPressureBeta(radius_m, density_kgm3, q_pr=1.0):
     return 5.7425e-4*q_pr/(density_kgm3*radius_m)
 
 
+def equivalentSphereRadius(mass_kg, density_kgm3):
+    """ Compute the radius of the sphere with the given mass and bulk density,
+
+        s = (3*m/(4*pi*rho))^(1/3)
+
+    which is the size radiationPressureBeta needs, as meteor work gives a mass (photometric, or from
+    a MetSim fit) and an assumed bulk density. At a fixed mass beta goes as m^(-1/3)*rho^(-2/3), so a
+    factor of 2 in the mass changes it by a factor of 1.26.
+
+    Arguments:
+        mass_kg: [float] Meteoroid mass in kg.
+        density_kgm3: [float] Bulk density in kg/m^3.
+
+    Return:
+        [float] Radius of the equivalent sphere in metres.
+    """
+
+    if (mass_kg <= 0) or (density_kgm3 <= 0):
+        raise ValueError("The mass and the density must both be positive.")
+
+    return (3*mass_kg/(4*np.pi*density_kgm3))**(1/3.0)
+
+
 def tisserandParameterJupiter(a, e, inc):
     """ Compute the Tisserand parameter with respect to Jupiter, a quasi-invariant of the encounter
     geometry that is the standard way to classify the dynamical origin of a small body.
@@ -1068,7 +1108,7 @@ def tisserandParameterJupiter(a, e, inc):
             that the parameter is not defined.
     """
 
-    a_jupiter = 5.204267  # AU
+    a_jupiter = A_JUPITER_TISSERAND
 
     if (a is None) or (a <= 0) or (e is None) or (e >= 1):
         return None
@@ -1076,27 +1116,103 @@ def tisserandParameterJupiter(a, e, inc):
     return a_jupiter/a + 2.0*np.cos(inc)*np.sqrt((a/a_jupiter)*(1.0 - e**2))
 
 
-def tisserandClass(t_j):
-    """ Return the conventional dynamical class implied by a Tisserand parameter (see
-    tisserandParameterJupiter).
+def borovickaClass(a, e, inc):
+    """ Return the meteoroid orbital class of Borovicka et al. (2005) of an orbit, as
+    wmpl.Utils.OrbitClassification.classifyBorovicka gives it from the perihelion distance,
+    eccentricity and inclination: 'sun-approaching', 'halley-type', 'jupiter-family' or
+    'asteroidal-chondritic'. The fifth class, 'ecliptic-shower', is membership of a shower, which
+    the integration does not know, so it is never given here.
+
+    Unlike the Tisserand parameter, the class is defined for an unbound orbit too.
 
     Arguments:
-        t_j: [float or None] Tisserand parameter with respect to Jupiter.
+        a: [float] Semi-major axis in AU, negative for a hyperbolic orbit as REBOUND gives it.
+        e: [float] Eccentricity.
+        inc: [float] Inclination in radians.
 
     Return:
-        [str] A short description of the dynamical class.
+        [str] The class.
     """
 
+    return classifyBorovicka(a*(1.0 - e), e, inc, a_planet=A_JUPITER_TISSERAND)
+
+
+def tisserandAndClassSummary(orbits):
+    """ The Tisserand parameter with respect to Jupiter and the Borovicka et al. (2005) class of a set
+    of orbits, e.g. the clones' at the end of the run, with the spread of T_J given as the report gives
+    the spread of the elements: 1 sigma from the 95% interval, and the interval.
+
+    Arguments:
+        orbits: [list] Objects with a (AU, negative for a hyperbolic orbit), e and inc (radians), as
+            the outputs of reboundSimulate hold them.
+
+    Return:
+        [dict] {
+            "n": number of orbits,
+            "n_unbound": orbits without a finite T_J (unbound), left out of its statistics,
+            "tisserand_std": 1 sigma of T_J, (97.5% - 2.5%)/(2*1.96), or None without bound orbits,
+            "tisserand_95ci": [2.5%, 97.5%] of T_J, or None,
+            "classes": {class: fraction of the orbits}, the most frequent first,
+        }
+    """
+
+    # Leave the unbound and non-finite orbits out of the T_J statistics
+    t_j = [tisserandParameterJupiter(o.a, o.e, o.inc) for o in orbits]
+    t_j = np.array([x for x in t_j if (x is not None) and np.isfinite(x)], dtype=float)
+
+    classes = {}
+    for o in orbits:
+        name = str(borovickaClass(o.a, o.e, o.inc))
+        classes[name] = classes.get(name, 0) + 1
+
+    lo, hi = (np.percentile(t_j, 2.5), np.percentile(t_j, 97.5)) if len(t_j) else (None, None)
+
+    return {"n": len(orbits), "n_unbound": len(orbits) - len(t_j),
+            "tisserand_std": float((hi - lo)/2.0/1.96) if len(t_j) else None,
+            "tisserand_95ci": [float(lo), float(hi)] if len(t_j) else None,
+            "classes": {k: v/len(orbits) for k, v in sorted(classes.items(), key=lambda kv: -kv[1])}}
+
+
+def _tisserandAndClassReportLines(t_j, orbital_class, clones=None):
+    """ Make the lines of the report on the Tisserand parameter and the orbital class of the nominal at
+    the end of the run, with the spread of the clones when there are clones.
+
+    Arguments:
+        t_j: [float or None] Tisserand parameter of the nominal, None if it is unbound.
+        orbital_class: [str] Orbital class of the nominal.
+
+    Keyword arguments:
+        clones: [dict] Summary of the clones from tisserandAndClassSummary(). None by default.
+
+    Return:
+        lines: [list] Lines of the report.
+    """
+
+    if clones is None:
+        lines = ["Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the end "
+                 "of the run, nominal:"]
+    else:
+        lines = ["Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the end "
+                 "of the run,",
+                 "nominal +/- 1 sigma [95% CI] of the {:d} clones:".format(clones["n"])]
+
     if t_j is None:
-        return "undefined (unbound orbit)"
+        lines.append("  T_J   = undefined (unbound orbit)")
+    elif (clones is None) or (clones["tisserand_std"] is None):
+        lines.append("  T_J   = {:.6f}".format(t_j))
+    else:
+        lines.append("  T_J   = {:.6f} +/- {:.6f} [{:10.6f}, {:10.6f}]".format(
+            t_j, clones["tisserand_std"], *clones["tisserand_95ci"]))
+    if (clones is not None) and clones["n_unbound"]:
+        lines.append("          ({:d} unbound clones have no T_J)".format(clones["n_unbound"]))
 
-    if t_j > 3.0:
-        return "asteroidal (T_J > 3)"
+    if clones is None:
+        lines.append("  class = {:s}".format(orbital_class))
+    else:
+        lines.append("  class = {:s} (nominal); clones: {:s}".format(orbital_class, ", ".join(
+            "{:s} {:.1f}%".format(k, 100*v) for k, v in clones["classes"].items())))
 
-    if t_j > 2.0:
-        return "Jupiter-family-comet-like (2 < T_J < 3)"
-
-    return "Halley-type/long-period-comet-like (T_J < 2)"
+    return lines
 
 
 def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
@@ -1178,11 +1294,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
     re = vectMag(eci_pos)
     alpha_e, delta_e = eci2RaDec(eci_pos)
 
-    # Convert the Julian date to dynamical time
-    jd_dyn = jd2DynamicalTimeJD(jd)
-    alpha_ej, delta_ej = equatorialCoordPrecession(
-        jd_dyn, J2000_JD.days, alpha_e, delta_e
-    )
+    alpha_ej, delta_ej = equatorialCoordDateToJ2000(jd, alpha_e, delta_e)
 
     if len(log_file_path):
         log(f"RA precessed to J2000: {alpha_ej}")
@@ -1209,9 +1321,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
     v_inf = vectMag(eci_vel)
     alpha_e_vel, delta_e_vel = eci2RaDec(eci_vel)
-    alpha_ej_vel, delta_ej_vel = equatorialCoordPrecession(
-        jd_dyn, J2000_JD.days, alpha_e_vel, delta_e_vel
-    )
+    alpha_ej_vel, delta_ej_vel = equatorialCoordDateToJ2000(jd, alpha_e_vel, delta_e_vel)
 
     if len(log_file_path):
         log(f"RA of velocity direction precessed to J2000: {alpha_ej_vel}")
@@ -2064,6 +2174,41 @@ def _megnoReportLines(megno):
     return lines
 
 
+
+def integrationEpochs(jd_ref_utc, elapsed_days):
+    """ Compute the start and end epochs of an integration in TDB, the time scale of the ephemeris and
+        of the integration, and in UTC, the time scale of the trajectory reference time (traj.jdt_ref).
+        The end is the start in TDB plus the elapsed days, as adding them to the UTC time would put it
+        about 69 s off.
+
+    Arguments:
+        jd_ref_utc: [float] Julian date of the start in UTC.
+        elapsed_days: [float] Integration time (days), negative for a backward integration.
+
+    Return:
+        [dict] Julian dates "start_jd_utc", "start_jd_tdb", "final_jd_tdb" and "final_jd_utc", and the
+            UTC times as ISO strings, "start_utc" and "final_utc".
+    """
+
+    # Import astropy here, as the module imports it only when REBOUND is found
+    import astropy.time
+
+    # Convert the start to TDB, add the elapsed days and convert the end back to UTC
+    start = astropy.time.Time(jd_ref_utc, format='jd', scale='utc')
+    start_tdb = start.tdb.jd
+    final = astropy.time.Time(start_tdb + elapsed_days, format='jd', scale='tdb').utc
+
+    return {
+        "start_jd_utc": float(jd_ref_utc),
+        "start_jd_tdb": float(start_tdb),
+        "final_jd_tdb": float(start_tdb + elapsed_days),
+        "final_jd_utc": float(final.jd),
+        "start_utc": start.iso,
+        "final_utc": final.iso,
+    }
+
+
+
 def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
@@ -2110,9 +2255,10 @@ def reboundSimulate(
             is done in the parent process, so results do not depend on the number of cores used.
         beta: [float] Ratio of solar radiation pressure to solar gravity for the integrated object.
             If given, radiation pressure and Poynting-Robertson drag are applied to the object (see
-            radiationPressureBeta to compute it from a size and density). None (default) leaves the
-            integration purely gravitational, since a trajectory solution does not constrain the
-            object's size and density.
+            radiationPressureBeta to compute it from a size and a density, and equivalentSphereRadius
+            to get that size from a mass). None (default) leaves the integration purely
+            gravitational, since a trajectory solution does not constrain the object's size and
+            density.
         integrator: [str] "ias15" (default), "whfast" or "trace" (see INTEGRATORS). IAS15 is adaptive
             and accurate to machine precision; the other two use a fixed timestep.
         dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
@@ -2434,18 +2580,26 @@ if __name__ == "__main__":
                         "Increase it for long integrations, where the default 500 samples are "
                         "coarse. Default: 500.")
 
-    parser.add_argument("--beta", type=float, default=None,
-                        help="Include solar radiation pressure and Poynting-Robertson drag with this "
-                        "beta (the ratio of radiation pressure to solar gravity). Mutually exclusive "
-                        "with --radius/--density, which compute beta instead.")
+    # The radiation forces need the object's size, which can be given as a beta, a radius or a mass
+    size_group = parser.add_mutually_exclusive_group()
 
-    parser.add_argument("--radius", type=float, default=None,
+    size_group.add_argument("--beta", type=float, default=None,
+                        help="Include solar radiation pressure and Poynting-Robertson drag with this "
+                        "beta (the ratio of radiation pressure to solar gravity).")
+
+    size_group.add_argument("--radius", type=float, default=None,
                         help="Object radius in metres, used with --density to compute beta and "
-                        "include radiation forces. Purely gravitational if not given.")
+                        "include radiation forces. Purely gravitational if none of --beta, --radius "
+                        "and --mass is given.")
+
+    size_group.add_argument("--mass", type=float, nargs="?", const=0.0, default=None,
+                        help="Object mass in kg, used with --density to compute beta. Given without "
+                        "a value, the photometric mass of the trajectory light curve is used, which is "
+                        "only as good as the trajectory's magnitudes.")
 
     parser.add_argument("--density", type=float, default=3000.0,
-                        help="Object bulk density in kg/m^3, used with --radius to compute beta. "
-                        "Default: 3000.")
+                        help="Object bulk density in kg/m^3, used with --radius or --mass to compute "
+                        "beta. Default: 3000.")
 
     parser.add_argument("--integrator", type=str.lower, default="ias15", choices=INTEGRATORS,
                         help="Integrator: ias15 (default; adaptive, accurate to machine precision), "
@@ -2482,19 +2636,6 @@ if __name__ == "__main__":
     # Seed for the Monte Carlo sampling. If none was given, draw one and report it, so that any run
     # can be reproduced afterwards with --seed.
     random_seed = args.seed if args.seed is not None else int(np.random.SeedSequence().entropy % (2**32))
-
-    ### Non-gravitational forces (off by default) ###
-    if (args.beta is not None) and (args.radius is not None):
-        parser.error("Give either --beta or --radius (with --density), not both.")
-
-    beta = args.beta
-    if args.radius is not None:
-        beta = radiationPressureBeta(args.radius, args.density)
-        print("Radiation forces ON: radius {:.4g} m, density {:.0f} kg/m^3 -> beta = {:.4e}".format(
-            args.radius, args.density, beta))
-    elif beta is not None:
-        print("Radiation forces ON: beta = {:.4e}".format(beta))
-    ### ###
 
     ### Integrator ###
 
@@ -2534,6 +2675,36 @@ if __name__ == "__main__":
     traj = loadPickle(*os.path.split(args.pickle_path))
 
 
+    ### Non-gravitational forces (off by default, as they need the object's size) ###
+    beta = args.beta
+    if ((args.mass is not None) or (args.radius is not None)) and (not (args.density > 0)):
+        parser.error("--density must be positive, got {:g} kg/m^3.".format(args.density))
+
+    if args.mass is not None:
+
+        if (args.mass < 0) or (not np.isfinite(args.mass)):
+            parser.error("--mass must be positive, got {:g} kg.".format(args.mass))
+
+        # Use the photometric mass of the light curve if --mass was given without a value
+        if args.mass == 0:
+            from wmpl.Trajectory.AggregateAndPlot import computeMass, P_0M
+
+            args.mass = computeMass(traj, P_0M)
+            if (not args.mass) or (not np.isfinite(args.mass)) or (args.mass < 0):
+                parser.error("The trajectory has no usable photometry, so --mass needs a value in kg.")
+            print("Photometric mass: {:.4g} kg (P_0m = {:g} W, tau = 0.7%).".format(args.mass, P_0M))
+
+        args.radius = equivalentSphereRadius(args.mass, args.density)
+
+    if args.radius is not None:
+        beta = radiationPressureBeta(args.radius, args.density)
+        print("Radiation forces ON: radius {:.4g} m, density {:.0f} kg/m^3 -> beta = {:.4e}".format(
+            args.radius, args.density, beta))
+    elif beta is not None:
+        print("Radiation forces ON: beta = {:.4e}".format(beta))
+    ### ###
+
+
     ### Set reference frame settings ###
     reference_frame = "heliocentric"
     if args.geocentric:
@@ -2559,9 +2730,9 @@ if __name__ == "__main__":
     
     # State the integration span up front, so it is visible while the integration is running and
     # not only in the summary printed at the end
+    start_epochs = integrationEpochs(traj.jdt_ref, 0.0)
     print("Integrating {:.2f} days {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
-        sim_days, direction, traj.jdt_ref,
-        astropy.time.Time(traj.jdt_ref, format='jd', scale='utc').iso))
+        sim_days, direction, start_epochs["start_jd_tdb"], start_epochs["start_utc"]))
 
     # Run the simulation for the given number of days from the epoch of the trajectory
     t_run_start = time.time()
@@ -2679,11 +2850,9 @@ if __name__ == "__main__":
     # Extract the final time in days
     final_sim_days = sim_outputs[-1][0]/(2*np.pi)*365.25
 
-    # Compute the final epoch
-    final_epoch_jd = traj.jdt_ref + final_sim_days
-
-    # Convert the epoch to UTC
-    time_utc = astropy.time.Time(final_epoch_jd, format='jd', scale='utc')
+    # Compute the start and final epochs in TDB, the time scale of the integration, and in UTC
+    epochs = integrationEpochs(traj.jdt_ref, final_sim_days)
+    final_epoch_jd = epochs["final_jd_tdb"]
 
     ###
 
@@ -2755,8 +2924,8 @@ if __name__ == "__main__":
     print("  Forces       : {:s}".format(
         "gravity + GR + Earth J2/J4" if beta is None
         else "gravity + GR + Earth J2/J4 + radiation (beta = {:.3e})".format(beta)))
-    print("  Start epoch  : {:.6f} JD (TDB)".format(traj.jdt_ref))
-    print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, time_utc.iso))
+    print("  Start epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(epochs["start_jd_tdb"], epochs["start_utc"]))
+    print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, epochs["final_utc"]))
     if len(sim_outputs_mc):
         print("  Monte Carlo  : {:d} realizations on {:d} core(s), seed {:d}".format(
             len(sim_outputs_mc), n_cpu, random_seed))
@@ -2795,14 +2964,25 @@ if __name__ == "__main__":
     print("    node = {:>13.6f}{:s}  deg".format(node_val, Omega_ci_str))
     print("    f    = {:>13.6f}{:s}  deg".format(f_val, f_ci_str))
 
-    # Tisserand parameter with respect to Jupiter and the dynamical class it implies. Only
-    # meaningful for a heliocentric orbit.
+    # Tisserand parameter with respect to Jupiter and the meteoroid orbital class of Borovicka et
+    # al. (2005). Only meaningful for a heliocentric orbit. Like the elements, they are the nominal's,
+    # with the spread of the clones of the confidence intervals.
+    clone_classes = None
     if reference_frame == "heliocentric":
+        if len(sim_outputs_mc):
+            clone_classes = tisserandAndClassSummary([sim_outputs_mc[name][-1][2] for name in ci_names])
         t_j = tisserandParameterJupiter(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
         if t_j is None:
-            print("    T_J  =        undefined  ({:s})".format(tisserandClass(t_j)))
+            print("    T_J  =        undefined  (unbound orbit)")
+        elif (clone_classes is not None) and (clone_classes["tisserand_std"] is not None):
+            print("    T_J  = {:>13.6f} +/- {:.6f} [{:10.6f}, {:10.6f}]".format(
+                t_j, clone_classes["tisserand_std"], *clone_classes["tisserand_95ci"]))
         else:
-            print("    T_J  = {:>13.6f}       {:s}".format(t_j, tisserandClass(t_j)))
+            print("    T_J  = {:>13.6f}".format(t_j))
+        print("    class: {:s} (Borovicka et al. 2005){:s}".format(
+            borovickaClass(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc),
+            "" if clone_classes is None else "; clones: " + ", ".join(
+                "{:s} {:.1f}%".format(k, 100*v) for k, v in clone_classes["classes"].items())))
 
     print("-" * 78)
 
@@ -2955,7 +3135,7 @@ if __name__ == "__main__":
             f.write("*** state before the impact, not a surviving orbit.\n\n")
 
         f.write("Orbital elements {:.2f} days {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
-            achieved_days, direction, traj.jdt_ref,
+            achieved_days, direction, epochs["start_jd_tdb"],
             "" if abs(achieved_days - sim_days) <= 1e-6
             else " (requested {:.2f} days, stopped early)".format(sim_days)))
         f.write("a    = {:>10.6f}{:s} {:s}\n".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
@@ -3047,16 +3227,12 @@ if __name__ == "__main__":
                 f.write("the full span. Clones that impacted or were ejected ended at a different\n")
                 f.write("epoch, so mixing their final elements in would blend different times.\n")
 
-        # Save the Tisserand parameter and the run's provenance
+        # Save the Tisserand parameter, the orbital class and the run's provenance
         if reference_frame == "heliocentric":
             t_j = tisserandParameterJupiter(sim_outputs[-1][2].a, sim_outputs[-1][2].e,
                                             sim_outputs[-1][2].inc)
-            if t_j is None:
-                f.write("\nTisserand parameter w.r.t. Jupiter: undefined ({:s})\n".format(
-                    tisserandClass(t_j)))
-            else:
-                f.write("\nTisserand parameter w.r.t. Jupiter: T_J = {:.6f}  -> {:s}\n".format(
-                    t_j, tisserandClass(t_j)))
+            f.write("\n" + "\n".join(_tisserandAndClassReportLines(t_j, borovickaClass(
+                sim_outputs[-1][2].a, sim_outputs[-1][2].e, sim_outputs[-1][2].inc), clone_classes)) + "\n")
 
         if len(sim_outputs_mc):
             f.write("\nMonte Carlo: {:d} realizations, random seed {:d} "
@@ -3402,9 +3578,11 @@ if __name__ == "__main__":
             "ephemeris": "horizons" if args.horizons else "local_de430",
             "n_outputs": args.outputs,
             "beta": beta,
-            "start_epoch_jd_tdb": traj.jdt_ref,
+            "start_epoch_jd_tdb": epochs["start_jd_tdb"],
+            "start_epoch_jd_utc": epochs["start_jd_utc"],
             "final_epoch_jd_tdb": final_epoch_jd,
-            "final_epoch_utc": time_utc.iso,
+            "final_epoch_jd_utc": epochs["final_jd_utc"],
+            "final_epoch_utc": epochs["final_utc"],
             "mc_runs": len(sim_outputs_mc),
             "random_seed": random_seed,
             "runtime_s": sim_wall,
@@ -3426,6 +3604,10 @@ if __name__ == "__main__":
             "tisserand_jupiter": (tisserandParameterJupiter(
                 sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
                 if reference_frame == "heliocentric" else None),
+            "orbital_class": (borovickaClass(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
+                if reference_frame == "heliocentric" else None),
+            # The same for the clones of the confidence intervals (see tisserandAndClassSummary)
+            "clones_tisserand_and_class": clone_classes,
         },
         # One entry per passage, ordered by time. A body can appear more than once: before the
         #   encounter minima were refined between steps, only the deepest approach per body was kept.

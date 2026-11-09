@@ -6,14 +6,18 @@ and what the options are for.
 
 - [Solving a trajectory](Trajectory.md) — turning observations into a trajectory pickle, which is the
   input to most of the other tools.
+- [Drag fit of the motion along a trajectory](DragFit.md) — the drag model of the motion along a solved
+  trajectory, sampling it by height or time for dark flight, and what the ballistic coefficient says
+  about ablation and fragmentation.
 - [REBOUND orbital integration](REBOUND.md) — integrating a meteoroid orbit backwards or forwards,
   close encounters and impacts, Monte Carlo clones, radiation forces, and chaos indicators.
 - [DynestyMetSim](../Dynesty/README.md) — nested-sampling fits of the erosion ablation model to a
   meteor light curve and dynamics.
 - [Orbit dissimilarity criteria](OrbitSimilarity.md) — measuring how similar two orbits are, which
   criterion to pick, and why their thresholds are not interchangeable.
-- [Classifying a single orbit](OrbitClassification.md) — Tisserand, the cometary tests, and the
-  Tancredi scheme for asteroids in cometary orbits.
+- [Classifying a single orbit](OrbitClassification.md) — Tisserand, the cometary tests, the
+  meteoroid orbital classes of Borovička et al. (2005), the Atira/Aten/Apollo/Amor/Arjuna classes,
+  and the Tancredi scheme for asteroids in cometary orbits.
 - [Choosing a D-criterion threshold](DThresholds.md) — the other half of a stream search, and why
   the traditional threshold is too permissive to use.
 
