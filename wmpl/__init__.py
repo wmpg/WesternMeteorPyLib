@@ -47,7 +47,7 @@ for module_info in pkgutil.walk_packages(__path__, prefix=__name__ + '.'):
     ### ###
 
 
-    # Import the module under its full name, which also makes it an attribute of its package, so that it is
-    #   not loaded a second time under the name without wmpl
     __all__.append(module_name)
+
+    # Import the module under its full name only, so it is not loaded a second time without the wmpl prefix
     importlib.import_module(module_info.name)
