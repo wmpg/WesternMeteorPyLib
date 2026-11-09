@@ -12,7 +12,8 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import Trajectory, dropTimeOrigin
+from wmpl.Trajectory.Trajectory import Trajectory, applyGravityDrop, dropTimeOrigin, \
+    solutionDropTimeOrigin
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory
@@ -43,6 +44,39 @@ def testOriginIsTheFirstTimeOfTheUsedStations():
         station.ignore_station = True
 
     assert dropTimeOrigin(stations) == -1.0
+
+
+
+def testOldSolutionsKeepTheOriginOfAllStations():
+    """ Check that a solution which did not store the origin takes the first time of all stations, from which
+        it was fitted.
+    """
+
+    traj, _ = solveWithIgnoredStation(1.0)
+    assert traj.gravity_t0 == dropTimeOrigin(traj.observations)
+    assert solutionDropTimeOrigin(traj) == traj.gravity_t0
+
+    del traj.gravity_t0
+    assert solutionDropTimeOrigin(traj) == min([obs.time_data[0] for obs in traj.observations])
+    assert solutionDropTimeOrigin(traj) < dropTimeOrigin(traj.observations) - 0.5
+
+
+
+def testDropIsDownwardBeforeTheOrigin():
+    """ Check that a point before the origin, e.g. of a station which is not used and starts earlier, drops
+        below the line as a point after it does.
+    """
+
+    point = np.array([6.45e6, 0.0, 0.0])
+
+    for vz in (0.0, -15000.0):
+        for t in (-2.0, 2.0):
+            assert np.linalg.norm(applyGravityDrop(point, t, np.linalg.norm(point), 1.0, vz)) \
+                < np.linalg.norm(point) - 15.0
+
+    # Check that the drop without the vertical velocity is the same on both sides
+    assert np.allclose(applyGravityDrop(point, -2.0, 6.45e6, 1.0, 0.0), applyGravityDrop(point, 2.0, 6.45e6, \
+        1.0, 0.0), rtol=0, atol=1e-9)
 
 
 
@@ -117,6 +151,8 @@ def testDragAndDynamicMassFitsDropFromTheSameTime():
 if __name__ == "__main__":
 
     testOriginIsTheFirstTimeOfTheUsedStations()
+    testDropIsDownwardBeforeTheOrigin()
+    testOldSolutionsKeepTheOriginOfAllStations()
     testStationWithAClockFarOffDoesNotMoveTheDrop()
     testDragAndDynamicMassFitsDropFromTheSameTime()
 
