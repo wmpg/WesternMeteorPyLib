@@ -47,6 +47,7 @@ from wmpl.Config import config
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
     J2000_OBLIQUITY,
+    earthSpinAxisEcliptic,
     equatorialCoordDateToJ2000,
     eci2RaDec,
     vectMag,
@@ -153,6 +154,25 @@ def _setHeartbeat(sim, func):
         sim._heartbeat = heartbeat_ref
 
         return heartbeat_ref
+
+
+def harmonicsSpinAxisSupported():
+    """ Check whether the installed REBOUNDx orients gravitational_harmonics along a body's spin axis.
+
+    REBOUNDx 4.4.0 added the "Omega" particle parameter, whose direction is the axis of symmetry of
+    the body's J2 and J4. Earlier versions always use the z axis of the simulation, which here is the
+    ecliptic pole, 23.4 deg away from the Earth's.
+
+    Return:
+        [bool] True if the spin axis is supported.
+    """
+
+    try:
+        version = tuple(int(v) for v in re.findall(r"\d+", reboundx.__version__)[:2])
+    except (AttributeError, NameError, ValueError):
+        return False
+
+    return version >= (4, 4)
 
 
 def checkReboundxUsable():
@@ -1519,6 +1539,11 @@ def _integrateParticles(task):
                                  radii used for impact detection (Sun 695700 km, Earth 6371 km,
                                  Moon 1737.4 km).
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
+            earth_spin_axis: [list] Optional. Direction of the Earth's rotation axis in the
+                                 simulation frame, the axis of symmetry of its J2 and J4 (see
+                                 TrajConversions.earthSpinAxisEcliptic). Needs REBOUNDx >= 4.4.0.
+                                 None (default) leaves REBOUNDx's default, the z axis (the ecliptic
+                                 pole).
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
 
@@ -1637,12 +1662,19 @@ def _integrateParticles(task):
     if reverse_time:
         _reverseVelocities(sim)
 
-    # Add the gravitational harmonics of the Earth
+    # Add the gravitational harmonics of the Earth, symmetric about its rotation axis if it is given
+    #   (otherwise REBOUNDx uses the z axis, the ecliptic pole)
     gh = rebx.load_force("gravitational_harmonics")
     rebx.add_force(gh)
     ps["Earth"].params["J2"] = J2
     ps["Earth"].params["J4"] = J4
     ps["Earth"].params["R_eq"] = RE_eq
+
+    # Orient the harmonics along the Earth's rotation axis
+    earth_spin_axis = task.get("earth_spin_axis")
+    if earth_spin_axis is not None:
+        ps["Earth"].params["Omega"] = rb.Vec3d(*earth_spin_axis)
+
     # Assign the body radii used for impact detection
     for bname, brad in body_radii.items():
         if bname in planet_names:
@@ -2384,6 +2416,16 @@ def reboundSimulate(
     time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
+    # Take the Earth's rotation pole at the epoch as the axis of its J2 and J4, if REBOUNDx supports it
+    earth_spin_axis = None
+    if harmonicsSpinAxisSupported():
+        earth_spin_axis = earthSpinAxisEcliptic(time_tdb)
+    else:
+        warnings.warn("REBOUNDx {:s} cannot orient the Earth's J2/J4 along its rotation axis (this "
+                      "needs REBOUNDx >= 4.4.0), so they are symmetric about the ecliptic pole, 23.4 "
+                      "deg off. Upgrade REBOUNDx to fix it.".format(
+                          getattr(reboundx, "__version__", "?")), RuntimeWarning)
+
     # Set up the output time array (not integration steps, but the times at which state is saved)
     if direction == "forward":
         times = np.linspace(0, daysToSimTime(sim_days), n_outputs)
@@ -2465,6 +2507,7 @@ def reboundSimulate(
             "beta": beta,
             "integrator": integrator,
             "dt_days": dt_days,
+            "earth_spin_axis": earth_spin_axis,
         }
 
     if verbose:
@@ -2956,9 +2999,10 @@ if __name__ == "__main__":
         print("  Integration  : {:.2f} days {:s}".format(achieved_days, direction))
 
     print("  Frame        : {:s}".format(reference_frame))
+    j2_axis = "" if harmonicsSpinAxisSupported() else " (about the ecliptic pole: REBOUNDx < 4.4.0)"
     print("  Forces       : {:s}".format(
-        "gravity + GR + Earth J2/J4" if beta is None
-        else "gravity + GR + Earth J2/J4 + radiation (beta = {:.3e})".format(beta)))
+        "gravity + GR + Earth J2/J4" + j2_axis if beta is None
+        else "gravity + GR + Earth J2/J4{:s} + radiation (beta = {:.3e})".format(j2_axis, beta)))
     print("  Start epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(epochs["start_jd_tdb"], epochs["start_utc"]))
     print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, epochs["final_utc"]))
     if len(sim_outputs_mc):
@@ -3627,6 +3671,11 @@ if __name__ == "__main__":
             "integrator": args.integrator,
             "dt_days": dt_days,
             "fixed_step_from_days": fixed_from,
+            # Axis of the Earth's J2/J4 in the ecliptic J2000 frame (null if REBOUNDx < 4.4.0 used the
+            #   ecliptic pole)
+            "earth_spin_axis": (earthSpinAxisEcliptic(astropy.time.Time(
+                traj.jdt_ref, format="jd", scale="utc").tdb.jd)
+                if harmonicsSpinAxisSupported() else None),
             # The close-encounter gates, so a nominal-only run records them too ("clone_outcomes",
             #   which repeats them, is null without --mc)
             "n_hill_threshold": n_hill,
