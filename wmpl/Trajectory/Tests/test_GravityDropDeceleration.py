@@ -57,8 +57,7 @@ def perpendicularErrors(traj, meteor):
         [ndarray] Distances across the path, of all points of all stations (m).
     """
 
-    # The solver takes its first frame as the reference time, which comes after the beginning of the visible
-    #   part by the phase of the frames
+    # Take the time of the solver's first frame from the beginning of the visible part
     t_off = (traj.jdt_ref - JDT_REF)*86400.0
 
     errors = []
@@ -151,6 +150,7 @@ def solveFireball(gravity_decel, jacchia_fit=None):
         finally:
             traj_class.fitJacchiaLag = original
 
+    # Compare the radiant with the direction of motion at the solver's first frame
     t_off = (traj.jdt_ref - JDT_REF)*86400.0
     radiant_error = 3600*np.degrees(np.linalg.norm(traj.radiant_eci_mini - meteor.radiantAtTime(t_off)))
 

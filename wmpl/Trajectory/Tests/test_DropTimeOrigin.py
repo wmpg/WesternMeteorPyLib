@@ -57,7 +57,7 @@ def solveWithIgnoredStation(clock_lead):
             - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
     """
 
-    # The meteor falls freely from its line, as the solver models it
+    # Drop the meteor by its free fall from the line, as the solver does
     observed, _, radiant_eci = observeStraightMeteor(noise=0.0, duration=3.0, v_init=15000.0, \
         elevation=30.0, gravity_drop=True, free_fall=True)
 

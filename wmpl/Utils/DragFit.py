@@ -616,8 +616,7 @@ class DragFit(object):
         # Factor of the drop at each time, scaled for a decelerating meteor as in the solver
         drop_factor = getattr(traj, 'gravityDropFactor', lambda t_rel: gravity_factor)
 
-        # Or the free fall of the meteor from the line, as in the solver. Trajectories solved before it was
-        #   added drop the points along their vertical
+        # Or the free fall of the meteor from the line, as in the solver, None for old trajectories
         free_fall = traj.gravityFreeFall() if hasattr(traj, 'gravityFreeFall') else None
         radiant_eci = np.ascontiguousarray(self.radiant_eci, dtype=np.float64)
 
@@ -628,6 +627,7 @@ class DragFit(object):
         for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
             if np.isfinite(t) and (t > t0):
 
+                # Drop the point by its free fall from the line, or along its vertical
                 if free_fall is not None:
                     dropped = freeFallDrop(eci, t - t0, radiant_eci, *free_fall, gravity_factor)
                 else:
