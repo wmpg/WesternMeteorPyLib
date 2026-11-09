@@ -1,7 +1,5 @@
-""" Tests of what is made from ECSV files besides the trajectory: the azimuths and altitudes of the prepared
-    observations, which go into the MILIG input file, the R.A./Dec. given to the Gural solver, and the ECSV
-    files written by saveECSV. The R.A./Dec. of ECSV files are computed at the time of each row, so they have
-    to be converted back at that time.
+""" Tests that the MILIG input file and the Gural solver get the direction of every ECSV row at its time, and
+    that the ECSV files written by saveECSV are read back.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVOutputs.py -v
@@ -45,7 +43,7 @@ DURATION = 2.5
 
 
 
-def _writeECSVs(dir_path):
+def writeECSVs(dir_path):
     """ Write the noise-free straight meteor of SyntheticTrajectory, lasting DURATION, as seen from each of
         its stations into an ECSV file per station, with the azimuth and altitude at the time of each row.
 
@@ -69,9 +67,11 @@ def _writeECSVs(dir_path):
     azim_alt = {}
     for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
 
+        # Compute the direction of every row from the station
         azim, alt = stationAzimAlt(points, jds, s_lat, s_lon, ele)
         azim_alt[station_id] = (azim, alt)
 
+        # Write a row per point, with the azimuth and altitude in degrees
         rows = []
         for i, dt in enumerate(dt_list):
             rows.append(",".join([dt.strftime("%Y-%m-%dT%H:%M:%S.%f"), "0.0", "0.0", \
@@ -89,12 +89,14 @@ def _writeECSVs(dir_path):
 
 
 
-def _angleArcsec(azim1, alt1, azim2, alt2):
+def angleArcsec(azim1, alt1, azim2, alt2):
     """ Compute the angles between two sets of directions.
 
     Arguments:
-        azim1, alt1: [ndarray] First directions (rad).
-        azim2, alt2: [ndarray] Second directions (rad).
+        azim1: [ndarray] Azimuths of the first directions (rad).
+        alt1: [ndarray] Altitudes of the first directions (rad).
+        azim2: [ndarray] Azimuths of the second directions (rad).
+        alt2: [ndarray] Altitudes of the second directions (rad).
 
     Return:
         [ndarray] Angles (arcsec).
@@ -110,12 +112,12 @@ def testPreparedAzimuthsAreThoseOfTheFile():
     """
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        paths, azim_alt = _writeECSVs(tmp_dir)
+        paths, azim_alt = writeECSVs(tmp_dir)
         _, meteor_list = loadECSVs(paths)
 
     for meteor in meteor_list:
         azim, alt = azim_alt[meteor.station_id]
-        assert np.max(_angleArcsec(meteor.azim_data, meteor.elev_data, azim, alt)) < 0.01
+        assert np.max(angleArcsec(meteor.azim_data, meteor.elev_data, azim, alt)) < 0.01
 
 
 
@@ -124,7 +126,7 @@ def testMiligFileHasTheAzimuthsOfTheRows():
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
-        paths, azim_alt = _writeECSVs(tmp_dir)
+        paths, azim_alt = writeECSVs(tmp_dir)
         jdt_ref, meteor_list = loadECSVs(paths)
 
         milig_path = os.path.join(tmp_dir, "milig.txt")
@@ -133,11 +135,12 @@ def testMiligFileHasTheAzimuthsOfTheRows():
         with open(milig_path) as f:
             lines = f.readlines()
 
-    # Read the points, which follow the line of each station, the last one flagged with 9, until the end flag
+    # Read the points of each station, the last one flagged with 9
     stations = []
     new_station = True
     for line in lines[1:]:
 
+        # Stop at the end flag
         if line.startswith('-1'):
             break
 
@@ -156,18 +159,20 @@ def testMiligFileHasTheAzimuthsOfTheRows():
         azim, alt = azim_alt[station_id]
         station_points = np.array(station_points)
 
-        # The file has the azimuth west of due south and the zenith angle, in degrees
+        # Convert the azimuth west of due south and the zenith angle
         milig_azim = (np.radians(station_points[:, 0]) + np.pi)%(2*np.pi)
         milig_alt = np.pi/2 - np.radians(station_points[:, 1])
 
         # The file has 5 decimals of a degree
-        assert np.max(_angleArcsec(milig_azim, milig_alt, azim, alt)) < 0.1
+        assert np.max(angleArcsec(milig_azim, milig_alt, azim, alt)) < 0.1
 
 
 
-class _GuralStub(object):
+class GuralStub(object):
+    """ Stand-in for the Gural solver which records the measurements instead of solving the trajectory. """
+
     def __init__(self, *args, **kwargs):
-        """ Record the measurements given to the Gural solver instead of solving the trajectory. """
+        """ Make an empty record. """
 
         self.infilled = []
 
@@ -192,13 +197,14 @@ def testGuralSolverGetsTheRaDecAtTheReferenceTime():
         point at the azimuth and altitude of every row at that time.
     """
 
+    # Replace the Gural solver by the stub
     generic = sys.modules['wmpl.Formats.GenericFunctions']
     original = generic.GuralTrajectory
-    generic.GuralTrajectory = _GuralStub
+    generic.GuralTrajectory = GuralStub
 
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            paths, azim_alt = _writeECSVs(tmp_dir)
+            paths, azim_alt = writeECSVs(tmp_dir)
             jdt_ref, meteor_list = loadECSVs(paths)
             stub = solveTrajectoryGeneric(jdt_ref, meteor_list, tmp_dir, solver='gural')
 
@@ -211,7 +217,7 @@ def testGuralSolverGetsTheRaDecAtTheReferenceTime():
         ra = ra + calcEquationOfEquinoxes(jdt_ref)
 
         azim, alt = raDec2AltAz_vect(ra, dec, jdt_ref, lat, lon)
-        assert np.max(_angleArcsec(azim, alt, *azim_alt[station_id])) < 0.01
+        assert np.max(angleArcsec(azim, alt, *azim_alt[station_id])) < 0.01
 
 
 
@@ -224,9 +230,10 @@ def testSavedECSVIsReadBack():
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
-        paths, azim_alt = _writeECSVs(tmp_dir)
+        paths, azim_alt = writeECSVs(tmp_dir)
         _, meteor_list = loadECSVs(paths)
 
+        # Save the loaded meteors into new files
         out_dir = os.path.join(tmp_dir, "saved")
         os.makedirs(out_dir)
         saveECSV(out_dir, meteor_list)
@@ -234,6 +241,7 @@ def testSavedECSVIsReadBack():
         saved_paths = sorted(os.path.join(out_dir, name) for name in os.listdir(out_dir))
         assert len(saved_paths) == len(STRAIGHT_STATIONS)
 
+        # Check the declared columns with astropy
         for path in saved_paths:
             table = Table.read(path, format='ascii.ecsv')
             assert table.colnames == COLUMNS
@@ -244,4 +252,15 @@ def testSavedECSVIsReadBack():
         azim, alt = azim_alt[meteor.station_id]
 
         # The files have 6 decimals of a degree
-        assert np.max(_angleArcsec(meteor.azim_data, meteor.elev_data, azim, alt)) < 0.01
+        assert np.max(angleArcsec(meteor.azim_data, meteor.elev_data, azim, alt)) < 0.01
+
+
+
+if __name__ == "__main__":
+
+    testPreparedAzimuthsAreThoseOfTheFile()
+    testMiligFileHasTheAzimuthsOfTheRows()
+    testGuralSolverGetsTheRaDecAtTheReferenceTime()
+    testSavedECSVIsReadBack()
+
+    print("All tests passed.")

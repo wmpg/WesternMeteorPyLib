@@ -214,13 +214,13 @@ def prepareObservations(meteor_list):
             meteor.ra_data = ra_prec
             meteor.dec_data = dec_prec
 
-            # Convert precessed Ra, Dec to altitude and azimuth, at the time each of them was computed if they
-            #   were computed at the time of their point
+            # Take the time of each point if its Ra, Dec were computed at it
             azel_jd = jdt_ref
             if getattr(meteor, 'radec_per_point', False):
                 azel_jd = jdt_ref + meteor.time_data/86400.0
 
-            meteor.azim_data, meteor.elev_data = raDec2AltAz_vect(meteor.ra_data, meteor.dec_data, azel_jd,
+            # Convert precessed Ra, Dec to altitude and azimuth
+            meteor.azim_data, meteor.elev_data = raDec2AltAz_vect(meteor.ra_data, meteor.dec_data, azel_jd, \
                 meteor.latitude, meteor.longitude)
 
             meteor_list_epoch_of_date.append(meteor)
@@ -297,8 +297,7 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
             ra_data = meteor.ra_data
             dec_data = meteor.dec_data
 
-            # The Gural solver takes all R.A./Dec. at the reference time, so compute the ones computed at the
-            #   time of their point again at the reference time, from their azimuth and elevation
+            # Recompute the R.A./Dec. of each point at the reference time for the Gural solver
             if getattr(meteor, 'radec_per_point', False):
                 ra_data, dec_data = altAz2RADec_vect(meteor.azim_data, meteor.elev_data, jdt_ref, \
                     meteor.latitude, meteor.longitude)
