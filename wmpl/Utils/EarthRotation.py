@@ -17,10 +17,8 @@ import os
 import numpy as np
 
 from wmpl.Utils.Math import rotationMatrixZ
+from wmpl.Utils.Physics import EARTH_ROTATION_RATE
 
-
-# Rotation of the Earth in one second of UT1 (rad), IERS Conventions 2010 eq. 5.15
-EARTH_ROTATION_RATE = 2*np.pi*1.00273781191135448/86400.0
 
 # Environment variable which gives UT1 - UTC (s) instead of the IERS tables
 DUT1_ENV = 'WMPL_UT1_UTC'
@@ -108,6 +106,7 @@ def utcRotationAngle(dut1):
         [float] Angle (rad), positive towards increasing right ascension.
     """
 
+    # The ECI coordinates turn at the rate of the mean sidereal time
     return EARTH_ROTATION_RATE*dut1
 
 
