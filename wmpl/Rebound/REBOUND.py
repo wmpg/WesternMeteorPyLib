@@ -1277,9 +1277,8 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
             which is identical across Monte Carlo realizations sharing the same epoch.
 
     Return:
-        [list] Position and velocity components in barycentric coordinates in AU and AU per time
-            unit, eg.
-            [x, y, z, vx, vy, vz]
+        [list] Position and velocity components in barycentric coordinates in AU and AU per time unit,
+            e.g. [x, y, z, vx, vy, vz]
     """
 
     # Skip if REBOUND is not found
@@ -1387,12 +1386,10 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
     state_vect_rot[5] *= 86400*DAYS_PER_SIM_TIME
 
     if len(log_file_path):
-        log(
-            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU per REBOUND time unit): {state_vect_rot}"
-        )
-        log(
-            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU per REBOUND time unit): {earth_state}"
-        )
+        log("Meteor state vector in ecliptic ECI, J2000 (AU, AU per REBOUND time unit): {}".format(
+            state_vect_rot))
+        log("Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU per REBOUND time " \
+            "unit): {}".format(earth_state))
 
     # Add the Earth's position and velocity to the meteoroid's position and velocity
     state_vect_rot[0] += earth_state[0]
@@ -1403,9 +1400,8 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
     state_vect_rot[5] += earth_state[5]
 
     if len(log_file_path):
-        log(
-            f"Meteor state vector in barycentric, J2000 (AU, AU per REBOUND time unit): {state_vect_rot}"
-        )
+        log("Meteor state vector in barycentric, J2000 (AU, AU per REBOUND time unit): {}".format(
+            state_vect_rot))
         log_file.close()
 
     return state_vect_rot
@@ -3370,7 +3366,10 @@ if __name__ == "__main__":
             dist_str = "".join(", {:s} = {:10.6f}".format(body, output[3][body]) for body in dist_bodies)
 
             # Save the orbital elements and distances at the given time
-            f.write(f"t = {simTimeToDays(output[0]):.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}{dist_str}\n")
+            f.write("t = {:.6f} d, a = {:10.6f}, e = {:10.6f}, i = {:10.6f}, Omega = {:10.6f}, " \
+                "omega = {:10.6f}, f = {:10.6f}{:s}\n".format(simTimeToDays(output[0]), \
+                output[2].a*dist_unit_multiplier, output[2].e, np.degrees(output[2].inc), \
+                np.degrees(output[2].Omega), np.degrees(output[2].omega), np.degrees(output[2].f), dist_str))
 
         # If the MC was run, save orbital elements of individual MC runs
         if len(sim_outputs_mc):

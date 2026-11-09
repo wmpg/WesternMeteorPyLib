@@ -275,7 +275,7 @@ def testTimeUnitIsTheOneOfGEqualsOne(realReb):
 
     # The conversions are inverses of each other, and a Julian year is not 2 pi
     assert realReb.simTimeToDays(realReb.daysToSimTime(123.4)) == pytest.approx(123.4, rel=1e-15)
-    assert realReb.daysToSimTime(365.25) == pytest.approx(2*np.pi*(1 - 1.89e-5), rel=1e-7)
+    assert realReb.daysToSimTime(365.25) == pytest.approx(2*np.pi*(1 - 1.8886e-5), rel=1e-8)
 
 
 def testPlanetsFollowTheEphemeris(realReb):
