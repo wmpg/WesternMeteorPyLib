@@ -19,7 +19,7 @@ matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import G, applyGravityDrop, freeFallDrop, freeFallMoments, freeFallTable, \
     gravityDropScale
-from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDragMeteor, observeMeteor
+from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, bentDragMeteor, observeMeteor
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 
@@ -28,28 +28,8 @@ from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 FIREBALL_NO_DRAG = (16000.0, 120.0, 30.0, 0.0, 0.0, 4.0, 10.0)
 FIREBALL_DRAG = (16000.0, 120.0, 30.0, 0.02, 0.15, 4.0, 10.0)
 
-# Integrated fireballs, shared by the tests
-METEOR_CACHE = {}
-
 # Mass of the Earth used by applyGravityDrop and freeFallDrop (kg)
 EARTH_MASS = 5.9722e24
-
-
-
-def integrateMeteor(params):
-    """ Integrate a fireball of the tests once.
-
-    Arguments:
-        params: [tuple] Arguments of BentDragMeteor.
-
-    Return:
-        [BentDragMeteor object] The fireball.
-    """
-
-    if params not in METEOR_CACHE:
-        METEOR_CACHE[params] = BentDragMeteor(*params)
-
-    return METEOR_CACHE[params]
 
 
 
@@ -134,7 +114,7 @@ def solveFireball(params, gravity_free_fall, seed=1):
             - perp_errors: [ndarray] Distances of the model points from the truth across the path (m).
     """
 
-    meteor = integrateMeteor(params)
+    meteor = bentDragMeteor(*params)
 
     traj = observeMeteor(meteor, noise=0.0, seed=seed, gravity_correction=True, calc_orbit=False, \
         gravity_free_fall=gravity_free_fall)
@@ -166,7 +146,7 @@ def testTheFreeFallFollowsIntegratedFireballs():
 
     for params in (FIREBALL_NO_DRAG, FIREBALL_DRAG):
 
-        meteor = integrateMeteor(params)
+        meteor = bentDragMeteor(*params)
         time_rel, pos, vel, drag_vel = calcDragVelocity(meteor, 0.02)
         table = freeFallTable(time_rel, drag_vel)
 
