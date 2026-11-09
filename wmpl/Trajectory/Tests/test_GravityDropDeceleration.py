@@ -17,11 +17,11 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MAX_ACC, GRAVITY_DROP_MIN_VEL, Trajectory, \
-    gravityDropScale, segmentedVelocity
+from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MAX_ACC, GRAVITY_DROP_MIN_VEL, \
+    GRAVITY_DROP_VEL_GROUPS, GRAVITY_DROP_VEL_SEGMENTS, Trajectory, gravityDropScale
 from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDragMeteor, observeMeteor, \
     observeStraightMeteor
-from wmpl.Utils.Math import angleBetweenVectors
+from wmpl.Utils.Math import angleBetweenVectors, segmentedVelocity
 
 
 # Fireball of the tests, 18 km/s at 45 deg slowing down to about 10 km/s in 3.3 s
@@ -29,6 +29,9 @@ FIREBALL = (18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
 
 # Integrated fireball, shared by the tests
 METEOR_CACHE = []
+
+# Settings of the velocity fit of the solver
+VEL_FIT_SETTINGS = (GRAVITY_DROP_VEL_SEGMENTS, GRAVITY_DROP_VEL_GROUPS, GRAVITY_DROP_MAX_ACC)
 
 
 
@@ -374,18 +377,19 @@ def testTheVelocityFollowsAFragmentingFireball():
         lengths = integrateLengths(profile, times, duration) + rng.normal(0.0, 50.0, len(times))
         lengths[n_first:] += 30.0
 
-        vel = segmentedVelocity(times, lengths, time_eval)
+        vel = segmentedVelocity(times, lengths, time_eval, *VEL_FIT_SETTINGS)
 
         assert np.sqrt(np.mean((vel - vel_true)**2)) < 100.0
         assert abs(gravityDropScale(time_eval, vel)[-1] - gravityDropScale(time_eval, vel_true)[-1]) < 0.002
 
         # Check that the velocity is held outside the times of the points
         outside = segmentedVelocity(times, lengths, np.array([-1.0, np.min(times), np.max(times), \
-            np.max(times) + 1.0]))
+            np.max(times) + 1.0]), *VEL_FIT_SETTINGS)
         assert (outside[0] == outside[1]) and (outside[2] == outside[3])
 
     # Check that fewer than 3 distinct times give no velocity
-    assert segmentedVelocity(np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 2.0]), time_eval) is None
+    assert segmentedVelocity(np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 2.0]), time_eval, \
+        *VEL_FIT_SETTINGS) is None
 
 
 
@@ -405,7 +409,7 @@ def testNoChangeOfVelocityIsFoundAtAConstantVelocity():
         lengths = 15000.0*times + rng.normal(0.0, 100.0, len(times))
         lengths[n_first:] += 30.0
 
-        vel = segmentedVelocity(times, lengths, time_eval)
+        vel = segmentedVelocity(times, lengths, time_eval, *VEL_FIT_SETTINGS)
 
         # The offset between the stations moves the velocity by a few tens of m/s
         assert np.ptp(vel) == 0
@@ -440,7 +444,7 @@ def testAChangeOfVelocityByGravityAloneIsFollowed():
             times, _ = twoStationTimes(duration)
             lengths = integrateLengths(profile, times, duration) + rng.normal(0.0, 30.0, len(times))
 
-            vel = segmentedVelocity(times, lengths, time_eval)
+            vel = segmentedVelocity(times, lengths, time_eval, *VEL_FIT_SETTINGS)
 
             assert np.all(np.diff(vel)/np.diff(time_eval) <= GRAVITY_DROP_MAX_ACC + 1e-6)
             assert abs(gravityDropScale(time_eval, vel)[-1] - scale_true) < 0.0008
@@ -471,7 +475,7 @@ def testFewNoisyPointsDoNotMakeTheVelocityOscillate():
         lengths[1] += 300.0
         lengths[2] -= 300.0
 
-        vel = segmentedVelocity(np.concatenate(times), np.concatenate(lengths), time_eval)
+        vel = segmentedVelocity(np.concatenate(times), np.concatenate(lengths), time_eval, *VEL_FIT_SETTINGS)
 
         assert np.all(np.diff(vel)/np.diff(time_eval) <= GRAVITY_DROP_MAX_ACC + 1e-6)
         assert (np.min(vel) > 55000.0) and (np.max(vel) < 75000.0)
