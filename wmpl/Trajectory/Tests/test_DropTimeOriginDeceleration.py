@@ -12,16 +12,12 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Tests.SyntheticTrajectory import BentDragMeteor, observeMeteor
+from wmpl.Trajectory.Tests.SyntheticTrajectory import DECELERATING_FIREBALL, bentDragMeteor, observeMeteor
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 
 
-# Fireball of the tests, 18 km/s at 45 deg slowing down to about 10 km/s in 3.3 s
-FIREBALL = (18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
-
-# Integrated fireball and solutions, shared by the tests
-METEOR_CACHE = []
+# Solutions, shared by the tests
 SOLVED_CACHE = {}
 
 
@@ -39,12 +35,8 @@ def solveWithIgnoredStation(clock_lead):
 
     if clock_lead not in SOLVED_CACHE:
 
-        # Integrate the fireball once
-        if not METEOR_CACHE:
-            METEOR_CACHE.append(BentDragMeteor(*FIREBALL))
-
-        traj = observeMeteor(METEOR_CACHE[0], noise=0.0, gravity_correction=True, filter_picks=False, \
-            calc_orbit=False)
+        traj = observeMeteor(bentDragMeteor(*DECELERATING_FIREBALL), noise=0.0, gravity_correction=True, \
+            filter_picks=False, calc_orbit=False)
 
         # Add a station which is not used, with the picks of station A and its clock ahead
         obs = traj.observations[0]
