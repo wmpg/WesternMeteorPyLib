@@ -25,26 +25,20 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 # Scale height
 HT_NORM_CONST = 7160.0
 
-# Sea-level air density of the exponential atmosphere the alpha-beta model assumes (kg/m^3), used both to
-#   rescale the observed heights to it and to turn alpha into a mass
+# Sea-level air density of the exponential atmosphere of the alpha-beta model (kg/m^3)
 RHO_ATM_0 = 1.225
 
-# Standard gravity (m/s^2) and mean Earth radius (m), for the gravity the alpha-beta model leaves out
+# Standard gravity (m/s^2) and mean Earth radius (m)
 G0 = 9.81
 R_EARTH = 6371008.7714
 
-# Threshold on the z of the median residual of a height band beyond which the residuals of an alpha-beta fit are
-#   reported as a trend the model does not describe (see alphaBetaResidualTrend()). Set from few cases: on the
-#   observed velocities of 24 synthetic single-body fireballs solved by the trajectory solver, the largest |z|
-#   was 1.2; on the Winchcombe fireball, which fragmented, 2.5
+# Largest z of the median residual of a height band before the residuals are flagged as a trend
 RESIDUAL_TREND_SIGMA = 2.0
 
-# Bounds of a fitted initial velocity, as fractions of the median speed of the highest points (see topSpeed())
+# Bounds of a fitted initial velocity, as fractions of the median speed of the highest points
 V_INIT_FIT_BOUNDS = (0.8, 1.5)
 
-# Height of the first fitted point below which the command line advises fitting the initial velocity
-#   (--fitvinit): in synthetic fireballs, the speed at 180 km from the trajectory's velocity was 10-20 m/s low from
-#   90 km but 160-200 m/s from 70 km, and fitting it was as good from 90 km, so the advice errs on the high side
+# Height of the first point below which the command line advises fitting the initial velocity (m)
 FIT_V_INIT_ADVISED_HT = 80e3
 
 # Power of a zero absolute magnitude meteor (W), WMPL convention. Used to turn the
@@ -152,38 +146,30 @@ ALPHA_BETA_BOUNDS = ((0.001, 10000.0), (0.00001, 50.0))
 
 
 
-# Top of the air column integrated to rescale heights by column (m), and the steps of that integration (m): fine
-#   through the region meteors are observed in, coarse above, where the column left is small but not negligible
-#   (at 120 km, about 5% of it lies above 200 km)
+# Top of the air column integrated to rescale the heights (m)
 RESCALE_COLUMN_TOP = 1000e3
+
+# Steps of the column integration (m), fine below RESCALE_FINE_TOP (m) and coarse above
 RESCALE_STEP_FINE, RESCALE_STEP_COARSE, RESCALE_FINE_TOP = 100.0, 5000.0, 200e3
 
 
-def exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method="column"):
-    """ Heights in the exponential atmosphere the alpha-beta model assumes, rho = RHO_ATM_0*exp(-h/HT_NORM_CONST),
-        equivalent to the given heights in a real atmosphere given by a density profile.
 
-    The alpha-beta solution depends on the height only through the air column above: with B = Gamma A rho_m^(-2/3)
-    m^(-1/3), the drag and ablation equations give dv/dh = B rho v/sin(slope) and dm/dh = sigma B m rho
-    v^2/sin(slope), functions of the column M = int rho dh alone (for a straight path, without gravity). So a height
-    is mapped to the one with the same column, RHO_ATM_0*HT_NORM_CONST* exp(-h'/HT_NORM_CONST) = M ("column", the
-    default). Mapping it to the one with the same local density instead ("density", what this module did before) is
-    the same only where the local scale height is HT_NORM_CONST. In synthetic fireballs at 20 km/s (MetSim through
-    NRLMSISE-00, without gravity) fitted with the initial velocity free, it put that velocity 70 and 205 m/s low
-    from 60 and 50 km, alpha 1-12% high and, for a chondritic body (sigma = 0.005 s^2/km^2), beta to zero; in a test
-    atmosphere whose scale height goes from 6 to 8 km, alpha 16% low. The column mapping recovered the velocity
-    within 5 m/s, alpha within 2% and, where the deceleration constrains it (not from 95 km, with little of it),
-    beta within 11%. On the Winchcombe fireball (2021-02-28), the density mapping pinned beta to its lower bound,
-    1e-5, while the column mapping gave 0.17 +/- 22%.
+def exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method='column'):
+    """ Map heights in a real atmosphere, given by a density profile, to the exponential atmosphere of the
+        alpha-beta model, rho = RHO_ATM_0*exp(-h/HT_NORM_CONST).
+
+    The alpha-beta solution depends on the height only through the air column above it, so by default a
+    height is mapped to the one with the same column above. The 'density' method maps it to the height with
+    the same local density, which is the same only where the local scale height is HT_NORM_CONST.
 
     Arguments:
         ht_data: [ndarray] Heights to rescale (m).
-        profile_hts: [ndarray] Increasing heights of the density profile (m), reaching below the lowest of ht_data
-            and as high as the column above matters (see RESCALE_COLUMN_TOP).
+        profile_hts: [ndarray] Increasing heights of the density profile (m), from below the lowest of ht_data
+            up to RESCALE_COLUMN_TOP.
         profile_dens: [ndarray] Air density at profile_hts (kg/m^3).
 
     Keyword arguments:
-        method: [str] "column" (default) or "density".
+        method: [str] 'column' or 'density'. 'column' by default.
 
     Return:
         [ndarray] Rescaled heights (m).
@@ -193,51 +179,55 @@ def exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method="col
     profile_dens = np.asarray(profile_dens, dtype=np.float64)
     log_dens = np.log(profile_dens)
 
-    if method == "density":
+    # Map the heights by the local density
+    if method == 'density':
         return HT_NORM_CONST*np.log(RHO_ATM_0/np.exp(np.interp(ht_data, profile_hts, log_dens)))
 
-    if method != "column":
+    if method != 'column':
         raise ValueError("method must be 'column' or 'density', got {!r}.".format(method))
 
-    # Column above every profile height, integrating each interval as an exponential between its ends (exact for
-    #   an exponential atmosphere, and far better than the trapezoid where the density falls by a large factor)
+    # Compute the column above each profile height, integrating each interval as an exponential
     dh = np.diff(profile_hts)
     ratio = profile_dens[:-1]/profile_dens[1:]
-    seg = np.where(np.abs(ratio - 1) > 1e-12, dh*(profile_dens[:-1] - profile_dens[1:])/np.log(ratio),
+    seg = np.where(np.abs(ratio - 1) > 1e-12, dh*(profile_dens[:-1] - profile_dens[1:])/np.log(ratio), \
         dh*profile_dens[:-1])
     column = np.concatenate([np.cumsum(seg[::-1])[::-1], [0.0]])
 
-    # Above the profile, the exponential tail with the scale height of its last interval
+    # Add the column above the profile, with the scale height of its last interval
     scale_top = dh[-1]/np.log(ratio[-1])
     column += profile_dens[-1]*scale_top
 
+    # Map the heights to those with the same column in the exponential atmosphere
     column_data = np.exp(np.interp(ht_data, profile_hts, np.log(column)))
 
     return HT_NORM_CONST*np.log(RHO_ATM_0*HT_NORM_CONST/column_data)
 
 
-def exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method="column"):
-    """ Real air density at the given heights over the density of the exponential atmosphere at their rescaled
-        heights (see exponentialAtmosphereHeights()), the factor the alpha-beta luminosity needs.
 
-    The luminosity, I = -tau d(m v^2/2)/dt, is proportional to the local air density through dv/dt and dm/dt,
-    which the model takes from its exponential atmosphere at the rescaled height. With the column mapping the
-    velocity and mass are right but that density is M/HT_NORM_CONST, not the real one: the model's magnitudes
-    are too faint by 2.5 log10(ratio), where the ratio is HT_NORM_CONST over the column's scale height M/rho.
-    Through NRLMSISE-00 that is +0.04 to +0.10 mag at 30 km, about -0.1 at 50 km, +0.1 at 70 km, +0.24 to +0.39 at 90 km
-    and about -0.12 at 110 km, varying with height, so a light curve fit cannot absorb it into its amplitude. With
-    the density mapping the ratio is 1, but the velocity and mass are not right.
+def exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method='column'):
+    """ Compute the ratio of the real air density at the given heights to the density of the exponential
+        atmosphere at their rescaled heights (see exponentialAtmosphereHeights()).
+
+    The luminosity of the alpha-beta model is proportional to the local air density, which the column
+    mapping gets wrong by this ratio, so the model magnitudes are too faint by 2.5 log10(ratio). The ratio
+    is 1 with the density mapping.
 
     Arguments:
-        ht_data, profile_hts, profile_dens, method: As in exponentialAtmosphereHeights().
+        ht_data: [ndarray] Heights in the real atmosphere (m).
+        profile_hts: [ndarray] Increasing heights of the density profile (m).
+        profile_dens: [ndarray] Air density at profile_hts (kg/m^3).
+
+    Keyword arguments:
+        method: [str] 'column' or 'density'. 'column' by default.
 
     Return:
-        [ndarray] rho_real/rho_model at ht_data.
+        [ndarray] Real density over the model density at ht_data.
     """
 
     profile_hts = np.asarray(profile_hts, dtype=np.float64)
     log_dens = np.log(np.asarray(profile_dens, dtype=np.float64))
 
+    # Compare the real and the model densities in log space
     ht_rescaled = exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method=method)
     log_rho_real = np.interp(ht_data, profile_hts, log_dens)
     log_rho_model = np.log(RHO_ATM_0) - ht_rescaled/HT_NORM_CONST
@@ -245,7 +235,8 @@ def exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method
     return np.exp(log_rho_real - log_rho_model)
 
 
-def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method="column", return_density_ratio=False):
+
+def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method='column', return_density_ratio=False):
     """ Given observed heights, rescale them from the real MSIS atmosphere to the simplified exponential
         atmosphere model used by the Alpha-Beta procedure (see exponentialAtmosphereHeights()).
 
@@ -256,35 +247,40 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method="column",
         jd: [float] Julian date.
 
     Keyword arguments:
-        method: [str] "column" (default): the height with the same air column above, which keeps the alpha-beta
-            solution exact in the real atmosphere. "density": the height with the same local density, what this
-            function did before, kept to reproduce earlier results. With "column", the profile is taken at the
-            mean location of the points.
-        return_density_ratio: [bool] Also return the real density over the model's at the rescaled heights
-            (see exponentialAtmosphereDensityRatio()), which a light curve fit with the column mapping needs
-            (fitAlphaBetaLightCurve(lc_density_ratio=...)). It is 1 with the density mapping. False by default.
+        method: [str] 'column' for the height with the same air column above, or 'density' for the height
+            with the same local density. 'column' takes the density profile at the mean location of the
+            points. 'column' by default.
+        return_density_ratio: [bool] Also return the real density over the model density at the points (see
+            exponentialAtmosphereDensityRatio()), for fitAlphaBetaLightCurve(lc_density_ratio=...). False by
+            default.
 
     Return:
-        rescaled_ht_data, or (rescaled_ht_data, density_ratio) with return_density_ratio
+        ht_rescaled: [ndarray] Rescaled heights (m).
+        density_ratio: [ndarray] Real density over the model density, only returned with
+            return_density_ratio.
     """
 
     ht_data = np.asarray(ht_data, dtype=np.float64)
 
-    if method == "density":
+    # Map the heights by the local density
+    if method == 'density':
         atm_dens = getAtmDensity_vect(lat, lon, ht_data, jd)
         ht_rescaled = HT_NORM_CONST*np.log(RHO_ATM_0/atm_dens)
         return (ht_rescaled, np.ones_like(ht_rescaled)) if return_density_ratio else ht_rescaled
 
+    # Take the density profile at the mean location of the points
     lat_mean = np.arctan2(np.mean(np.sin(lat)), np.mean(np.cos(lat)))
     lon_mean = meanAngle(np.atleast_1d(lon))
 
-    profile_hts = np.concatenate([np.arange(np.min(ht_data) - RESCALE_STEP_FINE, RESCALE_FINE_TOP,
+    profile_hts = np.concatenate([np.arange(np.min(ht_data) - RESCALE_STEP_FINE, RESCALE_FINE_TOP, \
         RESCALE_STEP_FINE), np.arange(RESCALE_FINE_TOP, RESCALE_COLUMN_TOP + 1, RESCALE_STEP_COARSE)])
     profile_dens = getAtmDensity_vect(lat_mean, lon_mean, profile_hts, jd)
 
+    # Map the heights by the air column above them
     ht_rescaled = exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method=method)
     if return_density_ratio:
-        return ht_rescaled, exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method=method)
+        return ht_rescaled, exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, \
+            method=method)
 
     return ht_rescaled
 
@@ -881,8 +877,21 @@ def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init
     }
 
 
+
 def topSpeed(v_data, ht_data, fraction=0.1, n_min=10):
-    """ Median speed of the highest points: the highest fraction of them, at least n_min (m/s). """
+    """ Compute the median speed of the highest points.
+
+    Arguments:
+        v_data: [ndarray] Velocities (m/s).
+        ht_data: [ndarray] Heights (m).
+
+    Keyword arguments:
+        fraction: [float] Fraction of the points to take from the top. 0.1 by default.
+        n_min: [int] Smallest number of points to take. 10 by default.
+
+    Return:
+        [float] Median speed of the highest points (m/s).
+    """
 
     order = np.argsort(ht_data)[::-1]
     n = min(len(order), max(n_min, int(fraction*len(order))))
@@ -890,81 +899,119 @@ def topSpeed(v_data, ht_data, fraction=0.1, n_min=10):
     return np.median(np.asarray(v_data)[order[:n]])
 
 
-def _fitAlphaBetaFreeVinit(v_data, ht_data, v_init0, alpha0, beta0, sigma_v, loss, f_scale, fast=False):
-    """ Least squares on the velocity residuals with the initial velocity free together with alpha and beta,
-        x = (v_init, ln alpha, ln beta), seeded from a fit at a fixed v_init0 (see fitAlphaBeta(fit_v_init=True)).
+
+def fitAlphaBetaFreeVinit(v_data, ht_data, v_init0, alpha0, beta0, sigma_v, loss, f_scale, fast=False):
+    """ Fit the initial velocity together with alpha and beta by least squares on the velocity residuals,
+        starting from a fit at a fixed initial velocity (see fitAlphaBeta(fit_v_init=True)).
+
+    Arguments:
+        v_data: [ndarray] Velocities (m/s).
+        ht_data: [ndarray] Heights rescaled to the exponential atmosphere (m).
+        v_init0: [float] Initial velocity of the fit at a fixed initial velocity (m/s).
+        alpha0: [float] Alpha of the fit at a fixed initial velocity.
+        beta0: [float] Beta of the fit at a fixed initial velocity.
+        sigma_v: [float] Velocity uncertainty (m/s).
+        loss: [str] scipy.optimize.least_squares loss.
+        f_scale: [float] Robust loss scale, in units of sigma_v.
+
+    Keyword arguments:
+        fast: [bool] Use the LUT-accelerated alphaBetaVelocityNormedLUT(). False by default.
 
     Return:
-        (v_init, alpha, beta, fit_res): fit_res is the scipy.optimize.least_squares result, on residuals
-            normalized by sigma_v.
+        (v_init, alpha, beta, fit_res):
+            - v_init: [float] Fitted initial velocity (m/s).
+            - alpha: [float] Fitted alpha.
+            - beta: [float] Fitted beta.
+            - fit_res: [OptimizeResult] scipy.optimize.least_squares result for (v_init, ln alpha, ln beta),
+                on the residuals normalized by sigma_v.
     """
 
     ht_normed = ht_data/HT_NORM_CONST
     log_bounds = _logAlphaBetaBounds()
 
-    def _residuals(x):
+    def velocityResiduals(x):
+        """ Compute the velocity residuals normalized by sigma_v for x = (v_init, ln alpha, ln beta). """
+
         v_init, ln_alpha, ln_beta = x
+
+        # Give a large residual where the model fails
         try:
             v_model = v_init*alphaBetaVelocityNormed(ht_normed, np.exp(ln_alpha), np.exp(ln_beta), fast=fast)
         except (ValueError, RuntimeError, OverflowError, ZeroDivisionError):
             return np.full_like(v_data, 1e6)
+
         res = (v_model - v_data)/sigma_v
+
         return np.where(np.isfinite(res), res, 1e6)
 
-    # Bounds on the initial velocity from the speeds of the highest points, by their median so that outliers do
-    #   not set them (a bound from the fastest speed seen pinned the fit to a single outlier): the entry velocity
-    #   is not far below the speeds at the top, nor half again above them
+
+    # Bound the initial velocity by the median speed of the highest points
     v_top = topSpeed(v_data, ht_data)
     lower = [V_INIT_FIT_BOUNDS[0]*v_top, log_bounds[0][0], log_bounds[0][1]]
     upper = [V_INIT_FIT_BOUNDS[1]*v_top, log_bounds[1][0], log_bounds[1][1]]
 
-    def _clip(x):
+    def clipToBounds(x):
+        """ Move the parameters just inside their bounds. """
+
         return np.clip(x, np.array(lower) + 1e-9*np.abs(lower), np.array(upper) - 1e-9*np.abs(upper))
 
-    # A few starts around the fixed-v_init solution, since v_init and beta trade off along a valley
+
+    # Start from a few points around the solution at the fixed initial velocity
     x0 = np.array([np.clip(v_init0, lower[0], upper[0]), np.log(alpha0), np.log(beta0)])
     starts = [x0, x0 + [0.02*x0[0], 0.0, 0.0], x0 + [0.05*x0[0], -0.5, 0.5]]
 
+    # Keep the best fit
     best = None
     for start in starts:
-        fit_res = scipy.optimize.least_squares(_residuals, _clip(start), bounds=(lower, upper), loss=loss,
-            f_scale=f_scale, x_scale=[0.01*x0[0], 0.1, 0.1])
+        fit_res = scipy.optimize.least_squares(velocityResiduals, clipToBounds(start), \
+            bounds=(lower, upper), loss=loss, f_scale=f_scale, x_scale=[0.01*x0[0], 0.1, 0.1])
         if (best is None) or (fit_res.cost < best.cost):
             best = fit_res
 
     v_init, ln_alpha, ln_beta = best.x
 
+    # Warn if the fit did not converge
     if best.status <= 0:
-        print("WARNING: the fit of the initial velocity with alpha and beta did not converge ({:s}).".format(
-            str(best.message)))
+        print("WARNING: the fit of the initial velocity with alpha and beta did not converge " \
+            "({:s}).".format(str(best.message)))
 
+    # Warn if the initial velocity is at its bound
     if (v_init < lower[0]*(1 + 1e-3)) or (v_init > upper[0]*(1 - 1e-3)):
-        print("WARNING: the fitted initial velocity, {:.1f} m/s, is at its bound ({:.1f} to {:.1f} m/s, from the "
-            "median speed of the highest points, {:.1f} m/s): the fit does not constrain it.".format(v_init,
-            lower[0], upper[0], v_top))
+        print("WARNING: the fitted initial velocity, {:.1f} m/s, is at its bound ({:.1f} to {:.1f} m/s, " \
+            "from the median speed of the highest points, {:.1f} m/s): the fit does not constrain " \
+            "it.".format(v_init, lower[0], upper[0], v_top))
 
     return v_init, np.exp(ln_alpha), np.exp(ln_beta), best
 
 
-def _alphaBetaFreeVinitErrors(fit_res, alpha, beta, v_init, sigma_v, ci):
-    """ Gauss-Newton error estimate of fitAlphaBeta(fit_v_init=True), with the same keys as
-        _alphaBetaRobustErrors() plus 'v_init_std' and 'cov_full', the 3x3 covariance of (v_init, ln alpha,
-        ln beta). 'cov_log' is its (ln alpha, ln beta) block, which already carries the uncertainty of v_init
-        since all three are fitted together, and 'cov_fit' the same with v_init held fixed. Unlike for a fixed
-        v_init, 'sigma_v_init' is an output, v_init_std. Draws for bands should take the three parameters from
-        'cov_full', since v_init is correlated with alpha and beta.
+
+def alphaBetaFreeVinitErrors(fit_res, alpha, beta, v_init, sigma_v, ci):
+    """ Estimate the Gauss-Newton errors of fitAlphaBeta(fit_v_init=True).
+
+    Arguments:
+        fit_res: [OptimizeResult] Least squares result of fitAlphaBetaFreeVinit().
+        alpha: [float] Fitted alpha.
+        beta: [float] Fitted beta.
+        v_init: [float] Fitted initial velocity (m/s).
+        sigma_v: [float] Velocity uncertainty (m/s).
+        ci: [float] Confidence level of the Wald intervals (0-100).
+
+    Return:
+        [dict] The keys of _alphaBetaRobustErrors(), with 'v_init_std' and 'cov_full', the 3x3 covariance
+            of (v_init, ln alpha, ln beta). 'cov_log' is its (ln alpha, ln beta) block, and 'cov_fit' the
+            same with v_init held fixed.
     """
 
+    # Return NaN uncertainties if the covariance cannot be computed
     nan_cov = np.full((2, 2), np.nan)
-    result = {
-        'alpha': alpha, 'beta': beta, 'v_init': v_init, 'v_init_std': np.nan, 'alpha_std_rel': np.nan,
-        'beta_std_rel': np.nan, 'alpha_std': np.nan, 'beta_std': np.nan, 'cov_fit': nan_cov,
-        'cov_log': nan_cov, 'cov_full': np.full((3, 3), np.nan), 'corr_log': np.nan, 'cov': nan_cov,
-        'corr': np.nan, 'alpha_ci_wald_lower': np.nan, 'alpha_ci_wald_upper': np.nan,
-        'beta_ci_wald_lower': np.nan, 'beta_ci_wald_upper': np.nan, 'ci': ci, 'sigma_v': sigma_v,
-        'sigma_v_init': np.nan,
-    }
+    result = {'alpha': alpha, 'beta': beta, 'v_init': v_init, 'v_init_std': np.nan, 'alpha_std_rel': np.nan, \
+        'beta_std_rel': np.nan, 'alpha_std': np.nan, 'beta_std': np.nan, 'cov_fit': nan_cov, \
+        'cov_log': nan_cov, 'cov_full': np.full((3, 3), np.nan), 'corr_log': np.nan, 'cov': nan_cov, \
+        'corr': np.nan, 'alpha_ci_wald_lower': np.nan, 'alpha_ci_wald_upper': np.nan, \
+        'beta_ci_wald_lower': np.nan, 'beta_ci_wald_upper': np.nan, 'ci': ci, 'sigma_v': sigma_v, \
+        'sigma_v_init': np.nan}
 
+    # Compute the covariance of (v_init, ln alpha, ln beta)
     dof = max(len(fit_res.fun) - len(fit_res.x), 1)
     s2 = 2.0*fit_res.cost/dof
 
@@ -974,20 +1021,21 @@ def _alphaBetaFreeVinitErrors(fit_res, alpha, beta, v_init, sigma_v, ci):
         return result
 
     if np.any(np.diag(cov_full) < 0):
-        print("WARNING: the Gauss-Newton covariance of (v_init, alpha, beta) has a negative variance on its "
-            "diagonal (a near-singular Jacobian). Returning NaN for the uncertainties.")
+        print("WARNING: the Gauss-Newton covariance of (v_init, alpha, beta) has a negative variance on " \
+            "its diagonal (a near-singular Jacobian). Returning NaN for the uncertainties.")
         return result
 
     cov_log = cov_full[1:, 1:]
     v_init_std = np.sqrt(cov_full[0, 0])
 
-    # The (ln alpha, ln beta) covariance with v_init held at its fitted value, so that 'cov_log' - 'cov_fit' shows
-    #   what the uncertainty of v_init adds, as for a fixed v_init with its own uncertainty
+    # Compute the (ln alpha, ln beta) covariance with v_init held fixed
     jtj = fit_res.jac.T @ fit_res.jac
     try:
         cov_fit = s2*np.linalg.inv(jtj[1:, 1:])
     except np.linalg.LinAlgError:
         cov_fit = nan_cov
+
+    # Compute the uncertainties of alpha and beta
     alpha_std_rel, beta_std_rel = np.sqrt(np.diag(cov_log))
     corr_log = cov_log[0, 1]/(alpha_std_rel*beta_std_rel)
 
@@ -996,51 +1044,55 @@ def _alphaBetaFreeVinitErrors(fit_res, alpha, beta, v_init, sigma_v, ci):
     alpha_std, beta_std = np.sqrt(np.diag(cov))
     corr = cov[0, 1]/(alpha_std*beta_std)
 
+    # Compute the Wald confidence intervals
     z = scipy.special.ndtri(0.5 + ci/200.0)
 
-    result.update({
-        'v_init_std': v_init_std, 'alpha_std_rel': alpha_std_rel, 'beta_std_rel': beta_std_rel,
-        'alpha_std': alpha_std, 'beta_std': beta_std, 'cov_fit': cov_fit, 'cov_log': cov_log,
-        'cov_full': cov_full, 'corr_log': corr_log, 'cov': cov, 'corr': corr,
-        'alpha_ci_wald_lower': alpha*np.exp(-z*alpha_std_rel), 'alpha_ci_wald_upper': alpha*np.exp(z*alpha_std_rel),
-        'beta_ci_wald_lower': beta*np.exp(-z*beta_std_rel), 'beta_ci_wald_upper': beta*np.exp(z*beta_std_rel),
-        'sigma_v_init': v_init_std,
-    })
+    result.update({'v_init_std': v_init_std, 'alpha_std_rel': alpha_std_rel, 'beta_std_rel': beta_std_rel, \
+        'alpha_std': alpha_std, 'beta_std': beta_std, 'cov_fit': cov_fit, 'cov_log': cov_log, \
+        'cov_full': cov_full, 'corr_log': corr_log, 'cov': cov, 'corr': corr, \
+        'alpha_ci_wald_lower': alpha*np.exp(-z*alpha_std_rel), \
+        'alpha_ci_wald_upper': alpha*np.exp(z*alpha_std_rel), \
+        'beta_ci_wald_lower': beta*np.exp(-z*beta_std_rel), \
+        'beta_ci_wald_upper': beta*np.exp(z*beta_std_rel), 'sigma_v_init': v_init_std})
 
     return result
 
 
-def alphaBetaResidualTrend(v_data, ht_data, v_init, alpha, beta, n_bands=4, ht_label=None):
-    """ Median velocity residual of an alpha-beta fit in height bands, and how far each is from zero for the
-        scatter of the residuals, to tell a model that does not describe the meteor (e.g. one that fragments,
-        or whose centroids follow a wake) from noise.
 
-    A single body leaves residuals that scatter around zero at every height; a fragmentation or the onset of
-    erosion within the fitted part leaves them positive in some height bands and negative in others, and pulls
-    the fitted initial velocity, alpha and beta with them, while their formal uncertainties stay small. See
-    RESIDUAL_TREND_SIGMA for the threshold. Use the observed velocities, not smoothed ones, whose residuals are
-    correlated and would trend even for a good fit.
+def alphaBetaResidualTrend(v_data, ht_data, v_init, alpha, beta, n_bands=4, ht_label=None):
+    """ Compute the median velocity residual of an alpha-beta fit in height bands, and its z, to tell a
+        meteor the model does not describe, e.g. one that fragments, from noise.
+
+    Give it the observed velocities, as the residuals of smoothed ones trend even for a good fit.
 
     Arguments:
         v_data: [ndarray] Observed velocities (m/s).
-        ht_data: [ndarray] Their heights, rescaled to the exponential atmosphere (m).
-        v_init, alpha, beta: [float] The fit.
+        ht_data: [ndarray] Heights of the velocities, rescaled to the exponential atmosphere (m).
+        v_init: [float] Fitted initial velocity (m/s).
+        alpha: [float] Fitted alpha.
+        beta: [float] Fitted beta.
 
     Keyword arguments:
-        n_bands: [int] Number of height bands with about the same number of points.
-        ht_label: [ndarray] Heights to give the bands' ranges in, e.g. the real ones (m). ht_data by default.
+        n_bands: [int] Number of height bands with about the same number of points. 4 by default.
+        ht_label: [ndarray] Heights to give the ranges of the bands in, e.g. the real ones (m). None by
+            default, for ht_data.
 
     Return:
-        (bands, significant): bands is a list of (ht_hi, ht_lo, n, median residual (m/s), its z), from the
-            highest band down, the z being the median over its standard error, 1.2533 times the robust
-            scatter of all residuals over sqrt(n); significant is whether any |z| exceeds RESIDUAL_TREND_SIGMA.
+        (bands, significant):
+            - bands: [list] (ht_hi, ht_lo, n, med, z) of each band from the highest down, with the median
+                residual med (m/s) and its z, med over 1.2533 times the robust scatter of all residuals
+                over sqrt(n).
+            - significant: [bool] True if any |z| exceeds RESIDUAL_TREND_SIGMA.
     """
 
     v_data, ht_data = np.asarray(v_data), np.asarray(ht_data)
     ht_label = ht_data if ht_label is None else np.asarray(ht_label)
+
+    # Compute the residuals and their robust scatter
     res = alphaBetaVelocity(ht_data, alpha, beta, v_init) - v_data
     scatter = 1.4826*np.median(np.abs(res - np.median(res)))
 
+    # Compute the median residual of each band, from the highest down
     order = np.argsort(ht_data)[::-1]
     bands = []
     for idx in np.array_split(order, n_bands):
@@ -1055,32 +1107,30 @@ def alphaBetaResidualTrend(v_data, ht_data, v_init, alpha, beta, n_bands=4, ht_l
     return bands, significant
 
 
-def alphaBetaEntryVelocityWithGravity(v_init, ht_first, ht_top=180e3):
-    """ The speed at ht_top of a meteoroid whose alpha-beta initial velocity is v_init, with the gravity the
-        alpha-beta model leaves out.
 
-    The model has no gravity, so its v_init is the speed the meteoroid would have had above the atmosphere
-    without it: from there down to the observed part, gravity sped the meteoroid up by about g dh/v, which the fit
-    puts into v_init. By energy, the speed at ht_top is sqrt(v_init^2 - 2 g (ht_top - ht_first)), with g at
-    the mid height. It is exact for free fall (within 0.05 m/s of an integration); in synthetic fireballs
-    (MetSim with gravity, 15-30 km/s, first seen at 50-95 km) the mean fitted v_init was 30-76 m/s above the
-    speed at 180 km, and this formula gave those offsets within 7 m/s. Gravity over the observed part itself
-    is still not in the model.
+def alphaBetaEntryVelocityWithGravity(v_init, ht_first, ht_top=180e3):
+    """ Compute the speed at ht_top of a meteoroid with the alpha-beta initial velocity v_init, with the
+        gravity the alpha-beta model leaves out.
+
+    The fit puts the speed gained by gravity above the observed part into v_init. By energy, the speed at
+    ht_top is sqrt(v_init^2 - 2 g (ht_top - ht_first)), with g at the mid height.
 
     Arguments:
         v_init: [float] Alpha-beta initial velocity (m/s).
         ht_first: [float] Real height of the highest fitted point (m).
 
     Keyword arguments:
-        ht_top: [float] Height to give the speed at (m), 180 km by default.
+        ht_top: [float] Height of the speed (m). 180 km by default.
 
     Return:
         [float] Speed at ht_top (m/s).
     """
 
+    # Gravity at the mid height
     g_mid = G0*(R_EARTH/(R_EARTH + (ht_top + ht_first)/2))**2
 
     return np.sqrt(v_init**2 - 2*g_mid*(ht_top - ht_first))
+
 
 
 def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='soft_l1',
@@ -1147,18 +1197,11 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
             wmpl.Utils.Math.confidenceInterval()'s `ci`.
         verbose: [bool] If True, print the adopted v_init/alpha/beta (and, if
             estimate_errors=True, the error estimate too).
-        fit_v_init: [bool] Fit the initial velocity together with alpha and beta, on the velocity
-            residuals (method='robust' only), with v_init, if given, as its starting value, bounded by
-            V_INIT_FIT_BOUNDS times the median speed of the highest points. Without it, v_init is the given
-            one or the median of the leading points, which for a meteor already decelerating there is biased
-            low. Give it observed velocities, not ones smoothed toward a fixed initial velocity. The errors then
-            hold 'v_init_std' and the 3x3 'cov_full' of (v_init, ln alpha, ln beta), whose 'cov_log' block
-            already carries the uncertainty of v_init. Through the trajectory solver and the command line, on
-            synthetic fireballs at 20 and 30 km/s first seen at 90, 70, 60 and 50 km, the speed at 180 km from
-            the fitted v_init (see alphaBetaEntryVelocityWithGravity(); the model has no gravity) was within
-            13, 30, 76 and 119 m/s of the true one, inside its uncertainty, with alpha within 6% and beta
-            1.1-1.5 times the true one below 70 km; from the trajectory's v_init it was 20, 200, 730 and 2360 m/s
-            low, with alpha down to 0.5 and beta up to 4.7 times the true ones. False by default.
+        fit_v_init: [bool] Fit the initial velocity together with alpha and beta on the velocity residuals
+            (method='robust' only), starting from v_init if given, and bounded by V_INIT_FIT_BOUNDS times the
+            median speed of the highest points. Give it the observed velocities, not smoothed ones. The
+            errors then also hold 'v_init_std' and the 3x3 covariance 'cov_full' of (v_init, ln alpha,
+            ln beta). False by default.
         fast: [bool] Only affects method='robust' (Q4's residual never inverts velocity, so it is
             unaffected). If True, use the experimental LUT-accelerated alphaBetaVelocityNormedLUT()
             instead of brentq everywhere this fit inverts velocity - see its docstring for the
@@ -1279,8 +1322,9 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
 
     method = method.lower()
 
+    # Fit the initial velocity only with the robust fit
     if fit_v_init and method != 'robust':
-        raise ValueError("fit_v_init=True is only supported for method='robust', which fits the velocity "
+        raise ValueError("fit_v_init=True is only supported for method='robust', which fits the velocity " \
             "residuals the initial velocity enters.")
 
     if estimate_errors and method != 'robust':
@@ -1301,7 +1345,7 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         if max_index < 10:
             max_index = 10
 
-        # Fitting it, start from the highest points whatever the order of the input
+        # Use the highest points when the initial velocity is fitted
         if fit_v_init:
             v_init = np.median(v_data[np.argsort(ht_data)[::-1][:max_index]])
         else:
@@ -1321,9 +1365,11 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
             sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init, fast=fast)
 
         if fit_v_init:
+
+            # Fit at the starting initial velocity, then with it free
             alpha1, beta1 = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v/v_init, loss=loss, \
                 f_scale=f_scale, x0_alpha_beta=(alpha0, beta0), fast=fast)
-            v_init, alpha, beta, fit_res = _fitAlphaBetaFreeVinit(v_data, ht_data, v_init, alpha1, beta1, \
+            v_init, alpha, beta, fit_res = fitAlphaBetaFreeVinit(v_data, ht_data, v_init, alpha1, beta1, \
                 sigma_v, loss, f_scale, fast=fast)
 
         elif estimate_errors:
@@ -1338,7 +1384,7 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         raise ValueError("method must be 'q4' or 'robust', got '{:s}'.".format(method))
 
     if estimate_errors and fit_v_init:
-        errors = _alphaBetaFreeVinitErrors(fit_res, alpha, beta, v_init, sigma_v, ci)
+        errors = alphaBetaFreeVinitErrors(fit_res, alpha, beta, v_init, sigma_v, ci)
 
     elif estimate_errors:
         errors = _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, \
@@ -1348,7 +1394,8 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         print()
         print("--- fitAlphaBeta ({:s}) ---".format(method))
         if estimate_errors and fit_v_init:
-            print("v_init               = {:.3f} +/- {:.3f} m/s (fitted)".format(v_init, errors['v_init_std']))
+            print("v_init               = {:.3f} +/- {:.3f} m/s (fitted)".format(v_init, \
+                errors['v_init_std']))
         else:
             print("v_init               = {:.3f} m/s{:s}".format(v_init, " (fitted)" if fit_v_init else ""))
 
@@ -2315,8 +2362,7 @@ def plotAlphaBeta(v_data, ht_data, fit, errors=None, band=True, fan=True, band_s
     alpha_valid = beta_valid = v0_valid = None
     band_fan_suppressed = False
 
-    # With the initial velocity fitted too (fitAlphaBeta(fit_v_init=True)), it is drawn with alpha and beta from
-    #   their joint covariance, since it is correlated with them
+    # Draw a fitted initial velocity together with alpha and beta
     cov_full = errors.get('cov_full') if have_errors else None
     joint_v0 = (cov_full is not None) and np.all(np.isfinite(cov_full))
 
@@ -2394,7 +2440,7 @@ def plotAlphaBeta(v_data, ht_data, fit, errors=None, band=True, fan=True, band_s
                 transform=ax_main.transAxes, ha='center', va='bottom', fontsize=8, color='0.4')
 
         else:
-            v_samples = np.array([alphaBetaVelocity(ht_grid, a, b, v0, fast=fast)
+            v_samples = np.array([alphaBetaVelocity(ht_grid, a, b, v0, fast=fast) \
                 for v0, a, b in zip(v0_valid, alpha_valid, beta_valid)])
 
             if band:
@@ -4727,13 +4773,10 @@ def fitAlphaBetaLightCurve(
         mag_abs_data: [ndarray] Absolute magnitudes (100 km) at ht_lc_data.
 
     Keyword arguments:
-        lc_density_ratio: [ndarray] The real air density over the model's at the light curve points, from
-            rescaleHeightToExponentialAtmosphere(..., return_density_ratio=True). The luminosity is proportional
-            to the local density, which with the column mapping (the default) the model gets wrong by this ratio:
-            without it, the model magnitudes are too faint by 2.5 log10(ratio), up to about 0.4 mag near 90 km and
-            varying with height (see exponentialAtmosphereDensityRatio()). The observed magnitudes are corrected
-            by +2.5 log10(ratio) for the fit, and shown so in the plot. None by default, for heights rescaled by
-            density, where it is 1.
+        lc_density_ratio: [ndarray] Real air density over the model density at the light curve points, from
+            rescaleHeightToExponentialAtmosphere(..., return_density_ratio=True), needed with the column
+            mapping. The observed magnitudes are corrected by +2.5 log10(ratio) for the fit and the plot.
+            None by default, for heights rescaled by density.
         v_init: [float] Initial velocity (m/s). If None, median of the first 20% of points
             (min 10 points), same convention as fitAlphaBeta() - except that here the inputs are
             first sorted by decreasing height internally, so they don't have to be time-ordered.
@@ -4841,8 +4884,7 @@ def fitAlphaBetaLightCurve(
     if len(ht_lc_data) != len(mag_abs_data):
         raise ValueError("ht_lc_data and mag_abs_data must have the same length.")
 
-    # The luminosity takes the model's air density at the rescaled heights: correct the observed magnitudes for
-    #   the real density there, which is the same as correcting the model (see lc_density_ratio above)
+    # Correct the observed magnitudes for the real air density at the points
     if lc_density_ratio is not None:
         lc_density_ratio = np.broadcast_to(np.asarray(lc_density_ratio, dtype=np.float64), mag_abs_data.shape)
         mag_abs_data = mag_abs_data + 2.5*np.log10(lc_density_ratio)
@@ -5426,18 +5468,15 @@ if __name__ == "__main__":
         "estimate when --errors is set. Default: the density is treated as exactly known.")
 
     arg_parser.add_argument('--fitvinit', action="store_true", \
-        help="Fit the initial velocity together with alpha and beta (robust fit, on the observed velocities, "
-        "as the lag-smoothed ones never exceed the trajectory's initial velocity), starting from the "
-        "trajectory's. Use it for a meteor whose observed part starts already decelerating, e.g. a fireball "
-        "first seen below about 70 km: there the trajectory's initial velocity is low, by up to over a km/s, "
-        "and biases alpha and beta. The alpha-beta initial velocity has no gravity; the speed at 180 km with it "
-        "is also printed.")
+        help="Fit the initial velocity together with alpha and beta, using the robust fit on the observed " \
+        "velocities and starting from the trajectory's. Use it for a meteor which is already decelerating " \
+        "at its first point, e.g. a fireball first seen below about 70 km. The speed at 180 km with " \
+        "gravity is also printed.")
 
     arg_parser.add_argument('--atmrescale', choices=['column', 'density'], default='column', \
-        help="How heights are mapped to the exponential atmosphere of the alpha-beta model: 'column' (default), "
-        "to the height with the same air column above, which the alpha-beta solution depends on; or 'density', "
-        "to the height with the same local density, as before, which biases alpha and beta where the local "
-        "scale height differs from 7.16 km.")
+        help="How the heights are mapped to the exponential atmosphere of the alpha-beta model. 'column' " \
+        "(default) maps them to the height with the same air column above, and 'density' to the height " \
+        "with the same local density, which biases alpha and beta where the scale height is not 7.16 km.")
 
     arg_parser.add_argument('-x', '--hideplots', action="store_true", \
         help="Don't show the plots on the screen. Combine with --saveplots to only write them to disk.")
@@ -5541,13 +5580,7 @@ if __name__ == "__main__":
         vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, traj.v_init)
 
         # Choose which data will be used for alpha-beta fitting
-        #   With --fitvinit, always the observed velocities. The smoothed velocity, v_init - |a1 a2| exp(|a2| t) and
-        #   then decreasing, never exceeds the trajectory's initial velocity, which for a meteor already
-        #   decelerating at its first point is low (by about 100, 450 and 1100 m/s in synthetic fireballs first
-        #   seen at 70, 60 and 50 km). Through the trajectory solver, the speed at 180 km from --fitvinit came out
-        #   100-180 m/s low from 60 km and 600-1230 m/s from 50 km on the smoothed velocities, and 20-80 and 50-120
-        #   m/s on the observed ones; letting the lag model start freely did not help (-280 and -1030 m/s in one
-        #   case), its exponential shape not following the early deceleration either.
+        #   (always the observed velocities with --fitvinit)
         if cml_args.obsvel or cml_args.fitvinit:
             vel_input = vel_data
         else:
@@ -5556,7 +5589,7 @@ if __name__ == "__main__":
         # Estimate the alpha, beta parameters. With --errors, use the robust fit (the only one
         #   that can produce a covariance - estimate_errors=True is rejected for the q4 default)
         #   and keep its (ln alpha, ln beta) covariance for the mass error propagation below.
-        #   With --fitvinit the initial velocity is fitted too (robust fit), starting from the trajectory's.
+        #   With --fitvinit, the initial velocity is fitted too
         if cml_args.errors:
             v_init, alpha, beta, fit_errors = fitAlphaBeta(vel_input, ht_data_rescaled, \
                 v_init=traj.v_init, method='robust', estimate_errors=True, fit_v_init=cml_args.fitvinit)
@@ -5601,55 +5634,57 @@ if __name__ == "__main__":
 
 
         print()
-        # What was fitted, how the heights were mapped, and the velocities involved: the alpha-beta entry
-        #   velocity is the model's asymptote above the atmosphere without gravity, not the speed at the first
-        #   point, which the trajectory's initial velocity is
+
+        # Compute the model speed at the first point
         ht_first = np.max(ht_data)
         v_model_first = alphaBetaVelocity(ht_data_rescaled[np.argmax(ht_data)], alpha, beta, v_init)
 
-        print("Alpha-beta fit to {:d} points, {:.1f} to {:.1f} km".format(len(ht_data), ht_first/1000,
+        # Print what was fitted and how the heights were mapped
+        print("Alpha-beta fit to {:d} points, {:.1f} to {:.1f} km".format(len(ht_data), ht_first/1000, \
             np.min(ht_data)/1000))
         if cml_args.atmrescale == 'column':
-            print("  Heights mapped to the model's exponential atmosphere by the air column above them "
-                "(--atmrescale column; the default before was by local density, --atmrescale density)")
+            print("  Heights mapped to the model's exponential atmosphere by the air column above them " \
+                "(--atmrescale column)")
         else:
-            print("  Heights mapped to the model's exponential atmosphere by local density (--atmrescale "
-                "density, the previous default; it biases alpha and beta where the scale height is not 7.16 km)")
+            print("  Heights mapped to the model's exponential atmosphere by local density (--atmrescale " \
+                "density, which biases alpha and beta where the scale height is not 7.16 km)")
 
+        # Print the entry velocity, the model speed at the first point and the trajectory's velocity
         print("Velocities:")
         if cml_args.fitvinit:
             v_init_std = fit_errors['v_init_std'] if (fit_errors is not None) else np.nan
+            v_init_std_str = " +/- {:.3f}".format(v_init_std/1000) if np.isfinite(v_init_std) else ""
             print("  V_e, alpha-beta entry velocity (asymptote above the atmosphere, without gravity)")
-            print("                                             = {:.3f}{:s} km/s (fitted, --fitvinit)".format(
-                v_init/1000, " +/- {:.3f}".format(v_init_std/1000) if np.isfinite(v_init_std) else ""))
-            print("  Speed at 180 km, with gravity              = {:.3f} km/s".format(
+            print("                                             = {:.3f}{:s} km/s " \
+                "(fitted, --fitvinit)".format(v_init/1000, v_init_std_str))
+            print("  Speed at 180 km, with gravity              = {:.3f} km/s".format(\
                 alphaBetaEntryVelocityWithGravity(v_init, ht_first)/1000))
         else:
-            print("  V_e, alpha-beta entry velocity             = {:.3f} km/s (fixed to the trajectory's; fit it "
-                "with --fitvinit)".format(v_init/1000))
-        print("  Model speed at the first point, {:5.1f} km   = {:.3f} km/s".format(ht_first/1000,
+            print("  V_e, alpha-beta entry velocity             = {:.3f} km/s (fixed to the trajectory's; " \
+                "fit it with --fitvinit)".format(v_init/1000))
+        print("  Model speed at the first point, {:5.1f} km   = {:.3f} km/s".format(ht_first/1000, \
             v_model_first/1000))
-        print("  Trajectory's initial velocity (solver)     = {:.3f} km/s (the model is {:+.0f} m/s from it at the "
-            "first point)".format(traj.v_init/1000, v_model_first - traj.v_init))
+        print("  Trajectory's initial velocity (solver)     = {:.3f} km/s (the model is {:+.0f} m/s from " \
+            "it at the first point)".format(traj.v_init/1000, v_model_first - traj.v_init))
         print("  The masses below use V_e.")
 
-        # Whether the single-body model describes the meteor: residuals against the observed velocities by height
-        bands, trend = alphaBetaResidualTrend(vel_data, ht_data_rescaled, v_init, alpha, beta, ht_label=ht_data)
-        print("Model minus observed velocities by height band (median, z): " + "; ".join(
-            "{:.1f}-{:.1f} km {:+.0f} m/s ({:+.1f})".format(b[0]/1000, b[1]/1000, b[3], b[4]) for b in bands))
+        # Check the residuals of the observed velocities for a trend with height
+        bands, trend = alphaBetaResidualTrend(vel_data, ht_data_rescaled, v_init, alpha, beta, \
+            ht_label=ht_data)
+        print("Model minus observed velocities by height band (median, z): " + "; ".join(\
+            "{:.1f}-{:.1f} km {:+.0f} m/s ({:+.1f})".format(b[0]/1000, b[1]/1000, b[3], b[4]) \
+            for b in bands))
         if trend:
-            print("WARNING: the residuals trend with height beyond their noise (|z| > {:g}): the single-body "
-                "alpha-beta model does not describe this meteor over the fitted part, e.g. because it fragments, "
-                "and V_e, alpha and beta, and more so their uncertainties, are then unreliable.".format(
-                RESIDUAL_TREND_SIGMA))
+            print("WARNING: the residuals trend with height beyond their noise (|z| > {:g}): the " \
+                "single-body alpha-beta model does not describe this meteor over the fitted part, e.g. " \
+                "because it fragments, and V_e, alpha and beta, and more so their uncertainties, are then " \
+                "unreliable.".format(RESIDUAL_TREND_SIGMA))
 
+        # Advise fitting the initial velocity of a meteor first seen deep
         if (not cml_args.fitvinit) and (ht_first < FIT_V_INIT_ADVISED_HT):
-            print("NOTE: the first point is at {:.1f} km. A meteor first seen this deep may already be "
-                "decelerating there, so the trajectory's velocity is below the entry velocity, and fixing V_e to "
-                "it biases alpha and beta: in synthetic fireballs solved by the trajectory solver and first seen "
-                "at 70, 60 and 50 km, the speed at 180 km from it was 160-200, 690-730 and 2050-2360 m/s low, with "
-                "alpha down to 0.5 and beta up to 4.7 times the true ones, against 4-30, 18-76 and 47-119 m/s with "
-                "--fitvinit. Fit it with --fitvinit.".format(ht_first/1000))
+            print("NOTE: the first point is at {:.1f} km. A meteor first seen this deep may already be " \
+                "decelerating there, so the trajectory's velocity is below the entry velocity, and fixing " \
+                "V_e to it biases alpha and beta. Fit it with --fitvinit.".format(ht_first/1000))
         print()
         print("Alpha-beta analysis")
         print("-------------------")
@@ -5728,10 +5763,11 @@ if __name__ == "__main__":
 
         # If uncertainties are available (finite cov_log), draw a 1-sigma velocity band by
         #   sampling the fitted (ln alpha, ln beta) covariance and propagating each draw through
-        #   the model velocity curve: with v_init held fixed, or, with --fitvinit, drawn together with
-        #   alpha and beta from their joint covariance
+        #   the model velocity curve, with v_init drawn too if it was fitted
         if cml_args.errors and np.all(np.isfinite(fit_errors['cov_log'])):
             rng = np.random.RandomState(0)
+
+            # Draw a fitted v_init together with alpha and beta
             if 'cov_full' in fit_errors and np.all(np.isfinite(fit_errors['cov_full'])):
                 joint_draws = rng.multivariate_normal(np.r_[v_init, np.log([alpha, beta])], \
                     fit_errors['cov_full'], size=500)
@@ -5770,7 +5806,7 @@ if __name__ == "__main__":
                     for v0, a, b in zip(v0_draws[is_valid], alpha_draws[is_valid], beta_draws[is_valid])])
                 vel_lo, vel_hi = np.percentile(vel_draws, [15.865, 84.135], axis=0)
                 ax_ab.fill_betweenx(ht_arr/1000, vel_lo/1000, vel_hi/1000, color='k', alpha=0.15, \
-                    zorder=1, label=(r"1$\sigma$ ($v_0$, $\alpha$, $\beta$) band" if cml_args.fitvinit
+                    zorder=1, label=(r"1$\sigma$ ($v_0$, $\alpha$, $\beta$) band" if cml_args.fitvinit \
                     else r"1$\sigma$ ($\alpha$, $\beta$) band"))
 
         ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
@@ -5890,16 +5926,16 @@ if __name__ == "__main__":
         lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
         lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
 
-        def _modelVelocityAtRealHeights(ht_real):
-            """ The alpha-beta velocity at real heights, evaluated at their heights in the model's atmosphere. """
+        def modelVelocityAtRealHeights(ht_real):
+            """ Compute the alpha-beta velocity at real heights, rescaled to the model atmosphere. """
+
             n = len(ht_real)
+
             return alphaBetaVelocity(rescaleHeightToExponentialAtmosphere(np.full(n, lat_mean), \
                 np.full(n, lon_mean), ht_real, traj.jdt_ref, method=cml_args.atmrescale), alpha, beta, v_init)
 
-        # Compute the dynamic pressure using alpha and beta, with the real density at real heights; the model
-        #   velocity is evaluated at those heights rescaled to its atmosphere (before, the rescaled heights went
-        #   into the real atmosphere as if they were real ones, 0.5-8.5 km off between 30 and 110 km)
-        vel_arr_real = _modelVelocityAtRealHeights(ht_arr)
+        # Compute the dynamic pressure using alpha and beta
+        vel_arr_real = modelVelocityAtRealHeights(ht_arr)
         dyn_pressure = dynamicPressure(lat_mean, lon_mean, ht_arr, traj.jdt_ref, vel_arr_real)
 
         # Compute the dynamic pressure with the lag fit, at the real heights of the points
@@ -5929,7 +5965,7 @@ if __name__ == "__main__":
             i_rev = len(ht_arr) - i - 1
             print("{:11.2f}  {:10.4f}  {:14.5f}".format(
                 ht_arr[i_rev]/1000, 
-                vel_arr_real[i_rev]/1000, 
+                vel_arr_real[i_rev]/1000,
                 dyn_pressure[i_rev]/1e6
                 )
                 )
@@ -5943,7 +5979,7 @@ if __name__ == "__main__":
             i_rev = len(ht_data) - i - 1
 
             print("{:11.2f}  {:10.4f}  {:14.5f}".format(
-                ht_data[i_rev]/1000, 
+                ht_data[i_rev]/1000,
                 vel_data_smooth[i_rev]/1000,
                 dyn_pressure_lag[i_rev]/1e6
                 )
@@ -5999,7 +6035,7 @@ if __name__ == "__main__":
                 if np.any(mag_filter):
 
                     # Get the model velocities at the observed heights
-                    vel_model_obs = _modelVelocityAtRealHeights(obs.model_ht)
+                    vel_model_obs = modelVelocityAtRealHeights(obs.model_ht)
 
                     # Compute the dynamic pressure
                     dyn_pres_station = dynamicPressure(lat_mean, lon_mean, obs.model_ht, traj.jdt_ref, vel_model_obs)
