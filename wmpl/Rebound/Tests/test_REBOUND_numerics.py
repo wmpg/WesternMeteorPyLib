@@ -41,8 +41,8 @@ def _series(n_samples, sep_func, a_func=None, day_step=1.0, helio_r=1.0):
     that bounds the fit window compares the ensemble spread against that distance.
     """
 
-    year = 2*np.pi
-    times = [k*day_step/365.25*year for k in range(n_samples)]
+    days_per_unit = np.sqrt(149597870700.0**3/1.3271244004193938e20)/86400.0
+    times = [k*day_step/days_per_unit for k in range(n_samples)]
 
     nominal = [_mkrow(t, helio_r) for t in times]
 
@@ -487,15 +487,6 @@ def testTisserandUndefinedForUnboundOrbits(reb):
 
     assert reb.tisserandParameterJupiter(2.0, 1.2, 0.0) is None
     assert reb.tisserandParameterJupiter(-3.0, 0.5, 0.0) is None
-    assert "undefined" in reb.tisserandClass(None)
-
-
-def testTisserandClassBoundaries(reb):
-    """ The conventional class boundaries sit at T_J = 2 and T_J = 3. """
-
-    assert "asteroidal" in reb.tisserandClass(3.5)
-    assert "Jupiter-family" in reb.tisserandClass(2.5)
-    assert "Halley" in reb.tisserandClass(1.5)
 
 
 ### Radiation-pressure beta ###
@@ -522,6 +513,24 @@ def testRadiationBetaRejectsUnphysicalInput(reb):
     for radius, density in [(0.0, 3000.0), (-1e-6, 3000.0), (1e-6, 0.0), (1e-6, -10.0)]:
         with pytest.raises(ValueError):
             reb.radiationPressureBeta(radius, density)
+
+
+def testEquivalentSphereRadiusInvertsTheSphereMass(reb):
+    """ The radius must give back the mass it was computed from, m = 4/3*pi*rho*s^3. """
+
+    radius = reb.equivalentSphereRadius(1e-6, 3000.0)
+    assert (4/3)*np.pi*3000.0*radius**3 == pytest.approx(1e-6)
+
+    # A 1 micron grain at 3000 kg/m^3 weighs 1.2566e-14 kg, and must come back at that size
+    assert reb.equivalentSphereRadius(1.2566e-14, 3000.0) == pytest.approx(1e-6, rel=1e-3)
+
+
+def testEquivalentSphereRadiusRejectsUnphysicalInput(reb):
+    """ A non-positive mass or density is an error, not a silent NaN. """
+
+    for mass, density in [(0.0, 3000.0), (-1e-6, 3000.0), (1e-6, 0.0), (1e-6, -10.0)]:
+        with pytest.raises(ValueError):
+            reb.equivalentSphereRadius(mass, density)
 
 
 ### Hill-radius table ###

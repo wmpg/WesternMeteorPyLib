@@ -11,7 +11,7 @@ import warnings
 import numpy as np
 
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
-from wmpl.Utils.Physics import ballisticCoeffMass, dynamicMass, calcMass, LUM_EFF_MODELS
+from wmpl.Utils.Physics import ballisticCoeffMass, dynamicMass, calcMass, calcRadiatedEnergy, LUM_EFF_MODELS
 
 
 # A synthetic light curve: a 2 s meteor peaking at -2 mag, decelerating from 20 to 15 km/s
@@ -152,13 +152,34 @@ def testCalcMassConstantCodeIsAlways0p7Percent():
 
 
 
+def testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy():
+    """ Check that a flare of -5 mag between two closely spaced frames, after 1 s gaps, gives the energy of
+        the trapezoidal rule. Simpson's rule gave a negative energy of -288 J there, and so a negative mass.
+    """
+
+    time = np.array([0.0, 1.0, 1.1, 1.2, 2.2])
+    mag_abs = np.array([0.0, 0.0, -5.0, 0.0, 0.0])
+
+    # Sum the trapezoids of the intensities 1, 1, 100, 1 and 1 W
+    energy = 1.0*(1 + 1)/2 + 0.1*(1 + 100)/2 + 0.1*(100 + 1)/2 + 1.0*(1 + 1)/2
+
+    assert np.isclose(calcRadiatedEnergy(time, mag_abs, P_0m=1.0), energy, rtol=1e-12)
+
+    # Check the mass with a constant and a varying velocity
+    assert np.isclose(calcMass(time, mag_abs, 20000.0, P_0m=1.0), 2*energy/(0.007*20000.0**2), rtol=1e-12)
+    assert np.isclose(calcMass(time, mag_abs, np.full(5, 20000.0), P_0m=1.0), \
+        2*energy/(0.007*20000.0**2), rtol=1e-12)
+
+
+
 
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testBallisticCoeffMass, testCalcMassTakesNumpyIntegersAsModelCodes, \
         testCalcMassWarnsAboutP0mForThe1500WModels, testCalcMassAtZeroLumEffMassIsTheSmallMassLimit, \
-        testCalcMassConstantCodeIsAlways0p7Percent]
+        testCalcMassConstantCodeIsAlways0p7Percent, \
+        testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy]
 
     for test in test_list:
         test()

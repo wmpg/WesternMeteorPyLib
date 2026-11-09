@@ -4,6 +4,7 @@ from __future__ import print_function, absolute_import
 
 import io
 import os
+import pkgutil
 import sys
 import uuid
 import pickle
@@ -44,12 +45,24 @@ def savePickle(obj, dir_path, file_name):
 
 
 
+# Top-level packages of wmpl, which old pickles may name without the wmpl prefix
+WMPL_PACKAGES = [module_info.name for module_info \
+    in pkgutil.iter_modules([os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]) if module_info.ispkg]
+
+
+
 class NPCompatUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
-        """ Special unpickler to handle numpy._core rename to numpy.core. """
-        
+        """ Special unpickler to handle numpy._core rename to numpy.core, and the wmpl classes saved with the
+            module names without wmpl that older versions of wmpl also loaded, e.g. Trajectory.Trajectory.
+        """
+
         if module.startswith('numpy._core'):
             module = module.replace('numpy._core', 'numpy.core')
+
+        # Add the wmpl prefix to the modules of wmpl saved without it
+        if module.split('.')[0] in WMPL_PACKAGES:
+            module = 'wmpl.' + module
 
         return super().find_class(module, name)
 
@@ -79,12 +92,13 @@ def loadPickle(dir_path, file_name):
         p = _loads_compat(buf)
 
     except ModuleNotFoundError as e:
-        # Fallback only for numpy._core rename
-        if "numpy._core" not in str(e):
+
+        # Fall back only for the numpy._core rename and the wmpl modules saved without the prefix
+        if ("numpy._core" not in str(e)) and (str(e.name).split('.')[0] not in WMPL_PACKAGES):
             raise
-        
-        # Custom unpickler to fix numpy._core rename
-        p = NPCompatUnpickler(io.BytesIO(buf)).load()
+
+        # Unpickle with the renamed modules
+        p = NPCompatUnpickler(io.BytesIO(buf), encoding='latin1').load()
 
     # Fix attribute compatibility in trajectory objects with older versions which had a
     # typo "uncertanties"

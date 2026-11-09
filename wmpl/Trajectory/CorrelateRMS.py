@@ -2267,6 +2267,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     arg_parser.add_argument('--addlogsuffix', help='add a suffix to the log to show what stage it is.', default=False, action="store_true")
 
+    arg_parser.add_argument('--radec_at_ref', \
+        help="Legacy and incorrect, only to reproduce older solutions. Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed, which rotates each line of sight by the Earth's rotation since the reference time.", \
+        action="store_true")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -2590,7 +2594,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                         log.info(f'loaded {len(dh.unpaired_observations)} observations')
 
                     # Run the trajectory correlator
-                    tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
+                    tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, \
+                        enableOSM=cml_args.enableOSM, radec_per_point=(not cml_args.radec_at_ref))
                     bin_time_range = [bin_beg, bin_end]
                     num_done = tc.run(event_time_range=event_time_range, mcmode=mcmode, bin_time_range=bin_time_range, verbose=verbose)
 

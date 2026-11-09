@@ -23,10 +23,10 @@ except ImportError:
 
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
 from wmpl.Trajectory.Trajectory import addTrajectoryID
-from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
+from wmpl.Utils.Math import meanAngle, sphericalPointFromHeadingAndDistance, \
     angleBetweenSphericalCoords, generateMonthyTimeBins
 from wmpl.Utils.OSTools import mkdirP, walkDirsToDepth
-from wmpl.Utils.Physics import calcMass
+from wmpl.Utils.Physics import calcMass, trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import MapColorScheme
@@ -84,47 +84,15 @@ P_0M = 1210
 def computeMass(traj, P_0m):
     """ Compute the mass given the trajectory and a power of a zero magnitude meteor. """
 
-
-    time_mag_arr = []
-    avg_t_diff_max = 0
-    for obs in traj.observations:
-
-        # Skip ignored stations
-        if obs.ignore_station:
-            continue
-
-        # If there are not magnitudes for this site, skip it
-        if obs.absolute_magnitudes is None:
-            continue
-
-        # Compute average time difference
-        avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
-
-        # Exclude magnitudes fainter than mag +8
-        mag_filter = obs.absolute_magnitudes < 8
-
-        # If all magnitudes are fainter than 8, skip the station
-        if not np.any(mag_filter):
-            continue
-
-        for t, mag in zip(obs.time_data[mag_filter], obs.absolute_magnitudes[mag_filter]):
-            if (mag is not None) and (not np.isnan(mag)):
-                time_mag_arr.append([t, mag])
+    # Extract the light curve
+    time_arr, mag_arr, _ = trajectoryLightCurve(traj)
 
     # If there are no magnitudes, return 0
-    if len(time_mag_arr) == 0:
+    if time_arr is None:
         return 0
 
-    # Compute the mass
-    time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
-    time_arr, mag_arr = time_mag_arr.T
-    
-    # Take the brightest magnitudes, which mitigates saturation effects. Note that this assumes that the
-    #   photometric calibration was done well
-    time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='min')
-
     # Compute the photometric mass
-    mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
+    mass = calcMass(time_arr, mag_arr, traj.orbit.v_avg_norot, P_0m=P_0m)
 
 
     return mass

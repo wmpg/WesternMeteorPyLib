@@ -133,6 +133,39 @@ def getRotMatrix(v1, v2):
     return R
 
 
+
+def rotationMatrixX(angle):
+    """ Rotation matrix of the coordinate frame about the X axis.
+
+    Arguments:
+        angle: [float] Angle of rotation of the frame (radians).
+
+    Return:
+        [3x3 ndarray] Rotation matrix, applied to column vectors.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+
+    return np.array([[1, 0, 0], [0, c, s], [0, -s, c]])
+
+
+
+def rotationMatrixZ(angle):
+    """ Rotation matrix of the coordinate frame about the Z axis.
+
+    Arguments:
+        angle: [float] Angle of rotation of the frame (radians).
+
+    Return:
+        [3x3 ndarray] Rotation matrix, applied to column vectors.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+
+    return np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+
+
+
 def angleBetweenVectors(a, b):
     """Compute the angle between two vectors.
 
@@ -144,7 +177,8 @@ def angleBetweenVectors(a, b):
         [float] Angle between a and b (radians).
     """
 
-    return np.arccos(np.dot(a, b) / (vectMag(a) * vectMag(b)))
+    # Clip the cosine, which can be slightly above 1 for parallel vectors due to rounding
+    return np.arccos(np.clip(np.dot(a, b) / (vectMag(a) * vectMag(b)), -1.0, 1.0))
 
 
 def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
@@ -1220,6 +1254,27 @@ def generateMonthyTimeBins(dt_beg, dt_end):
 
 
 ##############################################################################################################
+
+
+
+def expSegmentIntegral(rho_0, scale, dh):
+    """ Integrate rho_0*exp(scale*x) for x from 0 to dh, stably when scale*dh is near 0.
+
+    Arguments:
+        rho_0: [float or ndarray] Density at the bottom of the segment (kg/m^3).
+        scale: [float or ndarray] Exponential scale of the segment (1/m).
+        dh: [float or ndarray] Height above the bottom of the segment (m).
+
+    Return:
+        [float or ndarray] Air column (kg/m^2).
+    """
+
+    x = np.asarray(scale*dh, dtype=np.float64)
+    x_safe = np.where(x == 0, 1.0, x)
+
+    return rho_0*dh*np.where(x == 0, 1.0, np.expm1(x_safe)/x_safe)
+
+
 
 
 if __name__ == "__main__":
