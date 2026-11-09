@@ -10,8 +10,7 @@ import sys
 import argparse
 import numpy as np
 
-from wmpl.Utils.AtmosphereDensity import setAtmosphere
-from wmpl.Formats.GenericFunctions import addSolverOptions, MeteorObservation, \
+from wmpl.Formats.GenericFunctions import addKMLOptions, addSolverOptions, MeteorObservation, \
     prepareObservations, solveTrajectoryGeneric
 from wmpl.Formats.Milig import StationData, writeMiligInputFile
 from wmpl.Utils.TrajConversions import date2JD
@@ -516,6 +515,7 @@ if __name__ == "__main__":
 
     # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
+    arg_parser = addKMLOptions(arg_parser)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
         help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.', \
@@ -523,9 +523,6 @@ if __name__ == "__main__":
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
-
-    # Atmosphere model for any density the solver evaluates, also in its Monte Carlo processes
-    setAtmosphere(cml_args)
 
     #########################
 
@@ -630,7 +627,9 @@ if __name__ == "__main__":
             v_init_drag_ht=cml_args.vinitdraght, \
             show_jacchia=cml_args.jacchia, \
             estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-            fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, enable_OSM_plot=cml_args.enableOSM)
+            fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, \
+            enable_OSM_plot=cml_args.enableOSM, save_kml=(cml_args.kml or cml_args.kmlmeas), \
+            kml_measured=cml_args.kmlmeas)
 
 
     # ### PERFORM PHOTOMETRY

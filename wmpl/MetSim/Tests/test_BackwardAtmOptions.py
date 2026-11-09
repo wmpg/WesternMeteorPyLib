@@ -20,7 +20,7 @@ from wmpl.MetSim.BackwardAtmIntegration import BACKWARD_GA, BACKWARD_MAX_DT, _ec
     checkBackwardArguments, depthWarnings, dragSpeedGain, groundSpeed, unusedBackwardArguments, DRAW_UNKNOWNS_DENSITY, \
     DRAW_UNKNOWNS_GA, DRAW_UNKNOWNS_MASS_SIGMA, DRAW_UNKNOWNS_SIGMA
 from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, runSimulation
-from wmpl.Utils.AtmosphereDensity import getAtmDensityTable
+from wmpl.Utils.AtmosphereDensity import getAtmDensityTable, setAtmosphere
 from wmpl.Utils.TrajConversions import date2JD, enu2ECEF, geo2Cartesian
 
 
@@ -314,10 +314,10 @@ def test_options_of_the_run_back_are_reported_when_given_without_it():
     assert unusedBackwardArguments(parser, parser.parse_args(["--mass", "1", "--density", "2000"])) == []
 
     used = unusedBackwardArguments(parser, parser.parse_args(["--ablation_coeff", "0.1", "--ga", "0.5", "--ga_sigma",
-        "0.1", "--density_sigma", "100", "--mass_sigma", "0.1", "--freeze_mass", "--atm", "2.1", "--erosion_coeff",
-        "0.3", "--erosion_height", "90"]))
+        "0.1", "--density_sigma", "100", "--mass_sigma", "0.1", "--freeze_mass", "--atm", "00", "--atmsw",
+        "constant", "--erosion_coeff", "0.3", "--erosion_height", "90"]))
     assert set(used) == {"--ablation_coeff", "--ga", "--ga_sigma", "--density_sigma", "--mass_sigma", "--freeze_mass",
-        "--atm", "--erosion_coeff", "--erosion_height"}
+        "--atm", "--atmsw", "--erosion_coeff", "--erosion_height"}
 
 
 def _erosionConstants(sigma, eta, height, rho=3000.0, ga=1.21):
@@ -526,11 +526,20 @@ def test_back_time_on_its_own_starts_the_run_back_where_the_height_is_optional()
     assert parser.parse_args(["--back_height", "150", "--back_time", "2"]).back_height == 150.0
 
 
-def test_the_drag_gives_the_speed_difference_published_by_vida_et_al_2018():
+def test_the_drag_gives_the_speed_difference_published_by_vida_et_al_2018(monkeypatch):
     """ Vida et al. (2018), Fig. 5: 0.1 g entering at 20 km/s, 45 deg from the zenith, of 1510 kg/m^3, sigma 0.1 s^2/km^2
         and Gamma*A = 1.21, is detected at 88.38 km with 19.870 km/s, 130 m/s below its speed out of the atmosphere with
         gravity apart. Their ablation model is another, so the mass left there is not known: 0.1-0.08 g give 125-134
-        m/s. """
+        m/s. The run takes their atmosphere, NRLMSISE-00 with constant solar activity: the default NRLMSIS 2.1
+        with the measured activity gives 119 m/s. """
+
+    # Select the atmosphere of the paper, and restore the module and the environment after the test
+    module = setAtmosphere.__globals__
+    for name in ('MSIS_VERSION', 'MSIS_JD', 'MSIS_SPACE_WEATHER'):
+        monkeypatch.setitem(module, name, module[name])
+    for name in ('MSIS_VERSION_ENV', 'MSIS_JD_ENV', 'MSIS_SPACE_WEATHER_ENV'):
+        monkeypatch.delenv(module[name], raising=False)
+    setAtmosphere(argparse.Namespace(atm='00', atmtime=None, atmsw='constant'))
 
     jd = date2JD(2000, 1, 1, 12, 0, 0)
     state = _stateVector(88380.0, 19870.0, jd=jd, lat=np.radians(45.0), lon=0.0)

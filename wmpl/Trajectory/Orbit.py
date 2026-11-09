@@ -17,9 +17,9 @@ from wmpl.Utils.ShowerAssociation import associateShower
 from wmpl.Utils.SolarLongitude import jd2SolLonJPL
 from wmpl.Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, \
     jd2LST, jd2Date, jd2DynamicalTimeJD, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo,\
-    equatorialCoordPrecession, eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD, \
-    geo2Cartesian
-from wmpl.Utils.Math import vectNorm, vectMag, rotateVector, cartesianToSpherical, sphericalToCartesian
+    eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD, \
+    geo2Cartesian, equatorialCoordDateToJ2000, equatorialCoordJ2000ToDate, eciDateToJ2000
+from wmpl.Utils.Math import vectNorm, vectMag, rotateVector
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.Pickling import loadPickle
 
@@ -845,22 +845,11 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_ref, lat_geocentric, lon_ref)
         
 
-        ### Precess ECI coordinates to J2000 ###
-
-        # Convert rectangular to spherical coordinates
-        re, delta_e, alpha_e = cartesianToSpherical(*eci_ref)
-
-        # Precess coordinates to J2000
-        alpha_ej, delta_ej = equatorialCoordPrecession(jd_ref, J2000_JD.days, alpha_e, delta_e)
-
-        # Convert coordinates back to rectangular
-        eci_ref = sphericalToCartesian(re, delta_ej, alpha_ej)
-        eci_ref = np.array(eci_ref)
-
-        ######
+        # Convert the ECI coordinates to J2000
+        eci_ref = eciDateToJ2000(jd_ref, eci_ref)
 
         # Precess the geocentric radiant to J2000
-        ra_g, dec_g = equatorialCoordPrecession(jd_ref, J2000_JD.days, ra_g, dec_g)
+        ra_g, dec_g = equatorialCoordDateToJ2000(jd_ref, ra_g, dec_g)
 
 
         # Compute the orbital elements
@@ -1124,7 +1113,7 @@ if __name__ == "__main__":
 
             # Precess to epoch of date if given in J2000
             if cml_args.j2000:
-                ra, dec = equatorialCoordPrecession(J2000_JD.days, jd_ref, ra, dec)
+                ra, dec = equatorialCoordJ2000ToDate(jd_ref, ra, dec)
 
         # Compute the radiant vector in ECI coordinates
         radiant_eci = np.array(raDec2ECI(ra, dec))

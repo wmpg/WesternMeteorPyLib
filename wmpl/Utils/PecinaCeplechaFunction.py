@@ -14,8 +14,8 @@ HT_CEILING = 180
 
 
 def airColumn(dens_interp, ht_low, ht_high):
-    """ Integrate the air density between two heights. 
-    
+    """ Integrate the air density between two heights.
+
     Arguments:
         dens_interp: [func] Function which takes the height in meters and returns the air density in kg/m^3.
             If it provides the exact column (e.g. AtmDensityTableInterp), it is used instead of quadrature.
@@ -309,8 +309,7 @@ def fitPecinaCeplecha84Model(lat, lon, jd, time_data, ht_data, len_data, dens_in
 
     ### FIT THE AIR DENSITY MODEL ###
 
-    # Tabulate the air mass density of the MSIS model from the ceiling height to 3 km below the fireball - 
-    #   limit the height to 12 km
+    # Tabulate the density from the ceiling height to 3 km below the fireball, but not below 12 km
     ht_min = np.min(ht_data) - 3
     if ht_min < 12:
         ht_min = 12
@@ -318,9 +317,8 @@ def fitPecinaCeplecha84Model(lat, lon, jd, time_data, ht_data, len_data, dens_in
 
     if dens_interp is None:
 
-        # Tabulate the density
+        # Tabulate the density, with the exact air column
         print("Tabulating atmosphere density...")
-        # Create a convenience function for compute the density at the given height (and the exact air column)
         dens_interp = AtmDensityTableInterp(*getAtmDensityTable(lat, lon, 1000*ht_min, 1000*HT_CEILING, jd))
 
         print("   ... done!")
@@ -736,16 +734,14 @@ if __name__ == "__main__":
 
     ### FIT THE AIR DENSITY MODEL ###
 
-    # Tabulate the air mass density of the MSIS model from the ceiling height to 3 km below the fireball - 
-    #   limit the height to 12 km
+    # Tabulate the density from the ceiling height to 3 km below the fireball, but not below 12 km
     ht_min = np.min(ht_data) - 3
     if ht_min < 12:
         ht_min = 12
 
 
-    # Tabulate the density
+    # Tabulate the density, with the exact air column
     print("Tabulating atmosphere density...")
-    # Create a convenience function for compute the density at the given height (and the exact air column)
     dens_interp = AtmDensityTableInterp(*getAtmDensityTable(lat, lon, 1000*ht_min, 1000*HT_CEILING, jd))
 
     print("   ... done!")

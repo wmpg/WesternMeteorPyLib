@@ -389,9 +389,11 @@ def addBackwardArguments(arg_parser):
         help="Run back for this many seconds, unless the height of --back_height, 180 km if not given, is reached "
         "first. Default: up to that height.")
 
-    arg_parser.add_argument("--mass", type=float, default=None,
-        help="Mass of the meteoroid at the trajectory's reference point in kg, e.g. a photometric mass. In REBOUND "
-        "it also sets the radiation pressure (beta) with --density.")
+    arg_parser.add_argument("--mass", type=float, nargs="?", const=0.0, default=None,
+        help="Mass of the meteoroid at the trajectory's reference point in kg. Given without a value, the "
+        "photometric mass of the trajectory's light curve is used, which is only as good as its "
+        "magnitudes. In REBOUND it also sets the radiation pressure (beta) with --density, or with "
+        "--back_height the mass at the top of the run back does.")
 
     arg_parser.add_argument("--mass_sigma", type=float, default=0.0,
         help="1-sigma uncertainty of --mass in kg. Each Monte Carlo realization starts with a mass drawn from a "
@@ -470,6 +472,39 @@ def addBackwardArguments(arg_parser):
 
     # The MSIS model of the air density
     addAtmosphereArguments(arg_parser)
+
+
+
+def massArgument(arg_parser, args, traj):
+    """ Check --mass and, if it was given without a value, set it to the photometric mass of the trajectory's
+        light curve, with the same zero-magnitude power as the trajectory summaries. Stop with a command-line
+        error for a mass that is not positive or a trajectory without usable photometry.
+
+    Arguments:
+        arg_parser: [ArgumentParser object] Parser of the command line, for the errors.
+        args: [Namespace] Parsed arguments, whose mass is set in place.
+        traj: [Trajectory object] Trajectory of the photometric mass.
+
+    Return:
+        None
+    """
+
+    if args.mass is None:
+        return
+
+    if (args.mass < 0) or (not np.isfinite(args.mass)):
+        arg_parser.error("--mass must be positive, got {:g} kg.".format(args.mass))
+
+    # Use the photometric mass of the light curve if --mass was given without a value. The import is local, as
+    #   that module pulls in the whole plotting stack
+    if args.mass == 0:
+        from wmpl.Trajectory.AggregateAndPlot import computeMass, P_0M
+
+        args.mass = computeMass(traj, P_0M)
+        if (not args.mass) or (not np.isfinite(args.mass)) or (args.mass < 0):
+            arg_parser.error("The trajectory has no usable photometry, so --mass needs a value in kg.")
+        print("Photometric mass: {:.4g} kg (P_0m = {:g} W, tau = 0.7%).".format(args.mass, P_0M))
+
 
 
 def checkBackwardArguments(arg_parser, args):
@@ -574,7 +609,7 @@ def unusedBackwardArguments(arg_parser, args):
 
     names = ["mass_sigma", "freeze_mass", "ablation_coeff", "ablation_coeff_sigma", "erosion_coeff",
         "erosion_coeff_sigma", "erosion_height", "erosion_height_sigma", "density_sigma", "ga", "ga_sigma", "atm",
-        "atmtime", "draw_unknowns"]
+        "atmtime", "atmsw", "draw_unknowns"]
 
     return ["--" + name for name in names if getattr(args, name) != arg_parser.get_default(name)]
 
@@ -887,13 +922,16 @@ if __name__ == "__main__":
     if args.draw_unknowns and (args.mc <= 1):
         args.mc = DRAW_UNKNOWNS_MC
 
+    # The trajectory comes first, as --mass without a value takes its photometric mass
+    traj = loadPickle(*os.path.split(args.pickle_path))
+    massArgument(arg_parser, args, traj)
+
     checkBackwardArguments(arg_parser, args)
     setAtmosphere(args)
 
     # As in REBOUND's command line, draw a seed if none was given and report it, so the run can be reproduced
     random_seed = args.seed if args.seed is not None else int(np.random.SeedSequence().entropy % (2**32))
 
-    traj = loadPickle(*os.path.split(args.pickle_path))
     state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
     state_vects = [state_vect] + sampleStateVectors(traj, args.mc, random_seed)
 
