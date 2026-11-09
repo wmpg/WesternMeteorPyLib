@@ -22,18 +22,14 @@ import matplotlib
 matplotlib.use('Agg')
 
 from wmpl.Trajectory.Trajectory import EARTH_ROTATION_RATE, airRotationShift, interpAirRotationShift
-from wmpl.Trajectory.Tests.SyntheticTrajectory import GM_EARTH, JDT_REF, BentDragMeteor, observeMeteor, \
-    observeStraightMeteor
+from wmpl.Trajectory.Tests.SyntheticTrajectory import DECELERATING_FIREBALL, GM_EARTH, JDT_REF, \
+    bentDragMeteor, observeMeteor, observeStraightMeteor
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 from wmpl.Utils.Math import angleBetweenVectors
 
 
-# Fireball of the tests, 18 km/s at 45 deg slowing down to about 10 km/s in 3.3 s
-FIREBALL = (18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
-
-# Integrated fireball and its solutions, shared by the tests
-METEOR_CACHE = []
+# Solutions of the fireball, shared by the tests
 SOLVED_CACHE = {}
 
 
@@ -45,10 +41,7 @@ def integrateFireball():
         [BentDragMeteor object] The fireball.
     """
 
-    if not METEOR_CACHE:
-        METEOR_CACHE.append(BentDragMeteor(*FIREBALL, air_rotation=True))
-
-    return METEOR_CACHE[0]
+    return bentDragMeteor(*DECELERATING_FIREBALL, air_rotation=True)
 
 
 
@@ -246,7 +239,7 @@ def testTheShiftGivesTheDeviationOfAnIntegratedFireball():
     assert np.max(np.linalg.norm(deviation - gravity_part - shift, axis=1)) < 0.03
 
     # Check that gravity alone gives the deviation in still air
-    still = BentDragMeteor(*FIREBALL, air_rotation=False)
+    still = bentDragMeteor(*DECELERATING_FIREBALL, air_rotation=False)
     _, _, _, _, deviation, gravity_part = calcDeviationFromLine(still, air_rotation=False)
 
     assert np.max(np.linalg.norm(deviation - gravity_part, axis=1)) < 0.03
