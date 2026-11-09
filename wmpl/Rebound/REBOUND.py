@@ -245,25 +245,39 @@ WHFAST_SUN_WARNING_AU = 0.1
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
 
-# Time unit of the simulations. They use G = 1 with lengths in AU and masses in solar masses, so the
-#   time unit is the one in which GM_Sun = 1 AU^3: sqrt(AU^3/GM_Sun) = 58.13244 days, a Gaussian year
-#   (365.25690 d) over 2 pi. REBOUND calls it "yr2pi" and uses it for the bodies added from JPL
-#   Horizons, and REBOUNDx's speed of light is expressed in it. The Julian year over 2 pi (58.13134 d)
-#   is 1.9e-5 shorter: used with G = 1 it makes the Sun 3.8e-5 too massive and every mean motion 7.6e-5
-#   too fast, and the Earth drifts ~700 000 km away from DE430 in 10 years.
-GM_SUN_SI = 1.3271244004193938e20  # m^3/s^2, as in rebound.units (DE430: 1.32712440041e20)
+# Gravitational parameter of the Sun (m^3/s^2), as in rebound.units
+GM_SUN_SI = 1.3271244004193938e20
+
+# Astronomical unit (m)
 AU_M = 149597870700.0
+
+# Time unit of the simulations (days), sqrt(AU^3/GM_Sun) for G = 1 with lengths in AU and masses in solar
+#   masses, which REBOUND calls yr2pi (it is not the Julian year over 2 pi)
 DAYS_PER_SIM_TIME = np.sqrt(AU_M**3/GM_SUN_SI)/86400.0
 
 
 def daysToSimTime(days):
-    """ Convert a time in days to REBOUND simulation time units (see DAYS_PER_SIM_TIME). """
+    """ Convert a time in days to the time unit of the simulations.
+
+    Arguments:
+        days: [float or ndarray] Time (days).
+
+    Return:
+        [float or ndarray] Time in the units of the simulations (see DAYS_PER_SIM_TIME).
+    """
 
     return days/DAYS_PER_SIM_TIME
 
 
 def simTimeToDays(t):
-    """ Convert a time in REBOUND simulation units to days (see DAYS_PER_SIM_TIME). """
+    """ Convert a time in the time unit of the simulations to days.
+
+    Arguments:
+        t: [float or ndarray] Time in the units of the simulations (see DAYS_PER_SIM_TIME).
+
+    Return:
+        [float or ndarray] Time (days).
+    """
 
     return t*DAYS_PER_SIM_TIME
 

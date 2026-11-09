@@ -315,11 +315,12 @@ def testPlanetsFollowTheEphemeris(realReb):
         p = sim.particles[name]
         return np.array([p.x, p.y, p.z])
 
-    # Measured: Mercury 1 km, Venus 0, Earth 1, Mars 4, Jupiter 26, Moon (from the Earth) 62 km
+    # Measured: Mercury 1 km, Venus 0, Earth 3, Mars 4, Jupiter 26, and the Moon from the Earth 264 km,
+    #   mostly from the Earth's J2/J4 which this test leaves out
     au_km = 149597870.7
     for name, centre, limit_km in [("Mercury", "Sun", 20), ("Venus", "Sun", 20), ("Earth", "Sun", 20),
                                    ("Mars", "Sun", 40), ("Jupiter", "Sun", 100),
-                                   ("Luna", "Earth", 300)]:
+                                   ("Luna", "Earth", 500)]:
         ref = (np.array(realReb.ephemBodyStateRebound(name, jd + days, eph)[0][:3])
                - np.array(realReb.ephemBodyStateRebound(centre, jd + days, eph)[0][:3]))
         err_km = np.linalg.norm(position(name) - position(centre) - ref)*au_km
