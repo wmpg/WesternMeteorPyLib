@@ -133,6 +133,39 @@ def getRotMatrix(v1, v2):
     return R
 
 
+
+def rotationMatrixX(angle):
+    """ Rotation matrix of the coordinate frame about the X axis.
+
+    Arguments:
+        angle: [float] Angle of rotation of the frame (radians).
+
+    Return:
+        [3x3 ndarray] Rotation matrix, applied to column vectors.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+
+    return np.array([[1, 0, 0], [0, c, s], [0, -s, c]])
+
+
+
+def rotationMatrixZ(angle):
+    """ Rotation matrix of the coordinate frame about the Z axis.
+
+    Arguments:
+        angle: [float] Angle of rotation of the frame (radians).
+
+    Return:
+        [3x3 ndarray] Rotation matrix, applied to column vectors.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+
+    return np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+
+
+
 def angleBetweenVectors(a, b):
     """Compute the angle between two vectors.
 
@@ -144,7 +177,8 @@ def angleBetweenVectors(a, b):
         [float] Angle between a and b (radians).
     """
 
-    return np.arccos(np.dot(a, b) / (vectMag(a) * vectMag(b)))
+    # Clip the cosine, which can be slightly above 1 for parallel vectors due to rounding
+    return np.arccos(np.clip(np.dot(a, b) / (vectMag(a) * vectMag(b)), -1.0, 1.0))
 
 
 def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
@@ -200,7 +234,7 @@ def circPercentile(data, percentile, q0=None):
     Source: https://github.com/circstat/pycircstat/blob/53d2efdf54c394fd9ecff8d47eaae165c1458fb0/pycircstat/descriptive.py#L375
 
     Arguments:
-        data: [array-like] Angles in radians.
+        data: [array-like] Angles in radians, in any range (e.g. 0 to 2 pi or -pi to pi).
         percentile: [float] Percentile in the [0, 100] range.
 
     Keyword arguments:
@@ -215,6 +249,15 @@ def circPercentile(data, percentile, q0=None):
     data = np.array(data)
 
     if q0 is None:
+
+        # Wrap the angles to 0-360, so angles from -180 to 180 (e.g. longitudes) are also taken, in double
+        #   precision so the order of the samples is kept
+        data = data.astype(np.float64)%(2*np.pi)
+
+        # Without a value for every sample (e.g. the anomalies of a hyperbolic orbit), the percentile is NaN
+        if np.any(np.isnan(data)):
+            return np.nan
+
         # If the data is on the 0/360 discontinuity, adjust the 0th percentile
         if np.abs(np.min(data) - np.max(data)) > np.pi:
             q0 = np.min(data[data > np.pi])
@@ -802,6 +845,37 @@ def RMSD(x, weights=None):
     return np.sqrt(np.sum(weights * x**2) / np.sum(weights))
 
 
+
+def medianStddev(stddev_list, n_samples=100000):
+    """ Compute the standard deviation of the median of independent normally distributed values, by
+        sampling them. A fixed seed is used, so the result is repeatable and the global random state is not
+        changed.
+
+    Arguments:
+        stddev_list: [list] Standard deviations of the individual values. Values which are None or not
+            finite are taken as exact.
+
+    Keyword arguments:
+        n_samples: [int] Number of samples. 100000 by default.
+
+    Return:
+        [float] Standard deviation of the median.
+    """
+
+    # Take values without a valid standard deviation as exact
+    stddev_list = np.array([sd if ((sd is not None) and np.isfinite(sd)) else 0.0 for sd in stddev_list])
+
+    if len(stddev_list) == 0:
+        return 0.0
+
+    # Sample the values and compute the spread of their median
+    rng = np.random.RandomState(0)
+    samples = rng.normal(0, 1, (n_samples, len(stddev_list)))*stddev_list
+
+    return np.std(np.median(samples, axis=1))
+
+
+
 def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method="avg"):
     """Finds if points have similar sample values on the independent axis x (if they are within delta) and
         averages all y values.
@@ -1173,6 +1247,27 @@ def generateMonthyTimeBins(dt_beg, dt_end):
 
 
 ##############################################################################################################
+
+
+
+def expSegmentIntegral(rho_0, scale, dh):
+    """ Integrate rho_0*exp(scale*x) for x from 0 to dh, stably when scale*dh is near 0.
+
+    Arguments:
+        rho_0: [float or ndarray] Density at the bottom of the segment (kg/m^3).
+        scale: [float or ndarray] Exponential scale of the segment (1/m).
+        dh: [float or ndarray] Height above the bottom of the segment (m).
+
+    Return:
+        [float or ndarray] Air column (kg/m^2).
+    """
+
+    x = np.asarray(scale*dh, dtype=np.float64)
+    x_safe = np.where(x == 0, 1.0, x)
+
+    return rho_0*dh*np.where(x == 0, 1.0, np.expm1(x_safe)/x_safe)
+
+
 
 
 if __name__ == "__main__":
