@@ -210,11 +210,11 @@ def testNamedParticlesAndHeartbeatWorkOnTheInstalledVersion(realReb):
 def testEndToEndIntegrationMatchesReference(realReb):
     """ Integrate the example trajectory 60 days back and compare with a reference solution.
 
-    The reference was computed with rebound 4.4.10 and reboundx 4.4.2, after the time unit was made
-    consistent with G = 1 (DAYS_PER_SIM_TIME). The previous reference, from rebound 4.3.0 and 5.1.1,
-    used the Julian year over 2 pi and had a = 10.98466 AU, 0.0119 AU further from the solver's own
-    orbit (10.99652 AU) than now. The tolerance leaves room for floating-point differences between
-    platforms, while catching any real change in the dynamics.
+    The reference was computed with rebound 4.4.11 and reboundx 4.5.0, with the J2000 coordinates
+    nutated as well as precessed to the epoch of date, and the time unit consistent with G = 1
+    (DAYS_PER_SIM_TIME). With the Julian year over 2 pi as the time unit, a was 10.96543 AU. The tolerance
+    leaves room for floating-point differences between platforms, while catching any real change in the
+    dynamics.
     """
 
     from wmpl.Config import config
@@ -237,19 +237,19 @@ def testEndToEndIntegrationMatchesReference(realReb):
 
     orbit = sim_outputs[-1][2]
     rtol = 1e-7
-    assert orbit.a == pytest.approx(10.9937899741892, rel=rtol)
-    assert orbit.e == pytest.approx(0.9470181770710294, rel=rtol)
-    assert np.degrees(orbit.inc) == pytest.approx(164.56527442912162, rel=rtol)
-    assert np.degrees(orbit.Omega) == pytest.approx(29.396553069608316, rel=rtol)
-    assert np.degrees(orbit.omega) == pytest.approx(81.5139061407715, rel=rtol)
+    assert orbit.a == pytest.approx(10.974521149972595, rel=rtol)
+    assert orbit.e == pytest.approx(0.946915444491625, rel=rtol)
+    assert np.degrees(orbit.inc) == pytest.approx(164.56720115596698, rel=rtol)
+    assert np.degrees(orbit.Omega) == pytest.approx(29.396552946490985, rel=rtol)
+    assert np.degrees(orbit.omega) == pytest.approx(81.50390425379562, rel=rtol)
 
     # The Moon's closest approach comes from the heartbeat, so this also checks that it ran
     diag = next(iter(diagnostics.values()))
     assert diag["departed"]
     assert diag["impact"] is None
-    assert diag["min_dist_au"]["Luna"] == pytest.approx(0.0018192453834511423, rel=rtol)
+    assert diag["min_dist_au"]["Luna"] == pytest.approx(0.0018191014954228937, rel=rtol)
     # The within-step refinement added in #99 moves this off the step-end value it had before
-    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426156510, rel=1e-6)
+    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426197656, rel=1e-6)
 
 
 ### Units ###

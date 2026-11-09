@@ -125,14 +125,15 @@ python -m wmpl.Rebound.REBOUND --help
 | `--horizons` | Use the JPL Horizons web service for planet positions instead of the local DE430 kernel. |
 | `--integrator {ias15,whfast,trace}` | Which integrator to use. Default: `ias15`. See [Choosing an integrator](#choosing-an-integrator). |
 | `--dt DAYS` | Timestep in days for `whfast` and `trace`. Default: `0.5`. Must be positive. Ignored by `ias15`. |
-| `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. Mutually exclusive with `--radius`/`--density`. |
-| `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
-| `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
+| `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. |
+| `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if none of `--beta`, `--radius` and `--mass` is given. |
+| `--mass [KG]` | Object mass in kg. With `--density`, beta is computed from it. Without a value, the photometric mass of the light curve is used. |
+| `--density KG_M3` | Bulk density in kg/m³, used with `--radius` or `--mass`. Default: `3000`. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
 | `--verbose` | Print the progress of the simulation. |
 
-`--beta` and `--radius` are mutually exclusive: give the beta directly, or give the size and density
-and let the code compute it, but not both.
+`--beta`, `--radius` and `--mass` are mutually exclusive: give the beta directly, or give a size or a
+mass (with the density) and let the code compute it, but only one of them.
 
 ---
 
@@ -182,9 +183,12 @@ integrating, for the nominal solution or for any clone. **Take that warning seri
 `--integrator trace` or `ias15`.
 
 **A small perihelion is a close encounter for this purpose too.** A fixed step that is fine along most
-of an eccentric orbit is far too long through perihelion, and the Sun passages inside 0.1 AU are counted
-in the warning for that reason. Measured on a δ-Aquariid-like orbit (a = 2.6 AU, q = 0.07 AU, i = 27°),
-100 years, with the Sun and five planets:
+of an eccentric orbit is far too long through perihelion, and the Sun passages inside 0.1 AU
+(`WHFAST_SUN_WARNING_AU`) are counted in the warning for that reason. Sun passages are listed out to
+0.2 AU, but beyond 0.1 AU the default step is enough: on orbits with a = 1.27 and 2.6 AU (i = 25°,
+100 years, the Sun and five planets) WHFast at 0.5 d was 9e-4 to 1e-2 off in a at q = 0.07 AU, 5e-6 to
+6e-6 at 0.10 AU, 1e-6 to 4e-6 at 0.14 AU and below 7e-7 from 0.17 AU. Measured on a δ-Aquariid-like
+orbit (a = 2.6 AU, q = 0.07 AU, i = 27°), 100 years, with the Sun and five planets:
 
 | Integrator | `--dt` | Final a against IAS15 |
 | :--- | :--- | :--- |
@@ -218,6 +222,20 @@ or let it be computed from a size and a density:
 python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --radius 1e-5 --density 3000
 ```
 
+A size is not what a meteor solution gives, so a mass works too, either explicitly or — with no value
+— as the photometric mass computed from the trajectory's own light curve:
+
+```
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --mass 1e-6 --density 3000
+python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --mass --density 3000
+```
+
+The mass is turned into the radius of the sphere of that mass and density, `s = (3m/(4πρ))^(1/3)`.
+At a fixed mass, beta goes as `m^(-1/3)*rho^(-2/3)`. The mass, and through it the luminous efficiency
+of a photometric mass, enters as a cube root, so a factor of 2 in it changes beta by a factor of 1.26.
+The density enters more strongly: halving it raises beta by a factor of 1.59. `--mass 0` is the same
+as `--mass` without a value.
+
 For a spherical grain, `beta = 5.7425e-4*Q_pr/(rho*s)` with the density in kg/m³ and the radius in m.
 A 1 µm grain at 3000 kg/m³ gives beta = 0.19; a 1 cm meteoroid of the same density gives 1.9e-5. In
 other words, radiation forces matter for small grains and are negligible for fireball-producing
@@ -241,17 +259,22 @@ and then refined *within* the step. Both steps matter:
   accurate even when one step spans the whole flyby.
 
 - **Close encounters** are reported for any body approached within **3 Hill radii**, and for the Sun
-  within **0.1 AU** (it has no Hill sphere, so its `n_hill` is `None`), listed in the order they
+  within **0.2 AU** (it has no Hill sphere, so its `n_hill` is `None`), listed in the order they
   happened. **A body can appear more than once**, if the object passed it more than once: each local
   minimum of the distance is refined and listed separately. A meteoroid in resonance with a planet
   commonly meets it many times.
-  - *Why 0.1 AU for the Sun.* That is where thermal processing of meteoroids is established: sodium is
-    thermally desorbed at q < 0.1 AU ([Kasuga et al. 2006](https://doi.org/10.1051/0004-6361:20065330),
-    explaining the Na-free meteoroids of Borovička et al. 2005), asteroids disrupt at q ≈ 0.076 AU
-    ([Granvik et al. 2016](https://doi.org/10.1038/nature16934)), and it lies inside the sunskirter zone
-    (q < 33 R☉ = 0.153 AU) of [Jones et al. 2018](https://doi.org/10.1007/s11214-017-0446-5). A Sun
-    passage is a thermal event, not a gravitational perturbation, and is listed for that reason.
-  - *Repeated Sun passages.* An orbit with q < 0.1 AU passes the Sun every revolution, so a
+  - *Why 0.2 AU for the Sun.* It is the limit of the Sun-approaching orbital class of
+    [Borovička et al. 2005](https://doi.org/10.1016/j.icarus.2004.09.011), the one meteor studies use:
+    almost all meteoroids inside it are Na-free or Na-poor
+    ([Vojáček et al. 2019](https://doi.org/10.1051/0004-6361/201833289), section 3.3). Inside 0.1 AU all
+    of them are, the sodium being thermally desorbed
+    ([Kasuga et al. 2006](https://doi.org/10.1051/0004-6361:20065330)), asteroids disrupt at
+    q ≈ 0.076 AU ([Granvik et al. 2016](https://doi.org/10.1038/nature16934)), and the sunskirter zone
+    (q < 33 R☉ = 0.153 AU) of [Jones et al. 2018](https://doi.org/10.1007/s11214-017-0446-5) lies inside
+    it. Kasuga et al. found no sodium loss down to q = 0.14 AU among larger shower meteoroids, so the
+    limit is that of the small meteoroids. A Sun passage is a thermal event, not a gravitational
+    perturbation, and is listed for that reason.
+  - *Repeated Sun passages.* An orbit with q < 0.2 AU passes the Sun every revolution, so a
     low-perihelion stream lists one Sun passage every few years (measured: 24 in 100 yr for a
     δ-Aquariid-like orbit, against 6 planetary flybys). The terminal and the text report collapse more
     than three Sun passages into one line with the count, the perihelion range and the time span,
@@ -285,7 +308,24 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --mc 200 --cores 8 --see
 The report gives the final elements with 95 % confidence intervals from the clone ensemble, how many
 clones impacted which body, how many escaped, and how many had a close encounter with each body. If
 some clones did not survive, the confidence intervals are computed from the survivors only and the
-report says so (`ci_uses_survivors_only` in the JSON).
+report says so (`ci_uses_survivors_only` in the JSON). Under the final elements come the Tisserand
+parameter and the orbital class at the end of the run: the meteoroid class of Borovička et al. (2005),
+from `wmpl.Utils.OrbitClassification.classifyBorovicka` (`final_elements.orbital_class` in the JSON, see
+[Classifying a single orbit](OrbitClassification.md)). Like the elements, they are the nominal's, and
+with clones T_J has their 1σ and 95% interval and the class the fraction of the clones in each class
+(`final_elements.clones_tisserand_and_class`). For Winchcombe, 1000 years back with 200 clones:
+
+```
+Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the end of the run,
+nominal +/- 1 sigma [95% CI] of the 200 clones:
+  T_J   = 3.083673 +/- 0.029853 [  2.995651,   3.112674]
+  class = asteroidal-chondritic (nominal); clones: asteroidal-chondritic 97.0%, jupiter-family 3.0%
+```
+
+Beyond the predictability horizon the nominal's class is that of one clone among many, and the
+clones' fractions are the ones to quote. The class of the observed orbit is that of the trajectory
+solution, before any integration. The ecliptic-shower class needs a shower association, which the
+integration does not have, so it is never given.
 
 The ensemble also gives a divergence estimate for free: the clones are trajectories started from
 slightly different state vectors, so their spread over time is exactly what a Lyapunov analysis
@@ -357,7 +397,7 @@ The JSON keys, at the top level:
 | Key | Contents |
 | :--- | :--- |
 | `traj_id` | Event identifier. |
-| `run` | Run settings: `integration_days`, `direction`, `reference_frame`, `ephemeris`, `n_outputs`, `beta`, `start_epoch_jd_tdb`, `final_epoch_jd_tdb`, `final_epoch_utc`, `mc_runs`, `random_seed`, `runtime_s`, `integrator`, `dt_days`, `fixed_step_from_days`, and the close-encounter gates `n_hill_threshold` and `sun_encounter_au`. |
+| `run` | Run settings: `integration_days`, `direction`, `reference_frame`, `ephemeris`, `n_outputs`, `beta`, `start_epoch_jd_tdb` and `start_epoch_jd_utc`, `final_epoch_jd_tdb`, `final_epoch_jd_utc` and `final_epoch_utc` (ISO), `mc_runs`, `random_seed`, `runtime_s`, `integrator`, `dt_days`, `fixed_step_from_days`, and the close-encounter gates `n_hill_threshold` and `sun_encounter_au`. |
 | `final_elements` | `a`, `q`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `tisserand_jupiter`, with `a_units`/`q_units` (AU heliocentric, km geocentric). |
 | `encounters` | Every close encounter of the nominal solution, ordered by time, each with `body`, `min_dist_au`, `time_days`, `hill_radius_au` and `n_hill`. A body can appear more than once. For the Sun, `hill_radius_au` and `n_hill` are `null`. |
 | `closest_approaches_au`, `closest_approach_times_days` | Closest approach to every tracked body, whether or not it counted as an encounter. This is the deepest approach only, one value per body. |
@@ -516,6 +556,7 @@ Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 | Function | Purpose |
 | :--- | :--- |
 | `radiationPressureBeta(radius_m, density_kgm3)` | Beta for a spherical grain. |
+| `equivalentSphereRadius(mass_kg, density_kgm3)` | The radius that beta needs, from a mass and a bulk density. |
 | `encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0)` | The close-encounter list from the closest-approach dictionaries, one entry per body, with the same gates as the integration (Hill radii, and `SUN_ENCOUNTER_AU` for the Sun). The per-particle `encounters` diagnostic lists every passage instead. |
 | `sunPassageSummary(encounters, max_listed=3)` / `formatSunPassageSummary(summary)` | Collapse more than `max_listed` Sun passages into one summary, and its report line. |
 | `cloneEncounterSummary(clone_diag)` | Per body, how many clones met it, how many passages they made, and the closest approach over all of them. |
