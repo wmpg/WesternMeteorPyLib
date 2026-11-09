@@ -491,6 +491,56 @@ def earthRotationSpeed(traj):
 
 
 
+# Rotation rate of the Earth (rad/s)
+EARTH_ROTATION_RATE = 2*np.pi/86164.09053
+
+
+
+def earthRotationVelocity(eci_pos):
+    """ Compute the velocity of the ground at the given ECI positions.
+
+    Arguments:
+        eci_pos: [ndarray] ECI position(s) (m), shape (3,) or (N, 3).
+
+    Return:
+        [ndarray] Velocity of the ground (m/s), from the rotation about the z axis of the ECI frame of date.
+    """
+
+    eci_pos = np.asarray(eci_pos, dtype=float)
+
+    return EARTH_ROTATION_RATE*np.stack([-eci_pos[..., 1], eci_pos[..., 0], np.zeros_like(eci_pos[..., 0])], \
+        axis=-1)
+
+
+
+def groundSpeed(traj, eci_pos, vel):
+    """ Compute the speed relative to the ground of points on a trajectory, from the speeds along the fitted
+        line that the solver measures in the ECI frame.
+
+        The solver's speeds include the component of the Earth's rotation along the motion, while drag acts on
+        the speed relative to the air. Relative to the ground the body moves along the ground-fixed direction
+        of the radiant, so the speed along the line is the ground speed projected on the line plus the
+        rotation velocity projected on it.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+        eci_pos: [ndarray] ECI position(s) of the point(s) (m), shape (3,) or (N, 3).
+        vel: [float or ndarray] Speed(s) along the fitted line in the ECI frame (m/s).
+
+    Return:
+        [float or ndarray] Speed(s) relative to the ground (m/s).
+    """
+
+    motion = -traj.radiant_eci_mini
+
+    # Ground-fixed direction of motion at the state vector
+    direction_ground = traj.v_init*motion - earthRotationVelocity(traj.state_vect_mini)
+    direction_ground /= np.sqrt(np.dot(direction_ground, direction_ground))
+
+    return (vel - np.dot(earthRotationVelocity(eci_pos), motion))/np.dot(direction_ground, motion)
+
+
+
 def groundAlphaBetaFit(traj):
     """ Fit the speeds of a solved trajectory relative to the ground with a robust alpha-beta fit
         (AlphaBeta.fitAlphaBeta(method='robust')).

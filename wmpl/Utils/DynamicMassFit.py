@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
-from wmpl.Utils.Math import lineFunc, vectMag
+from wmpl.Utils.Math import lineFunc, vectMag, rotateVector
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
-from wmpl.Utils.Physics import dynamicMass
+from wmpl.Utils.Physics import dynamicMass, groundSpeed, earthRotationVelocity, EARTH_ROTATION_RATE
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
@@ -224,12 +224,15 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
         and with the elevation steepened by the gravity turn along the path. They are the inputs a dark
         flight computation needs.
 
+        The simulation works relative to the ground, so the body moves by the simulated length along the
+        ground-fixed direction of motion, and with the ground under it in the ECI frame.
+
     Arguments:
         traj: [Trajectory] Solved trajectory.
         dyn_mass: [float] Dynamic mass at the evaluation point (kg).
         density: [float] Bulk density of the meteoroid (kg/m^3).
         hend: [float] Height of the evaluation point (m).
-        vend: [float] Velocity at the evaluation point (m/s).
+        vend: [float] Speed relative to the ground at the evaluation point (m/s), see groundSpeed().
         gamma_a: [float] Product of the drag coefficient and the shape factor used for the dynamic mass. Not
             used by the simulation itself, see runFragSim().
 
@@ -292,8 +295,15 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
 
     ### Compute the final lat/lon ###
 
-    # Initial 3D ECI vector + total length x direction
-    final_eci = pointOnTrajectory(traj, total_len, total_time)
+    # Take the ground-fixed direction of motion at the evaluation point
+    direction_ground = -traj.v_init*traj.radiant_eci_mini \
+        - earthRotationVelocity(pointOnTrajectory(traj, meas_len, meas_time))
+    direction_ground /= vectMag(direction_ground)
+
+    # Move the simulated length along it with the gravity drop at the final time, and rotate the point with
+    #   the ground to the final time
+    final_eci = rotateVector(pointOnTrajectory(traj, meas_len, total_time) \
+        + sr.frag_main.length*direction_ground, np.array([0.0, 0.0, 1.0]), EARTH_ROTATION_RATE*final_time)
 
     t_obs = np.concatenate([obs.time_data for obs in traj.observations])
 
@@ -400,14 +410,15 @@ def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1', **kwargs):
     return popt, pcov, perr
 
 
-def fitVelocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3.0):
+def fitVelocity(time_data, vel_data, p0=None, loss='soft_l1', sigma_clip=3.0):
     """ Perform a robust velocity fit and iterative outlier rejection.
         Uses robust least-squares (soft L1 loss) both before and after sigma-clipping.
 
     Arguments:
         time_data: [ndarray] Time data points.
         vel_data: [ndarray] Velocity data points.
-        p0: [tuple(float, float)] Initial parameter guess (slope, intercept).
+        p0: [tuple(float, float)] Initial parameter guess (slope, intercept). None by default, for the
+            least-squares line.
         loss: [str] Loss function for robust fitting.
         sigma_clip: [float] Outlier rejection threshold, in units of the robust (MAD) residual standard
             deviation.
@@ -420,6 +431,10 @@ def fitVelocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3
     """
 
     # Initial robust fit
+    # Start from the least-squares line, as the robust fit from a distant guess can run out of evaluations
+    if p0 is None:
+        p0 = np.polyfit(time_data, vel_data, 1)
+
     popt, pcov, perr = _robust_linear_fit(time_data, vel_data, p0=p0, loss=loss)
 
     yhat = lineFunc(np.asarray(time_data, dtype=float), *popt)
@@ -572,7 +587,8 @@ if __name__ == "__main__":
         ignored = obs.ignore_list[1:] > 0
 
 
-        vel = obs.velocities[1:][~ignored]
+        # Speeds relative to the ground, which the drag depends on, from the solver's ECI speeds
+        vel = groundSpeed(traj, obs.model_eci[1:][~ignored], obs.velocities[1:][~ignored])
         ht = obs.meas_ht[1:][~ignored]
         t = obs.time_data[1:][~ignored]
 
@@ -599,7 +615,7 @@ if __name__ == "__main__":
     if ht_min > 0:
         ax1.axhline(y=ht_min, color='k', linestyle='dashed', label='Ht min')
 
-    ax1.set_xlabel("Velocity (km/s)")
+    ax1.set_xlabel("Velocity relative to the ground (km/s)")
     ax1.set_ylabel("Height (km)")
 
 
@@ -630,7 +646,7 @@ if __name__ == "__main__":
 
     # Fit a line to the velocity data in the range
     popt_final, pcov_final, perr_final, vel_filter = fitVelocity(
-        time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=cml_args.sigma_clip
+        time_data, vel_data, loss='soft_l1', sigma_clip=cml_args.sigma_clip
     )
 
     vel_fit = popt_final
@@ -832,7 +848,7 @@ if __name__ == "__main__":
 
     ax2.invert_yaxis()
     ax2.set_ylabel("Time (s)")
-    ax2.set_xlabel("Velocity (km/s)")
+    ax2.set_xlabel("Velocity relative to the ground (km/s)")
     
     ax1.legend()
     ax2.legend()
