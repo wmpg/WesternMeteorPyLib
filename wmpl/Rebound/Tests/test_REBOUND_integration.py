@@ -362,9 +362,20 @@ def testEarthSpinAxisIsThePoleOfDate(reb):
     assert np.allclose(reb.earthSpinAxisEcliptic(jd), expected, atol=1e-12)
 
 
-def _slowDepartureTask(reb, spin_axis, rotation=None):
-    """ A meteoroid leaving the Earth from 100 km up at 14 km/s, with the Sun, the Earth and the Moon.
-    rotation, if given, is a 3x3 matrix applied to every state, to integrate in a rotated frame. """
+def slowDepartureTask(reb, spin_axis, rotation=None):
+    """ Make the task of a meteoroid leaving the Earth from 100 km up at 14 km/s, with the Sun, the
+    Earth and the Moon.
+
+    Arguments:
+        reb: [module] The REBOUND module.
+        spin_axis: [list] Axis of the Earth's J2/J4, None for the z axis.
+
+    Keyword arguments:
+        rotation: [ndarray] 3x3 matrix applied to every state, to integrate in a rotated frame.
+
+    Return:
+        [dict] Task for _integrateParticles.
+    """
 
     au_km = 149597870.7
     day = 1.0/reb.DAYS_PER_SIM_TIME
@@ -408,9 +419,9 @@ def testHarmonicsAreSymmetricAboutTheSpinAxis(realReb):
     # Rotation about x taking the axis to z (ecliptic to equatorial)
     rot = np.array([[1.0, 0.0, 0.0], [0.0, np.cos(eps), -np.sin(eps)], [0.0, np.sin(eps), np.cos(eps)]])
 
-    with_axis = reb._integrateParticles(_slowDepartureTask(reb, axis))["outputs"]["obj"][-1][1]
-    rotated = reb._integrateParticles(_slowDepartureTask(reb, None, rot))["outputs"]["obj"][-1][1]
-    ecliptic_z = reb._integrateParticles(_slowDepartureTask(reb, None))["outputs"]["obj"][-1][1]
+    with_axis = reb._integrateParticles(slowDepartureTask(reb, axis))["outputs"]["obj"][-1][1]
+    rotated = reb._integrateParticles(slowDepartureTask(reb, None, rot))["outputs"]["obj"][-1][1]
+    ecliptic_z = reb._integrateParticles(slowDepartureTask(reb, None))["outputs"]["obj"][-1][1]
 
     rotated_back = np.concatenate([rot.T @ np.array(rotated[:3]), rot.T @ np.array(rotated[3:])])
 

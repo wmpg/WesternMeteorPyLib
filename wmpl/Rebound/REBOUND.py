@@ -156,14 +156,14 @@ def _setHeartbeat(sim, func):
 
 
 def harmonicsSpinAxisSupported():
-    """ Whether the installed REBOUNDx orients gravitational_harmonics along each body's spin axis.
+    """ Check whether the installed REBOUNDx orients gravitational_harmonics along a body's spin axis.
 
     REBOUNDx 4.4.0 added the "Omega" particle parameter, whose direction is the axis of symmetry of
     the body's J2 and J4. Earlier versions always use the z axis of the simulation, which here is the
-    ecliptic pole, 23.4 degrees away from the Earth's.
+    ecliptic pole, 23.4 deg away from the Earth's.
 
     Return:
-        [bool]
+        [bool] True if the spin axis is supported.
     """
 
     try:
@@ -175,8 +175,8 @@ def harmonicsSpinAxisSupported():
 
 
 def earthSpinAxisEcliptic(jd_tdb):
-    """ Unit vector along the Earth's mean rotation pole of date, in the ecliptic J2000 frame of the
-    simulations. It is the axis of symmetry of the Earth's J2 and J4.
+    """ Compute the Earth's mean rotation pole of date in the ecliptic J2000 frame of the simulations,
+    the axis of symmetry of the Earth's J2 and J4.
 
     The precession matrix from J2000 to the date is R3(-z) R2(theta) R3(-zeta), so the pole of date
     is, in J2000 equatorial coordinates, (sin(theta) cos(zeta), -sin(theta) sin(zeta), cos(theta)),
@@ -187,7 +187,7 @@ def earthSpinAxisEcliptic(jd_tdb):
         jd_tdb: [float] Julian date (TDB) of the epoch.
 
     Return:
-        [list] [x, y, z] unit vector.
+        [list] Unit vector [x, y, z].
     """
 
     # Julian centuries from J2000
@@ -1691,14 +1691,14 @@ def _integrateParticles(task):
     if reverse_time:
         _reverseVelocities(sim)
 
-    # Add the gravitational harmonics of the Earth, symmetric about its rotation axis. The simulation
-    #   frame is the ecliptic, so the axis has to be given: REBOUNDx would otherwise use the z axis,
-    #   the ecliptic pole, 23.4 deg from the Earth's (5 m/s on the departure of a 14 km/s meteoroid).
+    # Add the gravitational harmonics of the Earth, symmetric about its rotation axis if it is given
+    #   (otherwise REBOUNDx uses the z axis, the ecliptic pole)
     gh = rebx.load_force("gravitational_harmonics")
     rebx.add_force(gh)
     ps["Earth"].params["J2"] = J2
     ps["Earth"].params["J4"] = J4
     ps["Earth"].params["R_eq"] = RE_eq
+
     earth_spin_axis = task.get("earth_spin_axis")
     if earth_spin_axis is not None:
         ps["Earth"].params["Omega"] = rb.Vec3d(*earth_spin_axis)
@@ -2443,8 +2443,7 @@ def reboundSimulate(
     time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
-    # Axis of the Earth's J2 and J4: its rotation pole at the epoch. Older REBOUNDx versions cannot
-    #   orient them and use the ecliptic pole instead.
+    # Take the Earth's rotation pole at the epoch as the axis of its J2 and J4, if REBOUNDx supports it
     earth_spin_axis = None
     if harmonicsSpinAxisSupported():
         earth_spin_axis = earthSpinAxisEcliptic(time_tdb)
@@ -3699,8 +3698,8 @@ if __name__ == "__main__":
             "integrator": args.integrator,
             "dt_days": dt_days,
             "fixed_step_from_days": fixed_from,
-            # Axis of the Earth's J2/J4 in the ecliptic J2000 frame (null: the ecliptic pole was used,
-            #   REBOUNDx < 4.4.0)
+            # Axis of the Earth's J2/J4 in the ecliptic J2000 frame (null if REBOUNDx < 4.4.0 used the
+            #   ecliptic pole)
             "earth_spin_axis": (earthSpinAxisEcliptic(astropy.time.Time(
                 traj.jdt_ref, format="jd", scale="utc").tdb.jd)
                 if harmonicsSpinAxisSupported() else None),
