@@ -16,6 +16,8 @@ import os
 
 import numpy as np
 
+from wmpl.Utils.Math import rotationMatrixZ
+
 
 # Rotation of the Earth in one second of UT1 (rad), IERS Conventions 2010 eq. 5.15
 EARTH_ROTATION_RATE = 2*np.pi*1.00273781191135448/86400.0
@@ -110,32 +112,6 @@ def utcRotationAngle(dut1):
 
 
 
-def rotateAroundPole(vect, angle):
-    """ Turn vectors around the Z axis, towards increasing right ascension.
-
-    Arguments:
-        vect: [ndarray] A vector (3) or vectors (N x 3).
-        angle: [float] Angle (rad).
-
-    Return:
-        [ndarray] The turned vectors, in the shape of the input.
-    """
-
-    vect = np.array(vect, dtype=np.float64)
-    if angle == 0:
-        return vect
-
-    cos_a, sin_a = np.cos(angle), np.sin(angle)
-
-    # Turn the X and Y components
-    rotated = np.copy(vect)
-    rotated[..., 0] = cos_a*vect[..., 0] - sin_a*vect[..., 1]
-    rotated[..., 1] = sin_a*vect[..., 0] + cos_a*vect[..., 1]
-
-    return rotated
-
-
-
 def eciToInertial(vect, dut1):
     """ Convert vectors from the ECI coordinates of wmpl, which turn with the Earth by UTC, to the inertial
         frame of the equator of date, against which the stars and the radiant are given.
@@ -148,7 +124,8 @@ def eciToInertial(vect, dut1):
         [ndarray] The vectors in the inertial frame.
     """
 
-    return rotateAroundPole(vect, utcRotationAngle(dut1))
+    # Turn the row vectors towards increasing right ascension
+    return np.dot(vect, rotationMatrixZ(utcRotationAngle(dut1)))
 
 
 
@@ -164,4 +141,5 @@ def inertialToECI(vect, dut1):
         [ndarray] The vectors in the ECI coordinates of wmpl.
     """
 
-    return rotateAroundPole(vect, -utcRotationAngle(dut1))
+    # Turn the row vectors back
+    return np.dot(vect, rotationMatrixZ(-utcRotationAngle(dut1)))
