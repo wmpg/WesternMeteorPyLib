@@ -112,8 +112,7 @@ arcsec, and the largest error of the positions across the path from 4-71 m to 0.
 The meteor falls from the line along the whole path, while the vertical turns with the curvature of the
 Earth, so dropping every point by `g*t^2/2` along its own vertical tilts the line, by about `0.08*t^2`
 arcsec after `t` seconds. The solver drops the points by the free fall of the meteor from the line under the
-gravity of the Earth instead, a point mass with its oblateness (J2 of WGS84, around the axis of the ECI frame
-of date):
+gravity of the Earth instead:
 
     displacement(t) = integral from 0 to t of g(L(q)) (l(t) - l(q))/v(q) dq
 
@@ -124,9 +123,8 @@ the velocity enters through integrals of the motion tabulated from the fit, so t
 the fitted velocity changes its slope. It follows fireballs integrated in 3D with drag and gravity to 0.5-2.4
 cm, against 0.2-2.1 m for the scaled drop along the vertical. On the same fireballs, without noise, the
 radiant error falls from 0.6-3.6 arcsec to 0.00-0.18 arcsec and the largest error across the path from
-0.08-1.3 m to 0.01-0.26 m. The radiant of Winchcombe moves by 7.7 arcsec, where the two drops differ by up to
-2.8 m across the 97 km of the path. The oblateness accounts for 1 arcsec of it: on a sphere the drop across
-its path differs by up to 0.45 m.
+0.08-1.3 m to 0.01-0.26 m. The radiant of Winchcombe moves by 7 arcsec, where the two drops differ by up to
+2.8 m across the 97 km of the path.
 
 - `Trajectory(..., gravity_decel=False)` keeps the drop at a constant velocity. Trajectories pickled before
   the option was added keep it too.

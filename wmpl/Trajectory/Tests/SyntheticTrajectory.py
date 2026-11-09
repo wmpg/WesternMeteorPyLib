@@ -159,30 +159,6 @@ class DragMeteor(object):
 # Gravitational parameter of the Earth, WGS84 (m^3/s^2)
 GM_EARTH = 3.986004418e14
 
-# Second zonal harmonic of the gravity of the Earth and the equatorial radius to which it refers (m), WGS84
-J2_EARTH = 1.082626683e-3
-R_EQUATOR = 6378137.0
-
-
-
-def oblatenessAcceleration(pos):
-    """ Compute the acceleration by the oblateness of the Earth (J2), around the z axis of the ECI frame of
-        date, which adds to the gravity of a point mass.
-
-    Arguments:
-        pos: [ndarray] (x, y, z) ECI coordinates (m).
-
-    Return:
-        [ndarray] (x, y, z) acceleration (m/s^2).
-    """
-
-    r2 = pos @ pos
-    oblate = 1.5*J2_EARTH*R_EQUATOR**2/r2
-    polar = 5.0*pos[2]**2/r2
-
-    return -GM_EARTH/r2**1.5*oblate*np.array([pos[0]*(1.0 - polar), pos[1]*(1.0 - polar), \
-        pos[2]*(3.0 - polar)])
-
 
 
 class BentDragMeteor(object):
@@ -246,15 +222,6 @@ class BentDragMeteor(object):
                 vel_air = vel - np.cross(np.array([0.0, 0.0, EARTH_ROTATION_RATE]), pos)
 
             return -k*rho*np.sqrt(vel_air @ vel_air)*vel_air - GM_EARTH*pos/r**3
-
-
-        # Add the oblateness of the Earth to the gravity (see BentDragMeteorJ2)
-        if getattr(self, 'j2', False):
-
-            _point_mass_acceleration = _acceleration
-
-            def _acceleration(t, pos, vel):
-                return _point_mass_acceleration(t, pos, vel) + oblatenessAcceleration(pos)
 
 
         # Integrate with the 4th order Runge-Kutta method
@@ -337,15 +304,6 @@ class BentDragMeteor(object):
         vel = np.array([np.interp(t + self.t_vis_beg, self.time, self.vel[:, i]) for i in range(3)])
 
         return -vel/np.sqrt(vel @ vel)
-
-
-
-class BentDragMeteorJ2(BentDragMeteor):
-    """ The fireball of BentDragMeteor, with the oblateness of the Earth (J2) in its gravity (see
-        oblatenessAcceleration).
-    """
-
-    j2 = True
 
 
 
