@@ -307,6 +307,36 @@ class BentDragMeteor(object):
 
 
 
+# Fireball of the tests, 18 km/s at 45 deg slowing down to about 10 km/s in 3.3 s
+DECELERATING_FIREBALL = (18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
+
+# Integrated meteors, shared by the tests
+BENT_DRAG_METEORS = {}
+
+
+
+def bentDragMeteor(*params, **kwargs):
+    """ Integrate a BentDragMeteor once for the given arguments, and return the same object for them
+        afterwards. The tests share it, so they must not change it.
+
+    Arguments:
+        params: [tuple] Arguments of BentDragMeteor.
+
+    Keyword arguments:
+        kwargs: [dict] Keyword arguments of BentDragMeteor.
+
+    Return:
+        [BentDragMeteor object] The integrated meteor.
+    """
+
+    key = (params, tuple(sorted(kwargs.items())))
+    if key not in BENT_DRAG_METEORS:
+        BENT_DRAG_METEORS[key] = BentDragMeteor(*params, **kwargs)
+
+    return BENT_DRAG_METEORS[key]
+
+
+
 def stationAzimAlt(eci_points, jds, lat, lon, ele):
     """ Compute the directions of points on a trajectory as seen from a station.
 

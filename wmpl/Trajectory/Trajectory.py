@@ -50,6 +50,7 @@ from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
     angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval, \
     medianStddev
+from wmpl.Utils.Math import segmentedVelocity
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
@@ -855,95 +856,6 @@ GRAVITY_FREE_FALL_GL_WEIGHTS = np.array([5.0/9, 8.0/9, 5.0/9])
 
 # Time by which the free fall table is extended at both ends (s)
 GRAVITY_FREE_FALL_EXTEND = 1000.0
-
-
-
-def segmentedVelocity(time_rel, length, time_eval, max_segments=GRAVITY_DROP_VEL_SEGMENTS, \
-    n_groups=GRAVITY_DROP_VEL_GROUPS, max_acc=GRAVITY_DROP_MAX_ACC):
-    """ Fit the velocity of a meteor to its lengths along the trajectory, without a deceleration model. The
-        velocity is piecewise linear in time, with the number of segments chosen by the Bayesian information
-        criterion, and does not increase faster than max_acc.
-
-    References:
-        Schwarz, G. (1978). Estimating the dimension of a model. The Annals of Statistics, 6(2), 461-464.
-
-    Arguments:
-        time_rel: [ndarray] Times of the points (s).
-        length: [ndarray] Lengths of the points along the trajectory (m).
-        time_eval: [ndarray] Times at which the velocity is evaluated (s). Outside the times of the points,
-            the velocity at the nearest point is used.
-
-    Keyword arguments:
-        max_segments: [int] Largest number of segments. GRAVITY_DROP_VEL_SEGMENTS by default.
-        n_groups: [int] Largest number of groups of consecutive points averaged before the fit.
-            GRAVITY_DROP_VEL_GROUPS by default.
-        max_acc: [float] Largest increase of the velocity with time (m/s^2). GRAVITY_DROP_MAX_ACC by default.
-
-    Return:
-        vel: [ndarray] Velocity at the times time_eval (m/s), None if the points have fewer than 3 distinct
-            times.
-    """
-
-    # Average the lengths at equal times, as from several stations
-    time_unique, inverse = np.unique(np.asarray(time_rel, dtype=np.float64), return_inverse=True)
-    length_unique = np.bincount(inverse, weights=np.asarray(length, dtype=np.float64))/np.bincount(inverse)
-
-    if len(time_unique) < 3:
-        return None
-
-    # Average groups of consecutive points to keep the fit small
-    if len(time_unique) > n_groups:
-        groups = np.array_split(np.arange(len(time_unique)), n_groups)
-        time_unique = np.array([np.mean(time_unique[grp]) for grp in groups])
-        length_unique = np.array([np.mean(length_unique[grp]) for grp in groups])
-
-    # Normalize the times to 0-1
-    n_points = len(time_unique)
-    time_beg, time_span = time_unique[0], time_unique[-1] - time_unique[0]
-    tau = (time_unique - time_beg)/time_span
-
-    # Fit 0 (a constant velocity) to max_segments segments of a linear velocity
-    best = None
-    for n_seg in range(max_segments + 1):
-
-        n_params = n_seg + 2
-        if n_points < n_params + 2:
-            break
-
-        # Integrate the time spent in each segment into the columns of the lengths
-        edges = np.r_[0.0, np.quantile(tau, np.arange(1, n_seg)/n_seg), 1.0]
-        columns = [np.ones(n_points), tau]
-        for edge_beg, edge_end in zip(edges[:n_seg], edges[1:n_seg + 1]):
-            in_segment = np.clip(tau - edge_beg, 0.0, edge_end - edge_beg)
-            columns.append(0.5*in_segment**2 + (edge_end - edge_beg)*np.maximum(tau - edge_end, 0.0))
-        design = np.column_stack(columns)
-
-        # Fit the lengths, with the slopes of the segments at most max_acc
-        if n_seg == 0:
-            coeffs = np.linalg.lstsq(design, length_unique, rcond=None)[0]
-
-        else:
-            upper = np.r_[np.inf, np.inf, np.full(n_seg, max_acc*time_span**2)]
-            coeffs = scipy.optimize.lsq_linear(design, length_unique, bounds=(-np.inf, upper), \
-                method='bvls').x
-
-        # Keep the fit with the lowest Bayesian information criterion
-        rss = np.sum((length_unique - design @ coeffs)**2)
-        bic = n_points*np.log(max(rss/n_points, 1e-300)) + n_params*np.log(n_points)
-
-        if (best is None) or (bic < best[0]):
-            best = (bic, n_seg, coeffs, edges)
-
-    _, n_seg, coeffs, edges = best
-
-    # Evaluate the velocity, held constant outside the times of the points
-    time_eval = np.atleast_1d(np.asarray(time_eval, dtype=np.float64))
-    tau_eval = (time_eval - time_beg)/time_span
-    vel = np.full_like(tau_eval, coeffs[1])
-    for slope, edge_beg, edge_end in zip(coeffs[2:], edges[:n_seg], edges[1:n_seg + 1]):
-        vel += slope*np.clip(tau_eval - edge_beg, 0.0, edge_end - edge_beg)
-
-    return vel/time_span
 
 
 
@@ -4735,7 +4647,8 @@ class Trajectory(object):
 
             # Fit the velocity from the beginning of the meteor to its last used point
             time_rel = np.linspace(0.0, np.max(times), GRAVITY_DROP_SCALE_POINTS)
-            vel = segmentedVelocity(times, lengths, time_rel)
+            vel = segmentedVelocity(times, lengths, time_rel, GRAVITY_DROP_VEL_SEGMENTS, \
+                GRAVITY_DROP_VEL_GROUPS, GRAVITY_DROP_MAX_ACC)
 
             # Keep the line if the lengths show no change of velocity
             if (vel is not None) and np.all(np.isfinite(vel)) and (np.ptp(vel) > 0):
@@ -4920,7 +4833,8 @@ class Trajectory(object):
 
         # Fit the velocity from the beginning of the meteor to its last used point
         time_rel = np.linspace(0.0, np.max(times), GRAVITY_DROP_SCALE_POINTS)
-        vel = segmentedVelocity(times, lengths, time_rel)
+        vel = segmentedVelocity(times, lengths, time_rel, GRAVITY_DROP_VEL_SEGMENTS, \
+            GRAVITY_DROP_VEL_GROUPS, GRAVITY_DROP_MAX_ACC)
         if (vel is None) or (not np.all(np.isfinite(vel))):
             return None
 
