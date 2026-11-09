@@ -498,22 +498,28 @@ def testWindsInTheSimulationMoveTheEndAsExpected(traj, tmp_path):
         np.dot(wind, across)*(sr.time_arr[-1] - length_air/u0), abs=1.0)
 
 
-def testMonteCarloWorkersUseTheMSISModelOfTheMainProcess(traj):
-    """ --atm selects the MSIS model in this process only. Where worker processes are spawned (macOS, Windows)
-        they start from NRLMSISE-00, so runMonteCarloDynMass() hands the model to them: the realizations give
-        the same masses on one core and on two, and not those of NRLMSISE-00. """
+def testMonteCarloWorkersUseTheMSISModelOfTheMainProcess(traj, monkeypatch):
+    """ --atm selects the MSIS model of this process. Where worker processes are spawned (macOS, Windows) they
+        import the atmosphere module afresh, so they must get the model from setAtmosphere() of the main
+        process: the realizations give the same masses on one core and on two, and not those of the default
+        NRLMSIS 2.1. """
 
     args = ([traj, traj], traj.rbeg_ele/1000, traj.rend_ele/1000, 0.5, 3500, 0.55, 73000, 50, 3.0)
     kwargs = dict(run_final_sim=False, rng_seed=1)
 
+    # setAtmosphere() changes the module of DynamicMassFit and the environment, which are restored after the
+    #   test (wmpl loads every module twice, so the module is taken from the function)
+    module = setAtmosphere.__globals__
+    for name in ('MSIS_VERSION', 'MSIS_JD', 'MSIS_SPACE_WEATHER'):
+        monkeypatch.setitem(module, name, module[name])
+    for name in ('MSIS_VERSION_ENV', 'MSIS_JD_ENV', 'MSIS_SPACE_WEATHER_ENV'):
+        monkeypatch.delenv(module[name], raising=False)
+
     with contextlib.redirect_stdout(io.StringIO()):
         default = runMonteCarloDynMass(*args, cores=1, **kwargs)['dyn_mass_geom']
-        setAtmosphere(argparse.Namespace(atm='2.1', atmtime=None))
-        try:
-            serial = runMonteCarloDynMass(*args, cores=1, **kwargs)['dyn_mass_geom']
-            parallel = runMonteCarloDynMass(*args, cores=2, **kwargs)['dyn_mass_geom']
-        finally:
-            setAtmosphere(argparse.Namespace(atm='00', atmtime=None))
+        setAtmosphere(argparse.Namespace(atm='00', atmtime=None))
+        serial = runMonteCarloDynMass(*args, cores=1, **kwargs)['dyn_mass_geom']
+        parallel = runMonteCarloDynMass(*args, cores=2, **kwargs)['dyn_mass_geom']
 
     assert parallel == pytest.approx(serial, rel=1e-12)
     assert abs(serial[0]/default[0] - 1) > 0.01
