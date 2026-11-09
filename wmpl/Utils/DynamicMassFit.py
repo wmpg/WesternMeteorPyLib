@@ -25,11 +25,11 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
-from wmpl.Utils.AtmosphereDensity import getMSISVersion, msisModelName
 from wmpl.Utils.Math import lineFunc, vectMag, rotateVector
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, jd2LST, enu2ECEF, ecef2ENU
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.AtmosphereDensity import getMSISVersion, msisModelName
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 from wmpl.Utils.DynamicMassFitExport import ejectionState, buildDynMassFitOutput, saveDynMassFitPickle
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile, PROFILE_TYPES
