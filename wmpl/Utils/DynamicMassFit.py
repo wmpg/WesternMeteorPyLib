@@ -6,77 +6,13 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
-from wmpl.Utils.Math import lineFunc, vectMag
+from wmpl.Utils.Math import lineFunc, vectMag, rotateVector
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
-from wmpl.Utils.Physics import dynamicMass
+from wmpl.Utils.Physics import dynamicMass, groundSpeed, earthRotationVelocity, EARTH_ROTATION_RATE
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
-from wmpl.Utils.Math import rotateVector
-
-
-# Rotation rate of the Earth (rad/s)
-EARTH_ROTATION_RATE = 2*np.pi/86164.09053
-
-
-def earthRotationRate(traj):
-    """ Return the rotation rate of the Earth in the ECI frame of the trajectory.
-
-    Arguments:
-        traj: [Trajectory] Solved trajectory.
-
-    Return:
-        [float] EARTH_ROTATION_RATE (rad/s), or 0 for a solution with fixed stations (a failed lines of sight
-            fit), whose ECI frame is already fixed to the ground.
-    """
-
-    if getattr(traj, 'orbit_los_success', True):
-        return EARTH_ROTATION_RATE
-
-    return 0.0
-
-
-def rotationVelocity(traj, eci_pos):
-    """ Compute the velocity of the ground at the given ECI positions.
-
-    Arguments:
-        traj: [Trajectory] Solved trajectory.
-        eci_pos: [ndarray] ECI position(s) (m), shape (3,) or (N, 3).
-
-    Return:
-        [ndarray] Velocity of the ground (m/s), from the rotation about the z axis of the ECI frame of date.
-    """
-
-    eci_pos = np.asarray(eci_pos, dtype=float)
-
-    return earthRotationRate(traj)*np.stack([-eci_pos[..., 1], eci_pos[..., 0], \
-        np.zeros_like(eci_pos[..., 0])], axis=-1)
-
-
-def groundSpeed(traj, eci_pos, vel):
-    """ Compute the speed relative to the ground of points on the trajectory, from the speeds along the fitted
-        line that the solver measures in the ECI frame.
-
-        The solver's speeds include the component of the Earth's rotation along the motion, while drag acts on
-        the speed relative to the air. Relative to the ground the body moves along the ground-fixed direction
-        of the radiant, so the speed along the line is the ground speed projected on the line plus the
-        rotation velocity projected on it.
-
-    Arguments:
-        traj: [Trajectory] Solved trajectory.
-        eci_pos: [ndarray] ECI position(s) of the point(s) (m), shape (3,) or (N, 3).
-        vel: [float or ndarray] Speed(s) along the fitted line in the ECI frame (m/s).
-
-    Return:
-        [float or ndarray] Speed(s) relative to the ground (m/s).
-    """
-
-    motion = -traj.radiant_eci_mini
-    direction_ground = traj.v_init*motion - rotationVelocity(traj, traj.state_vect_mini)
-    direction_ground /= np.sqrt(direction_ground @ direction_ground)
-
-    return (vel - rotationVelocity(traj, eci_pos) @ motion)/np.dot(direction_ground, motion)
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a):
@@ -361,13 +297,13 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
 
     # Take the ground-fixed direction of motion at the evaluation point
     direction_ground = -traj.v_init*traj.radiant_eci_mini \
-        - rotationVelocity(traj, pointOnTrajectory(traj, meas_len, meas_time))
+        - earthRotationVelocity(pointOnTrajectory(traj, meas_len, meas_time))
     direction_ground /= vectMag(direction_ground)
 
     # Move the simulated length along it with the gravity drop at the final time, and rotate the point with
     #   the ground to the final time
     final_eci = rotateVector(pointOnTrajectory(traj, meas_len, total_time) \
-        + sr.frag_main.length*direction_ground, np.array([0.0, 0.0, 1.0]), earthRotationRate(traj)*final_time)
+        + sr.frag_main.length*direction_ground, np.array([0.0, 0.0, 1.0]), EARTH_ROTATION_RATE*final_time)
 
     t_obs = np.concatenate([obs.time_data for obs in traj.observations])
 
@@ -474,14 +410,15 @@ def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1', **kwargs):
     return popt, pcov, perr
 
 
-def fitVelocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3.0):
+def fitVelocity(time_data, vel_data, p0=None, loss='soft_l1', sigma_clip=3.0):
     """ Perform a robust velocity fit and iterative outlier rejection.
         Uses robust least-squares (soft L1 loss) both before and after sigma-clipping.
 
     Arguments:
         time_data: [ndarray] Time data points.
         vel_data: [ndarray] Velocity data points.
-        p0: [tuple(float, float)] Initial parameter guess (slope, intercept).
+        p0: [tuple(float, float)] Initial parameter guess (slope, intercept). None by default, for the
+            least-squares line.
         loss: [str] Loss function for robust fitting.
         sigma_clip: [float] Outlier rejection threshold, in units of the robust (MAD) residual standard
             deviation.
@@ -494,6 +431,10 @@ def fitVelocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3
     """
 
     # Initial robust fit
+    # Start from the least-squares line, as the robust fit from a distant guess can run out of evaluations
+    if p0 is None:
+        p0 = np.polyfit(time_data, vel_data, 1)
+
     popt, pcov, perr = _robust_linear_fit(time_data, vel_data, p0=p0, loss=loss)
 
     yhat = lineFunc(np.asarray(time_data, dtype=float), *popt)
@@ -703,10 +644,9 @@ if __name__ == "__main__":
     ax2.scatter(vel_data/1000, time_data, s=5, label="Measurements")
     
 
-    # Fit a line to the velocity data in the range, starting from the least-squares line
+    # Fit a line to the velocity data in the range
     popt_final, pcov_final, perr_final, vel_filter = fitVelocity(
-        time_data, vel_data, p0=np.polyfit(time_data, vel_data, 1), loss='soft_l1', \
-        sigma_clip=cml_args.sigma_clip
+        time_data, vel_data, loss='soft_l1', sigma_clip=cml_args.sigma_clip
     )
 
     vel_fit = popt_final

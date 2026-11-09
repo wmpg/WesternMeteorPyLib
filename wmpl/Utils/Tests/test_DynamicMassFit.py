@@ -16,7 +16,6 @@ Run under pytest, or directly:
 import io
 import os
 import contextlib
-import copy
 
 import numpy as np
 import pytest
@@ -26,10 +25,11 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo, jd2LST, latLonAlt2ECEF, ecef2ENU
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
-from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim
+from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
+    computeFragEndParams, interpolateHtVsTimeLen
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, atmDensPoly, getAtmDensity
 from wmpl.Utils.Math import lineFunc
-from wmpl.Utils.DynamicMassFit import groundSpeed, computeFragEndParams, interpolateHtVsTimeLen
+from wmpl.Utils.Physics import groundSpeed, earthRotationVelocity
 
 
 # A solved trajectory shipped with the repository (2019-10-23, four stations, gravity correction on)
@@ -155,8 +155,9 @@ def testPointOnTrajectoryStartsAtTheStateVectorAndDropsPerpendicularly(traj):
 ### Speeds relative to the ground ###
 
 def testGroundSpeedRemovesTheEarthRotationFromTheSolverSpeeds(traj):
-    """ The solver's point speeds are measured in the ECI frame. The speeds of its model points in a frame fixed
-        to the ground, by finite differences after rotating them with the Earth, are the ground speeds. """
+    """ The solver's point speeds are measured in the ECI frame. The speeds of its model points in a frame
+        fixed to the ground, by finite differences after rotating them with the Earth, are the ground speeds.
+    """
 
     for obs in traj.observations:
         t = obs.time_data
@@ -172,16 +173,23 @@ def testGroundSpeedRemovesTheEarthRotationFromTheSolverSpeeds(traj):
         assert np.max(np.abs(v_eci - v_ground)) > 40, "the rotation is a sizeable part of the speed"
 
 
-def testGroundSpeedKeepsTheSpeedsOfFixedStations(traj):
-    """ A solution with fixed stations (a failed lines of sight fit) is already relative to the ground. """
+def testGroundSpeedOfADeceleratingBody(traj):
+    """ A body moving relative to the ground along the ground-fixed direction of the radiant, at a speed well
+        below the initial one, is measured by the solver at its inertial speed projected on the fitted line.
+        groundSpeed() recovers the ground speed from it.
+    """
 
-    traj_fixed = copy.copy(traj)
-    traj_fixed.orbit_los_success = False
+    motion = -traj.radiant_eci_mini
+    direction_ground = traj.v_init*motion - earthRotationVelocity(traj.state_vect_mini)
+    direction_ground /= np.linalg.norm(direction_ground)
 
-    obs = traj.observations[0]
-    vel = np.asarray(obs.velocities[1:])
+    eci = np.array([pointOnTrajectory(traj, length, 0.0) for length in [0.0, 20000.0, 40000.0]])
+    v_ground = np.array([0.9, 0.6, 0.3])*traj.v_init
 
-    assert np.array_equal(groundSpeed(traj_fixed, obs.model_eci[1:], vel), vel)
+    # Speed along the fitted line of the inertial velocity
+    vel = np.dot(v_ground[:, None]*direction_ground + earthRotationVelocity(eci), motion)
+
+    assert groundSpeed(traj, eci, vel) == pytest.approx(v_ground, rel=1e-12)
 
 
 def _ecef(lat, lon, ele_msl):
@@ -205,13 +213,15 @@ def testEndOfAblationMovesWithTheGround(traj):
     ht_vs_time_interp, _ = interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False)
     meas_time = ht_vs_time_interp(height)
     meas_len = scipy.optimize.brentq(lambda l: cartesian2Geo(traj.jdt_ref + meas_time/86400, \
-        *pointOnTrajectory(traj, l, meas_time))[2] - height, 0, np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
+        *pointOnTrajectory(traj, l, meas_time))[2] - height, 0, \
+        np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
     eval_eci = pointOnTrajectory(traj, meas_len, meas_time)
     eval_jd = traj.jdt_ref + meas_time/86400
     eval_lat, eval_lon, _ = cartesian2Geo(eval_jd, *eval_eci)
 
     # The ground-fixed direction of motion at the evaluation point
-    azim, elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, eval_eci, eval_jd, eval_lat, eval_lon)
+    azim, elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, eval_eci, eval_jd, eval_lat, \
+        eval_lon)
     motion = -np.array([np.sin(azim)*np.cos(elev), np.cos(azim)*np.cos(elev), np.sin(elev)])
     across = np.array([np.cos(azim), -np.sin(azim), 0.0])
 
