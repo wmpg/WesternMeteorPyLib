@@ -54,8 +54,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
-from wmpl.Trajectory.Trajectory import dropTimeOrigin
-from wmpl.Trajectory.Trajectory import applyGravityDrop
+from wmpl.Trajectory.Trajectory import applyGravityDrop, dropTimeOrigin
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.Physics import ballisticCoeffMass
@@ -601,6 +600,8 @@ class DragFit(object):
         # Take the time of the first point and the largest distance from the centre of the Earth of the first
         #   points of the used stations as the reference, as the trajectory solver does
         t0 = dropTimeOrigin(traj.observations)
+
+        # Take all stations if none is used
         used = [obs for obs in traj.observations if not obs.ignore_station] or traj.observations
         r0 = max([vectMag(findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], self.state_vect, \
             self.radiant_eci)[1]) for obs in used])

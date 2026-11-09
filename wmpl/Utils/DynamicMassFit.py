@@ -12,8 +12,7 @@ from wmpl.Utils.Physics import dynamicMass, groundSpeed, earthRotationVelocity, 
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
-from wmpl.Trajectory.Trajectory import dropTimeOrigin
-from wmpl.Trajectory.Trajectory import applyGravityDrop
+from wmpl.Trajectory.Trajectory import applyGravityDrop, dropTimeOrigin
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a):
