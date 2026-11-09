@@ -34,7 +34,7 @@ from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, lumin
 # Earth acceleration in m/s^2 on the surface
 G0 = 9.81
 
-# Rotation rate of the Earth (rad/s), over one sidereal day
+# Rotation rate of the Earth (rad/s)
 EARTH_ROTATION_RATE = 2*math.pi/86164.09053
 
 ###
@@ -149,29 +149,17 @@ class Constants(object):
         # Zenith angle (radians)
         self.zenith_angle = math.radians(45)
 
-        # Optional winds: an object whose wind(height) method gives the east and north wind velocity (m/s) at a
-        #   height (m), such as wmpl.Utils.AtmosphereProfile.AtmosphereProfile. With winds, drag, ablation and
-        #   light use the velocity relative to the air at each height, and the fragments move in 3D. The motion
-        #   is followed in the east-north-up frame of the starting point, which turns by less than 1 deg over
-        #   100 km of path, and the wind is horizontal. Gravity is handled as without winds, as a negligible drop in
-        #   height, unless gravity_3d is set. None, the default, runs without winds, with results identical to before
-        #   winds were added
+        # Winds, an object whose wind(height) method gives the east and north wind (m/s) at a height (m)
+        #   which moves the fragments in 3D, with their speeds relative to the air (None for no winds)
         self.wind_profile = None
 
-        # Azimuth of the radiant (radians, +E of due N), used only in 3D (with winds or gravity_3d) to know how the
-        #   wind blows relative to the motion and to orient the path
-        self.radiant_azimuth = 0.0
+        # Azimuth of the radiant (radians, +E of due N), needed for the motion in 3D
+        self.radiant_azimuth = None
 
-        # Follow the fragments in 3D with gravity, towards the Earth's centre, in their velocity, instead of the
-        #   default straight path with a negligible drop in height. Gravity then turns the fragments downwards and
-        #   accelerates them along their path, together with the drag and the winds, which matters for long, slow
-        #   and shallow paths. Off by default, since the default path is the one the fits are made with. The motion
-        #   is followed in the east-north-up frame of the start, which is fixed to the ground, so with a latitude
-        #   it also includes the Coriolis acceleration of the Earth's rotation
+        # Move the fragments in 3D with gravity in their velocity, instead of the drop in height
         self.gravity_3d = False
 
-        # Geodetic latitude of the start (radians), used only with gravity_3d to add the Coriolis acceleration,
-        #   -2*omega x v. It turns the path by up to 2*omega, 0.008 deg/s. None, the default, leaves it out
+        # Geodetic latitude of the start (radians), used only with gravity_3d for the Coriolis acceleration
         self.latitude = None
 
         # Drag coefficient
@@ -434,18 +422,22 @@ class Fragment(object):
         self.vv = -v_init*math.cos(zenith_angle)
         self.vh = v_init*math.sin(zenith_angle)
 
-        # In 3D (with winds or gravity_3d), v_init is the speed relative to the ground and the fragment's speed is
-        #   the one relative to the air. The fragment then also carries its velocity (east, north, up) relative to
-        #   the ground (m/s) and its position (east, north, up) from the start of the simulation (m), in the local
-        #   frame of the start. They are scalars, so spawn_child() copies them to the grains and fragments it
-        #   creates, and they only exist in 3D, so runs in 2D copy no more state than before
-        if (const.wind_profile is not None) or const.gravity_3d:
+        # In 3D, the position (m) and the velocity relative to the ground (m/s), east, north and up in the
+        #   frame of the start
+        wind_profile = getattr(const, 'wind_profile', None)
+        if (wind_profile is not None) or getattr(const, 'gravity_3d', False):
+
+            if getattr(const, 'radiant_azimuth', None) is None:
+                raise ValueError("Constants.radiant_azimuth must be set for the motion in 3D")
+
             self.px = self.py = self.pz = 0.0
             self.vx = -self.vh*math.sin(const.radiant_azimuth)
             self.vy = -self.vh*math.cos(const.radiant_azimuth)
             self.vz = self.vv
-            if const.wind_profile is not None:
-                wind_e, wind_n = const.wind_profile.wind(self.h)
+
+            # Take the speed relative to the air
+            if wind_profile is not None:
+                wind_e, wind_n = windAt(wind_profile, self.h)
                 self.v = math.sqrt((self.vx - wind_e)**2 + (self.vy - wind_n)**2 + self.vz**2)
 
         self.active = True
@@ -535,6 +527,27 @@ def zenithAngleAtSimulationBegin(h0_sim, hb, zc, r_earth):
     beta = np.arcsin((hb + r_earth)/(h0_sim + r_earth)*np.sin(zc))
 
     return beta
+
+
+def windAt(wind_profile, height):
+    """ Return the wind at the given height, checking that it is finite.
+
+    Arguments:
+        wind_profile: [object] Object whose wind(height) method gives the east and north wind (m/s).
+        height: [float] Height (m).
+
+    Return:
+        (wind_e, wind_n): [tuple of floats] East and north wind (m/s).
+    """
+
+    wind_e, wind_n = wind_profile.wind(height)
+    wind_e, wind_n = float(wind_e), float(wind_n)
+
+    if not (math.isfinite(wind_e) and math.isfinite(wind_n)):
+        raise ValueError("The wind profile gives no finite wind at the height of {:.1f} m".format(height))
+
+    return wind_e, wind_n
+
 
 
 def heightCurvature(h0, zc, l, r_earth):
@@ -1092,25 +1105,27 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
     #   post-loop scan of the whole fragment list
     mass_total_active = 0.0
 
-    # Checked once per call, since the per-fragment loop below is the hot path
-    winds = const.wind_profile is not None
-    gravity_3d = const.gravity_3d
-    motion_3d = winds or gravity_3d
-    wind_e = wind_n = 0.0
-    backward = const.dt < 0
-    freeze_mass = const.freeze_mass
-    body_erosion = backward and const.erosion_on
-
-    # Twice the Earth's rotation vector (north and up components) in the frame of the start, for the Coriolis
-    #   acceleration
-    coriolis_n = coriolis_u = 0.0
-    if gravity_3d and (const.latitude is not None):
-        coriolis_n = 2*EARTH_ROTATION_RATE*math.cos(const.latitude)
-        coriolis_u = 2*EARTH_ROTATION_RATE*math.sin(const.latitude)
-
     # Take the atmosphere density table once, not for every fragment
     if atm_table is None:
         atm_table = atmDensityTableCy(const)
+
+    # Check once per call whether the fragments move in 3D
+    wind_profile = getattr(const, 'wind_profile', None)
+    winds = wind_profile is not None
+    gravity_3d = getattr(const, 'gravity_3d', False)
+    latitude = getattr(const, 'latitude', None)
+    motion_3d = winds or gravity_3d
+    wind_e = wind_n = 0.0
+    backward = const.dt < 0
+    freeze_mass = getattr(const, 'freeze_mass', False)
+    t_kill = getattr(const, 't_kill', -1)
+    body_erosion = backward and const.erosion_on
+
+    # Twice the Earth's rotation vector (north and up) in the frame of the start, for the Coriolis term
+    coriolis_n = coriolis_u = 0.0
+    if gravity_3d and (latitude is not None):
+        coriolis_n = 2*EARTH_ROTATION_RATE*math.cos(latitude)
+        coriolis_u = 2*EARTH_ROTATION_RATE*math.sin(latitude)
 
     # Go through all active fragments
     for frag in fragments:
@@ -1119,9 +1134,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
         if not frag.active:
             continue
 
-        # With winds, drag, ablation and light depend on the speed relative to the air at the current height
+        # Take the speed relative to the air, with the wind at the current height in the frame of the start
         if winds:
-            wind_e, wind_n = const.wind_profile.wind(frag.h)
+            wind_e, wind_n = windAt(wind_profile, frag.h)
             frag.v = math.sqrt((frag.vx - wind_e)**2 + (frag.vy - wind_n)**2 + frag.vz**2)
 
         # Going back, the body's erosion follows its height
@@ -1163,24 +1178,23 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
         # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
         if deceleration_total > 0:
             frag.vv = frag.vh = frag.v = 0
-            if motion_3d:
-                frag.vx = frag.vy = frag.vz = 0
             deceleration_total = 0
 
-        # In 3D, drag slows the velocity relative to the air along its own direction, and the fragment keeps the
-        #   velocity of the air around it
+            # In 3D, stop the fragment relative to the air
+            if motion_3d:
+                frag.vx, frag.vy, frag.vz = wind_e, wind_n, 0.0
+
+        # In 3D, slow down the velocity relative to the air, which the fragment moves with
         elif motion_3d:
 
-            # A step that would take away more than the whole speed stops the fragment relative to the air
-            #   instead of reversing it, as the vv > 0 check below does in 2D
+            # Stop the fragment relative to the air instead of reversing it
             scale = max(0.0, 1 + deceleration_total*const.dt/frag.v)
             frag.vx = wind_e + (frag.vx - wind_e)*scale
             frag.vy = wind_n + (frag.vy - wind_n)*scale
             frag.vz *= scale
             frag.v *= scale
 
-            # Gravity towards the Earth's centre, which is at (0, 0, -(r_earth + h_init)) in the frame of the start,
-            #   and the Coriolis acceleration -2*omega x v, with omega = (0, cos(lat), sin(lat))*rate
+            # Add gravity towards the Earth's centre at (0, 0, -(r_earth + h_init)), and the Coriolis term
             if gravity_3d:
                 r_up = const.r_earth + const.h_init + frag.pz
                 r = math.sqrt(frag.px**2 + frag.py**2 + r_up**2)
@@ -1191,7 +1205,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
                 frag.vz -= (g_dt*r_up - coriolis_n*vx*const.dt)
                 frag.v = math.sqrt((frag.vx - wind_e)**2 + (frag.vy - wind_n)**2 + frag.vz**2)
 
-            # Otherwise the same negligible gravity drop as in 2D
+            # Otherwise use the gravity drop in height
             else:
                 frag.h_grav_drop_total += 0.5*G0/((1 + frag.h/const.r_earth)**2)*const.dt**2
 
@@ -1253,8 +1267,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
             frag.length += frag.v*const.dt
             frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
 
-        # In 3D, move the fragment, measure the length along its path over the ground, and take the height of its
-        #   position over a spherical Earth
+        # In 3D, move the fragment and take its height over a spherical Earth
         else:
             frag.px += frag.vx*const.dt
             frag.py += frag.vy*const.dt
@@ -1339,7 +1352,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
             or ((frag.h > const.h_kill) if backward else (frag.h < const.h_kill))
             or (frag.lum < 0)
             or ((const.len_kill > 0) and (frag.length > const.len_kill))
-            or ((const.t_kill > 0) and (abs(const.total_time + const.dt) >= const.t_kill))
+            or ((t_kill > 0) and (abs(const.total_time + const.dt) >= t_kill))
             ):
 
             killFragment(const, frag)
