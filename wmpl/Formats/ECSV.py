@@ -10,13 +10,12 @@ import itertools
 
 import numpy as np
 
-from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
-    prepareObservations, writeMiligInputFileMeteorObservation
+from wmpl.Formats.GenericFunctions import addKMLOptions, addSolverOptions, solveTrajectoryGeneric, \
+    MeteorObservation, prepareObservations, writeMiligInputFileMeteorObservation
 from wmpl.Trajectory.StationSystematics import stationSystematicErrors, systematicErrorSize
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenSphericalCoords
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
-    equatorialCoordPrecession_vect, jd2Date
+from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
 
 
 
@@ -52,7 +51,7 @@ def ecsvFragments(ecsv_paths):
 
 
 
-def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
+def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True, fragment=0):
     """ Load meteor observations from ECSV files. 
     
     Arguments:
@@ -60,6 +59,10 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
 
     Keyword arguments:
         no_prepare: [bool] If True, only load the observations, do not prepare them for the solver.
+        radec_per_point: [bool] Have the solver convert each point's R.A./Dec. back to azimuth/altitude at
+            that point's own time, at which they were computed from the file. True by default. False is
+            incorrect and only for reproducing solutions from before this option existed: it converts them
+            all at the reference time, which rotates each line of sight by the Earth's rotation since then.
         fragment: [int] Fragment to load. 0 (default) is the main fragment, without the points flagged as not
             to be used in its trajectory (trajectory_use = False). An additional fragment k is read from the
             columns with the suffix k (e.g. azimuth1), as in Appendix 4 of the GFE standard, which makes the
@@ -206,8 +209,8 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
             ra_data, dec_data = altAz2RADec_vect(np.radians(azim_data), np.radians(alt_data), jd_data, \
                 np.radians(station_lat), np.radians(station_lon))
 
-            # Precess to J2000
-            ra_data, dec_data = equatorialCoordPrecession_vect(jdt_ref, J2000_JD.days, ra_data, dec_data)
+            # Precess and nutate from the epoch of date to J2000
+            ra_data, dec_data = equatorialCoordDateToJ2000_vect(jdt_ref, ra_data, dec_data)
 
             comment = '{"ff_name":' + f'"{image_file}"' +'}'
 
@@ -215,6 +218,9 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0):
             # Init the meteor object
             meteor = MeteorObservation(jdt_ref, station_id, np.radians(station_lat), \
                 np.radians(station_lon), station_ele, FPS, ff_name=comment)
+
+            # The R.A./Dec. above were computed at each point's own time
+            meteor.radec_per_point = radec_per_point
 
             # Add data to meteor object
             for t_rel, x_centroid, y_centroid, ra, dec, azim, alt, mag in zip(time_data, x_data, y_data, \
@@ -1179,7 +1185,7 @@ def saveECSV(dir_path, meteor_observations,
 
 
             # Precess RA/Dec to J2000
-            ra_J2000, dec_J2000 = equatorialCoordPrecession_vect(meteor.jdt_ref, J2000_JD.days, ra, dec)
+            ra_J2000, dec_J2000 = equatorialCoordDateToJ2000_vect(meteor.jdt_ref, ra, dec)
 
 
             # Add an entry to the ECSV file
@@ -1220,6 +1226,7 @@ if __name__ == "__main__":
 
     # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
+    arg_parser = addKMLOptions(arg_parser)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
         help="Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.", \
@@ -1249,6 +1256,10 @@ if __name__ == "__main__":
         help="With --fragments, estimate the time offsets of the stations for every fragment instead of " \
             "taking the ones of the main trajectory, which are better constrained by its larger number of " \
             "points.", \
+        action="store_true")
+
+    arg_parser.add_argument('--radec_at_ref', \
+        help="Legacy and incorrect, only to reproduce older solutions. Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed, which rotates each line of sight by the Earth's rotation since the reference time.", \
         action="store_true")
 
     # Parse the command line arguments
@@ -1309,7 +1320,7 @@ if __name__ == "__main__":
 
 
     # Load the observations into container objects
-    jdt_ref, meteor_list = loadECSVs(ecsv_paths)
+    jdt_ref, meteor_list = loadECSVs(ecsv_paths, radec_per_point=not cml_args.radec_at_ref)
 
 
     # Write the observations to a MILIG input file and exit
@@ -1351,7 +1362,9 @@ if __name__ == "__main__":
         show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
         show_jacchia=cml_args.jacchia,
         estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-        fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, enable_OSM_plot=cml_args.enableOSM)
+        fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, \
+        enable_OSM_plot=cml_args.enableOSM, save_kml=(cml_args.kml or cml_args.kmlmeas), \
+        kml_measured=cml_args.kmlmeas)
 
     # Solve the trajectory
     traj = solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver=cml_args.solver, **solver_kwargs)
