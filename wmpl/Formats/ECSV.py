@@ -418,6 +418,30 @@ def originalPicksTrajectory(traj):
 
 
 
+def monteCarloRuns(traj):
+    """ Load the trajectories of the Monte Carlo runs of a solved trajectory, from the uncertainties saved
+        with its results.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory, the solution with the original picks or the best of the
+            Monte Carlo runs.
+
+    Return:
+        [list] Trajectory objects of the runs, empty if it was solved without them or if its results were not
+            saved.
+    """
+
+    if (traj.uncertainties is None) or (not traj.save_results):
+        return []
+
+    mc_path = os.path.join(traj.output_dir, 'Monte Carlo', traj.file_name + '_mc_uncertainties.pickle')
+    if not os.path.isfile(mc_path):
+        return []
+
+    return list(getattr(loadPickle(*os.path.split(mc_path)), 'mc_traj_list', []))
+
+
+
 def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=True, systematics=True, \
     **kwargs):
     """ Solve the trajectories of the additional fragments described in ECSV files (see ecsvFragments()),
@@ -629,7 +653,7 @@ def trajectoryModelPoints(traj):
 
 
 
-def offMainPath(traj, frag_traj):
+def offMainPath(traj, frag_traj, vectors=False):
     """ Compute how far the first and the last point of a fragment are from the main path, each one from the
         point of the main path as far along it.
 
@@ -637,8 +661,12 @@ def offMainPath(traj, frag_traj):
         traj: [Trajectory object] Solved trajectory of the main fragment.
         frag_traj: [Trajectory object] Solved trajectory of the fragment.
 
+    Keyword arguments:
+        vectors: [bool] Return the offsets from the main path as ECI vectors (m) instead of their lengths.
+            False by default.
+
     Return:
-        (off_first, off_last): [tuple of floats] The distances (m).
+        (off_first, off_last): [tuple] The distances (m), or the offsets if vectors is True.
     """
 
     def interpolate(x, xp, fp):
@@ -659,8 +687,8 @@ def offMainPath(traj, frag_traj):
     main_along = np.dot(main_eci - traj.state_vect_mini, direction)
     along_order = np.argsort(main_along)
 
-    def crossDistance(point):
-        """ Compute the distance (m) of a point from the main path, as far along it as the point. """
+    def crossOffset(point):
+        """ Compute the offset (m) of a point across the main path, from its point as far along. """
 
         along = np.dot(point - traj.state_vect_mini, direction)
 
@@ -669,12 +697,85 @@ def offMainPath(traj, frag_traj):
             for i in range(3)])
         diff = point - main_point
 
-        return vectMag(diff - np.dot(diff, direction)*direction)
+        return diff - np.dot(diff, direction)*direction
 
 
     _, frag_eci = trajectoryModelPoints(frag_traj)
+    off_first, off_last = crossOffset(frag_eci[0]), crossOffset(frag_eci[-1])
 
-    return crossDistance(frag_eci[0]), crossDistance(frag_eci[-1])
+    if vectors:
+        return off_first, off_last
+
+    return vectMag(off_first), vectMag(off_last)
+
+
+
+# Least number of Monte Carlo runs of each trajectory to give the distance off the main path in sigma
+FRAGMENT_MIN_MC_RUNS = 10
+
+# Distance off the main path in sigma within which a fragment further than FRAGMENT_OFF_PATH_LIMIT is only
+#   noted as poorly constrained
+FRAGMENT_OFF_PATH_SIGMA = 3.0
+
+
+
+def offMainPathSigma(traj, frag_traj, main_runs, frag_runs):
+    """ Compute how far the first and the last point of a fragment are from the main path in units of the
+        uncertainty of both paths there. It is the Mahalanobis distance across the main path, with the
+        scatter of the lines of the Monte Carlo runs of both trajectories where they cross it.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory of the main fragment.
+        frag_traj: [Trajectory object] Solved trajectory of the fragment.
+        main_runs: [list] Trajectories of the Monte Carlo runs of the main fragment (see monteCarloRuns()).
+        frag_runs: [list] Trajectories of the Monte Carlo runs of the fragment.
+
+    Return:
+        (sigma_first, sigma_last): [tuple] The distances in units of the uncertainty, None with fewer than
+            FRAGMENT_MIN_MC_RUNS runs of either trajectory or without any scatter.
+    """
+
+    if min(len(main_runs), len(frag_runs)) < FRAGMENT_MIN_MC_RUNS:
+        return None, None
+
+    # Two directions across the main path
+    direction = -vectNorm(traj.radiant_eci_mini)
+    across_1 = vectNorm(np.cross(direction, np.eye(3)[np.argmin(np.abs(direction))]))
+    across = np.array([across_1, np.cross(direction, across_1)])
+
+    def crossings(runs, point):
+        """ Compute where the lines of Monte Carlo runs cross the plane across the main path through a point,
+            as offsets from the point in that plane (m).
+        """
+
+        state_vects = np.array([run.state_vect_mini for run in runs])
+        run_dirs = -np.array([vectNorm(run.radiant_eci_mini) for run in runs])
+
+        # Move along every line to the plane
+        with np.errstate(divide='ignore', invalid='ignore'):
+            dist = np.dot(point - state_vects, direction)/np.dot(run_dirs, direction)
+
+        return np.dot(state_vects + dist[:, np.newaxis]*run_dirs - point, across.T)
+
+
+    _, frag_eci = trajectoryModelPoints(frag_traj)
+    offsets = offMainPath(traj, frag_traj, vectors=True)
+
+    sigmas = []
+    for point, offset in zip((frag_eci[0], frag_eci[-1]), offsets):
+
+        # The runs of the two trajectories are independent, so their scatters add up
+        cov = np.cov(crossings(main_runs, point).T) + np.cov(crossings(frag_runs, point).T)
+
+        # Without any scatter, or with a run parallel to the plane, which never crosses it
+        if not (np.linalg.det(cov) > 0):
+            sigmas.append(None)
+            continue
+
+        offset = np.dot(across, offset)
+        sigmas.append(np.sqrt(np.dot(offset, np.linalg.solve(cov, offset))))
+
+    return sigmas[0], sigmas[1]
 
 
 
@@ -826,6 +927,9 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
     main_along = np.dot(main_eci - traj.state_vect_mini, direction)
     main_motion = localMotionFit((main_jd - main_jd[0])*86400, main_along)
 
+    # Monte Carlo runs of the main fragment, for the distance off its path in sigma
+    main_runs = monteCarloRuns(traj)
+
 
     def stationsPoints(t):
         """ Format the number of stations and points of a trajectory. """
@@ -899,11 +1003,23 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
         ahead_poly = np.polyfit(frag_t, ahead, min(2, len(frag_t) - 1))
 
         off_first, off_last = offMainPath(traj, frag_traj)
-        out_str += "  Off the main path     : {:.0f} m at the fragment's first point, {:.0f} m at its " \
-            "last\n".format(off_first, off_last)
 
-        # Warn about a fragment too far from the main path to have come from the main fragment
-        if max(off_first, off_last) > FRAGMENT_OFF_PATH_LIMIT:
+        # The distances in units of the uncertainty of both paths, with their Monte Carlo runs
+        sigmas = offMainPathSigma(traj, frag_traj, main_runs, monteCarloRuns(frag_traj))
+        off_sigmas = ["" if sigma is None else " ({:.1f} sigma)".format(sigma) for sigma in sigmas]
+        out_str += "  Off the main path     : {:.0f} m at the fragment's first point{:s}, {:.0f} m at its " \
+            "last{:s}\n".format(off_first, off_sigmas[0], off_last, off_sigmas[1])
+
+        # Warn about a fragment too far from the main path to have come from the main fragment, unless it is
+        #   within the uncertainty of both paths
+        known = [sigma for sigma in sigmas if sigma is not None]
+        if (max(off_first, off_last) > FRAGMENT_OFF_PATH_LIMIT) and known \
+            and (max(known) <= FRAGMENT_OFF_PATH_SIGMA):
+            out_str += "  NOTE: more than {:.1f} km off the main path, but within {:.0f} sigma: its " \
+                "trajectory is poorly constrained\n".format(FRAGMENT_OFF_PATH_LIMIT/1000, \
+                FRAGMENT_OFF_PATH_SIGMA)
+
+        elif max(off_first, off_last) > FRAGMENT_OFF_PATH_LIMIT:
             out_str += "  NOTE: more than {:.1f} km off the main path, where no fragment of the main one " \
                 "was in simulated\n        fireballs: another body, different fragments measured by the " \
                 "stations, or a poorly\n        constrained trajectory?\n" \

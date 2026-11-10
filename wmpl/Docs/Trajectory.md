@@ -77,6 +77,14 @@ under the same number, or its trajectory may be poorly constrained: with station
 14 % of the fragments of the main went further. Two stations measuring different fragments mostly give a line
 close to the main path anyway, and often no trajectory at all.
 
+With the Monte Carlo runs, the distance off the main path is also given in units of the uncertainty of both
+paths there, from the scatter of their runs across it (the Mahalanobis distance), and a fragment more than
+1.5 km off but within 3 sigma is noted as poorly constrained instead. On 24 fireballs simulated with MetSim
+per case, solved after merging master, this kept 99 % of the fragments of another body 2 km away noted, and
+cut the fragments of the main noted from 6 to 2 % with stations converging by 20 deg, and from 27 to 8 % by
+8 deg. A fragment of the main is often more than 3 sigma off, as it truly separates from it by up to 600 m,
+and the runs are slightly optimistic: 80 % of the errors were within their 95 % region.
+
 With the time offsets of the main trajectory, the comparison also gives how far apart along the path of the
 fragment every two of its stations see it at the same times, from their points on its line, as a constant
 difference in a joint fit of their positions in time, and notes more than 1 km. Two stations measuring
