@@ -12,16 +12,16 @@ import itertools
 import numpy as np
 import scipy.optimize
 
-from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
-    prepareObservations, writeMiligInputFileMeteorObservation
+from wmpl.Formats.GenericFunctions import addKMLOptions, addSolverOptions, solveTrajectoryGeneric, \
+    MeteorObservation, prepareObservations, writeMiligInputFileMeteorObservation
 from wmpl.Trajectory.StationSystematics import stationSystematicErrors, systematicErrorSize
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenSphericalCoords
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Trajectory.Trajectory import ObservedPoints
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
-    equatorialCoordPrecession_vect, jd2Date
+from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
+from wmpl.Utils.TrajConversions import equatorialCoordJ2000ToDate_vect
 
 
 
@@ -57,7 +57,7 @@ def ecsvFragments(ecsv_paths):
 
 
 
-def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
+def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True, fragment=0, flares=False):
     """ Load meteor observations from ECSV files. 
     
     Arguments:
@@ -65,6 +65,10 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
 
     Keyword arguments:
         no_prepare: [bool] If True, only load the observations, do not prepare them for the solver.
+        radec_per_point: [bool] Have the solver convert each point's R.A./Dec. back to azimuth/altitude at
+            that point's own time, at which they were computed from the file. True by default. False is
+            incorrect and only for reproducing solutions from before this option existed: it converts them
+            all at the reference time, which rotates each line of sight by the Earth's rotation since then.
         fragment: [int] Fragment to load. 0 (default) is the main fragment, without the points flagged as not
             to be used in its trajectory (trajectory_use = False). An additional fragment k is read from the
             columns with the suffix k (e.g. azimuth1), as in Appendix 4 of the GFE standard, which makes the
@@ -234,8 +238,8 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
             ra_data, dec_data = altAz2RADec_vect(np.radians(azim_data), np.radians(alt_data), jd_data, \
                 np.radians(station_lat), np.radians(station_lon))
 
-            # Precess to J2000
-            ra_data, dec_data = equatorialCoordPrecession_vect(jdt_ref, J2000_JD.days, ra_data, dec_data)
+            # Precess and nutate from the epoch of date to J2000
+            ra_data, dec_data = equatorialCoordDateToJ2000_vect(jdt_ref, ra_data, dec_data)
 
             comment = '{"ff_name":' + f'"{image_file}"' +'}'
 
@@ -243,6 +247,9 @@ def loadECSVs(ecsv_paths, no_prepare=False, fragment=0, flares=False):
             # Init the meteor object
             meteor = MeteorObservation(jdt_ref, station_id, np.radians(station_lat), \
                 np.radians(station_lon), station_ele, FPS, ff_name=comment)
+
+            # The R.A./Dec. above were computed at each point's own time
+            meteor.radec_per_point = radec_per_point
 
             # Add data to meteor object
             for t_rel, x_centroid, y_centroid, ra, dec, azim, alt, mag in zip(time_data, x_data, y_data, \
@@ -460,6 +467,30 @@ def originalPicksTrajectory(traj):
 
 
 
+def monteCarloRuns(traj):
+    """ Load the trajectories of the Monte Carlo runs of a solved trajectory, from the uncertainties saved
+        with its results.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory, the solution with the original picks or the best of the
+            Monte Carlo runs.
+
+    Return:
+        [list] Trajectory objects of the runs, empty if it was solved without them or if its results were not
+            saved.
+    """
+
+    if (traj.uncertainties is None) or (not traj.save_results):
+        return []
+
+    mc_path = os.path.join(traj.output_dir, 'Monte Carlo', traj.file_name + '_mc_uncertainties.pickle')
+    if not os.path.isfile(mc_path):
+        return []
+
+    return list(getattr(loadPickle(*os.path.split(mc_path)), 'mc_traj_list', []))
+
+
+
 def solveFragmentTrajectories(traj, ecsv_paths, solver='original', reuse_timing=True, systematics=True, \
     **kwargs):
     """ Solve the trajectories of the additional fragments described in ECSV files (see ecsvFragments()),
@@ -671,7 +702,7 @@ def trajectoryModelPoints(traj):
 
 
 
-def offMainPath(traj, frag_traj):
+def offMainPath(traj, frag_traj, vectors=False):
     """ Compute how far the first and the last point of a fragment are from the main path, each one from the
         point of the main path as far along it.
 
@@ -679,8 +710,12 @@ def offMainPath(traj, frag_traj):
         traj: [Trajectory object] Solved trajectory of the main fragment.
         frag_traj: [Trajectory object] Solved trajectory of the fragment.
 
+    Keyword arguments:
+        vectors: [bool] Return the offsets from the main path as ECI vectors (m) instead of their lengths.
+            False by default.
+
     Return:
-        (off_first, off_last): [tuple of floats] The distances (m).
+        (off_first, off_last): [tuple] The distances (m), or the offsets if vectors is True.
     """
 
     def interpolate(x, xp, fp):
@@ -701,8 +736,8 @@ def offMainPath(traj, frag_traj):
     main_along = np.dot(main_eci - traj.state_vect_mini, direction)
     along_order = np.argsort(main_along)
 
-    def crossDistance(point):
-        """ Compute the distance (m) of a point from the main path, as far along it as the point. """
+    def crossOffset(point):
+        """ Compute the offset (m) of a point across the main path, from its point as far along. """
 
         along = np.dot(point - traj.state_vect_mini, direction)
 
@@ -711,12 +746,85 @@ def offMainPath(traj, frag_traj):
             for i in range(3)])
         diff = point - main_point
 
-        return vectMag(diff - np.dot(diff, direction)*direction)
+        return diff - np.dot(diff, direction)*direction
 
 
     _, frag_eci = trajectoryModelPoints(frag_traj)
+    off_first, off_last = crossOffset(frag_eci[0]), crossOffset(frag_eci[-1])
 
-    return crossDistance(frag_eci[0]), crossDistance(frag_eci[-1])
+    if vectors:
+        return off_first, off_last
+
+    return vectMag(off_first), vectMag(off_last)
+
+
+
+# Least number of Monte Carlo runs of each trajectory to give the distance off the main path in sigma
+FRAGMENT_MIN_MC_RUNS = 10
+
+# Distance off the main path in sigma within which a fragment further than FRAGMENT_OFF_PATH_LIMIT is only
+#   noted as poorly constrained
+FRAGMENT_OFF_PATH_SIGMA = 3.0
+
+
+
+def offMainPathSigma(traj, frag_traj, main_runs, frag_runs):
+    """ Compute how far the first and the last point of a fragment are from the main path in units of the
+        uncertainty of both paths there. It is the Mahalanobis distance across the main path, with the
+        scatter of the lines of the Monte Carlo runs of both trajectories where they cross it.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory of the main fragment.
+        frag_traj: [Trajectory object] Solved trajectory of the fragment.
+        main_runs: [list] Trajectories of the Monte Carlo runs of the main fragment (see monteCarloRuns()).
+        frag_runs: [list] Trajectories of the Monte Carlo runs of the fragment.
+
+    Return:
+        (sigma_first, sigma_last): [tuple] The distances in units of the uncertainty, None with fewer than
+            FRAGMENT_MIN_MC_RUNS runs of either trajectory or without any scatter.
+    """
+
+    if min(len(main_runs), len(frag_runs)) < FRAGMENT_MIN_MC_RUNS:
+        return None, None
+
+    # Two directions across the main path
+    direction = -vectNorm(traj.radiant_eci_mini)
+    across_1 = vectNorm(np.cross(direction, np.eye(3)[np.argmin(np.abs(direction))]))
+    across = np.array([across_1, np.cross(direction, across_1)])
+
+    def crossings(runs, point):
+        """ Compute where the lines of Monte Carlo runs cross the plane across the main path through a point,
+            as offsets from the point in that plane (m).
+        """
+
+        state_vects = np.array([run.state_vect_mini for run in runs])
+        run_dirs = -np.array([vectNorm(run.radiant_eci_mini) for run in runs])
+
+        # Move along every line to the plane
+        with np.errstate(divide='ignore', invalid='ignore'):
+            dist = np.dot(point - state_vects, direction)/np.dot(run_dirs, direction)
+
+        return np.dot(state_vects + dist[:, np.newaxis]*run_dirs - point, across.T)
+
+
+    _, frag_eci = trajectoryModelPoints(frag_traj)
+    offsets = offMainPath(traj, frag_traj, vectors=True)
+
+    sigmas = []
+    for point, offset in zip((frag_eci[0], frag_eci[-1]), offsets):
+
+        # The runs of the two trajectories are independent, so their scatters add up
+        cov = np.cov(crossings(main_runs, point).T) + np.cov(crossings(frag_runs, point).T)
+
+        # Without any scatter, or with a run parallel to the plane, which never crosses it
+        if not (np.linalg.det(cov) > 0):
+            sigmas.append(None)
+            continue
+
+        offset = np.dot(across, offset)
+        sigmas.append(np.sqrt(np.dot(offset, np.linalg.solve(cov, offset))))
+
+    return sigmas[0], sigmas[1]
 
 
 
@@ -868,6 +976,9 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
     main_along = np.dot(main_eci - traj.state_vect_mini, direction)
     main_motion = localMotionFit((main_jd - main_jd[0])*86400, main_along)
 
+    # Monte Carlo runs of the main fragment, for the distance off its path in sigma
+    main_runs = monteCarloRuns(traj)
+
 
     def stationsPoints(t):
         """ Format the number of stations and points of a trajectory. """
@@ -941,11 +1052,23 @@ def fragmentComparison(traj, fragment_trajs, reuse_timing=True):
         ahead_poly = np.polyfit(frag_t, ahead, min(2, len(frag_t) - 1))
 
         off_first, off_last = offMainPath(traj, frag_traj)
-        out_str += "  Off the main path     : {:.0f} m at the fragment's first point, {:.0f} m at its " \
-            "last\n".format(off_first, off_last)
 
-        # Warn about a fragment too far from the main path to have come from the main fragment
-        if max(off_first, off_last) > FRAGMENT_OFF_PATH_LIMIT:
+        # The distances in units of the uncertainty of both paths, with their Monte Carlo runs
+        sigmas = offMainPathSigma(traj, frag_traj, main_runs, monteCarloRuns(frag_traj))
+        off_sigmas = ["" if sigma is None else " ({:.1f} sigma)".format(sigma) for sigma in sigmas]
+        out_str += "  Off the main path     : {:.0f} m at the fragment's first point{:s}, {:.0f} m at its " \
+            "last{:s}\n".format(off_first, off_sigmas[0], off_last, off_sigmas[1])
+
+        # Warn about a fragment too far from the main path to have come from the main fragment, unless it is
+        #   within the uncertainty of both paths
+        known = [sigma for sigma in sigmas if sigma is not None]
+        if (max(off_first, off_last) > FRAGMENT_OFF_PATH_LIMIT) and known \
+            and (max(known) <= FRAGMENT_OFF_PATH_SIGMA):
+            out_str += "  NOTE: more than {:.1f} km off the main path, but within {:.0f} sigma: its " \
+                "trajectory is poorly constrained\n".format(FRAGMENT_OFF_PATH_LIMIT/1000, \
+                FRAGMENT_OFF_PATH_SIGMA)
+
+        elif max(off_first, off_last) > FRAGMENT_OFF_PATH_LIMIT:
             out_str += "  NOTE: more than {:.1f} km off the main path, where no fragment of the main one " \
                 "was in simulated\n        fireballs: another body, different fragments measured by the " \
                 "stations, or a poorly\n        constrained trajectory?\n" \
@@ -1071,12 +1194,16 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
         if time_diffs is not None:
             t_rel += time_diffs.get(station_ids[meteor.ecsv_file], 0.0)
 
-        # Precess from J2000 to the epoch of date, as the observations given to the solver
-        ra, dec = equatorialCoordPrecession_vect(J2000_JD.days, \
-            np.zeros_like(meteor.ra_data) + traj.jdt_ref, meteor.ra_data, meteor.dec_data)
+        # Precess and nutate from J2000 to the epoch of date, and take the times the R.A./Dec. were computed
+        #   at, as the observations given to the solver
+        ra, dec = equatorialCoordJ2000ToDate_vect(np.zeros_like(meteor.ra_data) + traj.jdt_ref, \
+            meteor.ra_data, meteor.dec_data)
+        radec_jd = None
+        if meteor.radec_per_point:
+            radec_jd = meteor.jdt_ref + np.array(meteor.time_data)/86400.0
 
         obs = ObservedPoints(traj.jdt_ref, ra, dec, t_rel, meteor.latitude, meteor.longitude, meteor.height, \
-            1, station_id=station_ids[meteor.ecsv_file])
+            1, station_id=station_ids[meteor.ecsv_file], radec_jd=radec_jd)
 
         # Add noise to the lines of sight as the Monte Carlo runs of the solver do
         if noise_sigma is not None:
@@ -2507,7 +2634,7 @@ def saveECSV(dir_path, meteor_observations,
 
 
             # Precess RA/Dec to J2000
-            ra_J2000, dec_J2000 = equatorialCoordPrecession_vect(meteor.jdt_ref, J2000_JD.days, ra, dec)
+            ra_J2000, dec_J2000 = equatorialCoordDateToJ2000_vect(meteor.jdt_ref, ra, dec)
 
 
             # Add an entry to the ECSV file
@@ -2548,6 +2675,7 @@ if __name__ == "__main__":
 
     # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
+    arg_parser = addKMLOptions(arg_parser)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
         help="Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.", \
@@ -2577,6 +2705,10 @@ if __name__ == "__main__":
         help="With --fragments, estimate the time offsets of the stations for every fragment instead of " \
             "taking the ones of the main trajectory, which are better constrained by its larger number of " \
             "points.", \
+        action="store_true")
+
+    arg_parser.add_argument('--radec_at_ref', \
+        help="Legacy and incorrect, only to reproduce older solutions. Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed, which rotates each line of sight by the Earth's rotation since the reference time.", \
         action="store_true")
 
     # Parse the command line arguments
@@ -2637,7 +2769,7 @@ if __name__ == "__main__":
 
 
     # Load the observations into container objects
-    jdt_ref, meteor_list = loadECSVs(ecsv_paths)
+    jdt_ref, meteor_list = loadECSVs(ecsv_paths, radec_per_point=not cml_args.radec_at_ref)
 
 
     # Write the observations to a MILIG input file and exit
@@ -2679,7 +2811,9 @@ if __name__ == "__main__":
         show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
         show_jacchia=cml_args.jacchia,
         estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-        fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, enable_OSM_plot=cml_args.enableOSM)
+        fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, \
+        enable_OSM_plot=cml_args.enableOSM, save_kml=(cml_args.kml or cml_args.kmlmeas), \
+        kml_measured=cml_args.kmlmeas)
 
     # Solve the trajectory
     traj = solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver=cml_args.solver, **solver_kwargs)
@@ -2707,6 +2841,7 @@ if __name__ == "__main__":
 
 
     # Solve the trajectories of the additional fragments, after the main one
+    fragment_trajs = []
     if cml_args.fragments and (traj is not None):
 
         if cml_args.solver != 'original':
@@ -2757,3 +2892,16 @@ if __name__ == "__main__":
                 if os.path.isfile(report_path):
                     with open(report_path, 'a') as f:
                         f.write(match_report)
+
+
+    # Save the 3D KML of the main trajectory again with the additional fragments, if it was saved
+    if fragment_trajs and solver_kwargs['save_kml']:
+
+        try:
+            from wmpl.Utils.TrajectoryKML import trajectoryToKML
+            traj_orig = originalPicksTrajectory(traj)
+            trajectoryToKML(traj_orig, os.path.join(traj_orig.output_dir, traj_orig.file_name + '_3D.kml'), \
+                measured=cml_args.kmlmeas, fragments=fragment_trajs)
+
+        except Exception as e:
+            print("WARNING: The 3D KML could not be saved with the fragments: {:s}".format(repr(e)))

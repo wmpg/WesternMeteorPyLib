@@ -150,6 +150,10 @@ python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 | `--fragtimefit` | Estimate the station time offsets for every fragment, instead of reusing those of the main trajectory, which its larger number of points constrains better. Without the timing estimation (`-e`), the fragments take the same fixed offsets as the main fragment. |
 | `--fragnosys` | Leave out of the Monte Carlo uncertainties of the fragments the systematic errors of the stations, which are otherwise included when the main trajectory has 3 stations or more (see below). |
 
+With `--kml` or `--kmlmeas`, the 3D KML of the main trajectory also shows every solved fragment, from its
+first to its last point, in its colour in SkyFit2 (1 cyan, 2 green, 3 magenta, 4 blue, 5 orange, 6 purple,
+7 white, 8 pink).
+
 Two solutions differ slightly even for identical data, as each goes through its own iterations of the
 timing and velocity estimation: in tests, by about 0.001 deg and tens of metres with well spread stations,
 and up to about 0.1 deg and a few hundred metres with nearly parallel ones. With the Monte Carlo runs, the
@@ -165,6 +169,14 @@ of the cases. Such a fragment may come from another body, the stations may have 
 under the same number, or its trajectory may be poorly constrained: with stations converging by 8 deg, 8 to
 14 % of the fragments of the main went further. Two stations measuring different fragments mostly give a line
 close to the main path anyway, and often no trajectory at all.
+
+With the Monte Carlo runs, the distance off the main path is also given in units of the uncertainty of both
+paths there, from the scatter of their runs across it (the Mahalanobis distance), and a fragment more than
+1.5 km off but within 3 sigma is noted as poorly constrained instead. On 24 fireballs simulated with MetSim
+per case, solved after merging master, this kept 99 % of the fragments of another body 2 km away noted, and
+cut the fragments of the main noted from 6 to 2 % with stations converging by 20 deg, and from 27 to 8 % by
+8 deg. A fragment of the main is often more than 3 sigma off, as it truly separates from it by up to 600 m,
+and the runs are slightly optimistic: 80 % of the errors were within their 95 % region.
 
 With the time offsets of the main trajectory, the comparison also gives how far apart along the path of the
 fragment every two of its stations see it at the same times, from their points on its line, as a constant

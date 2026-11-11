@@ -14,8 +14,10 @@ import scipy.optimize
 from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants, loadedConstantsRelativeToGround, \
+    atmDensityDescription
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
+    ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Pickling import loadPickle
 
@@ -550,8 +552,18 @@ if __name__ == "__main__":
     arg_parser.add_argument('--updated', action='store_true', \
         help="Load the updated simulation JSON file instead of the original one.")
 
+    arg_parser.add_argument('--refitatm', action="store_true", \
+        help="Refit the atmosphere density polynomial of a legacy constants file, saved without " \
+        "atm_density_model, from the MSIS model instead of using the saved polynomial.")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
@@ -715,10 +727,13 @@ if __name__ == "__main__":
         raise Exception("Could not find the simulation params file in {}".format(dir_path))
 
     # Load the simulation constants
-    const, _ = loadConstants(sim_params_path)
+    const, const_json = loadConstants(sim_params_path)
     print()
     print("Loaded simulation constants from: {}".format(sim_params_path))
     print()
+
+    # Convert constants saved with the inertial speed to the ground
+    loadedConstantsRelativeToGround(const, const_json, traj)
         
     ### ###
 
@@ -732,9 +747,6 @@ if __name__ == "__main__":
     if dens_fit_ht_end < 15000:
         dens_fit_ht_end = 15000
 
-    print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
-        dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
-
     # Take mean meteor lat/lon as reference for the atmosphere model
     lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
     lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
@@ -743,8 +755,26 @@ if __name__ == "__main__":
     dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, traj.jdt_ref)
 
 
-    # Assign the density coefficients
-    const.dens_co = dens_co
+    # Tabulate the density over the whole simulation, which is used if the constants have the table model
+    atm_ht_max = max(ATM_TABLE_HT_MAX, dens_fit_ht_beg)
+    const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, ATM_TABLE_HT_MIN, \
+        atm_ht_max, traj.jdt_ref)
+    const.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, traj.jdt_ref, height_max=atm_ht_max)
+
+    # Keep the saved polynomial of a legacy constants file unless it is refitted
+    if (const.atm_density_model == 'polynomial') and (not cml_args.refitatm):
+        const.dens_co = np.array(const.dens_co)
+        const.atm_density_info = None
+        print("Using the atmosphere density polynomial saved in the constants file, give --refitatm to " \
+            "refit it from the MSIS model.")
+
+    else:
+        const.dens_co = dens_co
+        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+            dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
+
+    # Print the atmosphere the simulation uses
+    print(atmDensityDescription(const))
 
     ### ###
 
