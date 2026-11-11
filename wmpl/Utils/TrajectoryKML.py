@@ -441,7 +441,7 @@ def kmlColor(rgb, alpha=255):
 
 
 
-def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragments=None):
+def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragments=None, flares=None):
     """ Save a 3D KML with the trajectory of the drag fit, the vertical plane and the stations, and optionally
         the measured points.
 
@@ -463,6 +463,8 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragme
         fragments: [list] (fragment, trajectory) of the additional fragments, from
             Formats.ECSV.solveFragmentTrajectories(), drawn from their first to their last point in their
             colours in SkyFit2. None by default.
+        flares: [list] Flare points of the main fragment, from Formats.ECSV.flareHeights(), each marked with
+            a star in the colour of its station. None by default.
 
     Return:
         output_kml_path: [str] Path of the KML file.
@@ -500,6 +502,8 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragme
     folder_names = ['Vertical Plane']
     if traj_samples is not None:
         folder_names.append('Drag Fit Trajectory')
+    if flares:
+        folder_names.append('Flares')
     if fragments:
         folder_names.append('Fragments')
     if measured:
@@ -549,6 +553,20 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragme
         line.style.linestyle.width = 3
         line.description = "Begin {:.3f} km, end {:.3f} km".format(frag_traj.rbeg_ele/1000, \
             frag_traj.rend_ele/1000)
+
+    # Mark every flare point with a star in the colour of its station, at its height in the report
+    station_colors = {str(obs.station_id): colors[i%len(colors)] for i, obs in enumerate(traj.observations)}
+    for flare in (flares or []):
+
+        star = folders['Flares'].newpoint(name="{:s} {:.3f} s".format(flare['station_id'], flare['t_rel']), \
+            coords=[(np.degrees(flare['lon']), np.degrees(flare['lat']), flare['ht'])])
+        star.altitudemode = simplekml.AltitudeMode.absolute
+        star.style.iconstyle.icon.href = WEB_ICON + "color={:02x}{:02x}{:02x}&id=371&scale=4".format( \
+            *[int(round(c*255)) for c in station_colors.get(flare['station_id'], (1, 1, 1))[:3]])
+        star.style.labelstyle.scale = 0
+        star.description = "Flare of station {:s}, {:s} in the trajectory<br>t = {:.3f} s<br>" \
+            "Alt = {:.3f} km".format(flare['station_id'], "used" if flare['used'] else "not used", \
+            flare['t_rel'], flare['ht']/1000)
 
     for i, obs in enumerate(traj.observations):
 

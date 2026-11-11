@@ -308,3 +308,34 @@ def testTheFragmentsAreDrawnInTheirColoursInSkyFit2():
         [np.degrees(traj.rend_lon), np.degrees(traj.rend_lat), traj.rend_ele]])
 
     assert np.allclose(_coordinates(placemarks[0]), ends, rtol=0, atol=COORD_TOL)
+
+
+
+def testTheFlaresAreStarsInTheColourOfTheirStation():
+    """ Check that every flare point is a star at its position and height, in the colour of its station in
+        the KML.
+    """
+
+    traj = _solve()
+    obs = traj.observations[1]
+    flare = {'station_id': str(obs.station_id), 't_rel': obs.time_data[5], 'used': True, \
+        'lat': obs.model_lat[5], 'lon': obs.model_lon[5], 'ht': obs.model_ht[5]}
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        kml_path = TrajectoryKML.trajectoryToKML(traj, os.path.join(tmp_dir, 'test_3D.kml'), flares=[flare])
+        root = ET.parse(kml_path).getroot()
+
+    folders = {folder.find(KML_NS + 'name').text: folder for folder in root.iter(KML_NS + 'Folder')}
+    styles = {style.get('id'): style for style in root.iter(KML_NS + 'Style')}
+    placemarks = folders["3. Flares"].findall(KML_NS + 'Placemark')
+
+    assert len(placemarks) == 1
+
+    # Check the star in the orange of the second station
+    href = styles[placemarks[0].find(KML_NS + 'styleUrl').text[1:]].find('.//' + KML_NS + 'href').text
+
+    assert href == TrajectoryKML.WEB_ICON + "color=ff7f0e&id=371&scale=4"
+
+    position = np.array([np.degrees(obs.model_lon[5]), np.degrees(obs.model_lat[5]), obs.model_ht[5]])
+
+    assert np.allclose(_coordinates(placemarks[0])[0], position, rtol=0, atol=COORD_TOL)

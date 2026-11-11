@@ -2820,6 +2820,7 @@ if __name__ == "__main__":
 
 
     # Report the flares, if any, also in the saved report
+    flares = []
     if (traj is not None) and (cml_args.solver == 'original'):
 
         # Use the solution with the original picks, which the saved report describes
@@ -2894,14 +2895,16 @@ if __name__ == "__main__":
                         f.write(match_report)
 
 
-    # Save the 3D KML of the main trajectory again with the additional fragments, if it was saved
-    if fragment_trajs and solver_kwargs['save_kml']:
+    # Save the 3D KML of the main trajectory again with the flares and the additional fragments, if it was
+    #   saved
+    if (flares or fragment_trajs) and solver_kwargs['save_kml']:
 
         try:
             from wmpl.Utils.TrajectoryKML import trajectoryToKML
             traj_orig = originalPicksTrajectory(traj)
             trajectoryToKML(traj_orig, os.path.join(traj_orig.output_dir, traj_orig.file_name + '_3D.kml'), \
-                measured=cml_args.kmlmeas, fragments=fragment_trajs)
+                measured=cml_args.kmlmeas, fragments=fragment_trajs, flares=flares)
 
         except Exception as e:
-            print("WARNING: The 3D KML could not be saved with the fragments: {:s}".format(repr(e)))
+            print("WARNING: The 3D KML could not be saved with the flares and fragments: {:s}".format( \
+                repr(e)))
