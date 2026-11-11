@@ -1371,6 +1371,7 @@ if __name__ == "__main__":
 
 
     # Solve the trajectories of the additional fragments, after the main one
+    fragment_trajs = []
     if cml_args.fragments and (traj is not None):
 
         if cml_args.solver != 'original':
@@ -1387,3 +1388,16 @@ if __name__ == "__main__":
                 **solver_kwargs)
             print(fragmentComparison(originalPicksTrajectory(traj), fragment_trajs, \
                 reuse_timing=(not cml_args.fragtimefit)))
+
+
+    # Save the 3D KML of the main trajectory again with the additional fragments, if it was saved
+    if fragment_trajs and solver_kwargs['save_kml']:
+
+        try:
+            from wmpl.Utils.TrajectoryKML import trajectoryToKML
+            traj_orig = originalPicksTrajectory(traj)
+            trajectoryToKML(traj_orig, os.path.join(traj_orig.output_dir, traj_orig.file_name + '_3D.kml'), \
+                measured=cml_args.kmlmeas, fragments=fragment_trajs)
+
+        except Exception as e:
+            print("WARNING: The 3D KML could not be saved with the fragments: {:s}".format(repr(e)))
