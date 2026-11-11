@@ -16,7 +16,7 @@ MAX_FRAMES_WEB = 1000
 # Number of dashes in each residual line
 N_DASHES = 6
 
-# Colours of the fragments 0 to 8 in SkyFit2 (RMS), as red, green and blue between 0 and 255
+# RGB colours of the fragments in SkyFit2 (RMS)
 FRAGMENT_COLORS = [(255, 0, 0), (0, 255, 255), (0, 255, 0), (255, 0, 255), (60, 100, 255), (255, 128, 0), \
     (170, 90, 255), (255, 255, 255), (255, 160, 200)]
 
@@ -542,7 +542,7 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragme
                 "v ground = {:.3f} km/s<br>Lat {:.5f}, Lon {:.5f}".format(t, coords[2]/1000, vel/1000, \
                 vel_norot/1000, coords[1], coords[0])
 
-    # Draw every additional fragment from its first to its last point, in its colour in SkyFit2
+    # Draw the fragments from their first to their last point
     for fragment, frag_traj in (fragments or []):
 
         line = folders['Fragments'].newlinestring(name="Fragment {:d}".format(fragment), \

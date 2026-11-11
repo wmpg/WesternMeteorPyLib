@@ -151,10 +151,6 @@ python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 | `--fragtimefit` | Estimate the station time offsets for every fragment, instead of reusing those of the main trajectory, which its larger number of points constrains better. Without the timing estimation (`-e`), the fragments take the same fixed offsets as the main fragment. |
 | `--fragnosys` | Leave out of the Monte Carlo uncertainties of the fragments the systematic errors of the stations, which are otherwise included when the main trajectory has 3 stations or more (see below). |
 
-With `--kml` or `--kmlmeas`, the 3D KML of the main trajectory also shows every solved fragment, from its
-first to its last point, in its colour in SkyFit2 (1 cyan, 2 green, 3 magenta, 4 blue, 5 orange, 6 purple,
-7 white, 8 pink).
-
 Two solutions differ slightly even for identical data, as each goes through its own iterations of the
 timing and velocity estimation: in tests, by about 0.001 deg and tens of metres with well spread stations,
 and up to about 0.1 deg and a few hundred metres with nearly parallel ones. With the Monte Carlo runs, the

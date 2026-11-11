@@ -22,6 +22,7 @@ from wmpl.Trajectory.Trajectory import ObservedPoints
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
 from wmpl.Utils.TrajConversions import equatorialCoordJ2000ToDate_vect
+from wmpl.Utils.TrajectoryKML import trajectoryToKML
 
 
 
@@ -2895,12 +2896,10 @@ if __name__ == "__main__":
                         f.write(match_report)
 
 
-    # Save the 3D KML of the main trajectory again with the flares and the additional fragments, if it was
-    #   saved
+    # Save the 3D KML again with the flares and fragments
     if (flares or fragment_trajs) and solver_kwargs['save_kml']:
 
         try:
-            from wmpl.Utils.TrajectoryKML import trajectoryToKML
             traj_orig = originalPicksTrajectory(traj)
             trajectoryToKML(traj_orig, os.path.join(traj_orig.output_dir, traj_orig.file_name + '_3D.kml'), \
                 measured=cml_args.kmlmeas, fragments=fragment_trajs, flares=flares)

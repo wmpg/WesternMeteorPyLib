@@ -297,13 +297,13 @@ def testTheFragmentsAreDrawnInTheirColoursInSkyFit2():
 
     assert [placemark.find(KML_NS + 'name').text for placemark in placemarks] == ["Fragment 2", "Fragment 10"]
 
-    # Check the colours, green for fragment 2 and cyan for fragment 10, as for fragment 1
+    # Check the green of fragment 2, and the cyan of fragment 10 as for fragment 1
     colors = [styles[placemark.find(KML_NS + 'styleUrl').text[1:]].find('.//' + KML_NS + 'color').text \
         for placemark in placemarks]
 
     assert colors == ['ff00ff00', 'ffffff00']
 
-    # Check that the line runs from the first to the last point of the fragment
+    # Check the first and the last point
     ends = np.array([[np.degrees(traj.rbeg_lon), np.degrees(traj.rbeg_lat), traj.rbeg_ele], \
         [np.degrees(traj.rend_lon), np.degrees(traj.rend_lat), traj.rend_ele]])
 
