@@ -67,8 +67,7 @@ uncertainties come from the Monte Carlo runs and from the duration of the frame 
 it happened at any time within it. The duration of a frame comes from the frame numbers of the file, if it
 gives them, so it is that of one frame also when not every frame was picked. The times are relative to the
 clock of the reference station, whose time offset is not estimated, so the Monte Carlo runs give it no
-uncertainty in time, but the frame does. With `--kml` or `--kmlmeas`, the 3D KML of the main trajectory
-also marks every flare point with a star in the colour of its station, at its height in the report.
+uncertainty in time, but the frame does.
 
 Every flare also gets the speed of the meteor relative to the ground at its time, from the drag fit of the
 trajectory (`wmpl.Utils.DragFit`, with the Earth's rotation along the path taken off its inertial speeds),

@@ -20,8 +20,8 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Trajectory.Trajectory import ObservedPoints
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
-from wmpl.Utils.TrajConversions import equatorialCoordJ2000ToDate_vect
+from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, \
+    equatorialCoordJ2000ToDate_vect, jd2Date
 from wmpl.Utils.TrajectoryKML import trajectoryToKML
 
 
@@ -1195,10 +1195,11 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
         if time_diffs is not None:
             t_rel += time_diffs.get(station_ids[meteor.ecsv_file], 0.0)
 
-        # Precess and nutate from J2000 to the epoch of date, and take the times the R.A./Dec. were computed
-        #   at, as the observations given to the solver
+        # Precess and nutate to the epoch of date, as for the solver
         ra, dec = equatorialCoordJ2000ToDate_vect(np.zeros_like(meteor.ra_data) + traj.jdt_ref, \
             meteor.ra_data, meteor.dec_data)
+
+        # Take the times the R.A./Dec. were computed at, as the solver does
         radec_jd = None
         if meteor.radec_per_point:
             radec_jd = meteor.jdt_ref + np.array(meteor.time_data)/86400.0

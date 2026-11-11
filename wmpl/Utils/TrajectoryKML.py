@@ -554,7 +554,7 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragme
         line.description = "Begin {:.3f} km, end {:.3f} km".format(frag_traj.rbeg_ele/1000, \
             frag_traj.rend_ele/1000)
 
-    # Mark every flare point with a star in the colour of its station, at its height in the report
+    # Mark the flares with stars in the colours of their stations
     station_colors = {str(obs.station_id): colors[i%len(colors)] for i, obs in enumerate(traj.observations)}
     for flare in (flares or []):
 
@@ -562,7 +562,7 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragme
             coords=[(np.degrees(flare['lon']), np.degrees(flare['lat']), flare['ht'])])
         star.altitudemode = simplekml.AltitudeMode.absolute
         star.style.iconstyle.icon.href = WEB_ICON + "color={:02x}{:02x}{:02x}&id=371&scale=4".format( \
-            *[int(round(c*255)) for c in station_colors.get(flare['station_id'], (1, 1, 1))[:3]])
+            *[int(round(c*255)) for c in station_colors.get(flare['station_id'], (1.0, 1.0, 1.0))[:3]])
         star.style.labelstyle.scale = 0
         star.description = "Flare of station {:s}, {:s} in the trajectory<br>t = {:.3f} s<br>" \
             "Alt = {:.3f} km".format(flare['station_id'], "used" if flare['used'] else "not used", \
