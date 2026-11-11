@@ -10,7 +10,7 @@ the solver's own value and, when astropy is installed, against an independent TE
 
 Run under pytest, or directly:
 
-    python -m wmpl.Utils.Tests.test_DynamicMassFit
+    python -m wmpl.MetSim.Tests.test_DynamicMassFit
 """
 
 import io
@@ -25,7 +25,7 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo, jd2LST, latLonAlt2ECEF, ecef2ENU
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
-from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
+from wmpl.MetSim.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
     computeFragEndParams, interpolateHtVsTimeLen
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, atmDensPoly, getAtmDensity
 from wmpl.Utils.Math import lineFunc

@@ -7,7 +7,7 @@ changed during the flight. **`wmpl.Utils.SampleTrajectoryPositions`** uses it to
 by height or by time, which is the usual first step of a dark flight model.
 
 The ballistic coefficient is fitted from the dynamics alone, unlike in
-[`wmpl.Utils.DynamicMassFit`](../Utils/DynamicMassFit.py), which computes a mass from the drag equation
+[`wmpl.MetSim.DynamicMassFit`](../MetSim/DynamicMassFit.py), which computes a mass from the drag equation
 for an assumed shape and density.
 
 ## Table of Contents
@@ -270,7 +270,7 @@ m = (Gamma*A / (K*rho_m^(2/3)))^3
 ```
 
 This is the same dynamic mass as in `wmpl.Utils.Physics.dynamicMass` and
-`wmpl.Utils.DynamicMassFit`, as `K = decel/(rho*v^2)`. Here it comes from the fit of the whole
+`wmpl.MetSim.DynamicMassFit`, as `K = decel/(rho*v^2)`. Here it comes from the fit of the whole
 trajectory instead of the deceleration at one point. By default `Gamma*A = 0.78` and
 `rho_m = 3500 kg/m³`, which can be changed with `--ga` and `--dens` (note that `DynamicMassFit` uses
 `Gamma*A = 0.55` by default).
