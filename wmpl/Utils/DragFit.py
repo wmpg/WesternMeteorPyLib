@@ -6,17 +6,21 @@ which computes the mass from the drag equation for an assumed shape and density.
 The meteor is assumed to move along the straight line of the trajectory solution and to decelerate by
 atmospheric drag:
 
-    dv/dt = -K*rho*v**2 + g_along
+    dv/dt = -K*rho*v_air**2 + g_along
 
 where rho is the NRLMSISE-00 air density, g_along the component of gravity along the line and K the ballistic
-coefficient (Gamma*A/(m**(1/3)*rho_m**(2/3))). Both ablation and fragmentation increase K, so it is only
+coefficient (Gamma*A/(m**(1/3)*rho_m**(2/3))). The drag acts on the speed relative to the air, which moves
+with the ground, v_air = v - v_rot, where v is the inertial speed and v_rot the speed of the Earth's rotation
+along the trajectory (Physics.earthRotationSpeed). Both ablation and fragmentation increase K, so it is only
 allowed to grow along the trajectory, which keeps the velocity positive and decreasing. With the specific
-kinetic energy E = v**2/2 and the length L along the line, the drag equation is linear:
+kinetic energy E = v**2/2 and the length L along the line, the drag equation is linear for a given ratio
+v_air/v:
 
-    dE/dL = -2*K*rho*E + g_along
+    dE/dL = -2*K*rho*(v_air/v)**2*E + g_along
 
-and is solved exactly. The logarithm of K is a sum of non-negative ramps in L, which is fitted to the lengths
-and times of all used points with a robust loss and a small penalty on the growth of K.
+and is solved exactly, iterating on that ratio. The logarithm of K is a sum of non-negative ramps in L, which
+is fitted to the lengths and times of all used points with a robust loss and a small penalty on the growth
+of K.
 
 Above the first observed point the meteor is assumed to move without drag, only accelerated by gravity, as
 it barely decelerates in the thin air. Optionally, K can be kept at its first value instead. As K can only
@@ -57,7 +61,7 @@ import scipy.optimize
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
-from wmpl.Utils.Physics import ballisticCoeffMass
+from wmpl.Utils.Physics import ballisticCoeffMass, earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
 
@@ -69,6 +73,9 @@ G_SURFACE = 9.80665
 #   dynamic mass by default
 GAMMA_A = 0.78
 BULK_DENSITY = 3500.0
+
+# Iterations of the scale of the drag for the speed relative to the air
+DRAG_SCALE_ITERATIONS = 4
 
 
 
@@ -145,6 +152,10 @@ class DragFit(object):
 
         self.state_vect = np.array(traj.state_vect_mini)
         self.radiant_eci = np.array(traj.radiant_eci_mini)
+
+        # Speed of the Earth's rotation along the trajectory, by which the inertial speed exceeds the speed
+        #   relative to the air
+        self.v_rotation = earthRotationSpeed(traj)
 
         # Get the data
         self.time_data, self.len_data = usedPoints(traj)
@@ -302,15 +313,22 @@ class DragFit(object):
         g = self.g_grid[self.i_first:self.i_last + 1]
         dlen = np.diff(len_arr)
 
-        # Compute the integral of 2*K*rho from the first point
-        a = 2*np.exp(self._logK(params, len_arr))*rho
-        phi = np.concatenate([[0.0], np.cumsum(0.5*(a[1:] + a[:-1])*dlen)])
-        exp_phi = np.exp(np.clip(phi, None, 700.0))
+        # The drag acts on the speed relative to the air, which moves with the ground, so 2*K*rho is scaled by
+        #   the squared ratio of that speed to the inertial one, iterating from the inertial speed
+        drag_scale = 1.0
+        for _ in range(DRAG_SCALE_ITERATIONS if self.v_rotation else 1):
 
-        # Compute the energy, including the work done by gravity
-        grav = np.concatenate([[0.0], np.cumsum(0.5*(g[1:]*exp_phi[1:] + g[:-1]*exp_phi[:-1])*dlen)])
-        energy = (0.5*params[1]**2 + grav)/exp_phi
-        vel = np.sqrt(np.maximum(2*energy, 1.0))
+            # Compute the integral of 2*K*rho from the first point
+            a = 2*np.exp(self._logK(params, len_arr))*rho*drag_scale
+            phi = np.concatenate([[0.0], np.cumsum(0.5*(a[1:] + a[:-1])*dlen)])
+            exp_phi = np.exp(np.clip(phi, None, 700.0))
+
+            # Compute the energy, including the work done by gravity
+            grav = np.concatenate([[0.0], np.cumsum(0.5*(g[1:]*exp_phi[1:] + g[:-1]*exp_phi[:-1])*dlen)])
+            energy = (0.5*params[1]**2 + grav)/exp_phi
+            vel = np.sqrt(np.maximum(2*energy, 1.0))
+
+            drag_scale = (1 - self.v_rotation/vel)**2
 
         # Integrate the time
         time = params[0] + np.concatenate([[0.0], np.cumsum(0.5*(1/vel[1:] + 1/vel[:-1])*dlen)])
@@ -518,7 +536,7 @@ class DragFit(object):
             else:
                 a = 0.0
 
-            energy = self._energyStep(energy, a, g, -dlen)
+            energy = self._airEnergyStep(energy, a, g, -dlen, vel[i])
 
             # Stop when the velocity has grown too much, as K above the beginning is not known
             if np.sqrt(max(2*energy, 0.0)) > (1 + self.max_vel_growth)*vel[self.i_first]:
@@ -536,7 +554,7 @@ class DragFit(object):
             a = 2*np.exp(log_k_grid[i])*0.5*(self.rho_grid[i] + self.rho_grid[i + 1])
             g = 0.5*(self.g_grid[i] + self.g_grid[i + 1])
 
-            energy = self._energyStep(energy, a, g, dlen)
+            energy = self._airEnergyStep(energy, a, g, dlen, vel[i])
 
             # Stop if the meteor comes to a halt (e.g. an Earth-grazer going up)
             if energy <= 0.5:
@@ -586,6 +604,29 @@ class DragFit(object):
             return energy + g*dlen
 
         return energy*np.exp(-x) + (g/a)*(1 - np.exp(-x))
+
+
+
+    def _airEnergyStep(self, energy, a, g, dlen, vel):
+        """ Advance the energy equation by dlen, with the drag term scaled for the speed relative to the air
+            at the mean speed of the step.
+
+        Arguments:
+            energy: [float] Specific kinetic energy at the start (J/kg).
+            a: [float] Drag term 2*K*rho (1/m) for the inertial speed.
+            g: [float] Component of gravity along the line (m/s^2).
+            dlen: [float] Step along the line (m), negative when going up.
+            vel: [float] Inertial speed at the start (m/s).
+
+        Return:
+            [float] Specific kinetic energy at the end of the step (J/kg).
+        """
+
+        # Estimate the speed at the end of the step with the scale at its start
+        energy_end = self._energyStep(energy, a*(1 - self.v_rotation/vel)**2, g, dlen)
+        vel_mean = 0.5*(vel + np.sqrt(max(2*energy_end, 1.0)))
+
+        return self._energyStep(energy, a*(1 - self.v_rotation/vel_mean)**2, g, dlen)
 
 
 

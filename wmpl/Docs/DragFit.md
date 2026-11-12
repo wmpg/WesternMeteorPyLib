@@ -56,11 +56,12 @@ An example trajectory is included in the repository:
 The meteor moves along the solved trajectory and is decelerated by atmospheric drag:
 
 ```
-dv/dt = -K*rho*v^2 + g_along
+dv/dt = -K*rho*v_air^2 + g_along
 ```
 
 where `rho` is the NRLMSISE-00 air density along the path, `g_along` the component of gravity along
-the path, and `K` the ballistic coefficient,
+the path, `v_air` the speed relative to the air, which moves with the ground (the inertial speed `v`
+minus the speed of the Earth's rotation along the trajectory), and `K` the ballistic coefficient,
 
 ```
 K = Gamma*A / (m^(1/3) * rho_m^(2/3))

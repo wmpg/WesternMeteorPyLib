@@ -9,6 +9,7 @@ import numpy as np
 from wmpl.Trajectory.Trajectory import Trajectory, applyGravityDrop
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import vectMag
+from wmpl.Utils.Physics import earthRotationVelocity
 from wmpl.Utils.TrajConversions import altAz2RADec, cartesian2Geo, eci2RaDec, geo2Cartesian, \
     raDec2AltAz_vect, raDec2ECI
 
@@ -32,7 +33,8 @@ STATIONS = [
 
 
 class DragMeteor(object):
-    def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0):
+    def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0, \
+        ground_drag=False):
         """ Integrate the motion of a meteor decelerated by drag along a straight line. The ballistic
             coefficient grows linearly with time during the visible part of the trajectory.
 
@@ -48,6 +50,8 @@ class DragMeteor(object):
         Keyword arguments:
             dt: [float] Integration step (s). 0.001 s by default.
             duration: [float] Duration of the integration (s). 20 s by default.
+            ground_drag: [bool] If True, the drag acts on the speed relative to the ground, which moves with
+                the air, as on a real meteor. False by default, in which case it acts on the inertial speed.
         """
 
         self.t_vis_beg = t_vis_beg
@@ -58,6 +62,11 @@ class DragMeteor(object):
         self.top_eci = np.array(geo2Cartesian(lat, lon, TOP_HT, JDT_REF))
         ra, dec = altAz2RADec(np.radians(azim), np.radians(elev), JDT_REF, lat, lon)
         self.radiant_eci = np.array(raDec2ECI(ra, dec))
+
+        # Compute the speed of the ground along the line, which the drag takes off the inertial speed
+        v_rotation = 0.0
+        if ground_drag:
+            v_rotation = np.dot(earthRotationVelocity(self.top_eci), -self.radiant_eci)
 
         # Tabulate the air density with height along the line
         len_table = np.linspace(0, 400e3, 401)
@@ -78,7 +87,7 @@ class DragMeteor(object):
             rho = np.exp(np.interp(len_val, len_table, log_rho_table))
             g = np.interp(len_val, len_table, g_table)
 
-            return -k*rho*vel**2 + g
+            return -k*rho*(vel - v_rotation)**2 + g
 
 
         # Integrate with the 4th order Runge-Kutta method
