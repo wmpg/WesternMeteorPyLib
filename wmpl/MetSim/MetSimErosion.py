@@ -1021,6 +1021,10 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
     if atm_table is None:
         atm_table = atmDensityTableCy(const)
 
+    # Distance of the beginning from the centre of the Earth times the cosine of the zenith angle, from which
+    #   the local zenith angle of the path is computed
+    r_cos_zc = (const.h_init + const.r_earth)*math.cos(const.zenith_angle)
+
     # Go through all active fragments
     for frag in fragments:
 
@@ -1070,10 +1074,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
 
             # Compute the local zenith angle of the straight path, at the distance of the point on the path
             #   from the centre of the Earth without the drop
-            r_line = frag.h + frag.h_grav_drop_total + const.r_earth
-            cos_z = ((const.h_init + const.r_earth)*math.cos(const.zenith_angle) - frag.length)/r_line
-            cos_z = min(max(cos_z, -1.0), 1.0)
-            sin_z = math.sqrt(1.0 - cos_z**2)
+            cos_z = (r_cos_zc - frag.length)/(frag.h + frag.h_grav_drop_total + const.r_earth)
+            sin_z_sq = 1.0 - cos_z*cos_z
+            sin_z = math.sqrt(sin_z_sq) if (sin_z_sq > 0) else 0.0
 
             # Gravity along the path changes the speed, and the drag is only the deceleration by the air
             accel_along = deceleration_total + gv*cos_z
