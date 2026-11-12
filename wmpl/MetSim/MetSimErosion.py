@@ -310,6 +310,9 @@ class Fragment(object):
         # Total drop due to gravity (m)
         self.h_grav_drop_total = 0
 
+        # Vertical speed of the drop due to gravity (m/s)
+        self.v_grav_drop = 0
+
         # Length along the trajectory
         self.length = 0
 
@@ -1086,8 +1089,11 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
 
             ###
 
-            # Compute the drop due to gravity
-            h_grav_drop = 0.5*gv*const.dt**2
+            # Compute the drop due to gravity in this time step, carrying the drop speed accumulated so far
+            h_grav_drop = frag.v_grav_drop*const.dt + 0.5*gv*const.dt**2
+
+            # Update the vertical speed of the drop due to gravity
+            frag.v_grav_drop += gv*const.dt
 
             # Track the total drop due to gravity
             frag.h_grav_drop_total += h_grav_drop
