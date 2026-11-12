@@ -323,9 +323,10 @@ def testRadiantBentByGravity():
     # The modelled part ends before the path has bent by 5 deg
     assert np.degrees(angle[-1]) <= 5.0
 
-    # Below the end the path follows the bent direction, compared where it is bent by less than 2 deg
+    # Below the end the path follows the bent direction, compared where it is bent by less than 1 deg, as
+    #   further on the meteor is slower than 400 m/s and a grid step bends it by up to 0.4 deg
     len_arr = np.linspace(drag_fit.len_last + 100.0, len_valid[-1] - 100.0, 50)
-    len_arr = len_arr[_angle(len_arr) < np.radians(2.0)]
+    len_arr = len_arr[_angle(len_arr) < np.radians(1.0)]
     tangent = drag_fit.eciAtLength(len_arr + 10.0) - drag_fit.eciAtLength(len_arr - 10.0)
     tangent /= np.linalg.norm(tangent, axis=1)[:, None]
     assert len(len_arr) > 10
