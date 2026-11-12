@@ -1755,7 +1755,7 @@ class RMSDataHandle(object):
                 loadedpickle = loadPickle(self.candidate_dir, fil)
                 if isinstance(loadedpickle, list):
                     # check the date of the event here to make sure its inside the window
-                    pickle_dt = jd2Date(loadedpickle.jdt_ref, dt_obj=True)
+                    pickle_dt = jd2Date(loadedpickle[0][0].jdt_ref, dt_obj=True)
                     if self.dt_range and (pickle_dt < self.dt_range[0] or pickle_dt > self.dt_range[1]):
                         log.info(f'skipping {fil} as outside date range')
                         continue
@@ -1765,7 +1765,7 @@ class RMSDataHandle(object):
                     log.info(f'malformed candidate {fil}')
 
             except Exception: 
-                log.info(f'Candidate {fil} went away, probably picked up by another process')
+                log.info(f'Candidate {fil} unable to be loaded, possibly not a candidate file')
         log.info("-----------------------")
         log.info('LOADED {} CANDIDATES'.format(len(candidate_trajectories)))
         log.info("-----------------------")
