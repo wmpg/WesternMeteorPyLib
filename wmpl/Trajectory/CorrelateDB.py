@@ -621,13 +621,13 @@ class TrajectoryDatabase():
                 if failed:
                     self.dbhandle.execute('insert or replace into failed_trajectories values(:jdt_ref,:traj_id,:traj_file_path,:participating_stations,:ignored_stations,' \
                                         ':radiant_eci_mini,:state_vect_mini,:phase_1_only,:v_init,:gravity_factor,' \
-                                        ':obs_ids,:ign_obs_ids,:cand_id,:status)', \
+                                        ':obs_ids,:ign_obs_ids,:status,:cand_id)', \
                                         vals)
                 else:
                     self.dbhandle.execute('insert or replace into trajectories values(:jdt_ref,:traj_id,:traj_file_path,:participating_stations,:ignored_stations,' \
                                         ':radiant_eci_mini,:state_vect_mini,:phase_1_only,:v_init,:gravity_factor,' \
                                         ':v0z,:v_avg,:rbeg_jd,:rend_jd,:rbeg_lat,:rbeg_lon,:rbeg_ele,:rend_lat,:rend_lon,:rend_ele,' \
-                                        ':obs_ids,:ign_obs_ids,:cand_id,:status)', \
+                                        ':obs_ids,:ign_obs_ids,:status,:cand_id)', \
                                         vals)
                 self.dbhandle.commit()
                 return 1
