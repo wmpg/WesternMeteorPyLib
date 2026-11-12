@@ -1686,7 +1686,9 @@ class RMSDataHandle(object):
         """
         pickles = glob.glob1(self.phase1_dir, "*_trajectory.pickle")
         pickles.sort()
-        pickles = pickles[:self.max_trajs]
+        # truncate the list at max_trajs if we are in auto-mode as we will pick up another batch on the next pass
+        if self.auto_mode:
+            pickles = pickles[:self.max_trajs]
         self.phase1Trajectories = []
         if len(pickles) == 0:
             return None, None
@@ -1735,16 +1737,28 @@ class RMSDataHandle(object):
         Used only in phase1 solving mode 
         """
         candidate_trajectories = []
-        save_path = self.candidate_dir
-        
-        for fil in os.listdir(save_path)[:self.max_trajs]:
+
+        # Get a list of candidates, sort them to ensure we process
+        # the oldest data first
+        candidates = glob.glob1(self.candidate_dir, '*.pickle')
+        candidates.sort()
+        # truncate the list at max_trajs if we are in auto-mode as we will pick up another batch on the next pass
+        if self.auto_mode:
+            candidates = candidates[:self.max_trajs]
+
+        for fil in candidates:
             if '.pickle' not in fil: 
                 continue
             if self.candidate_db and self.candidate_db.isBeingProcessed(fil):
                 continue
             try:
-                loadedpickle = loadPickle(save_path, fil)
+                loadedpickle = loadPickle(self.candidate_dir, fil)
                 if isinstance(loadedpickle, list):
+                    # check the date of the event here to make sure its inside the window
+                    pickle_dt = jd2Date(loadedpickle.jdt_ref, dt_obj=True)
+                    if self.dt_range and (pickle_dt < self.dt_range[0] or pickle_dt > self.dt_range[1]):
+                        log.info(f'skipping {fil} as outside date range')
+                        continue
                     candidate_trajectories.append(loadedpickle)
                     self.candidate_db.markBeingProcessed(fil)
                 else:
