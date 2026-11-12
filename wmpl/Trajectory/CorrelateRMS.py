@@ -1764,8 +1764,9 @@ class RMSDataHandle(object):
                 else:
                     log.info(f'malformed candidate {fil}')
 
-            except Exception: 
+            except Exception as e: 
                 log.info(f'Candidate {fil} unable to be loaded, possibly not a candidate file')
+                log.info(e)
         log.info("-----------------------")
         log.info('LOADED {} CANDIDATES'.format(len(candidate_trajectories)))
         log.info("-----------------------")
