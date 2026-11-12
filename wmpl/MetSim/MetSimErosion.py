@@ -310,6 +310,9 @@ class Fragment(object):
         # Total drop due to gravity (m)
         self.h_grav_drop_total = 0
 
+        # Speed of the drop due to gravity across the path (m/s)
+        self.v_grav_drop = 0
+
         # Length along the trajectory
         self.length = 0
 
@@ -1018,6 +1021,10 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
     if atm_table is None:
         atm_table = atmDensityTableCy(const)
 
+    # Distance of the beginning from the centre of the Earth times the cosine of the zenith angle, from which
+    #   the local zenith angle of the path is computed
+    r_cos_zc = (const.h_init + const.r_earth)*math.cos(const.zenith_angle)
+
     # Go through all active fragments
     for frag in fragments:
 
@@ -1065,32 +1072,27 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
             # Compute g at given height
             gv = G0/((1 + frag.h/const.r_earth)**2)
 
-            # ### Add velocity change due to Earth's gravity ###
+            # Compute the local zenith angle of the straight path, at the distance of the point on the path
+            #   from the centre of the Earth without the drop
+            cos_z = (r_cos_zc - frag.length)/(frag.h + frag.h_grav_drop_total + const.r_earth)
+            sin_z_sq = 1.0 - cos_z*cos_z
+            sin_z = math.sqrt(sin_z_sq) if (sin_z_sq > 0) else 0.0
 
-            # # Vertical component of a
-            # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
-
-            # # Horizontal component of a
-            # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
-
-            # ### ###
-
-            ### Compute deceleration without the effects of gravity (to reconstruct the initial velocity
-            # without the gravity component)
+            # Gravity along the path changes the speed, and the drag is only the deceleration by the air
+            accel_along = deceleration_total + gv*cos_z
 
             # Vertical component of a
-            av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
+            av = -accel_along*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
 
             # Horizontal component of a
-            ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
+            ah = -accel_along*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
 
-            ###
+            # Gravity across the path drops the meteoroid below it, and the drag slows the speed of the drop
+            #   as it slows the meteoroid
+            frag.v_grav_drop += (gv*sin_z + deceleration_total*frag.v_grav_drop/frag.v)*const.dt
 
-            # Compute the drop due to gravity
-            h_grav_drop = 0.5*gv*const.dt**2
-
-            # Track the total drop due to gravity
-            frag.h_grav_drop_total += h_grav_drop
+            # Track the total drop of the height, the vertical part of the drop across the path
+            frag.h_grav_drop_total += frag.v_grav_drop*sin_z*const.dt
 
             # Update the velocity
             frag.vv -= av*const.dt
