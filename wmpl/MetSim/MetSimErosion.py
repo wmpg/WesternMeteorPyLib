@@ -1073,12 +1073,16 @@ def erosionBinMass(frag):
 
 
 
-def killFragment(const, frag):
+def killFragment(const, frag, release_grains=True):
     """ Deactivate the given fragment and keep track of the stats.
 
     Arguments:
         const: [object] Constants instance.
         frag: [object] Fragment instance.
+
+    Keyword arguments:
+        release_grains: [bool] Release the fractions of grains left in the mass bins of the fragment. True by
+            default. If False, they are dropped with the fragment.
 
     Return:
         frag_children: [list] Grains released from what the fragment eroded but did not release yet.
@@ -1096,8 +1100,14 @@ def killFragment(const, frag):
         const.main_mass_exhaustion_ht = frag.h
 
     # Release the fractions of grains left in the mass bins
-    frag_children = releaseGrainRemainder(const, frag)
-    const.n_active += len(frag_children)
+    if release_grains:
+        frag_children = releaseGrainRemainder(const, frag)
+        const.n_active += len(frag_children)
+
+    else:
+        frag_children = []
+        frag.erosion_bin_counts = None
+        frag.erosion_bin_params = None
 
 
     return frag_children
@@ -1364,13 +1374,19 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
             or ((const.len_kill > 0) and (frag.length > const.len_kill))
             ):
 
+            # Grains released at the speed and the height of a fragment which is too slow, too low or too far
+            #   would be killed in their first step, which they would take outside of the range of the
+            #   luminous efficiency, so they are released only by a fragment which has run out of mass
+            release_grains = (frag.v >= const.v_kill) and (frag.h >= const.h_kill) \
+                and not ((const.len_kill > 0) and (frag.length > const.len_kill))
+
             # Release the mass eroded in this step, as the grains are made below only for living fragments
-            if frag.erosion_enabled and (abs(mass_loss_erosion) > 0):
+            if release_grains and frag.erosion_enabled and (abs(mass_loss_erosion) > 0):
                 grain_children = erodeIntoGrains(const, frag, abs(mass_loss_erosion))
                 const.n_active += len(grain_children)
                 frag_children_all += grain_children
 
-            frag_children_all += killFragment(const, frag)
+            frag_children_all += killFragment(const, frag, release_grains=release_grains)
 
             # print('Killing', frag.id)
             continue

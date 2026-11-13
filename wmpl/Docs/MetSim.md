@@ -113,6 +113,9 @@ the bins are released as fragments that stand for a fraction of a grain. This wa
 - all of the eroded mass ends up in grains, and
 - the grains have the same masses whatever the time step.
 
+A fragment which ends because it is too slow (`v_kill`), too low (`h_kill`) or too far (`len_kill`) does not
+release them, as grains with its speed and height would end in their first step.
+
 The figure shows it for a 1e-7 kg meteoroid. On the left, the share of the eroded mass that goes into
 grains of each mass, at a 5 ms and a 0.5 ms step. If every step rounds the number of grains in a bin down
 and passes the rest to the next smaller bin (orange), the smaller the step, the more mass ends up in the
