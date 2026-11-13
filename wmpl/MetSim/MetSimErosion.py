@@ -1121,9 +1121,8 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
         ...
 
     Note:
-        const.dt is fixed for every fragment, including grains. A small grain deep in the atmosphere can
-        be stopped by the drag within a fraction of a step, which the step then stops instead of
-        integrating past it (see ablationStepRK4).
+        const.dt is fixed for every fragment, including grains. A small grain deep in the atmosphere whose
+        mass or speed changes within a fraction of a step is integrated in substeps (see ablationStepRK4).
     """
 
     # Keep track of the total luminosity
@@ -1211,6 +1210,10 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
         else:
             erosion_coeff = 0.0
 
+        # Keep the mass and the speed at the beginning of the step for the light and the ionization
+        m_start = frag.m
+        v_start = frag.v
+
         # Integrate the mass, the speed and the length over the step together, with the air density at the
         #   height of every stage, as the density changes by about 1% in a step of a fast meteor
         mass_loss_total, velocity_change, length_change = ablationStepRK4(const.dt, frag.K, \
@@ -1286,21 +1289,24 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
         frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
         frag.h -= frag.h_grav_drop_total
 
+        # Take the mass and the speed in the middle of the step, as the mass loss and the deceleration are
+        #   averages over the step, and a fragment which the drag nearly stops within the step would
+        #   otherwise take the luminous efficiency at a speed far outside of its range
+        m_mid = (m_start + frag.m)/2
+        v_mid = (v_start + frag.v)/2
+
         # Get the luminous efficiency
-        # NOTE: frag.v/frag.m here are the values at the end of the step, while mass_loss_ablation and
-        #   deceleration_total are averages over the step, see beta below for the same pattern
-        tau = luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m)
+        tau = luminousEfficiency(const.lum_eff_type, const.lum_eff, v_mid, m_mid)
 
         # # Compute luminosity for one grain/fragment (without the deceleration term)
-        # lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2)
+        # lum = -tau*((mass_loss_ablation/const.dt*v_mid**2)/2)
 
         # Compute luminosity for one grain/fragment (with the deceleration term)
-        # NOTE: The deceleration term can sometimes be numerically unstable for some reason...
-        lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2 + frag.m*frag.v*deceleration_total)
+        lum = -tau*((mass_loss_ablation/const.dt*v_mid**2)/2 + m_mid*v_mid*deceleration_total)
 
         # Compute the electron line density
-        beta = ionizationEfficiency(frag.v)
-        q = -beta*(mass_loss_ablation/const.dt)/(const.mu*frag.v)
+        beta = ionizationEfficiency(v_mid)
+        q = -beta*(mass_loss_ablation/const.dt)/(const.mu*v_mid)
 
         # Compute the total luminosity
         frag.lum = lum*frag.n_grains

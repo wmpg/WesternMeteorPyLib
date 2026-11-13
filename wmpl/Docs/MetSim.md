@@ -93,8 +93,10 @@ At each of the four stages, the air density is taken at the height where the fra
 stage. This matters: a fast meteor descends by 50-150 m in one step, and the air density changes by 1-2 %
 over that distance, so the density at the start of the step is not good enough.
 
-A small grain deep in the atmosphere can be stopped by the drag within a fraction of a step. When the step
-would make its speed negative, the step stops the grain instead.
+A small grain deep in the atmosphere can lose most of its mass or speed within a fraction of a step. A step
+which would change the mass or the speed by more than 30 % is split into two halves, and again if needed,
+until every piece resolves the motion, and the pieces get longer again once it does. Larger fragments are
+never split, as they change by much less than that in a step.
 
 ## Erosion into grains
 
@@ -201,5 +203,5 @@ can be late by up to `v*dt`, which is under a kilometre.
   `g`.
 - The drag and the mass loss of a fragment do not depend on the other fragments, and the grains do not
   shield each other.
-- The light and ionization use the mass loss and the deceleration averaged over the step, and the
-  luminous efficiency at the end of the step.
+- The light and the ionization of a step use the mass loss and the deceleration averaged over the step,
+  with the mass, the speed and the luminous efficiency in the middle of the step.
