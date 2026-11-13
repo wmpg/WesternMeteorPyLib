@@ -58,7 +58,9 @@ I = -tau*(v^2/2*dm/dt + m*v*dv_air/dt)
 q = -beta/(mu*v)*dm/dt
 ```
 
-where `tau` is the luminous efficiency and `beta` the ionization coefficient.
+where `tau` is the luminous efficiency and `beta` the ionization coefficient, both of which depend on the
+speed (and `tau` also on the mass for some of its types). A fragment slower than `v_kill` gives no light and
+no ionization, as the formulas of both are out of their range there.
 
 The height comes from the length: the path is a straight line in space from the beginning height at the
 beginning zenith angle, so the height follows the curvature of the Earth, and gravity pulls the fragment
@@ -88,6 +90,9 @@ method (`ablationStepRK4()` in `MetSimErosionCyTools.pyx`):
 2. Use them to estimate the state half a step later, and take the rates there. Do it twice.
 3. Estimate the state at the end of the step, and take the rates there.
 4. Advance by a weighted average of the four rates.
+
+The light and the ionization are integrated in the same way, as two more quantities that change with the
+mass and the speed, so the light of a step is the energy radiated over the step divided by the step.
 
 At each of the four stages, the air density is taken at the height where the fragment would be at that
 stage. This matters: a fast meteor descends by 50-150 m in one step, and the air density changes by 1-2 %
@@ -214,5 +219,5 @@ can be late by up to `v*dt`, which is under a kilometre.
   `g`.
 - The drag and the mass loss of a fragment do not depend on the other fragments, and the grains do not
   shield each other.
-- The light and the ionization of a step use the mass loss and the deceleration averaged over the step,
-  with the mass, the speed and the luminous efficiency in the middle of the step.
+- The light of a step is its average over the step, so the peak of a flare shorter than a step depends on
+  the step, while the light in the flare does not.
