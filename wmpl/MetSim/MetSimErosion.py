@@ -1066,7 +1066,8 @@ def erosionBinMass(frag):
     _, _, mass_max, _, bins_per_10mass = frag.erosion_bin_params
     mass_bin_coeff = 10**(-1.0/bins_per_10mass)
 
-    bin_mass = sum([n_grains*mass_max*mass_bin_coeff**i for i, n_grains in enumerate(frag.erosion_bin_counts)])
+    bin_mass = sum([n_grains*mass_max*mass_bin_coeff**i for i, n_grains \
+        in enumerate(frag.erosion_bin_counts)])
 
 
     return frag.n_grains*bin_mass

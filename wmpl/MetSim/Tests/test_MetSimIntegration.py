@@ -3,8 +3,9 @@
 MetSim integrates the mass, the speed and the length of every fragment over a time step together, with the
 air density at the height of every stage of the Runge-Kutta method. The tests check that a small fast meteor,
 which slows down quickly in a steep density gradient, follows the equations of motion at the default time
-step, that a small grain whose mass and speed change within a fraction of a step is integrated in
-substeps, with its light added up over them, and that a small grain deep in the atmosphere stops instead of speeding up.
+step, that a small grain whose mass and speed change within a fraction of a step is integrated in substeps,
+with its light added up over them, and that a small grain deep in the atmosphere stops instead of speeding
+up.
 
 Run with pytest:
     python -m pytest wmpl/MetSim/Tests/test_MetSimIntegration.py -v
