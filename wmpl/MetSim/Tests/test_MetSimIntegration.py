@@ -3,7 +3,8 @@
 MetSim integrates the mass, the speed and the length of every fragment over a time step together, with the
 air density at the height of every stage of the Runge-Kutta method. The tests check that a small fast meteor,
 which slows down quickly in a steep density gradient, follows the equations of motion at the default time
-step, and that a small grain deep in the atmosphere stops instead of speeding up.
+step, that a small grain whose mass and speed change within a fraction of a step is integrated in
+substeps, and that a small grain deep in the atmosphere stops instead of speeding up.
 
 Run with pytest:
     python -m pytest wmpl/MetSim/Tests/test_MetSimIntegration.py -v
@@ -12,8 +13,10 @@ Run with pytest:
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
+import scipy.integrate
 
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation
+from wmpl.MetSim.MetSimErosionCyTools import ablationStepRK4, AtmDensityTableCy
 from wmpl.MetSim.Tests.test_MetSimGravityDrop import bodyConstants, compareWithMotion
 
 
@@ -55,6 +58,39 @@ def testIntegrationDoesNotDependOnTheTimeStep():
 
 
 
+def testSmallGrainIsIntegratedInSubsteps():
+    """ Check one 5 ms step of a 1e-11 kg grain at 20 km/s in air of a constant density of 1e-4 kg/m^3,
+        which loses 90 % of its mass and 30 % of its speed within the step, against an integration of the
+        equations of motion. The step gave no mass left when an intermediate stage ran out of mass.
+    """
+
+    dt, m, v, rho_atm = 0.005, 1e-11, 20000.0, 1e-4
+    K = 1.21*3000**(-2/3.0)
+    sigma = 0.023e-6
+
+    # A density table which gives the same density at any height
+    atm_table = AtmDensityTableCy(np.array([-1e7, 1e7]), np.log10(np.array([rho_atm, rho_atm])))
+
+    dm, dv, dl = ablationStepRK4(dt, K, sigma, m, v, 0.0, 100000.0, np.radians(45.0), 6371000.0, 0.0, \
+        atm_table, np.zeros(7))
+
+    def motion(t, state):
+        m_t, v_t = max(state[0], 1e-30), state[1]
+        return [-K*sigma*m_t**(2/3.0)*rho_atm*v_t**3, -K*m_t**(-1/3.0)*rho_atm*v_t**2, v_t]
+
+    sol = scipy.integrate.solve_ivp(motion, (0, dt), [m, v, 0.0], method='DOP853', rtol=1e-12, \
+        atol=[1e-25, 1e-9, 1e-9])
+    m_end, v_end, l_end = sol.y[:, -1]
+
+    print("Mass, speed and length after the step:", m + dm, v + dv, dl)
+    print("From the equations of motion:", m_end, v_end, l_end)
+
+    assert abs(m + dm - m_end)/m_end < 1e-3
+    assert abs(v + dv - v_end) < 1.0
+    assert abs(dl - l_end) < 0.01
+
+
+
 def testSmallGrainDeepInTheAtmosphereStops():
     """ Check that a grain whose drag would stop it within one step does not speed up or reverse. """
 
@@ -74,6 +110,7 @@ if __name__ == "__main__":
 
     testSmallFastMeteorFollowsTheEquationsOfMotion()
     testIntegrationDoesNotDependOnTheTimeStep()
+    testSmallGrainIsIntegratedInSubsteps()
     testSmallGrainDeepInTheAtmosphereStops()
 
     print("All tests passed")

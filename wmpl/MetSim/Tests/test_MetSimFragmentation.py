@@ -2,6 +2,7 @@
 
 The tests check that:
     - the eroded mass goes into grains in full, with the same distribution of grain masses at any time step,
+    - the total mass counts the mass in the mass bins which is not released as grains yet,
     - the erosion coefficient of an "M" entry is kept below its height,
     - "EF" and "D" entries without a mass index take 2.0,
     - the count of active fragments stays right through a disruption,
@@ -126,6 +127,30 @@ def testGrainMassesDoNotDependOnTheTimeStep():
 
 
 
+def testTotalMassIncludesTheMassBins():
+    """ Check that the total mass of the active fragments stays the initial mass while the meteoroid erodes
+        and nothing ablates, as the grains are heavier than the mass it erodes in one step, so the eroded mass
+        waits in the mass bins.
+    """
+
+    const = erodingConstants(1e-7)
+    const.sigma = 0.0
+    const.erosion_mass_max = 1e-7
+    const.erosion_mass_min = 1e-8
+
+    _, results_list, _ = MetSimErosion.runSimulation(const)
+    results = np.array(results_list, dtype=np.float64)
+
+    # Total mass of the active fragments while the meteoroid is eroding
+    eroding = results[:, 16] > 0
+    mass_total = results[eroding, 15]
+
+    print("Total mass, smallest and largest (kg):", np.min(mass_total), np.max(mass_total))
+
+    assert np.allclose(mass_total, const.m_init, rtol=1e-9)
+
+
+
 def testMainEntryKeepsTheErosionCoefficient():
     """ Check that the erosion coefficient of an "M" entry is kept below its height, and is not replaced by
         the one of the height in the next step.
@@ -231,6 +256,7 @@ if __name__ == "__main__":
 
     testErodedMassGoesIntoGrains()
     testGrainMassesDoNotDependOnTheTimeStep()
+    testTotalMassIncludesTheMassBins()
     testMainEntryKeepsTheErosionCoefficient()
     testNewFragmentsTakeTheDefaultMassIndex()
     testActiveCountThroughDisruption()

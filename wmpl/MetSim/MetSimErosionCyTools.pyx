@@ -727,12 +727,92 @@ cdef double pathDensity(double length, double h_init, double cos_zc, double r_ea
 
 
 
+# Largest fraction of the mass or the speed which one Runge-Kutta step may change, above which the step is
+#   split, so that a small grain whose mass or speed changes on a time scale shorter than the step is
+#   integrated in substeps
+RK4_MAX_CHANGE = 0.3
+
+# Largest number of substeps a time step is split into
+RK4_MAX_SUBSTEPS = 65536
+
+
+
+@cython.cdivision(True)
+cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, double length, double h_init, \
+    double cos_zc, double r_earth, double h_drop, AtmDensityTableCy atm_table, const double[::1] dens_co, \
+    double *dm, double *dv, double *dl):
+    """ Integrate the mass, the speed and the length over one Runge-Kutta step, and check that the step
+        resolves the motion.
+
+    Arguments:
+        dt: [double] Step (s).
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Sum of the ablation and the erosion coefficients (s^2/m^2).
+        m: [double] Mass (kg).
+        v: [double] Speed (m/s).
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        cos_zc: [double] Cosine of the zenith angle of the path at the beginning.
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity, kept over the step (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+        dm, dv, dl: [double *] Changes of the mass (kg), the speed (m/s) and the length (m) over the step.
+
+    Return:
+        [bool] True if every stage has a positive mass and speed and the step changes the mass and the speed
+            by at most RK4_MAX_CHANGE of their values.
+    """
+
+    cdef double mk[4]
+    cdef double vk[4]
+    cdef double lk[4]
+    cdef double m_stage = m
+    cdef double v_stage = v
+    cdef double l_stage = 0.0
+    cdef double rho_atm
+    cdef int i
+
+    for i in range(4):
+
+        # Take the state of the stage from the previous one, halfway for the middle stages
+        if i == 1 or i == 2:
+            m_stage = m + dt*mk[i - 1]/2.0
+            v_stage = v + dt*vk[i - 1]/2.0
+            l_stage = dt*lk[i - 1]/2.0
+
+        elif i == 3:
+            m_stage = m + dt*mk[2]
+            v_stage = v + dt*vk[2]
+            l_stage = dt*lk[2]
+
+        # A stage which ablates all of the mass or reverses the motion does not resolve the motion
+        if (m_stage <= 0) or (v_stage <= 0):
+            return False
+
+        rho_atm = pathDensity(length + l_stage, h_init, cos_zc, r_earth, h_drop, atm_table, dens_co)
+
+        mk[i] = massLoss(K, sigma, m_stage, rho_atm, v_stage)
+        vk[i] = deceleration(K, m_stage, rho_atm, v_stage)
+        lk[i] = v_stage
+
+    dm[0] = dt*(mk[0] + 2*mk[1] + 2*mk[2] + mk[3])/6.0
+    dv[0] = dt*(vk[0] + 2*vk[1] + 2*vk[2] + vk[3])/6.0
+    dl[0] = dt*(lk[0] + 2*lk[1] + 2*lk[2] + lk[3])/6.0
+
+    return (-dm[0] <= RK4_MAX_CHANGE*m) and (-dv[0] <= RK4_MAX_CHANGE*v)
+
+
+
 @cython.cdivision(True)
 cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double v, double length, \
     double h_init, double zenith_angle, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
     const double[::1] dens_co):
     """ Integrate the mass, the speed and the length of a fragment over one time step together with the
-        4th order Runge-Kutta method, taking the atmosphere density at the height of every stage.
+        4th order Runge-Kutta method, taking the atmosphere density at the height of every stage. If a step
+        changes the mass or the speed by more than RK4_MAX_CHANGE, e.g. for a small grain deep in the
+        atmosphere, the step is split into substeps which are halved until they resolve the motion, and
+        doubled again after a resolved substep.
 
     Arguments:
         dt: [double] Time step (s).
@@ -753,59 +833,61 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
     """
 
     cdef double cos_zc = cos(zenith_angle)
-    cdef double mk[4]
-    cdef double vk[4]
-    cdef double lk[4]
-    cdef double m_stage = m
-    cdef double v_stage = v
-    cdef double l_stage = 0.0
+    cdef double dt_min = dt/RK4_MAX_SUBSTEPS
+    cdef double t = 0.0
+    cdef double h = dt
+    cdef double m_now = m
+    cdef double v_now = v
+    cdef double l_now = 0.0
+    cdef double dm = 0.0
+    cdef double dv = 0.0
+    cdef double dl = 0.0
     cdef double rho_atm
-    cdef double dm, dv, dl
-    cdef int i
+    cdef bint resolved
 
-    for i in range(4):
+    if (m <= 0) or (v <= 0):
+        return 0.0, 0.0, 0.0
 
-        # Take the state of the stage from the previous one, halfway for the middle stages
-        if i == 1 or i == 2:
-            m_stage = m + dt*mk[i - 1]/2.0
-            v_stage = v + dt*vk[i - 1]/2.0
-            l_stage = dt*lk[i - 1]/2.0
+    while t < dt:
 
-        elif i == 3:
-            m_stage = m + dt*mk[2]
-            v_stage = v + dt*vk[2]
-            l_stage = dt*lk[2]
+        # Do not step past the end of the time step
+        if h > dt - t:
+            h = dt - t
 
-        # Do not let a stage ablate more mass than there is, or the drag reverse the motion
-        if m_stage < 0:
-            m_stage = 0
+        resolved = rk4Substep(h, K, sigma, m_now, v_now, length + l_now, h_init, cos_zc, r_earth, h_drop, \
+            atm_table, dens_co, &dm, &dv, &dl)
 
-        if v_stage < 0:
-            v_stage = 0
+        # Halve a substep which does not resolve the motion, down to the smallest substep
+        if (not resolved) and (h > dt_min):
+            h /= 2.0
+            continue
 
-        rho_atm = pathDensity(length + l_stage, h_init, cos_zc, r_earth, h_drop, atm_table, dens_co)
+        # The smallest substep can only fail to resolve the motion when the fragment is ablated or stopped
+        #   within it, so take it with the rates at its start
+        if not resolved:
+            rho_atm = pathDensity(length + l_now, h_init, cos_zc, r_earth, h_drop, atm_table, dens_co)
+            dm = h*massLoss(K, sigma, m_now, rho_atm, v_now)
+            dv = h*deceleration(K, m_now, rho_atm, v_now)
+            dl = h*v_now
 
-        if m_stage > 0:
-            mk[i] = massLoss(K, sigma, m_stage, rho_atm, v_stage)
-            vk[i] = deceleration(K, m_stage, rho_atm, v_stage)
+        # Do not ablate more mass than there is or reverse the motion
+        if (dm < -m_now) or (dm != dm):
+            dm = -m_now
 
-        else:
-            mk[i] = 0
-            vk[i] = 0
+        if (dv < -v_now) or (dv != dv):
+            dv = -v_now
 
-        lk[i] = v_stage
+        m_now += dm
+        v_now += dv
+        l_now += dl
+        t += h
 
-    dm = dt*(mk[0] + 2*mk[1] + 2*mk[2] + mk[3])/6.0
-    dv = dt*(vk[0] + 2*vk[1] + 2*vk[2] + vk[3])/6.0
-    dl = dt*(lk[0] + 2*lk[1] + 2*lk[2] + lk[3])/6.0
+        # Stop integrating a fragment which is ablated or stopped
+        if (m_now <= 0) or (v_now <= 0):
+            break
 
-    # Do not ablate more mass than there is
-    if dm < -m:
-        dm = -m
+        # Try a longer substep after a resolved one
+        if resolved:
+            h *= 2.0
 
-    # Stop a fragment which the drag would stop within the step, e.g. a small grain deep in the atmosphere,
-    #   where the step is too long for the explicit integration
-    if dv < -v:
-        dv = -v
-
-    return dm, dv, dl
+    return m_now - m, v_now - v, l_now

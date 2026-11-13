@@ -1049,6 +1049,30 @@ def prepareAtmDensityTable(const):
     const.atm_table_log10_rho = table_log10_rho
 
 
+def erosionBinMass(frag):
+    """ Compute the mass which an eroding fragment has eroded into its mass bins but not released as grains
+        yet, for all of the grains the fragment stands for.
+
+    Arguments:
+        frag: [object] Fragment instance.
+
+    Return:
+        [float] Mass in the mass bins (kg).
+    """
+
+    if frag.erosion_bin_counts is None:
+        return 0.0
+
+    _, _, mass_max, _, bins_per_10mass = frag.erosion_bin_params
+    mass_bin_coeff = 10**(-1.0/bins_per_10mass)
+
+    bin_mass = sum([n_grains*mass_max*mass_bin_coeff**i for i, n_grains in enumerate(frag.erosion_bin_counts)])
+
+
+    return frag.n_grains*bin_mass
+
+
+
 def killFragment(const, frag):
     """ Deactivate the given fragment and keep track of the stats.
 
@@ -1680,6 +1704,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
         #   fragments still active at the end of the tick reach here (killed/disrupted ones hit a
         #   'continue' above), matching the old post-loop "active only" scan exactly
         mass_total_active += frag.m*frag.n_grains
+
+        # Add the mass the fragment eroded into its mass bins and did not release as grains yet
+        mass_total_active += erosionBinMass(frag)
 
     # Track the leading fragment length (use the tick-start snapshot, not a fresh frag.active filter, so a
     #   fragment that died partway through this tick is still a candidate for it - see the snapshot's own
