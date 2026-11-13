@@ -14,7 +14,7 @@ from wmpl.Formats.GenericFunctions import addKMLOptions, addSolverOptions, solve
     MeteorObservation, prepareObservations, writeMiligInputFileMeteorObservation
 from wmpl.Trajectory.StationSystematics import stationSystematicErrors, systematicErrorSize
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenSphericalCoords
-from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
 from wmpl.Utils.TrajectoryKML import trajectoryToKML
 
@@ -422,6 +422,36 @@ def originalPicksTrajectory(traj):
         return traj
 
     return loadPickle(*os.path.split(traj_path))
+
+
+
+def saveWithOriginalPicks(traj, **attributes):
+    """ Set attributes of the solution with the original picks of a trajectory, and save it again in the
+        pickle of its results, so that the pickle keeps what is computed after the solver.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory, from solveTrajectoryGeneric().
+
+    Keyword arguments:
+        **attributes: Values to set, by attribute name.
+
+    Return:
+        [Trajectory object] The solution with the original picks (see originalPicksTrajectory()), saved again
+            only if its results were saved.
+    """
+
+    # Set the attributes of the solution with the original picks
+    traj_orig = originalPicksTrajectory(traj)
+    for name, value in attributes.items():
+        setattr(traj_orig, name, value)
+
+    # Save it over the pickle of the results
+    traj_path = os.path.join(traj.output_dir, traj.file_name + '_trajectory.pickle')
+    if traj.save_results and os.path.isfile(traj_path):
+        savePickle(traj_orig, *os.path.split(traj_path))
+
+
+    return traj_orig
 
 
 
@@ -1387,6 +1417,10 @@ if __name__ == "__main__":
             fragment_trajs = solveFragmentTrajectories(traj, ecsv_paths, solver=cml_args.solver,
                 reuse_timing=(not cml_args.fragtimefit), systematics=(not cml_args.fragnosys), \
                 **solver_kwargs)
+
+            # Keep the solved fragments in the saved solution
+            saveWithOriginalPicks(traj, fragment_trajs=fragment_trajs)
+
             print(fragmentComparison(originalPicksTrajectory(traj), fragment_trajs, \
                 reuse_timing=(not cml_args.fragtimefit)))
 
