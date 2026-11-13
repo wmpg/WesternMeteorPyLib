@@ -1370,6 +1370,10 @@ class TrajectoryCorrelator(object):
 
                         # Find all unpaired observations that match already existing trajectories
                         for traj_reduced in computed_traj_list:
+                            # save the candidate ID 
+                            cand_id = None
+                            if hasattr(traj_reduced, 'cand_id'):
+                                cand_id = traj_reduced.cand_id
 
                             # If the trajectory already has more than the maximum number of stations, skip it
                             if len(traj_reduced.participating_stations) >= self.traj_constraints.max_stations:
