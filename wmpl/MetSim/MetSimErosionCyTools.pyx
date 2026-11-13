@@ -740,7 +740,8 @@ cdef int RK4_MAX_SUBSTEPS = 65536
 @cython.cdivision(True)
 cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, double length, double h_init, \
     double cos_zc, double r_earth, double h_drop, AtmDensityTableCy atm_table, const double[::1] dens_co, \
-    double *dm, double *dv, double *dl):
+    double ablation_fraction, int lum_eff_type, double lum_eff, double mu, double v_kill, double *dm, \
+    double *dv, double *dl, double *de, double *dq):
     """ Integrate the mass, the speed and the length over one Runge-Kutta step, and check that the step
         resolves the motion.
 
@@ -757,7 +758,14 @@ cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, doub
         h_drop: [double] Drop of the height due to gravity, kept over the step (m).
         atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
         dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+        ablation_fraction: [double] Fraction of the mass loss which is ablated, the rest is eroded.
+        lum_eff_type: [int] Type of the luminous efficiency (see luminousEfficiency).
+        lum_eff: [double] Constant luminous efficiency, used by the type 0 (%).
+        mu: [double] Mean mass of an atom of the meteoroid (kg).
+        v_kill: [double] Speed below which a fragment gives no light and no ionization (m/s).
         dm, dv, dl: [double *] Changes of the mass (kg), the speed (m/s) and the length (m) over the step.
+        de, dq: [double *] Energy radiated over the step (J), and the electron line density multiplied by
+            the step (s/m).
 
     Return:
         [bool] True if every stage has a positive mass and speed and the step changes the mass and the speed
@@ -767,6 +775,8 @@ cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, doub
     cdef double mk[4]
     cdef double vk[4]
     cdef double lk[4]
+    cdef double ek[4]
+    cdef double qk[4]
     cdef double m_stage = m
     cdef double v_stage = v
     cdef double l_stage = 0.0
@@ -796,9 +806,23 @@ cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, doub
         vk[i] = deceleration(K, m_stage, rho_atm, v_stage)
         lk[i] = v_stage
 
+        # Light from the ablated mass and the deceleration by the air, and the ionization from the ablated
+        #   mass, integrated with the motion, while the fragment is faster than the speed at which it is
+        #   ended, below which the efficiencies are out of their range
+        if v_stage >= v_kill:
+            ek[i] = -luminousEfficiency(lum_eff_type, lum_eff, v_stage, m_stage) \
+                *(ablation_fraction*mk[i]*v_stage*v_stage/2.0 + m_stage*v_stage*vk[i])
+            qk[i] = -ionizationEfficiency(v_stage)*ablation_fraction*mk[i]/(mu*v_stage)
+
+        else:
+            ek[i] = 0.0
+            qk[i] = 0.0
+
     dm[0] = dt*(mk[0] + 2*mk[1] + 2*mk[2] + mk[3])/6.0
     dv[0] = dt*(vk[0] + 2*vk[1] + 2*vk[2] + vk[3])/6.0
     dl[0] = dt*(lk[0] + 2*lk[1] + 2*lk[2] + lk[3])/6.0
+    de[0] = dt*(ek[0] + 2*ek[1] + 2*ek[2] + ek[3])/6.0
+    dq[0] = dt*(qk[0] + 2*qk[1] + 2*qk[2] + qk[3])/6.0
 
     return (-dm[0] <= RK4_MAX_CHANGE*m) and (-dv[0] <= RK4_MAX_CHANGE*v)
 
@@ -807,12 +831,14 @@ cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, doub
 @cython.cdivision(True)
 cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double v, double length, \
     double h_init, double zenith_angle, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
-    const double[::1] dens_co):
+    const double[::1] dens_co, double ablation_fraction, int lum_eff_type, double lum_eff, double mu, \
+    double v_kill):
     """ Integrate the mass, the speed and the length of a fragment over one time step together with the
-        4th order Runge-Kutta method, taking the atmosphere density at the height of every stage. If a step
-        changes the mass or the speed by more than RK4_MAX_CHANGE, e.g. for a small grain deep in the
-        atmosphere, the step is split into substeps which are halved until they resolve the motion, and
-        doubled again after a resolved substep.
+        4th order Runge-Kutta method, taking the atmosphere density at the height of every stage, and add up
+        the light and the ionization over the step. If a step changes the mass or the speed by more than
+        RK4_MAX_CHANGE, e.g. for a small grain deep in the atmosphere, the step is split into substeps which
+        are halved until they resolve the motion, and doubled again after a resolved substep, and the light
+        and the ionization are added up over the substeps.
 
     Arguments:
         dt: [double] Time step (s).
@@ -827,9 +853,21 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
         h_drop: [double] Drop of the height due to gravity, kept over the step (m).
         atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
         dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+        ablation_fraction: [double] Fraction of the mass loss which is ablated, the rest is eroded.
+        lum_eff_type: [int] Type of the luminous efficiency (see luminousEfficiency).
+        lum_eff: [double] Constant luminous efficiency, used by the type 0 (%).
+        mu: [double] Mean mass of an atom of the meteoroid (kg).
+        v_kill: [double] Speed below which a fragment gives no light and no ionization (m/s).
 
     Return:
-        (dm, dv, dl): [tuple] Changes of the mass (kg), the speed (m/s) and the length (m) over the step.
+        (dm, dv, dl, energy, electrons): [tuple]
+            - dm: [double] Change of the mass over the step (kg).
+            - dv: [double] Change of the speed by the air over the step (m/s).
+            - dl: [double] Change of the length over the step (m).
+            - energy: [double] Energy radiated over the step (J), from the ablated mass and the deceleration
+                by the air, integrated with the motion.
+            - electrons: [double] Electron line density multiplied by the time step (s/m), integrated with
+                the motion.
     """
 
     cdef double cos_zc = cos(zenith_angle)
@@ -842,11 +880,16 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
     cdef double dm = 0.0
     cdef double dv = 0.0
     cdef double dl = 0.0
+    cdef double energy = 0.0
+    cdef double electrons = 0.0
+    cdef double de = 0.0
+    cdef double dq = 0.0
+    cdef double m_mid, v_mid
     cdef double rho_atm
     cdef bint resolved
 
     if (m <= 0) or (v <= 0):
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0
 
     while t < dt:
 
@@ -855,7 +898,7 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
             h = dt - t
 
         resolved = rk4Substep(h, K, sigma, m_now, v_now, length + l_now, h_init, cos_zc, r_earth, h_drop, \
-            atm_table, dens_co, &dm, &dv, &dl)
+            atm_table, dens_co, ablation_fraction, lum_eff_type, lum_eff, mu, v_kill, &dm, &dv, &dl, &de, &dq)
 
         # Halve a substep which does not resolve the motion, down to the smallest substep
         if (not resolved) and (h > dt_min):
@@ -877,6 +920,21 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
         if (dv < -v_now) or (dv != dv):
             dv = -v_now
 
+        # The light and the ionization of the smallest substep are taken with the mass and the speed in its
+        #   middle, from its changes
+        if not resolved:
+            m_mid = m_now + dm/2.0
+            v_mid = v_now + dv/2.0
+            de = 0.0
+            dq = 0.0
+            if v_mid >= v_kill:
+                de = -luminousEfficiency(lum_eff_type, lum_eff, v_mid, m_mid) \
+                    *(ablation_fraction*dm*v_mid*v_mid/2.0 + m_mid*v_mid*dv)
+                dq = -ionizationEfficiency(v_mid)*ablation_fraction*dm/(mu*v_mid)
+
+        energy += de
+        electrons += dq
+
         m_now += dm
         v_now += dv
         l_now += dl
@@ -890,4 +948,4 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
         if resolved:
             h *= 2.0
 
-    return m_now - m, v_now - v, l_now
+    return m_now - m, v_now - v, l_now, energy, electrons

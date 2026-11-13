@@ -4,7 +4,7 @@ MetSim integrates the mass, the speed and the length of every fragment over a ti
 air density at the height of every stage of the Runge-Kutta method. The tests check that a small fast meteor,
 which slows down quickly in a steep density gradient, follows the equations of motion at the default time
 step, that a small grain whose mass and speed change within a fraction of a step is integrated in
-substeps, and that a small grain deep in the atmosphere stops instead of speeding up.
+substeps, with its light added up over them, and that a small grain deep in the atmosphere stops instead of speeding up.
 
 Run with pytest:
     python -m pytest wmpl/MetSim/Tests/test_MetSimIntegration.py -v
@@ -16,7 +16,7 @@ import numpy as np
 import scipy.integrate
 
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation
-from wmpl.MetSim.MetSimErosionCyTools import ablationStepRK4, AtmDensityTableCy
+from wmpl.MetSim.MetSimErosionCyTools import ablationStepRK4, AtmDensityTableCy, luminousEfficiency
 from wmpl.MetSim.Tests.test_MetSimGravityDrop import bodyConstants, compareWithMotion
 
 
@@ -71,8 +71,8 @@ def testSmallGrainIsIntegratedInSubsteps():
     # A density table which gives the same density at any height
     atm_table = AtmDensityTableCy(np.array([-1e7, 1e7]), np.log10(np.array([rho_atm, rho_atm])))
 
-    dm, dv, dl = ablationStepRK4(dt, K, sigma, m, v, 0.0, 100000.0, np.radians(45.0), 6371000.0, 0.0, \
-        atm_table, np.zeros(7))
+    dm, dv, dl, _, _ = ablationStepRK4(dt, K, sigma, m, v, 0.0, 100000.0, np.radians(45.0), 6371000.0, 0.0, \
+        atm_table, np.zeros(7), 1.0, 0, 0.7, 23*1.66*10**(-27), 3000.0)
 
     def motion(t, state):
         m_t, v_t = max(state[0], 1e-30), state[1]
@@ -88,6 +88,39 @@ def testSmallGrainIsIntegratedInSubsteps():
     assert abs(m + dm - m_end)/m_end < 1e-3
     assert abs(v + dv - v_end) < 1.0
     assert abs(dl - l_end) < 0.01
+
+
+
+def testLightOfSubstepsIsAddedUp():
+    """ Check that the energy radiated by a grain over a step which is split into substeps is the energy
+        radiated along the equations of motion, with a luminous efficiency which depends on the speed and the
+        mass. Taken once from the mass and the speed in the middle of the step, 11 % of it was lost.
+    """
+
+    dt, m, v, rho_atm = 0.005, 1e-11, 20000.0, 1e-4
+    K = 1.21*3000**(-2/3.0)
+    sigma = 0.023e-6
+    lum_eff_type = 5
+
+    atm_table = AtmDensityTableCy(np.array([-1e7, 1e7]), np.log10(np.array([rho_atm, rho_atm])))
+
+    _, _, _, energy, _ = ablationStepRK4(dt, K, sigma, m, v, 0.0, 100000.0, np.radians(45.0), 6371000.0, \
+        0.0, atm_table, np.zeros(7), 1.0, lum_eff_type, 0.7, 23*1.66*10**(-27), 3000.0)
+
+    def motion(t, state):
+        m_t, v_t = max(state[0], 1e-30), state[1]
+        dm_dt = -K*sigma*m_t**(2/3.0)*rho_atm*v_t**3
+        dv_dt = -K*m_t**(-1/3.0)*rho_atm*v_t**2
+        tau = luminousEfficiency(lum_eff_type, 0.7, v_t, m_t)
+        return [dm_dt, dv_dt, -tau*(dm_dt*v_t**2/2 + m_t*v_t*dv_dt)]
+
+    sol = scipy.integrate.solve_ivp(motion, (0, dt), [m, v, 0.0], method='DOP853', rtol=1e-12, \
+        atol=[1e-25, 1e-9, 1e-20])
+    energy_exact = sol.y[2, -1]
+
+    print("Radiated energy over the step (J):", energy, "from the equations of motion:", energy_exact)
+
+    assert abs(energy - energy_exact)/energy_exact < 1e-3
 
 
 
@@ -111,6 +144,7 @@ if __name__ == "__main__":
     testSmallFastMeteorFollowsTheEquationsOfMotion()
     testIntegrationDoesNotDependOnTheTimeStep()
     testSmallGrainIsIntegratedInSubsteps()
+    testLightOfSubstepsIsAddedUp()
     testSmallGrainDeepInTheAtmosphereStops()
 
     print("All tests passed")
