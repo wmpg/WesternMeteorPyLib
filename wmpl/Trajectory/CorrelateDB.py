@@ -133,13 +133,13 @@ class ObservationsDatabase():
         
         vals = []
         for obs_id, jdt_ref in zip(obs_ids, jdt_refs):
-            vals.append({"obs_id":obs_id, "jdt_ref":jdt_ref, "status":1})        
+            vals.append({"obs_id":obs_id, "obs_dt":jdt_ref, "status":1})        
 
         if verbose:
             log.info(f'adding {obs_ids} to paired_obs table')
         for retry in range(10):
             try:
-                self.dbhandle.executemany('insert or replace into paired_obs values(:obs_id, :jdt_ref, :status)', vals)
+                self.dbhandle.executemany('insert or replace into paired_obs values(:obs_id, :obs_dt, :status)', vals)
                 self.dbhandle.commit()
                 return True
             except sqlite3.OperationalError as e:
@@ -236,7 +236,7 @@ class ObservationsDatabase():
                     res = self.dbhandle.execute("SELECT count(name) FROM archdb.sqlite_master WHERE name='paired_obs'").fetchall()
                     if res[0][0] > 0:
                         self.dbhandle.execute('insert or replace into archdb.paired_obs '\
-                                              'select obs_id, jdt_ref, status from paired_obs where obs_dt < ?', 
+                                              'select obs_id, obs_dt, status from paired_obs where obs_dt < ?', 
                                               (archdate_jd,))
                     self.dbhandle.commit()
                     self.dbhandle.execute("detach database 'archdb'")
@@ -347,7 +347,7 @@ class ObservationsDatabase():
                     log.info(f'  no records in {source_db_path} to merge')
                 else:
                     self.dbhandle.execute('insert or replace into paired_obs ' \
-                                          'select obs_id, jdt_ref, status from sourcedb.paired_obs')
+                                          'select obs_id, obs_dt, status from sourcedb.paired_obs')
                 self.dbhandle.commit()
                 self.dbhandle.execute("detach database 'sourcedb'")
                 return True
