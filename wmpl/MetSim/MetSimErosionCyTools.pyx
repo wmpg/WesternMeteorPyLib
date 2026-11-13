@@ -6,7 +6,7 @@ cimport cython
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10
+from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10, cos, pow
 
 
 # Define cython types for numpy arrays
@@ -677,3 +677,275 @@ cpdef double atmDensityTable(double ht, const double[::1] table_ht, const double
     checkTableShape(table_ht, table_log10_rho)
 
     return tableDensity(ht, table_ht, table_log10_rho)
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef double polyDensity(double ht, const double[::1] dens_co) nogil:
+    """ Compute the atmosphere density (kg/m^3) at the given height (m) from the polynomial of
+        atmDensityPoly(), in C.
+    """
+
+    cdef double x = ht/1e6
+    cdef double log10_rho = dens_co[6]
+    cdef int i
+
+    for i in range(5, -1, -1):
+        log10_rho = log10_rho*x + dens_co[i]
+
+    return pow(10.0, log10_rho)
+
+
+
+@cython.cdivision(True)
+cdef double pathDensity(double length, double h_init, double cos_zc, double r_earth, double h_drop, \
+    AtmDensityTableCy atm_table, const double[::1] dens_co):
+    """ Compute the atmosphere density at the given length along the straight path, dropped by gravity.
+
+    Arguments:
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        cos_zc: [double] Cosine of the zenith angle of the path at the beginning.
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+
+    Return:
+        [double] Atmosphere density (kg/m^3).
+    """
+
+    cdef double r0 = h_init + r_earth
+    cdef double ht = sqrt(r0*r0 - 2*length*cos_zc*r0 + length*length) - r_earth - h_drop
+
+    if atm_table is not None:
+        return atm_table.density(ht)
+
+    return polyDensity(ht, dens_co)
+
+
+
+# Largest fraction of the mass or the speed which one Runge-Kutta step may change, above which the step is
+#   split, so that a small grain whose mass or speed changes on a time scale shorter than the step is
+#   integrated in substeps
+cdef double RK4_MAX_CHANGE = 0.3
+
+# Largest number of substeps a time step is split into
+cdef int RK4_MAX_SUBSTEPS = 65536
+
+
+
+@cython.cdivision(True)
+cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, double length, double h_init, \
+    double cos_zc, double r_earth, double h_drop, AtmDensityTableCy atm_table, const double[::1] dens_co, \
+    double ablation_fraction, int lum_eff_type, double lum_eff, double mu, double v_kill, double *dm, \
+    double *dv, double *dl, double *de, double *dq):
+    """ Integrate the mass, the speed and the length over one Runge-Kutta step, and check that the step
+        resolves the motion.
+
+    Arguments:
+        dt: [double] Step (s).
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Sum of the ablation and the erosion coefficients (s^2/m^2).
+        m: [double] Mass (kg).
+        v: [double] Speed (m/s).
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        cos_zc: [double] Cosine of the zenith angle of the path at the beginning.
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity, kept over the step (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+        ablation_fraction: [double] Fraction of the mass loss which is ablated, the rest is eroded.
+        lum_eff_type: [int] Type of the luminous efficiency (see luminousEfficiency).
+        lum_eff: [double] Constant luminous efficiency, used by the type 0 (%).
+        mu: [double] Mean mass of an atom of the meteoroid (kg).
+        v_kill: [double] Speed below which a fragment gives no light and no ionization (m/s).
+        dm, dv, dl: [double *] Changes of the mass (kg), the speed (m/s) and the length (m) over the step.
+        de, dq: [double *] Energy radiated over the step (J), and the electron line density multiplied by
+            the step (s/m).
+
+    Return:
+        [bool] True if every stage has a positive mass and speed and the step changes the mass and the speed
+            by at most RK4_MAX_CHANGE of their values.
+    """
+
+    cdef double mk[4]
+    cdef double vk[4]
+    cdef double lk[4]
+    cdef double ek[4]
+    cdef double qk[4]
+    cdef double m_stage = m
+    cdef double v_stage = v
+    cdef double l_stage = 0.0
+    cdef double rho_atm
+    cdef int i
+
+    for i in range(4):
+
+        # Take the state of the stage from the previous one, halfway for the middle stages
+        if i == 1 or i == 2:
+            m_stage = m + dt*mk[i - 1]/2.0
+            v_stage = v + dt*vk[i - 1]/2.0
+            l_stage = dt*lk[i - 1]/2.0
+
+        elif i == 3:
+            m_stage = m + dt*mk[2]
+            v_stage = v + dt*vk[2]
+            l_stage = dt*lk[2]
+
+        # A stage which ablates all of the mass or reverses the motion does not resolve the motion
+        if (m_stage <= 0) or (v_stage <= 0):
+            return False
+
+        rho_atm = pathDensity(length + l_stage, h_init, cos_zc, r_earth, h_drop, atm_table, dens_co)
+
+        mk[i] = massLoss(K, sigma, m_stage, rho_atm, v_stage)
+        vk[i] = deceleration(K, m_stage, rho_atm, v_stage)
+        lk[i] = v_stage
+
+        # Light from the ablated mass and the deceleration by the air, and the ionization from the ablated
+        #   mass, integrated with the motion, while the fragment is faster than the speed at which it is
+        #   ended, below which the efficiencies are out of their range
+        if v_stage >= v_kill:
+            ek[i] = -luminousEfficiency(lum_eff_type, lum_eff, v_stage, m_stage) \
+                *(ablation_fraction*mk[i]*v_stage*v_stage/2.0 + m_stage*v_stage*vk[i])
+            qk[i] = -ionizationEfficiency(v_stage)*ablation_fraction*mk[i]/(mu*v_stage)
+
+        else:
+            ek[i] = 0.0
+            qk[i] = 0.0
+
+    dm[0] = dt*(mk[0] + 2*mk[1] + 2*mk[2] + mk[3])/6.0
+    dv[0] = dt*(vk[0] + 2*vk[1] + 2*vk[2] + vk[3])/6.0
+    dl[0] = dt*(lk[0] + 2*lk[1] + 2*lk[2] + lk[3])/6.0
+    de[0] = dt*(ek[0] + 2*ek[1] + 2*ek[2] + ek[3])/6.0
+    dq[0] = dt*(qk[0] + 2*qk[1] + 2*qk[2] + qk[3])/6.0
+
+    return (-dm[0] <= RK4_MAX_CHANGE*m) and (-dv[0] <= RK4_MAX_CHANGE*v)
+
+
+
+@cython.cdivision(True)
+cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double v, double length, \
+    double h_init, double zenith_angle, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
+    const double[::1] dens_co, double ablation_fraction, int lum_eff_type, double lum_eff, double mu, \
+    double v_kill):
+    """ Integrate the mass, the speed and the length of a fragment over one time step together with the
+        4th order Runge-Kutta method, taking the atmosphere density at the height of every stage, and add up
+        the light and the ionization over the step. If a step changes the mass or the speed by more than
+        RK4_MAX_CHANGE, e.g. for a small grain deep in the atmosphere, the step is split into substeps which
+        are halved until they resolve the motion, and doubled again after a resolved substep, and the light
+        and the ionization are added up over the substeps.
+
+    Arguments:
+        dt: [double] Time step (s).
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Sum of the ablation and the erosion coefficients (s^2/m^2).
+        m: [double] Mass (kg).
+        v: [double] Speed (m/s).
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        zenith_angle: [double] Zenith angle of the path at the beginning (rad).
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity, kept over the step (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+        ablation_fraction: [double] Fraction of the mass loss which is ablated, the rest is eroded.
+        lum_eff_type: [int] Type of the luminous efficiency (see luminousEfficiency).
+        lum_eff: [double] Constant luminous efficiency, used by the type 0 (%).
+        mu: [double] Mean mass of an atom of the meteoroid (kg).
+        v_kill: [double] Speed below which a fragment gives no light and no ionization (m/s).
+
+    Return:
+        (dm, dv, dl, energy, electrons): [tuple]
+            - dm: [double] Change of the mass over the step (kg).
+            - dv: [double] Change of the speed by the air over the step (m/s).
+            - dl: [double] Change of the length over the step (m).
+            - energy: [double] Energy radiated over the step (J), from the ablated mass and the deceleration
+                by the air, integrated with the motion.
+            - electrons: [double] Electron line density multiplied by the time step (s/m), integrated with
+                the motion.
+    """
+
+    cdef double cos_zc = cos(zenith_angle)
+    cdef double dt_min = dt/RK4_MAX_SUBSTEPS
+    cdef double t = 0.0
+    cdef double h = dt
+    cdef double m_now = m
+    cdef double v_now = v
+    cdef double l_now = 0.0
+    cdef double dm = 0.0
+    cdef double dv = 0.0
+    cdef double dl = 0.0
+    cdef double energy = 0.0
+    cdef double electrons = 0.0
+    cdef double de = 0.0
+    cdef double dq = 0.0
+    cdef double m_mid, v_mid
+    cdef double rho_atm
+    cdef bint resolved
+
+    if (m <= 0) or (v <= 0):
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+
+    while t < dt:
+
+        # Do not step past the end of the time step
+        if h > dt - t:
+            h = dt - t
+
+        resolved = rk4Substep(h, K, sigma, m_now, v_now, length + l_now, h_init, cos_zc, r_earth, h_drop, \
+            atm_table, dens_co, ablation_fraction, lum_eff_type, lum_eff, mu, v_kill, &dm, &dv, &dl, &de, &dq)
+
+        # Halve a substep which does not resolve the motion, down to the smallest substep
+        if (not resolved) and (h > dt_min):
+            h /= 2.0
+            continue
+
+        # The smallest substep can only fail to resolve the motion when the fragment is ablated or stopped
+        #   within it, so take it with the rates at its start
+        if not resolved:
+            rho_atm = pathDensity(length + l_now, h_init, cos_zc, r_earth, h_drop, atm_table, dens_co)
+            dm = h*massLoss(K, sigma, m_now, rho_atm, v_now)
+            dv = h*deceleration(K, m_now, rho_atm, v_now)
+            dl = h*v_now
+
+        # Do not ablate more mass than there is or reverse the motion
+        if (dm < -m_now) or (dm != dm):
+            dm = -m_now
+
+        if (dv < -v_now) or (dv != dv):
+            dv = -v_now
+
+        # The light and the ionization of the smallest substep are taken with the mass and the speed in its
+        #   middle, from its changes
+        if not resolved:
+            m_mid = m_now + dm/2.0
+            v_mid = v_now + dv/2.0
+            de = 0.0
+            dq = 0.0
+            if v_mid >= v_kill:
+                de = -luminousEfficiency(lum_eff_type, lum_eff, v_mid, m_mid) \
+                    *(ablation_fraction*dm*v_mid*v_mid/2.0 + m_mid*v_mid*dv)
+                dq = -ionizationEfficiency(v_mid)*ablation_fraction*dm/(mu*v_mid)
+
+        energy += de
+        electrons += dq
+
+        m_now += dm
+        v_now += dv
+        l_now += dl
+        t += h
+
+        # Stop integrating a fragment which is ablated or stopped
+        if (m_now <= 0) or (v_now <= 0):
+            break
+
+        # Try a longer substep after a resolved one
+        if resolved:
+            h *= 2.0
+
+    return m_now - m, v_now - v, l_now, energy, electrons
