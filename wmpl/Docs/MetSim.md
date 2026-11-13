@@ -173,11 +173,19 @@ With the mass and the speed stepped separately and the grains rounded down in ev
 eroding CAMO meteors changed a lot with the time step: the end height by up to 2.1 km, and the RMS of the
 light-curve residuals of two Orionids went from 0.15 and 0.26 mag to 1.9 and 1.5 mag. The lag at the end of
 a US fireball of 2025 moved by 1.2 km. These fits had been tuned, without anyone knowing, to the numerical
-error of the time step. With the coupled steps and the grain bins (blue), the largest changes are 10-25
-times smaller: 0.13 km in the end height, 0.12 km in the lag and 0.07 mag in the RMS of the residuals.
-What is left comes from the steps in which something starts, such as the erosion or a fragmentation entry,
-which happen at the end of a step, and from short flares, which a longer step samples differently (the
-peak of the 2022 WJ1 fireball, a flare from a fragmentation entry, moves by 1 mag both before and after).
+error of the time step. With the coupled steps and the grain bins (blue), the largest changes are 0.14 km
+in the end height and 0.13 mag in the RMS of the residuals, 15 times smaller. What is left comes from things
+which happen at the end of a step: the start of the erosion, a fragmentation entry, or the end of a
+fragment. The largest change left in the lag, 0.3 km for the CAMO Lyrid, is of that kind: once the main
+fragment is gone, the leading fragment is the leading grain, and the step in which it ends sets where the
+lag stops (at 75 % of the path the two steps agree to 0.3 m).
+
+The substeps also matter for short flares from fragmentation entries. Dust released deep in the atmosphere
+burns up within a fraction of a step, and a step which does not resolve it loses 13-15 % of the light of the
+flares of the 2022 WJ1 and the Ontario 2022 fireballs at their time step. With the substeps, the light in the
+flares is the same as with a 10 times smaller step, and their peaks are 0.3-0.4 mag brighter than with the
+steps taken separately. The peak magnitude of a flare shorter than a step still depends on the
+step, as the light of a step is its average over the step, but the light in the flare does not.
 
 ![Two old fits, before and after, each at its own time step and a 10 times smaller one](figures/MetSim_fit_examples.png)
 
