@@ -970,7 +970,7 @@ class DragFit(object):
 
     def decelerationAtLength(self, len_arr):
         """ Compute the deceleration K*rho*v**2 - g_along of the model at the given lengths along the
-            trajectory.
+            trajectory, with the speed v relative to the air.
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -982,9 +982,9 @@ class DragFit(object):
 
         len_arr = np.atleast_1d(len_arr)
 
-        # Take the drag and the gravity along the path
+        # Take the drag, which acts on the speed relative to the air, and the gravity along the path
         k_arr, _ = self.ballisticCoeffAtLength(len_arr)
-        vel = self.velocityAtLength(len_arr)
+        vel = self.velocityAtLength(len_arr) - getattr(self, 'v_rotation', 0.0)
         g_along = np.interp(len_arr, self.len_grid, self.g_grid)
 
         return k_arr*self.airDensityAtLength(len_arr)*vel**2 - g_along
