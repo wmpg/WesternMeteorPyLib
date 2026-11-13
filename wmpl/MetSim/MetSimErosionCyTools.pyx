@@ -6,7 +6,7 @@ cimport cython
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10
+from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10, cos, pow
 
 
 # Define cython types for numpy arrays
@@ -677,3 +677,135 @@ cpdef double atmDensityTable(double ht, const double[::1] table_ht, const double
     checkTableShape(table_ht, table_log10_rho)
 
     return tableDensity(ht, table_ht, table_log10_rho)
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef double polyDensity(double ht, const double[::1] dens_co) nogil:
+    """ Compute the atmosphere density (kg/m^3) at the given height (m) from the polynomial of
+        atmDensityPoly(), in C.
+    """
+
+    cdef double x = ht/1e6
+    cdef double log10_rho = dens_co[6]
+    cdef int i
+
+    for i in range(5, -1, -1):
+        log10_rho = log10_rho*x + dens_co[i]
+
+    return pow(10.0, log10_rho)
+
+
+
+@cython.cdivision(True)
+cdef double pathDensity(double length, double h_init, double cos_zc, double r_earth, double h_drop, \
+    AtmDensityTableCy atm_table, const double[::1] dens_co):
+    """ Compute the atmosphere density at the given length along the straight path, dropped by gravity.
+
+    Arguments:
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        cos_zc: [double] Cosine of the zenith angle of the path at the beginning.
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+
+    Return:
+        [double] Atmosphere density (kg/m^3).
+    """
+
+    cdef double r0 = h_init + r_earth
+    cdef double ht = sqrt(r0*r0 - 2*length*cos_zc*r0 + length*length) - r_earth - h_drop
+
+    if atm_table is not None:
+        return atm_table.density(ht)
+
+    return polyDensity(ht, dens_co)
+
+
+
+@cython.cdivision(True)
+cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double v, double length, \
+    double h_init, double zenith_angle, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
+    const double[::1] dens_co):
+    """ Integrate the mass, the speed and the length of a fragment over one time step together with the
+        4th order Runge-Kutta method, taking the atmosphere density at the height of every stage.
+
+    Arguments:
+        dt: [double] Time step (s).
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Sum of the ablation and the erosion coefficients (s^2/m^2).
+        m: [double] Mass (kg).
+        v: [double] Speed (m/s).
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        zenith_angle: [double] Zenith angle of the path at the beginning (rad).
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity, kept over the step (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+
+    Return:
+        (dm, dv, dl): [tuple] Changes of the mass (kg), the speed (m/s) and the length (m) over the step.
+    """
+
+    cdef double cos_zc = cos(zenith_angle)
+    cdef double mk[4]
+    cdef double vk[4]
+    cdef double lk[4]
+    cdef double m_stage = m
+    cdef double v_stage = v
+    cdef double l_stage = 0.0
+    cdef double rho_atm
+    cdef double dm, dv, dl
+    cdef int i
+
+    for i in range(4):
+
+        # Take the state of the stage from the previous one, halfway for the middle stages
+        if i == 1 or i == 2:
+            m_stage = m + dt*mk[i - 1]/2.0
+            v_stage = v + dt*vk[i - 1]/2.0
+            l_stage = dt*lk[i - 1]/2.0
+
+        elif i == 3:
+            m_stage = m + dt*mk[2]
+            v_stage = v + dt*vk[2]
+            l_stage = dt*lk[2]
+
+        # Do not let a stage ablate more mass than there is, or the drag reverse the motion
+        if m_stage < 0:
+            m_stage = 0
+
+        if v_stage < 0:
+            v_stage = 0
+
+        rho_atm = pathDensity(length + l_stage, h_init, cos_zc, r_earth, h_drop, atm_table, dens_co)
+
+        if m_stage > 0:
+            mk[i] = massLoss(K, sigma, m_stage, rho_atm, v_stage)
+            vk[i] = deceleration(K, m_stage, rho_atm, v_stage)
+
+        else:
+            mk[i] = 0
+            vk[i] = 0
+
+        lk[i] = v_stage
+
+    dm = dt*(mk[0] + 2*mk[1] + 2*mk[2] + mk[3])/6.0
+    dv = dt*(vk[0] + 2*vk[1] + 2*vk[2] + vk[3])/6.0
+    dl = dt*(lk[0] + 2*lk[1] + 2*lk[2] + lk[3])/6.0
+
+    # Do not ablate more mass than there is
+    if dm < -m:
+        dm = -m
+
+    # Stop a fragment which the drag would stop within the step, e.g. a small grain deep in the atmosphere,
+    #   where the step is too long for the explicit integration
+    if dv < -v:
+        dv = -v
+
+    return dm, dv, dl

@@ -639,7 +639,7 @@ class FragmentationEntry(object):
 
             # Limit mass loss to 100%
             if self.mass_percent > 100:
-                mass_percent = 100.0
+                self.mass_percent = 100.0
 
         except:
             self.mass_percent = None
@@ -672,7 +672,12 @@ class FragmentationEntry(object):
         try:
             self.mass_index = float(mass_index)
         except:
-            self.mass_index = None
+
+            # New eroding fragments and dust take a mass index of 2.0 if not given, as the file header says
+            if self.frag_type in ("EF", "D"):
+                self.mass_index = 2.0
+            else:
+                self.mass_index = None
 
         ### ###
 
@@ -1537,7 +1542,7 @@ def loadConstants(sim_fit_json):
 
     # If the wake PSF wake list length is different from the wake PSF list length, set all weights to 1
     if len(const.wake_psf) != len(const.wake_psf_weights):
-        const.wake_psf_weights = np.ones(len(const.wake_psf))
+        const.wake_psf_weights = [1.0]*len(const.wake_psf)
         
 
     return const, const_json
@@ -1563,8 +1568,8 @@ def saveConstants(const, dir_path, file_name):
     if isinstance(const.dens_co, np.ndarray):
         const.dens_co = const.dens_co.tolist()
 
-    # Convert the density table to lists
-    for table_key in ['atm_table_ht', 'atm_table_log10_rho']:
+    # Convert the density table and the wake PSFs to lists
+    for table_key in ['atm_table_ht', 'atm_table_log10_rho', 'wake_psf', 'wake_psf_weights']:
         if isinstance(getattr(const, table_key, None), np.ndarray):
             setattr(const, table_key, getattr(const, table_key).tolist())
 
