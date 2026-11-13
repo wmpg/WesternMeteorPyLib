@@ -16,6 +16,10 @@ MAX_FRAMES_WEB = 1000
 # Number of dashes in each residual line
 N_DASHES = 6
 
+# RGB colours of the fragments in SkyFit2 (RMS)
+FRAGMENT_COLORS = [(255, 0, 0), (0, 255, 255), (0, 255, 0), (255, 0, 255), (60, 100, 255), (255, 128, 0), \
+    (170, 90, 255), (255, 255, 255), (255, 160, 200)]
+
 
 
 def generateTrajectoryKML(traj, dir_path):
@@ -437,7 +441,7 @@ def kmlColor(rgb, alpha=255):
 
 
 
-def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500):
+def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragments=None, flares=None):
     """ Save a 3D KML with the trajectory of the drag fit, the vertical plane and the stations, and optionally
         the measured points.
 
@@ -456,6 +460,11 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500):
         measured: [bool] Add the projected points, the lines of sight and the residuals of the measurements.
             False by default.
         n_samples: [int] Number of samples of the drag fit, at least 2. 500 by default.
+        fragments: [list] (fragment, trajectory) of the additional fragments, from
+            Formats.ECSV.solveFragmentTrajectories(), drawn from their first to their last point in their
+            colours in SkyFit2. None by default.
+        flares: [list] Flare points of the main fragment, from Formats.ECSV.flareHeights(), each marked with
+            a star in the colour of its station. None by default.
 
     Return:
         output_kml_path: [str] Path of the KML file.
@@ -493,6 +502,10 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500):
     folder_names = ['Vertical Plane']
     if traj_samples is not None:
         folder_names.append('Drag Fit Trajectory')
+    if flares:
+        folder_names.append('Flares')
+    if fragments:
+        folder_names.append('Fragments')
     if measured:
         folder_names += ['Projected Points', 'Lines of Sight', 'Residuals']
     folder_names.append('Stations')
@@ -528,6 +541,32 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500):
             point.description = "t = {:.4f} s<br>Alt = {:.3f} km<br>v = {:.3f} km/s<br>" \
                 "v ground = {:.3f} km/s<br>Lat {:.5f}, Lon {:.5f}".format(t, coords[2]/1000, vel/1000, \
                 vel_norot/1000, coords[1], coords[0])
+
+    # Draw the fragments from their first to their last point
+    for fragment, frag_traj in (fragments or []):
+
+        line = folders['Fragments'].newlinestring(name="Fragment {:d}".format(fragment), \
+            coords=[(np.degrees(frag_traj.rbeg_lon), np.degrees(frag_traj.rbeg_lat), frag_traj.rbeg_ele), \
+            (np.degrees(frag_traj.rend_lon), np.degrees(frag_traj.rend_lat), frag_traj.rend_ele)])
+        line.altitudemode = simplekml.AltitudeMode.absolute
+        line.style.linestyle.color = kmlColor(np.array(FRAGMENT_COLORS[fragment%len(FRAGMENT_COLORS)])/255)
+        line.style.linestyle.width = 3
+        line.description = "Begin {:.3f} km, end {:.3f} km".format(frag_traj.rbeg_ele/1000, \
+            frag_traj.rend_ele/1000)
+
+    # Mark the flares with stars in the colours of their stations
+    station_colors = {str(obs.station_id): colors[i%len(colors)] for i, obs in enumerate(traj.observations)}
+    for flare in (flares or []):
+
+        star = folders['Flares'].newpoint(name="{:s} {:.3f} s".format(flare['station_id'], flare['t_rel']), \
+            coords=[(np.degrees(flare['lon']), np.degrees(flare['lat']), flare['ht'])])
+        star.altitudemode = simplekml.AltitudeMode.absolute
+        star.style.iconstyle.icon.href = WEB_ICON + "color={:02x}{:02x}{:02x}&id=371&scale=4".format( \
+            *[int(round(c*255)) for c in station_colors.get(flare['station_id'], (1.0, 1.0, 1.0))[:3]])
+        star.style.labelstyle.scale = 0
+        star.description = "Flare of station {:s}, {:s} in the trajectory<br>t = {:.3f} s<br>" \
+            "Alt = {:.3f} km".format(flare['station_id'], "used" if flare['used'] else "not used", \
+            flare['t_rel'], flare['ht']/1000)
 
     for i, obs in enumerate(traj.observations):
 
