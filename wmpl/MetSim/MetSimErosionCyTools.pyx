@@ -730,10 +730,10 @@ cdef double pathDensity(double length, double h_init, double cos_zc, double r_ea
 # Largest fraction of the mass or the speed which one Runge-Kutta step may change, above which the step is
 #   split, so that a small grain whose mass or speed changes on a time scale shorter than the step is
 #   integrated in substeps
-RK4_MAX_CHANGE = 0.3
+cdef double RK4_MAX_CHANGE = 0.3
 
 # Largest number of substeps a time step is split into
-RK4_MAX_SUBSTEPS = 65536
+cdef int RK4_MAX_SUBSTEPS = 65536
 
 
 
