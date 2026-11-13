@@ -11,6 +11,9 @@ and what the options are for.
   about ablation and fragmentation.
 - [REBOUND orbital integration](REBOUND.md) — integrating a meteoroid orbit backwards or forwards,
   close encounters and impacts, Monte Carlo clones, radiation forces, and chaos indicators.
+- [The MetSim ablation model](MetSim.md) — what the erosion simulation computes, gravity, stepping through
+  time, erosion into grains, the fragmentation entries, checks against an exact solution, old fits run again,
+  and how to choose the time step.
 - [DynestyMetSim](../Dynesty/README.md) — nested-sampling fits of the erosion ablation model to a
   meteor light curve and dynamics.
 - [Orbit dissimilarity criteria](OrbitSimilarity.md) — measuring how similar two orbits are, which
