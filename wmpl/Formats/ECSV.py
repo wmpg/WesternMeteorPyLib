@@ -2872,6 +2872,9 @@ if __name__ == "__main__":
                 with open(report_path, 'a') as f:
                     f.write(flare_report)
 
+            # Keep the flares in the saved solution
+            saveWithOriginalPicks(traj, flares=flares)
+
 
     # Solve the trajectories of the additional fragments, after the main one
     fragment_trajs = []
@@ -2916,6 +2919,9 @@ if __name__ == "__main__":
                 if os.path.isfile(report_path):
                     with open(report_path, 'a') as f:
                         f.write(unsolved_report)
+
+                # Keep the unsolved fragments in the saved solution
+                saveWithOriginalPicks(traj, unsolved_fragments=projections)
 
             # Match the fragments of every two stations, also in the saved report
             match_report = fragmentMatchReport(fragmentMatches(traj_orig, ecsv_paths, \
