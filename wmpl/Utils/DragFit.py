@@ -47,6 +47,7 @@ grows faster if the meteor fragments, as the fragments have a larger area per ma
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import os
 import argparse
 
@@ -59,7 +60,7 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.Physics import ballisticCoeffMass
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
+from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, derotatedRadiantAltAz, ecef2LatLonAlt
 
 
 # Gravitational acceleration at the surface of the Earth (m/s^2)
@@ -918,6 +919,182 @@ class DragFit(object):
 
 
 
+    def groundVelocityAtLength(self, len_arr):
+        """ Compute the velocities relative to the ground at the given lengths along the trajectory.
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            [ndarray] Velocities relative to the ground (m/s), NaN outside the modelled part.
+        """
+
+        len_arr = np.atleast_1d(len_arr)
+
+        # Compute the modelled motion at the given lengths
+        vel = self.velocityAtLength(len_arr)
+        time_arr = self.timeAtLength(len_arr)
+        eci_arr = self.eciAtLength(len_arr)
+        radiant_arr = self.radiantAtLength(len_arr)
+
+        vel_norot = np.full(len(len_arr), np.nan)
+        for i in range(len(len_arr)):
+
+            # Skip the points outside the modelled part
+            if not (np.isfinite(vel[i]) and np.isfinite(time_arr[i])):
+                continue
+
+            # Derotate the velocity, with the ECI coordinates in the epoch of date
+            jd = self.traj.jdt_ref + time_arr[i]/86400.0
+            lat, lon, _ = cartesian2Geo(jd, *eci_arr[i])
+            _, _, vel_norot[i] = derotatedRadiantAltAz(vel[i]*radiant_arr[i], eci_arr[i], jd, lat, lon)
+
+
+        return vel_norot
+
+
+
+    def airDensityAtLength(self, len_arr):
+        """ Compute the air density used by the model at the given lengths along the trajectory.
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            [ndarray] Air densities (kg/m^3).
+        """
+
+        return np.exp(np.interp(self.heightAtLength(len_arr), self.ht_atm, self.log_rho_atm))
+
+
+
+    def decelerationAtLength(self, len_arr):
+        """ Compute the deceleration K*rho*v**2 - g_along of the model at the given lengths along the
+            trajectory, with the speed v relative to the air.
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            [ndarray] Decelerations (m/s^2), positive when the meteor slows down, NaN outside the modelled
+                part.
+        """
+
+        len_arr = np.atleast_1d(len_arr)
+
+        # Take the drag, which acts on the speed relative to the air, and the gravity along the path
+        k_arr, _ = self.ballisticCoeffAtLength(len_arr)
+        vel = self.velocityAtLength(len_arr) - getattr(self, 'v_rotation', 0.0)
+        g_along = np.interp(len_arr, self.len_grid, self.g_grid)
+
+        return k_arr*self.airDensityAtLength(len_arr)*vel**2 - g_along
+
+
+
+    def _motionGradients(self, coord_arr, by_time):
+        """ Compute the derivatives of the velocity and of the time or the length with respect to the
+            parameters by finite differences, with the gravity drop kept fixed.
+
+        Arguments:
+            coord_arr: [ndarray] Lengths along the trajectory from the state vector (m), or times (s).
+            by_time: [bool] If True, coord_arr are times and the derivatives of the lengths are computed. If
+                False, coord_arr are lengths and the derivatives of the times are computed.
+
+        Return:
+            (grad_vel, grad_coord):
+                - grad_vel: [ndarray] Derivatives of the velocities, one row per point.
+                - grad_coord: [ndarray] Derivatives of the times or the lengths, one row per point.
+        """
+
+        def motionAtParams(params):
+
+            # Solve the motion on a copy, which keeps this fit unchanged
+            drag_fit = copy.copy(self)
+            drag_fit.params = params
+            drag_fit._solveFull()
+
+            # Interpolate the velocity and the time or the length at the given points
+            valid = drag_fit._valid
+            if by_time:
+                x_arr, y_arr = drag_fit.time_grid[valid], drag_fit.len_grid[valid]
+            else:
+                x_arr, y_arr = drag_fit.len_grid[valid], drag_fit.time_grid[valid]
+
+            vel = np.interp(coord_arr, x_arr, drag_fit.vel_grid[valid], left=np.nan, right=np.nan)
+            coord = np.interp(coord_arr, x_arr, y_arr, left=np.nan, right=np.nan)
+
+            return np.column_stack([vel, coord])
+
+
+        # Solve the motion with the fitted parameters
+        n_params = len(self.params)
+        params_std = np.sqrt(np.maximum(np.diag(self.params_cov), 0.0))
+        nominal = motionAtParams(self.params)
+
+        grad = np.zeros((len(coord_arr), 2, n_params))
+        for j in range(n_params):
+
+            # Step by a tenth of the uncertainty of the parameter
+            step = 0.1*params_std[j]
+            if not (np.isfinite(step) and (step > 0)):
+                step = 1e-6*max(abs(self.params[j]), 1.0)
+
+            params_step = np.zeros(n_params)
+            params_step[j] = step
+            plus = motionAtParams(self.params + params_step)
+            minus = motionAtParams(self.params - params_step)
+
+            # Take central differences, one-sided where a step leaves the modelled part
+            grad_j = (plus - minus)/(2*step)
+            grad_j = np.where(np.isnan(minus), (plus - nominal)/step, grad_j)
+            grad_j = np.where(np.isnan(plus), (nominal - minus)/step, grad_j)
+            grad[:, :, j] = grad_j
+
+
+        return grad[:, 0, :], grad[:, 1, :]
+
+
+
+    def motionStdAtLength(self, len_arr):
+        """ Compute the uncertainties of the velocity and of the time at the given lengths along the
+            trajectory, from the covariance of the parameters (the noise of the points only).
+
+        Arguments:
+            len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
+
+        Return:
+            (vel_std, time_std):
+                - vel_std: [ndarray] Standard deviations of the velocities (m/s), NaN outside the modelled
+                    part and infinite if they depend on a direction not constrained by the data.
+                - time_std: [ndarray] Standard deviations of the times (s).
+        """
+
+        grad_vel, grad_time = self._motionGradients(np.atleast_1d(len_arr).astype(np.float64), False)
+
+        return self._paramStd(grad_vel), self._paramStd(grad_time)
+
+
+
+    def motionStdAtTime(self, time_arr):
+        """ Compute the uncertainties of the velocity and of the length along the trajectory at the given
+            times, from the covariance of the parameters (the noise of the points only).
+
+        Arguments:
+            time_arr: [float or ndarray] Times relative to the reference Julian date (s).
+
+        Return:
+            (vel_std, len_std):
+                - vel_std: [ndarray] Standard deviations of the velocities (m/s), NaN outside the modelled
+                    part and infinite if they depend on a direction not constrained by the data.
+                - len_std: [ndarray] Standard deviations of the lengths along the trajectory (m).
+        """
+
+        grad_vel, grad_len = self._motionGradients(np.atleast_1d(time_arr).astype(np.float64), True)
+
+        return self._paramStd(grad_vel), self._paramStd(grad_len)
+
+
+
     def ballisticCoeffGrowth(self):
         """ Compute the growth of the ballistic coefficient between the first and the last observed point,
             and the equivalent mass loss of a single body.
@@ -1030,7 +1207,7 @@ class DragFit(object):
 
             # Compute the dynamic pressure at the beginning of the segment
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
-            dyn_pres = rho_beg*vel_seg[0]**2
+            dyn_pres = rho_beg*self.groundVelocityAtLength(len_seg[0])[0]**2
 
             # Compute the significance of the growth of K in the segment
             if d_std[i] > 0:
@@ -1045,6 +1222,8 @@ class DragFit(object):
 
         out.append("The star * marks the segments where K grows significantly (more than 2 sigma). K std " \
             + "is the relative uncertainty of K at the segment end.")
+        out.append("Dyn pres is the dynamic pressure rho*v^2 at the segment beginning, with the velocity " \
+            + "relative to the air, assumed at rest relative to the ground.")
         out.append("The final dynamic mass is the mass of the leading body at the last point for the " \
             + "assumed Gamma*A and density, m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is " \
             + "propagated.")
