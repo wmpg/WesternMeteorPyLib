@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
 from wmpl.Utils.DragFit import DragFit, plotDragFit, spreadScan
+from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 
 
 # Height of the fragmentation (m), 5 km above the last point, the growth of the ballistic coefficient in it,
@@ -233,3 +234,19 @@ def testThePlotShowsTheUncertaintyFromTheSpread():
     plt.close(fig)
 
     assert "({:.3g} - {:.3g})".format(mass_lo[0], mass_hi[0]) in title
+
+
+
+def testTheSamplesFollowTheJumps():
+    """ With the heights of the fragmentations, the trajectory is sampled with the fit with jumps, which keeps
+        the uncertainty from the spread.
+    """
+
+    traj, _ = fragmentedTrajectory(1500.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj_samples = sampleTrajectory(traj, -1, -1, 1000.0, knot_hts=[HT_FRAG])
+    jumps = fitDrag(traj, knot_hts=[HT_FRAG])
+
+    ht_arr = np.array(traj_samples.ht)
+    assert np.allclose(traj_samples.vel, jumps.velocityAtLength(jumps.lengthAtHeight(ht_arr)), rtol=1e-9)
+    assert traj_samples.drag_fit.log_k_spread is not None

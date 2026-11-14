@@ -106,7 +106,7 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 | `-a`, `--dragabove` | Keep the ballistic coefficient of the first point above the beginning, instead of moving without drag. |
 | `-g`, `--ga` | The product of the drag coefficient Gamma and the shape factor A, assumed for the dynamic mass. 0.78 by default. |
 | `-d`, `--dens` | The bulk density assumed for the dynamic mass (kg/m³). 3500 by default. |
-| `-f`, `--fragheights` | Heights of the fragmentations (km), e.g. those of the flares, where `K` can jump without penalty. The spread of the fragmentations is then scanned, and the uncertainty of `K` and of the dynamic mass in the table, the plot and the samples includes it. |
+| `-f`, `--fragheights` | Heights of the fragmentations (km), e.g. those of the flares, where `K` can jump without penalty. The spread of the fragmentations is then scanned, and the uncertainty of `K` and of the dynamic mass in the table and the plot includes it. |
 
 `python -m wmpl.Utils.SampleTrajectoryPositions traj.pickle beg end step [options]`
 
@@ -114,6 +114,7 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 | :--- | :--- |
 | `beg`, `end`, `step` | Heights of the first and last sample and the step (km). `-1` uses the observed beginning or end height. With `--time` they are times relative to the reference time of the trajectory (s), and `-1` has no special meaning. |
 | `-t`, `--time` | Sample by time instead of height. |
+| `-f`, `--fragheights` | As above: the samples follow the fit with the jumps at the fragmentations. |
 | `-a`, `--dragabove` | As above. |
 
 ---

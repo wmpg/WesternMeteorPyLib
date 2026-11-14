@@ -11,7 +11,7 @@ import argparse
 
 import numpy as np
 
-from wmpl.Utils.DragFit import DragFit, plotDragFit
+from wmpl.Utils.DragFit import DragFit, plotDragFit, spreadScan
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Math import lineAndSphereIntersections
 from wmpl.Utils.Pickling import loadPickle
@@ -101,7 +101,8 @@ class TrajectorySamples(object):
 
 
 
-def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_time=False, drag_above=False):
+def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_time=False, drag_above=False, \
+    knot_hts=None):
     """ Given the trajectory, beginning, end and step in meters, this function will sample the positions on
         the trajectory and compute the geographical coordinates, the ground-fixed azimuth and elevation of the
         radiant and the velocity for every sample. The times and velocities are computed from a drag model
@@ -120,13 +121,20 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
             instead of heights, and -1 does not mean the observed beginning and end. False by default.
         drag_above: [bool] If True, the drag above the beginning is computed with the ballistic coefficient
             at the beginning. If False, the meteor moves without drag above the beginning. False by default.
+        knot_hts: [list] Heights of the fragmentations (m), e.g. those of the flares, where the ballistic
+            coefficient can jump, with the uncertainty from their spread (see wmpl.Utils.DragFit.spreadScan).
+            None by default.
 
     Return:
         traj_samples: [TrajectorySamples object] Sampled positions.
     """
 
-    # Fit the drag model of the motion along the trajectory
-    drag_fit = DragFit(traj, drag_above=drag_above)
+    # Fit the drag model of the motion along the trajectory, with the fragmentations if their heights are
+    #   given
+    if knot_hts is None:
+        drag_fit = DragFit(traj, drag_above=drag_above)
+    else:
+        drag_fit = spreadScan(traj, knot_hts, drag_above=drag_above)[0]
 
     if by_time:
 
@@ -265,6 +273,10 @@ if __name__ == "__main__":
         help='Compute the drag above the beginning with the ballistic coefficient at the beginning, ' \
         + 'instead of moving without drag.')
 
+    arg_parser.add_argument('-f', '--fragheights', metavar='HT', type=float, nargs='+', \
+        help='Heights of the fragmentations in km, e.g. those of the flares, where the ballistic ' \
+        + 'coefficient can jump (see wmpl.Utils.DragFit).')
+
     arg_parser.add_argument('-t', '--time', action='store_true', help='Sample by time instead of height. The begin, end and step are then given in seconds relative to the reference time of the trajectory, and -1 does not mean the observed begin and end.')
 
 
@@ -285,6 +297,9 @@ if __name__ == "__main__":
     beg_ht = units_conv*cml_args.beg_height
     end_ht = units_conv*cml_args.end_height
     sample_step = units_conv*cml_args.height_step
+
+    # Convert the heights of the fragmentations to meters
+    knot_hts = None if cml_args.fragheights is None else 1000*np.array(cml_args.fragheights)
 
     ############################
 
@@ -314,7 +329,7 @@ if __name__ == "__main__":
 
     # Run trajectory sampling
     sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True, by_time=cml_args.time, \
-        drag_above=cml_args.dragabove)
+        drag_above=cml_args.dragabove, knot_hts=knot_hts)
 
 
     # # Test the line and sphere intersection
