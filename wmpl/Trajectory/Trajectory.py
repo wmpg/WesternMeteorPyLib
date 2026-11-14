@@ -5724,8 +5724,10 @@ class Trajectory(object):
             vel_max = max(np.max(obs.velocities[1:]/1000), vel_max)
             vel_min = min(np.min(obs.velocities[1:]/1000), vel_min)
 
-            ht_max = max(np.max(obs.meas_ht), ht_max)
-            ht_min = min(np.min(obs.meas_ht), ht_min)
+            # Skip the NaN heights of an ignored station whose clock is far off
+            if np.any(np.isfinite(obs.meas_ht)):
+                ht_max = max(np.nanmax(obs.meas_ht), ht_max)
+                ht_min = min(np.nanmin(obs.meas_ht), ht_min)
 
             t_max = max(np.max(obs.time_data), t_max)
             t_min = min(np.min(obs.time_data), t_min)
