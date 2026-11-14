@@ -1171,61 +1171,25 @@ def checkWeights(observations, weights):
 
 
 
-def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=False):
-    """ Calculate the sum of absolute differences between timings of given stations using the length from
-        respective stations.
-    
+def timingDifferences(observations, weights=None):
+    """ Compute the differences in time between pairs of stations at the same lengths along the trajectory.
+        With the timing offsets t_i and t_j, the residuals are the differences plus t_i - t_j.
+
     Arguments:
-        params: [ndarray] Timing differences from the reference station (NOTE: reference station should NOT be 
-            in this list).
         observations: [list] A list of ObservedPoints objects.
-        time_dict: [dict] A dictionary of timing differences for every station. The keys are station IDs and
-            the values are timing differences. If a fixed time difference is not given for a station, the
-            timing difference is set to 0.
 
     Keyword arguments:
-        weights: [list] A list of statistical weights for every station.
-        ret_stddev: [bool] Returns the standard deviation instead of the cost function.
-    
-    Return:
-        [float] Average absolute difference between the timings from all stations using the length for
-            matching.
+        weights: [list] A list of statistical weights for every station. None by default.
 
+    Return:
+        pairs: [list] A tuple (i, j, diffs, weight) for every pair of used stations which overlap in at least
+            4 points, with the indices of the stations, the differences in time (s) and the pair weight.
     """
 
     # Make sure weight values are OK
     weights = checkWeights(observations, weights)
 
-    stat_count = 0
-
-    state_vect_distances = []
-
-    # Go through observations from all stations
-    for i, obs in enumerate(observations):
-
-        # Check if the station has a given fixed time offset and assign it
-        if not isinstance(time_dict[str(obs.station_id)], bool):
-            t_diff = time_dict[str(obs.station_id)]
-
-        else:
-            # Take the estimated time difference for all other stations
-            t_diff = params[stat_count]
-            stat_count += 1
-
-        # Calculate the shifted time
-        time_shifted = obs.time_data + t_diff
-
-        # Add length to length list
-        state_vect_distances.append([time_shifted,  obs.state_vect_dist])
-
-
-
-    cost_sum = 0
-    cost_point_count = 0
-    weights_sum = 1e-10
-
-    # Keep track of stations with confirmed overlaps
-    confirmed_overlaps = []
+    pairs = []
 
     # Go through all pairs of observations (i.e. stations)
     for i in range(len(observations)):
@@ -1234,106 +1198,274 @@ def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=Fa
         if observations[i].ignore_station:
             continue
 
-        for j in range(len(observations)):
-            
+        for j in range(i + 1, len(observations)):
+
             # Skip ignored stations
             if observations[j].ignore_station:
                 continue
 
-
-            # Skip pairing the same observations again
-            if j <= i:
-                continue
-
-            # Extract times and lengths from both stations
-            time1, len1 = state_vect_distances[i]
-            time2, len2 = state_vect_distances[j]
-
-            # Exclude ignored points
-            time1 = time1[observations[i].ignore_list == 0]
-            len1 = len1[observations[i].ignore_list == 0]
-            time2 = time2[observations[j].ignore_list == 0]
-            len2 = len2[observations[j].ignore_list == 0]
+            # Extract times and lengths of both stations, excluding the ignored points
+            used1 = observations[i].ignore_list == 0
+            used2 = observations[j].ignore_list == 0
+            time1, len1 = observations[i].time_data[used1], observations[i].state_vect_dist[used1]
+            time2, len2 = observations[j].time_data[used2], observations[j].state_vect_dist[used2]
 
             # Find common points in length between both stations
-            common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))
-
-
-            # Continue without fitting the timing is there is no, or almost no overlap
-            if len(common_pts[0]) < 4:
-                continue
-
-
-            # Keep track of stations with confirmed overlaps
-            confirmed_overlaps.append(observations[i].station_id)
-            confirmed_overlaps.append(observations[j].station_id)
-            
+            common_pts = (len2 >= np.min(len1)) & (len2 <= np.max(len1))
 
             # Take only the common points
             time2 = time2[common_pts]
             len2 = len2[common_pts]
 
-
             # If there are any excluded points in the reference observations, do not take their
-            # pairs from the other site into consideration
+            #   pairs from the other site into consideration
             if observations[i].excluded_indx_range:
 
-                # Extract excluded indices
-                excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
-
                 # Get the range of lengths inside the exclusion zone
-                len1_excluded_min = len1[excluded_indx_min]
-                len1_excluded_max = len1[excluded_indx_max]
+                excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
+                outside = ~((len2 >= len1[excluded_indx_min]) & (len2 <= len1[excluded_indx_max]))
 
-                # Select only those lengths in the other station which are outside the exclusion zone
-                temp_arr = np.c_[time2, len2]
-                temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
-                    & (temp_arr[:, 1] <= len1_excluded_max))]
+                time2 = time2[outside]
+                len2 = len2[outside]
 
-                time2, len2 = temp_arr.T
+            # Skip the pair if there is no, or almost no overlap
+            if len(len2) < 4:
+                continue
 
+            # Interpolate the time of the first (i.e. reference) station at the lengths of the second
+            sort_ind = np.argsort(len1, kind='stable')
+            diffs = np.interp(len2, len1[sort_ind], time1[sort_ind]) - time2
 
-            # Interpolate the first (i.e. reference length)
-            len1_interpol = scipy.interpolate.interp1d(len1, time1)
-
-            # Calculate the residuals using smooth approximation of L1 (absolute value) cost
-            z = (len1_interpol(len2) - time2)**2
-
-            # Calculate the cost function sum
-            cost_sum += weights[i]*weights[j]*np.sum(2*(np.sqrt(1 + z) - 1))
-
-            # Add the weight sum
-            weights_sum += weights[i]*weights[j]
-
-            # Add the total number of points to the cost counter
-            cost_point_count += len(z)
+            pairs.append((i, j, diffs, weights[i]*weights[j]))
 
 
-    # Exclude stations with no time overlap with other stations
-    if (len(observations) > 2):
-        confirmed_overlaps = list(set(confirmed_overlaps))
-        for obs in observations:
-            if obs.station_id not in confirmed_overlaps:
-                obs.ignore_station = True
-                obs.ignore_list = np.ones(len(obs.time_data), dtype=np.uint8)
+    return pairs
+
+
+
+def timingCost(pairs, offsets, stat='mean_square'):
+    """ Compute a statistic of the residuals in time between stations, with the given timing offsets.
+
+    Arguments:
+        pairs: [list] Differences in time between pairs of stations, see timingDifferences.
+        offsets: [ndarray] Timing offset of every station, in the order of the observations (s).
+
+    Keyword arguments:
+        stat: [str] 'mean_square' for the weighted mean of the squared residuals (s^2), 'rms' for its square
+            root (s), or 'mean_abs' for the weighted mean of the absolute residuals (s). 'mean_square' by
+            default.
+
+    Return:
+        [float] The statistic over all points of all pairs, each point weighted by the weight of its pair.
+            Infinite if no two stations overlap.
+    """
+
+    sq_sum = 0.0
+    abs_sum = 0.0
+    weights_sum = 0.0
+
+    for i, j, diffs, weight in pairs:
+
+        # Compute the residuals with the timing offsets
+        res = diffs + offsets[i] - offsets[j]
+
+        sq_sum += weight*np.sum(res**2)
+        abs_sum += weight*np.sum(np.abs(res))
+        weights_sum += weight*len(res)
 
 
     # If no points were compared, return infinite
-    if cost_point_count == 0:
+    if weights_sum <= 0:
         return np.inf
 
-    # Calculate the standard deviation of the fit
-    dist_stddev = np.sqrt(cost_sum/weights_sum/cost_point_count)
+    if stat == 'rms':
+        return np.sqrt(sq_sum/weights_sum)
+
+    elif stat == 'mean_abs':
+        return abs_sum/weights_sum
+
+    return sq_sum/weights_sum
+
+
+
+def timingOffsetsFromParams(params, observations, time_dict):
+    """ Assign the timing offset of every station from the estimated offsets and the fixed ones.
+
+    Arguments:
+        params: [ndarray] Timing offsets of the stations whose offset is estimated, in the order of the
+            observations, without the fixed ones (s).
+        observations: [list] A list of ObservedPoints objects.
+        time_dict: [dict] Timing offset of every station ID, a number if it is fixed or True if it is
+            estimated.
+
+    Return:
+        offsets: [ndarray] Timing offset of every station, in the order of the observations (s).
+    """
+
+    offsets = np.zeros(len(observations))
+
+    stat_count = 0
+    for i, obs in enumerate(observations):
+
+        # Check if the station has a given fixed time offset and assign it
+        if not isinstance(time_dict[str(obs.station_id)], bool):
+            offsets[i] = time_dict[str(obs.station_id)]
+
+        else:
+            # Take the estimated time difference for all other stations
+            offsets[i] = params[stat_count]
+            stat_count += 1
+
+
+    return offsets
+
+
+
+def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=False):
+    """ Calculate the weighted mean of the squared differences in time between stations at the same lengths,
+        with the given timing offsets.
+
+    Arguments:
+        params: [ndarray] Timing offsets of the stations whose offset is estimated (NOTE: the stations with a
+            fixed offset, such as the reference station, should NOT be in this list).
+        observations: [list] A list of ObservedPoints objects.
+        time_dict: [dict] A dictionary of timing differences for every station. The keys are station IDs and
+            the values are the fixed timing differences, or True for the estimated ones.
+
+    Keyword arguments:
+        weights: [list] A list of statistical weights for every station. None by default.
+        ret_stddev: [bool] Return the root mean square of the differences (s) instead of their mean square.
+            False by default.
+
+    Return:
+        [float] Weighted mean of the squared differences in time (s^2), or their root mean square (s).
+            Infinite if no two stations overlap.
+    """
+
+    # Assign the timing offset of every station
+    offsets = timingOffsetsFromParams(params, observations, time_dict)
+
+    # Compute the residuals between all pairs of stations
+    pairs = timingDifferences(observations, weights=weights)
 
     if ret_stddev:
 
         # Returned for reporting the goodness of fit
-        return dist_stddev
+        return timingCost(pairs, offsets, stat='rms')
 
     else:
 
         # Returned for minimization
-        return cost_sum/weights_sum/cost_point_count
+        return timingCost(pairs, offsets)
+
+
+
+def stationsWithoutTimeOverlap(observations, pairs):
+    """ Find the used stations whose lengths do not overlap with those of any other used station.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+        pairs: [list] Differences in time between pairs of stations, see timingDifferences.
+
+    Return:
+        [list] Indices of the stations, in the list of observations.
+    """
+
+    # Collect the stations which overlap with another one
+    overlapping = set()
+    for i, j, _, _ in pairs:
+        overlapping.update([i, j])
+
+    return [i for i, obs in enumerate(observations) if (not obs.ignore_station) and (i not in overlapping)]
+
+
+
+def solveTimingOffsets(pairs, observations, time_dict, max_toffset):
+    """ Estimate the timing offsets of the stations by linear least squares, within +/- max_toffset. In each
+        group of overlapping stations without a fixed offset, the one with the most points is held at zero.
+
+    Arguments:
+        pairs: [list] Differences in time between pairs of stations, see timingDifferences.
+        observations: [list] A list of ObservedPoints objects.
+        time_dict: [dict] Timing offset of every station ID, a number if it is fixed or True if it is
+            estimated.
+        max_toffset: [float] Largest timing offset allowed (s).
+
+    Return:
+        (offsets, success):
+            - offsets: [ndarray] Timing offset of every station, in the order of the observations (s). The
+                stations which overlap with no other one keep 0, or their fixed offset.
+            - success: [bool] False if no two stations overlap, or the least squares solution failed.
+    """
+
+    # Take the fixed offsets, and 0 for the others
+    offsets = np.array([0.0 if isinstance(time_dict[str(obs.station_id)], bool) \
+        else float(time_dict[str(obs.station_id)]) for obs in observations])
+
+    if not pairs:
+        return offsets, False
+
+    # Find the groups of stations which overlap with one another
+    group = list(range(len(observations)))
+
+    def findRoot(k):
+        """ Find the station which represents the group of the given station. """
+
+        while group[k] != k:
+            k = group[k]
+
+        return k
+
+    # Join the groups of the stations in each pair
+    for i, j, _, _ in pairs:
+        group[findRoot(i)] = findRoot(j)
+
+    # Hold the station with the most points at 0 in each group without a fixed offset
+    estimated = [isinstance(time_dict[str(obs.station_id)], bool) for obs in observations]
+    in_pairs = set([i for i, _, _, _ in pairs] + [j for _, j, _, _ in pairs])
+    for root in set(findRoot(k) for k in in_pairs):
+
+        members = [k for k in in_pairs if findRoot(k) == root]
+
+        if all(estimated[k] for k in members):
+            held = max(members, key=lambda k: observations[k].kmeas)
+            estimated[held] = False
+
+    # Estimate the offsets of the stations in pairs which are not fixed
+    free = [k for k in sorted(in_pairs) if estimated[k]]
+    if not free:
+        return offsets, True
+
+    column = {k: col for col, k in enumerate(free)}
+
+    # Construct the linear system, weighted by the square root of the pair weights
+    rows = []
+    rhs = []
+    for i, j, diffs, weight in pairs:
+
+        if len(diffs) == 0:
+            continue
+
+        row = np.zeros((len(diffs), len(free)))
+        if i in column:
+            row[:, column[i]] = 1.0
+        if j in column:
+            row[:, column[j]] = -1.0
+
+        rows.append(np.sqrt(weight)*row)
+        rhs.append(-np.sqrt(weight)*(diffs + offsets[i] - offsets[j]))
+
+    if not rows:
+        return offsets, False
+
+    # Solve the bounded least squares problem
+    solution = scipy.optimize.lsq_linear(np.vstack(rows), np.concatenate(rhs), \
+        bounds=(-max_toffset, max_toffset), method='bvls')
+
+    offsets[free] = solution.x
+
+
+    return offsets, bool(solution.success)
 
 
 
@@ -2494,7 +2626,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
             elif plt_flag == 'time_res':
 
-                timing_res_list_ms = 1000*timing_res_list
+                # Root mean square of the time residuals
+                timing_res_list_ms = 1000*np.sqrt(timing_res_list)
 
                 v_min = np.min(timing_res_list_ms)
                 v_max = np.max(timing_res_list_ms)
@@ -3103,11 +3236,14 @@ class Trajectory(object):
         # Jacchia fit parameters for all observations combined
         self.jacchia_fit = None
 
-        # Cost function value of the time vs. state vector distance fit
+        # Weighted mean square of the time residuals between the stations (s^2)
         self.timing_res = None
 
-        # Standard deviation of all time differences between individual stations
+        # Root mean square of the time residuals between the stations (s)
         self.timing_stddev = -1.0
+
+        # Mean absolute time residual between the stations (s)
+        self.timing_avg_res = None
 
         # Average position of the meteor
         self.state_vect_avg = None
@@ -3437,6 +3573,9 @@ class Trajectory(object):
                 # List of distances from the state vector
                 state_vect_dist = []
 
+                # Direction of motion along the radiant line
+                motion_dir = -vectNorm(radiant_eci)
+
                 # Go through all individual position measurement from each site
                 for i, (t, stat, meas) in enumerate(zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los)):
 
@@ -3460,13 +3599,13 @@ class Trajectory(object):
                         ref_point = np.copy(rad_cpa)
 
                     # Calculate the distance from the first observed point to the projected point on the
-                    #   radiant line
-                    dist = vectMag(ref_point - rad_cpa)
+                    #   radiant line, negative if the point is before it
+                    dist = np.dot(rad_cpa - ref_point, motion_dir)
                 
                     first_pt_distances.append(dist)
 
                     # Distance from the state vector to the projected point on the radiant line
-                    state_vect_dist.append(vectMag(state_vect - rad_cpa))
+                    state_vect_dist.append(np.dot(rad_cpa - state_vect, motion_dir))
 
 
                 # Convert the distances (length along the trail) into a numpy array
@@ -3475,49 +3614,32 @@ class Trajectory(object):
 
 
             ### Calculate average velocity including all points up to the given point ###
-            velocities_prev_point = []
-            for i, (t, l) in enumerate(zip(obs.time_data, obs.length)):
 
-                # For the first 4 points compute the velocity using the first 4 points
-                if i < 4:
-                    time_part = obs.time_data[:4]
-                    len_part = obs.length[:4]
+            # Take the last point of the line fitted up to every point, at least the 4th one
+            last_ind = np.minimum(np.maximum(np.arange(len(obs.time_data)), 3), len(obs.time_data) - 1)
 
-                # Otherwise include all points up to the current point
-                else:
-                    time_part = obs.time_data[: i+1]
-                    len_part = obs.length[: i+1]
+            # Take the finite times and lengths relative to the first finite point
+            good = np.isfinite(obs.time_data) & np.isfinite(obs.length)
+            time_rel = np.zeros(len(obs.time_data))
+            len_rel = np.zeros(len(obs.time_data))
+            if np.any(good):
+                time_rel[good] = obs.time_data[good] - obs.time_data[good][0]
+                len_rel[good] = obs.length[good] - obs.length[good][0]
 
-                # If there are NaNs or infs, drop them
-                filter_mask = np.logical_not(np.isnan(time_part) | np.isinf(time_part) | np.isnan(len_part) \
-                    | np.isinf(len_part))
+            # Fit the lines through time vs. length from the cumulative sums
+            n_sum = np.cumsum(good)[last_ind]
+            t_sum = np.cumsum(time_rel)[last_ind]
+            l_sum = np.cumsum(len_rel)[last_ind]
+            tt_sum = np.cumsum(time_rel**2)[last_ind]
+            tl_sum = np.cumsum(time_rel*len_rel)[last_ind]
+            denom = n_sum*tt_sum - t_sum**2
 
-                time_part = time_part[filter_mask]
-                len_part = len_part[filter_mask]
+            # Use NaN if there are no good points to estimate the velocity on
+            with np.errstate(divide='ignore', invalid='ignore'):
+                velocities_prev_point = np.where((n_sum > 1) & (denom > 0), \
+                    (n_sum*tl_sum - t_sum*l_sum)/denom, np.nan)
 
-                if len(time_part) > 1:
-
-                    # Fit a line through time vs. length data
-                    try:
-                        popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
-
-                    # Check for this fit error, which happens extremely rarely:
-                    # RuntimeError: Optimal parameters not found: gtol=0.000000 is too small, func(x) is 
-                    # orthogonal to the columns of the Jacobian to machine precision.
-                    except RuntimeError:
-                        print("A velocity fit failed with a RuntimeError, skipping this iteration.")
-                        popt = [np.nan]
-
-                    velocities_prev_point.append(popt[0])
-
-                else:
-
-                    # If there are no good points to estimate the velocity on, use NaN
-                    velocities_prev_point.append(np.nan)
-
-
-
-            obs.velocities_prev_point = np.array(velocities_prev_point)
+            obs.velocities_prev_point = velocities_prev_point
 
 
             ### ###
@@ -3542,11 +3664,12 @@ class Trajectory(object):
             # Calculate the time differences from point to point
             time_diffs = obs.time_data - time_shifted
 
-            # Replace zeros in time by machine precision value to avoid division by zero errors
-            time_diffs[time_diffs == 0] = np.finfo(np.float64).eps
+            # Calculate velocity for every point, NaN if no time passed between the points
+            with np.errstate(divide='ignore', invalid='ignore'):
+                obs.velocities = np.where(time_diffs == 0, np.nan, dists_diffs/time_diffs)
 
-            # Calculate velocity for every point
-            obs.velocities = dists_diffs/time_diffs
+            # The first velocity is always 0
+            obs.velocities[0] = 0.0
 
             ### ###
 
@@ -3576,6 +3699,10 @@ class Trajectory(object):
 
             self.timing_stddev = timingResiduals(zero_timing_res, self.observations, self.stations_time_dict, 
                                                  weights=weights, ret_stddev=True)
+
+            # Compute the mean absolute time residual
+            self.timing_avg_res = timingCost(timingDifferences(self.observations, weights=weights), \
+                zero_timing_res, stat='mean_abs')
 
 
     def calcAvgVelocityAboveHt(self, observations, bottom_ht, weights):
@@ -3627,7 +3754,7 @@ class Trajectory(object):
 
                 all_times.append(t)
                 all_state_vect_dists.append(sv_dist)
-                all_inv_weights.append(1.0/w)
+                all_inv_weights.append(1.0/np.sqrt(w))
 
 
         # If there are less than 4 points, don't estimate the initial velocity this way!
@@ -3636,7 +3763,7 @@ class Trajectory(object):
             print('Using automated velocity estimation with the sliding fit...')
             return None, None
 
-        # Fit a line through the time vs. state vector distance data
+        # Fit a weighted line through the time vs. state vector distance data
         line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
             sigma=all_inv_weights)
 
@@ -3663,16 +3790,21 @@ class Trajectory(object):
 
             if velocity_fit is None:
 
+                # Take the used points, or all points if fewer than 4 are used
+                used = obs.ignore_list == 0
+                if np.count_nonzero(used) < 4:
+                    used = np.ones(len(obs.time_data), dtype=bool)
+
                 # Fit a line to the first part of the points
-                init_part_size = int(self.v_init_part*len(obs.time_data))
+                init_part_size = int(self.v_init_part*np.count_nonzero(used))
 
                 # If the size is smaller than 4 points, take all point
                 if init_part_size < 4:
-                    init_part_size = len(obs.time_data)
+                    init_part_size = np.count_nonzero(used)
 
                 # Cut the length and time to the first quarter
-                quart_length = obs.length[:init_part_size]
-                quart_time = obs.time_data[:init_part_size]
+                quart_length = obs.length[used][:init_part_size]
+                quart_time = obs.time_data[used][:init_part_size]
 
                 # Fit a line to the data, estimate the velocity and its standard deviation
                 try:
@@ -3711,8 +3843,14 @@ class Trajectory(object):
             # Initial parameters
             p0 = np.zeros(2)
 
+            # Take the used points, or all points if fewer than 4 are used
+            used = obs.ignore_list == 0
+            if np.count_nonzero(used) < 4:
+                used = np.ones(len(obs.time_data), dtype=bool)
+
             try:
-                obs.jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, obs.time_data, obs.lag, p0=p0)
+                obs.jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, obs.time_data[used], \
+                    obs.lag[used], p0=p0)
 
             # If the maximum number of iterations have been reached, skip Jacchia fitting
             except RuntimeError:
@@ -3726,9 +3864,9 @@ class Trajectory(object):
 
 
         # Get the time and lag points from all sites
-        time_all = np.hstack([obs.time_data[obs.ignore_list == 0] for obs in self.observations \
+        time_all = np.hstack([obs.time_data[obs.ignore_list == 0] for obs in observations \
             if not obs.ignore_station])
-        lag_all = np.hstack([obs.lag[obs.ignore_list == 0] for obs in self.observations \
+        lag_all = np.hstack([obs.lag[obs.ignore_list == 0] for obs in observations \
             if not obs.ignore_station])
         time_lag = np.c_[time_all, lag_all]
 
@@ -3755,9 +3893,9 @@ class Trajectory(object):
 
     def estimateTimingAndVelocity(self, observations, weights, estimate_timing_vel=True):
         """ Estimates time offsets between the stations by matching time vs. distance from state vector. 
-            The initial velocity is calculated by ineratively fitting a line from the beginning to 20% of the 
-            total trajectory, and up to the 80% of the total trajectory. The fit with the lowest standard
-            deviation is chosen to represent the initial velocity.
+            The initial velocity is calculated by iteratively fitting a line to the first part of the points
+            of all stations, from v_init_part to 80% of the points, starting at one of the first 4 points. The
+            fit with the lowest standard deviation is chosen to represent the initial velocity.
 
         Arguments:
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
@@ -3766,7 +3904,8 @@ class Trajectory(object):
 
         Keyword arguments:
             estimate_timing_vel: [bool] If True (default), the time differences and the velocity will be 
-                estimated, otherwise the velocity will be estimated as the medial velocity.
+                estimated, otherwise the velocity will be estimated as the median velocity of the used
+                stations.
 
         Return:
             (fit_success, velocity_fit, v_init_mini, time_diffs, observations): [tuple]
@@ -3779,8 +3918,12 @@ class Trajectory(object):
 
         """
 
-        # Take the initial velocity as the median velocity between all sites
-        v_init_list = np.array([obs.v_init for obs in observations if obs.v_init is not None])
+        # Take the median velocity of the used sites, or of all sites if none is used
+        v_init_obs = [obs for obs in observations if (obs.v_init is not None) and (not obs.ignore_station)]
+        if not v_init_obs:
+            v_init_obs = [obs for obs in observations if obs.v_init is not None]
+
+        v_init_list = np.array([obs.v_init for obs in v_init_obs])
         v_init = np.median(v_init_list)
         vel_stddev = 0
 
@@ -3794,7 +3937,7 @@ class Trajectory(object):
             self.timing_res = timingResiduals(np.zeros(1), observations, fixed_time_dict, weights=weights)
 
             # Compute the standard deviation of the median velocity from the fits of individual stations
-            vel_stddev = medianStddev([obs.v_init_stddev for obs in observations if obs.v_init is not None])
+            vel_stddev = medianStddev([obs.v_init_stddev for obs in v_init_obs])
 
             return True, np.zeros(2), v_init, vel_stddev, time_diffs, observations
 
@@ -3816,79 +3959,50 @@ class Trajectory(object):
                     self.stations_time_dict[str(obs.station_id)] = True
                     self.stations_time_dict_copy[str(obs.station_id)] = True
 
-            # If no fixed times are given, set the station with the longest track as the reference station
-            #   (time difference = 0)
-            if len(self.fixed_time_offsets) == 0:
-                obs_points = [obs.kmeas for obs in observations]
-                ref_index = obs_points.index(max(obs_points))
+            # Compute the differences in time between the stations at the same lengths
+            pairs = timingDifferences(observations, weights=weights)
+
+            # Ignore the stations which overlap with no other station, if there are more than 2
+            if len(observations) > 2:
+                for i in stationsWithoutTimeOverlap(observations, pairs):
+
+                    print("Station {:s} does not overlap in length with any other station, ignoring it"\
+                        .format(str(observations[i].station_id)))
+
+                    observations[i].ignore_station = True
+                    observations[i].ignore_list = np.ones(len(observations[i].time_data), dtype=np.uint8)
+
+            # If no used station has a fixed time, take the one with the most points as the reference
+            used_fixed = [obs for obs in observations if (not obs.ignore_station) \
+                and (not isinstance(self.stations_time_dict[str(obs.station_id)], bool))]
+            used_indices = [i for i, obs in enumerate(observations) if not obs.ignore_station]
+            if (not used_fixed) and used_indices:
+                ref_index = max(used_indices, key=lambda i: observations[i].kmeas)
                 self.stations_time_dict[station_list[ref_index]] = 0
                 self.stations_time_dict_copy[station_list[ref_index]] = 0
-                
-            
-            # Generate an initial guess for stations which have no fixed time
-            p0 = np.zeros(len([val for val in self.stations_time_dict.values() if val is True]))
 
-            # If all stations are supplied with a time offset value, set them all to zero
-            if len([val for val in self.stations_time_dict.values() if val is True]) == 0:
-                p0 = np.zeros(1)
-            
 
             if self.verbose:
-                print('Initial function evaluation:', timingResiduals(p0, observations, 
-                                                                      self.stations_time_dict, 
-                                                                      weights=weights))
+                print("Initial function evaluation:", timingCost(pairs, \
+                    timingOffsetsFromParams(np.zeros(len(observations)), observations, \
+                    self.stations_time_dict)))
 
-            # Set bounds for timing to +/- given maximum time offset
-            bounds = []
-            for i in range(len(p0)):
-                bounds.append([-self.max_toffset, self.max_toffset])
+            # Estimate the timing offsets by linear least squares, within the maximum time offset
+            timing_offsets, timing_success = solveTimingOffsets(pairs, observations, \
+                self.stations_time_dict, self.max_toffset)
 
+            if timing_success:
 
-            ### Try different methods of optimization until it is successful ##
+                # Set the final value of the timing residual
+                self.timing_res = timingCost(pairs, timing_offsets)
 
-            # If there are more than 5 stations, use the advanced L-BFGS-B method by default
-            if len(self.observations) >= 5:
-                methods = [None]
-                opt_list = ['maxiter']
-                maxiter_list = [15000]
+                if self.verbose:
+                    print("Final function evaluation:", self.timing_res)
 
             else:
-                # If there are less than 5, try faster methods first
-                methods = ['SLSQP', 'TNC', None]
-                opt_list = ['maxiter','maxfun','maxiter']
-                maxiter_list = [1000, None, 15000]
 
-            # Try different methods to minimize timing residuals
-            for opt_method, opt, maxiter in zip(methods, opt_list, maxiter_list):
-
-                # Run the minimization of residuals between all stations
-                timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
-                    self.stations_time_dict, weights), bounds=bounds, method=opt_method, 
-                    options={opt: maxiter}, tol=1e-12)
-
-                # Stop trying methods if this one was successful
-                if timing_mini.success:
-
-                    # Set the final value of the timing residual
-                    self.timing_res = timing_mini.fun
-
-                    if self.verbose:
-                        print('Successful timing optimization with', opt_method)
-                        print("Final function evaluation:", timing_mini.fun)
-
-                    break
-
-                else:
-                    print('Unsuccessful timing optimization with', opt_method)
-
-            ### ###
-
-            if not timing_mini.success:
-
-                print('Timing difference and initial velocity minimization failed with the message:')
-                print(timing_mini.message)
-                print('Try increasing the range of time offsets!')
-                v_init_mini = v_init
+                print("Timing difference and initial velocity estimation failed, no two stations overlap " \
+                    + "enough in length!")
 
                 velocity_fit = np.zeros(2)
                 vel_stddev = 0
@@ -3902,14 +4016,13 @@ class Trajectory(object):
             estimate_velocity = True
             timing_minimization_successful = True
         else:
-            if timing_mini.success:
+            if timing_success:
                 estimate_velocity = True
                 timing_minimization_successful = True
 
         # If the minimization was successful, apply the time corrections
         if estimate_velocity:
 
-            stat_count = 0
             for i, obs in enumerate(observations):
 
                 # Check the station timing dictionary to see if the station is fixed
@@ -3931,8 +4044,7 @@ class Trajectory(object):
 
                 # Otherwise read the estimated offset
                 else:
-                    t_diff = timing_mini.x[stat_count]
-                    stat_count += 1
+                    t_diff = timing_offsets[i]
 
                     # Add the final time difference of the site to the list
                     time_diffs[i] = t_diff
@@ -4013,16 +4125,20 @@ class Trajectory(object):
                     velocity_fit = fit_params.x
 
                     ### Compute the standard deviation of the velocity fit
-                    
-                    jac = fit_params.jac
-                    jac_dot = jac.T.dot(jac)
 
-                    # Make sure the Jacobian matrix is not singular
-                    if np.linalg.det(jac_dot) == 0:
+                    # Compute the covariance of the weighted line, scaled by the variance of its residuals
+                    design = np.c_[times_part, np.ones_like(times_part)]*np.sqrt(weights_list_path)[:, None]
+                    line_residuals = lineFuncLS(velocity_fit, times_part, state_vect_dist_part, \
+                        weights_list_path)
+                    normal = design.T.dot(design)
+                    dof = len(times_part) - 2
+
+                    # Make sure the matrix is not singular and there are more points than parameters
+                    if (dof <= 0) or (np.linalg.cond(normal) > 1.0/np.finfo(np.float64).eps):
                         velocity_stddev = 0
                     else:
-                        vel_cov = np.linalg.inv(jac_dot)
-                        velocity_stddev = np.sqrt(np.diagonal(vel_cov))[0]
+                        vel_cov = np.linalg.inv(normal)*np.sum(line_residuals**2)/dof
+                        velocity_stddev = np.sqrt(vel_cov[0, 0])
 
                     ###
 
@@ -4061,8 +4177,8 @@ class Trajectory(object):
                 vel_intercept, vel_cov = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init_mini, \
                     intercept), times, state_vect_dist, p0=[0])
 
-                # Compute the fit standard deviation
-                vel_stddev = np.sqrt(np.diagonal(vel_cov))[0]
+                # Compute the standard deviation of the median velocity from the fits of individual stations
+                vel_stddev = medianStddev([obs.v_init_stddev for obs in v_init_obs])
 
                 # Construct a velocity fit vector
                 velocity_fit = [v_init_mini, vel_intercept[0]]
@@ -4881,7 +4997,8 @@ class Trajectory(object):
             out_str += "Mean time residuals from time vs. length:\n"
             out_str += "  Station with reference time: {:s}\n".format(
                 str(self.observations[self.t_ref_station].station_id))
-            out_str += "  Avg. res. = {:.3e} s\n".format(self.timing_res)
+            if getattr(self, 'timing_avg_res', None) is not None:
+                out_str += "  Avg. res. = {:.3e} s\n".format(self.timing_avg_res)
             out_str += "  Stddev    = {:.2e} s\n".format(self.timing_stddev)
             out_str += "\n"
 
@@ -5828,7 +5945,7 @@ class Trajectory(object):
             if self.timing_res is None:
                 title += ", Time residuals not calculated"
             else:
-                title += ", Time residuals = {:.3e} s".format(self.timing_res)
+                title += ", Time residuals = {:.3e} s".format(np.sqrt(self.timing_res))
 
         plt.title(title)
 
