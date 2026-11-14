@@ -18,12 +18,15 @@ or standalone (no pytest required):
 import time
 
 import numpy as np
+import scipy.integrate
 import scipy.special
 
 import matplotlib
 matplotlib.use("Agg")  # headless - plotAlphaBeta() tests must not require a display or block
 import matplotlib.pyplot as plt
 
+from wmpl.Utils.AlphaBeta import alphaBetaEntryVelocityWithGravity, alphaBetaResidualTrend, \
+    exponentialAtmosphereDensityRatio, exponentialAtmosphereHeights, RESIDUAL_TREND_SIGMA, RHO_ATM_0
 from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLightCurve,
     alphaBetaMasses, alphaBetaVelocity, alphaBetaHeight, alphaBetaVelocityNormed,
     alphaBetaVelocityNormedLUT, alphaBetaHeightNormed, alphaBetaLuminosityF,
@@ -1562,6 +1565,271 @@ def testLightCurveInputValidation():
     _assertRaisesValueError("bad dyn_method", dyn_method="banana")
 
 
+
+def makeNonExponentialAtmosphere():
+    """ Make a density profile whose scale height goes from 6 km at 40 km to 8 km at 100 km, constant
+        outside.
+
+    Return:
+        (hts, rho):
+            - hts: [ndarray] Heights (m).
+            - rho: [ndarray] Air density at hts (kg/m^3).
+    """
+
+    # Integrate the log density over the scale height from 15 km
+    hts = np.arange(15e3, 1000e3 + 1, 100.0)
+    scale = np.interp(hts, [40e3, 100e3], [6000.0, 8000.0])
+    ln_rho = np.log(RHO_ATM_0) - 15e3/6000.0 - np.concatenate([[0], \
+        np.cumsum(np.diff(hts)/((scale[1:] + scale[:-1])/2))])
+
+    return hts, np.exp(ln_rho)
+
+
+
+def simulateDeepFireball(hts, rho, v_e=20000.0, b_e=1.6e-3, sigma=1.5e-8, slope=np.radians(45), \
+    h_first=50e3):
+    """ Integrate the drag and ablation equations of the alpha-beta model (mu = 2/3, no gravity) from
+        200 km through the given atmosphere, and take the speeds at 60 heights from h_first until the
+        body is down to 40% of its initial speed.
+
+    Arguments:
+        hts: [ndarray] Heights of the density profile (m).
+        rho: [ndarray] Air density at hts (kg/m^3).
+
+    Keyword arguments:
+        v_e: [float] Initial speed (m/s). 20000 by default.
+        b_e: [float] Initial drag parameter B of the drag equation (m^2/kg). 1.6e-3 by default.
+        sigma: [float] Ablation coefficient (s^2/m^2). 1.5e-8 by default.
+        slope: [float] Slope of the trajectory (rad). 45 deg by default.
+        h_first: [float] Height of the first point (m). 50 km by default.
+
+    Return:
+        (h_obs, v_obs, alpha, beta):
+            - h_obs: [ndarray] Heights of the points (m).
+            - v_obs: [ndarray] Speeds at the points (m/s).
+            - alpha: [float] True alpha.
+            - beta: [float] True beta.
+    """
+
+    def deriv(h, y):
+        """ Compute the derivatives of the speed and the mass ratio over the height. """
+
+        v, mass_ratio = y
+        r = np.exp(np.interp(h, hts, np.log(rho)))
+        mass_ratio = max(mass_ratio, 1e-12)
+
+        return [b_e*mass_ratio**(-1/3)*r*v/np.sin(slope), sigma*b_e*mass_ratio**(2/3)*r*v**2/np.sin(slope)]
+
+
+    # Integrate from 200 km down to 20 km
+    sol = scipy.integrate.solve_ivp(deriv, [200e3, 20e3], [v_e, 1.0], dense_output=True, rtol=1e-10, \
+        atol=1e-8, max_step=200)
+
+    # Take the points from h_first until the body is down to 40% of its initial speed
+    grid = np.linspace(200e3, 20e3, 20000)
+    h_last = grid[np.nonzero(sol.sol(grid)[0] < 0.4*v_e)[0][0]]
+    h_obs = np.linspace(h_first, h_last, 60)
+
+    return h_obs, sol.sol(h_obs)[0], b_e*RHO_ATM_0*HT_NORM_CONST/np.sin(slope), sigma*v_e**2/6
+
+
+
+def testColumnRescalingIsTheIdentityInTheExponentialAtmosphere():
+    """ Check that in the exponential atmosphere of the model, both the column and the density rescalings
+        leave the heights as they are.
+    """
+
+    hts = np.arange(15e3, 1000e3 + 1, 100.0)
+    rho = RHO_ATM_0*np.exp(-hts/HT_NORM_CONST)
+    ht_data = np.linspace(30e3, 130e3, 50)
+
+    for method in ('column', 'density'):
+        assert np.allclose(exponentialAtmosphereHeights(ht_data, hts, rho, method=method), ht_data, atol=1.0)
+
+
+
+def testColumnRescalingKeepsTheFitExactInANonExponentialAtmosphere():
+    """ Check that the column rescaling with a fitted initial velocity recovers the initial velocity of a
+        fireball at 20 km/s seen from 50 km in an atmosphere whose scale height goes from 6 to 8 km within
+        15 m/s, alpha within 3% and beta within 5%. The density rescaling puts alpha over 10% low, and the
+        initial velocity of the leading points is over 50 m/s low.
+    """
+
+    hts, rho = makeNonExponentialAtmosphere()
+    h_obs, v_true, alpha_true, beta_true = simulateDeepFireball(hts, rho)
+
+    for seed in range(3):
+        v_obs = v_true + np.random.default_rng(seed).normal(0, 50.0, len(v_true))
+
+        # Fit with the column rescaling
+        ht_column = exponentialAtmosphereHeights(h_obs, hts, rho, method='column')
+        v_init, alpha, beta, errors = fitAlphaBeta(v_obs, ht_column, method='robust', sigma_v=50.0, \
+            fit_v_init=True, estimate_errors=True)
+        assert abs(v_init - 20000.0) < min(15.0, 3*errors['v_init_std'])
+        assert abs(alpha/alpha_true - 1) < 0.03 and abs(beta/beta_true - 1) < 0.05
+        assert errors['cov_full'].shape == (3, 3) and np.isfinite(errors['alpha_std_rel'])
+
+        # Fit with the density rescaling
+        ht_density = exponentialAtmosphereHeights(h_obs, hts, rho, method='density')
+        _, alpha_density, _ = fitAlphaBeta(v_obs, ht_density, method='robust', sigma_v=50.0, fit_v_init=True)
+        assert alpha_density/alpha_true < 0.9
+
+        # Fit with the initial velocity of the leading points
+        v_init_leading, _, _ = fitAlphaBeta(v_obs, ht_column, method='robust', sigma_v=50.0)
+        assert v_init_leading < 20000.0 - 50.0
+
+
+
+def testFittingTheInitialVelocityNeedsTheRobustFit():
+    """ Check that the Q4 fit refuses to fit the initial velocity. """
+
+    hts, rho = makeNonExponentialAtmosphere()
+    h_obs, v_true, _, _ = simulateDeepFireball(hts, rho)
+
+    try:
+        fitAlphaBeta(v_true, exponentialAtmosphereHeights(h_obs, hts, rho), method='q4', fit_v_init=True)
+    except ValueError:
+        return
+
+    raise AssertionError("fit_v_init=True with method='q4' did not raise ValueError")
+
+
+
+def testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint():
+    """ Check that the speed of a body falling under gravity alone from 180 km, at 20 km/s to 60 km and at
+        12 km/s to 40 km, is taken back to its speed at 180 km within 0.05 m/s.
+    """
+
+    def g(h):
+        """ Compute the gravity at the given height (m/s^2). """
+
+        return 9.81*(6371008.7714/(6371008.7714 + h))**2
+
+
+    for v_top, h_first in [(20000.0, 60e3), (12000.0, 40e3)]:
+        sol = scipy.integrate.solve_ivp(lambda h, v: [-g(h)/v[0]], [180e3, h_first], [v_top], rtol=1e-12)
+        v_first = sol.y[0][-1]
+        assert v_first - v_top > 50.0
+        assert abs(alphaBetaEntryVelocityWithGravity(v_first, h_first) - v_top) < 0.05
+
+
+
+def makeDeepModelData(seed=0, sigma_v=50.0):
+    """ Make noisy velocities of the alpha-beta model (alpha 20, beta 1, 20 km/s) over a deep window.
+
+    Keyword arguments:
+        seed: [int] Seed of the noise. 0 by default.
+        sigma_v: [float] Standard deviation of the noise (m/s). 50 by default.
+
+    Return:
+        (ht, v):
+            - ht: [ndarray] Heights (m).
+            - v: [ndarray] Velocities (m/s).
+    """
+
+    ht = np.linspace(9.0, 2.5, 80)*HT_NORM_CONST
+    v = alphaBetaVelocity(ht, 20.0, 1.0, 20000.0) + np.random.default_rng(seed).normal(0, sigma_v, len(ht))
+
+    return ht, v
+
+
+
+def testFreeInitialVelocityIsNotPinnedByAnOutlierAtTheTop():
+    """ Check that an outlier of +1500 m/s at the highest point does not pin the fitted initial velocity,
+        which stays within 3 sigma of the true 20 km/s, and that the (ln alpha, ln beta) covariance with
+        v_init held fixed is not larger than the marginal one.
+    """
+
+    ht, v = makeDeepModelData()
+    v[np.argmax(ht)] += 1500.0
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v, ht, method='robust', sigma_v=50.0, fit_v_init=True, \
+        estimate_errors=True)
+
+    assert abs(v_init - 20000.0) < 3*errors['v_init_std']
+    assert abs(alpha/20.0 - 1) < 0.05 and abs(beta - 1) < 0.1
+    assert np.all(np.diag(errors['cov_fit']) <= np.diag(errors['cov_log']) + 1e-15)
+
+
+
+def testResidualTrendFlagsAFragmentationNotNoise():
+    """ Check that the residuals of a body which decelerates three times as fast below a break are flagged
+        as a trend, and those of a single body are not.
+    """
+
+    # Check that the residuals of a single body are not flagged
+    ht, v = makeDeepModelData()
+    v_init, alpha, beta = fitAlphaBeta(v, ht, method='robust', sigma_v=50.0, fit_v_init=True)
+    bands, significant = alphaBetaResidualTrend(v, ht, v_init, alpha, beta)
+    assert (not significant) and max(abs(b[4]) for b in bands) < RESIDUAL_TREND_SIGMA
+
+    # Below the break, take the curve of a body with three times the ballistic coefficient
+    ht_break = 5.5*HT_NORM_CONST
+    below = ht < ht_break
+    v_frag = v.copy()
+    v_frag[below] = alphaBetaVelocity(ht[below], 60.0, 1.0, 20000.0) \
+        - alphaBetaVelocity(ht_break, 60.0, 1.0, 20000.0) + alphaBetaVelocity(ht_break, 20.0, 1.0, 20000.0) \
+        + np.random.default_rng(1).normal(0, 50.0, int(np.sum(below)))
+
+    v_init, alpha, beta = fitAlphaBeta(v_frag, ht, method='robust', sigma_v=50.0, fit_v_init=True)
+    _, significant = alphaBetaResidualTrend(v_frag, ht, v_init, alpha, beta)
+    assert significant
+
+
+
+def testLightCurveNeedsTheDensityRatioWithTheColumnMapping():
+    """ Check that the model magnitudes at the column-rescaled heights, corrected by the density ratio, follow
+        up to an offset the light curve of a single body integrated through an atmosphere whose scale height
+        goes from 6 to 8 km, and that without the correction they do not.
+    """
+
+    hts, rho = makeNonExponentialAtmosphere()
+    v_e, b_e, sigma, slope = 20000.0, 1.6e-3, 1.5e-8, np.radians(45)
+    log_rho = np.log(rho)
+
+    def deriv(h, y):
+        """ Compute the derivatives of the speed and the mass ratio over the height. """
+
+        v, mass_ratio = y
+        r = np.exp(np.interp(h, hts, log_rho))
+        mass_ratio = max(mass_ratio, 1e-12)
+
+        return [b_e*mass_ratio**(-1/3)*r*v/np.sin(slope), sigma*b_e*mass_ratio**(2/3)*r*v**2/np.sin(slope)]
+
+
+    # Integrate the body from 200 km and take the light curve points from 85 to 45 km
+    sol = scipy.integrate.solve_ivp(deriv, [200e3, 20e3], [v_e, 1.0], dense_output=True, rtol=1e-10, \
+        atol=1e-12, max_step=200)
+    h_lc = np.linspace(85e3, 45e3, 40)
+    v, mass_ratio = sol.sol(h_lc)
+    r = np.exp(np.interp(h_lc, hts, log_rho))
+
+    # Compute the luminosity per unit initial mass and luminous efficiency
+    lum = b_e*mass_ratio**(2/3)*r*v**3*(sigma*v**2/2 + 1)
+    mag_true = -2.5*np.log10(lum)
+
+    # Compute the model magnitudes at the column-rescaled heights
+    ht_column = exponentialAtmosphereHeights(h_lc, hts, rho, method='column')
+    ratio = exponentialAtmosphereDensityRatio(h_lc, hts, rho, method='column')
+    mag_model, _ = alphaBetaModelMagnitude(ht_column/HT_NORM_CONST, \
+        b_e*RHO_ATM_0*HT_NORM_CONST/np.sin(slope), sigma*v_e**2/6, 2/3.0)
+
+    def shapeError(mag):
+        """ Compute the largest difference from the true light curve after removing the mean offset. """
+
+        diff = mag - mag_true
+
+        return np.max(np.abs(diff - np.mean(diff)))
+
+
+    assert shapeError(mag_model - 2.5*np.log10(ratio)) < 0.01
+    assert shapeError(mag_model) > 0.05
+
+    # Check that the ratio is 1 with the density mapping
+    assert np.allclose(exponentialAtmosphereDensityRatio(h_lc, hts, rho, method='density'), 1.0)
+
+
+
 if __name__ == "__main__":
 
     # Standalone runner so the tests can be executed without pytest installed
@@ -1610,6 +1878,13 @@ if __name__ == "__main__":
         testFitAlphaBetaLightCurve,
         testLuminousEfficiency,
         testLightCurveInputValidation,
+        testColumnRescalingIsTheIdentityInTheExponentialAtmosphere,
+        testColumnRescalingKeepsTheFitExactInANonExponentialAtmosphere,
+        testFittingTheInitialVelocityNeedsTheRobustFit,
+        testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint,
+        testFreeInitialVelocityIsNotPinnedByAnOutlierAtTheTop,
+        testResidualTrendFlagsAFragmentationNotNoise,
+        testLightCurveNeedsTheDensityRatioWithTheColumnMapping,
     ]
 
     failed = 0
