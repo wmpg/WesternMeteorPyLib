@@ -28,6 +28,9 @@ beginning of the dark flight. Ablation essentially stops below about 3 km/s, so 
 exact. A meteor which ends faster probably still ablates below its end, but letting K grow there by
 single-body ablation did not predict the hidden ends of real fireballs better.
 
+A fragmentation makes K jump, which the penalty on the growth of K spreads over the segments around it. If the
+heights of the fragmentations are known, e.g. from the flares, K can jump at them without penalty.
+
 Gravity bends the path of the meteor by the angle theta, dtheta/dt = g_perp/v, where g_perp is the component
 of gravity perpendicular to the path. Drag damps the velocity gained from gravity in the same way as the rest
 of the velocity, so the bending grows quickly as the meteor slows down. The model is only computed until the
@@ -114,7 +117,7 @@ def usedPoints(traj):
 
 class DragFit(object):
     def __init__(self, traj, n_knots=None, h_top=200000.0, penalty=1.0, drag_above=False, max_bending=5.0, \
-        max_vel_growth=0.1):
+        max_vel_growth=0.1, knot_hts=None):
         """ Fit the drag model to the lengths and times of the used points of the given trajectory.
 
         Arguments:
@@ -135,6 +138,9 @@ class DragFit(object):
             max_vel_growth: [float] Largest relative growth of the velocity above the beginning of the
                 observed part, only used if drag_above is True. The model is not computed further. 0.1 by
                 default.
+            knot_hts: [list] Heights of the fragmentations (m), as given by the trajectory solution, e.g.
+                those of the flares. The ballistic coefficient can jump without penalty at each one within
+                the observed part. None by default.
         """
 
         self.traj = traj
@@ -160,9 +166,24 @@ class DragFit(object):
         if n_knots is None:
             n_knots = int(np.clip(len(self.len_data)/25, 3, 15))
 
-        self.n_knots = n_knots
         self.ramp_beg = np.linspace(self.len_first, self.len_last, n_knots + 1)[:-1]
-        self.ramp_len = (self.len_last - self.len_first)/n_knots
+        self.ramp_len = np.full(n_knots, (self.len_last - self.len_first)/n_knots)
+        self.pen_weight = np.ones(n_knots)
+
+        # Add a jump without penalty at the height of every fragmentation within the observed part
+        self.knot_hts = np.array([] if knot_hts is None else knot_hts, dtype=float)
+        if len(self.knot_hts):
+
+            knot_beg = self._knotLengths()
+            inside = (knot_beg > self.len_first) & (knot_beg < self.len_last)
+            self.knot_hts = self.knot_hts[inside]
+
+            self.ramp_beg = np.append(self.ramp_beg, knot_beg[inside])
+            self.ramp_len = np.append(self.ramp_len, np.ones(len(self.knot_hts)))
+            self.pen_weight = np.append(self.pen_weight, np.zeros(len(self.knot_hts)))
+            n_knots += len(self.knot_hts)
+
+        self.n_knots = n_knots
 
         # Fit the model and compute the solution along the whole line
         self._fit(penalty)
@@ -174,6 +195,10 @@ class DragFit(object):
         if self.gravity_correction:
 
             self._computeGravityDrop()
+
+            # Move the jumps to the heights of the fragmentations on the dropped path
+            self.ramp_beg[self.pen_weight == 0] = self._knotLengths()
+
             self._fit(penalty, params_init=self.params)
             self._checkFit()
             self._solveFull()
@@ -192,6 +217,21 @@ class DragFit(object):
         if (not np.isfinite(self.res_rms)) or (abs(self.params[0] - self.time_data[0]) > max(1.0, duration)):
             raise ValueError("The drag model could not be fitted, the lengths and times of the points of " \
                 + "the trajectory are not consistent")
+
+
+
+    def _knotLengths(self):
+        """ Compute the lengths at the heights of the fragmentations, on the descending part of the current
+            path.
+
+        Return:
+            [ndarray] Lengths along the trajectory (m).
+        """
+
+        i_low = np.argmin(self.ht_grid)
+        ht_desc, len_desc = self.ht_grid[:i_low + 1][::-1], self.len_grid[:i_low + 1][::-1]
+
+        return np.interp(self.knot_hts, ht_desc, len_desc)
 
 
 
@@ -342,7 +382,7 @@ class DragFit(object):
         len_model = np.where(self.time_data > time[-1], len_arr[-1] + vel[-1]*(self.time_data - time[-1]), \
             len_model)
 
-        return np.concatenate([len_model - self.len_data, w_pen*params[3:]])
+        return np.concatenate([len_model - self.len_data, w_pen*self.pen_weight*params[3:]])
 
 
 
@@ -1020,9 +1060,9 @@ class DragFit(object):
         out.append(("    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m{:s}/kg),   (m{:s}/kg), " \
             + "  (%),    (x), (sigma)").format(sq, sq))
 
-        for i in range(self.n_knots):
+        for n, i in enumerate(np.argsort(self.ramp_beg)):
 
-            len_seg = np.array([self.ramp_beg[i], self.ramp_beg[i] + self.ramp_len])
+            len_seg = np.array([self.ramp_beg[i], self.ramp_beg[i] + self.ramp_len[i]])
             ht_seg = self.heightAtLength(len_seg)
             time_seg = self.timeAtLength(len_seg)
             vel_seg = self.velocityAtLength(len_seg)
@@ -1039,7 +1079,7 @@ class DragFit(object):
                 signif = 0.0
 
             out.append(("{:4d}, {:6.2f}, {:6.2f}, {:8.3f}, {:8.3f}, {:9.1f}, {:9.2e}, {:9.2e}, {:5.0f}, " \
-                + "{:6.2f}, {:6.1f}{:s}").format(i + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
+                + "{:6.2f}, {:6.1f}{:s}").format(n + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
                 vel_seg[0]/1000, dyn_pres/1000, k_seg[0], k_seg[1], 100*log_k_std[1], \
                 np.exp(self.params[3 + i]), signif, " *" if signif > 2 else ""))
 
@@ -1048,6 +1088,9 @@ class DragFit(object):
         out.append("The final dynamic mass is the mass of the leading body at the last point for the " \
             + "assumed Gamma*A and density, m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is " \
             + "propagated.")
+        if len(self.knot_hts):
+            out.append("The segments which begin and end at the same height are the jumps at the " \
+                + "fragmentations.")
 
         return "\n".join(out)
 
@@ -1214,6 +1257,10 @@ if __name__ == "__main__":
         help='Bulk density in kg/m^3 used for computing the dynamic mass. Default is {:.0f} kg/m^3.'.format( \
         BULK_DENSITY))
 
+    arg_parser.add_argument('-f', '--fragheights', metavar='HT', type=float, nargs='+', \
+        help='Heights of the fragmentations in km, e.g. those of the flares, where the ballistic ' \
+        + 'coefficient can jump without penalty.')
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1225,7 +1272,8 @@ if __name__ == "__main__":
     traj = loadPickle(dir_path, file_name)
 
     # Fit the drag model
-    drag_fit = DragFit(traj, n_knots=cml_args.knots, drag_above=cml_args.dragabove)
+    knot_hts = None if cml_args.fragheights is None else 1000*np.array(cml_args.fragheights)
+    drag_fit = DragFit(traj, n_knots=cml_args.knots, drag_above=cml_args.dragabove, knot_hts=knot_hts)
 
     print(drag_fit.summaryTable(gamma_a=cml_args.ga, bulk_density=cml_args.dens))
 
