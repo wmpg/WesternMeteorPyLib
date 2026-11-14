@@ -21,6 +21,7 @@ from wmpl.MetSim.MetalMass import loadMetalMags
 from wmpl.Utils.TrajConversions import raDec2ECI, geo2Cartesian_vect, altAz2RADec_vect, unixTime2JD, \
     cartesian2Geo, jd2Date
 from wmpl.Utils.Math import findClosestPoints, vectMag
+from wmpl.Utils.EarthRotation import inertialToECI
 from wmpl.Utils.AtmosphereDensity import getAtmDensity, getAtmDensity_vect, \
     addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Pickling import loadPickle
@@ -347,8 +348,8 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
             # Convert azim/elev to RA/Dec
             ra, dec = altAz2RADec_vect(azim, elev, jd_data, exact.lat, exact.lon)
 
-            # Convert RA/Dec to ECI direction vector
-            x_eci, y_eci, z_eci = raDec2ECI(ra, dec)
+            # Convert RA/Dec to ECI direction vector in the frame of the trajectory
+            x_eci, y_eci, z_eci = inertialToECI(np.array(raDec2ECI(ra, dec)).T, getattr(traj, 'dut1', 0.0)).T
 
             # Convert station geocoords to ECEF coordinates
             x_stat_vect, y_stat_vect, z_stat_vect = geo2Cartesian_vect(exact.lat, exact.lon, exact.elev, \

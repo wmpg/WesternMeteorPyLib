@@ -9,6 +9,7 @@ one and what is inside it.
 
 - [Running the solver](#running-the-solver)
 - [The trajectory pickle](#the-trajectory-pickle)
+- [Time scale](#time-scale)
 - [Loading a pickle in Python](#loading-a-pickle-in-python)
 
 ---
@@ -51,12 +52,42 @@ other tools are:
 
 | Attribute | Meaning |
 | :--- | :--- |
-| `traj.jdt_ref` | Reference epoch of the trajectory, as a Julian date in TDB. |
+| `traj.jdt_ref` | Reference epoch of the trajectory, as a Julian date in UTC. |
 | `traj.traj_id` | Identifier of the event, e.g. `20191023_091225`. Used as the object name downstream. |
 | `traj.orbit` | The computed heliocentric orbit, including the geocentric radiant and velocity. |
 | `traj.state_vect_mini`, `traj.v_init`, `traj.radiant_eci_mini` | Position, speed and radiant direction at the reference point. Together these are the state vector REBOUND starts from. |
 | `traj.uncertainties` | One-sigma uncertainties from the Monte Carlo runs, used to draw clones. |
 | `traj.observations` | The per-station observations that went into the fit. |
+
+## Time scale
+
+The times of the measurements are UTC, the time of the clocks, but the Earth turns by UT1, which differs
+from UTC by up to 0.9 s. The solver takes the difference into account:
+
+- **Where UT1 - UTC comes from.** `Trajectory(..., dut1=None)` reads it at the time of the event from the
+  IERS tables, through astropy. Past events use the final values of Bulletin B that astropy ships. Recent
+  ones use Bulletin A, which astropy downloads when its copy is more than 30 days old. Where the tables do
+  not reach, it is 0, with a message. Give `dut1` (s), or set the environment variable `WMPL_UT1_UTC`, to
+  set it. The report gives the value used.
+- **The frames.** The ECI coordinates of the solution turn with the Earth by UTC, as everywhere in wmpl, so
+  `cartesian2Geo` and `geo2Cartesian` with the UTC times convert them to and from positions on the Earth
+  exactly. The directions measured against the stars are turned into these coordinates by the rotation of
+  the Earth in UT1 - UTC: the R.A./Dec., and the azimuths and altitudes that RMS and CAMS reduce from them
+  with UTC. The radiant and the orbit are turned back to the frame of the stars, and so is the state vector
+  that REBOUND takes. `wmpl.Utils.EarthRotation.eciToInertial(vect, traj.dut1)` does the same for any
+  vector of a solution.
+- **How much it matters.** On the straight synthetic meteor of the tests (3 stations, 2.5 s at 30 km/s),
+  with UT1 - UTC of 0.5 s and 0.9 s, the trajectory without the correction is 3.7 m and 6.6 m off the true
+  line. Its radiant is 2.7 and 4.9 arcsec off in the Earth-fixed frame, and 0.16 and 0.28 arcsec in the
+  frame of the stars. With the correction, for 0.5 s, it is 0.5 mm and 0.002 arcsec off, the precision of
+  the fit.
+- **When to give 0.** Observations computed with UTC as UT1, as synthetic ones made with the conversions of
+  wmpl are, have to be solved with `dut1=0`. The tests of wmpl do so through `conftest.py`.
+
+The Gural and MILIG solvers do not correct for UT1 - UTC.
+
+Reference: Petit, G., & Luzum, B. (Eds.) (2010). IERS Conventions (2010). IERS Technical Note 36,
+chapter 5.
 
 ## Loading a pickle in Python
 

@@ -176,7 +176,7 @@ if __name__ == "__main__":
                     # Init the trajectory (LoS or intersecing planes)
                     traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
                         meastype=2, show_plots=False, save_results=save_results, monte_carlo=False, \
-                        gravity_correction=gravity_correction, traj_id=unique_id)
+                        gravity_correction=gravity_correction, traj_id=unique_id, dut1=0.0)
 
 
                 elif traj_solver == 'monte_carlo':
@@ -184,7 +184,7 @@ if __name__ == "__main__":
                     # Init the trajectory
                     traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
                         meastype=2, show_plots=False, mc_runs=100, gravity_correction=gravity_correction,\
-                        traj_id=unique_id)
+                        traj_id=unique_id, dut1=0.0)
 
                 
                 elif 'gural' in traj_solver:

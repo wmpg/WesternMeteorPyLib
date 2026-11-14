@@ -33,6 +33,7 @@ from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSim
     constantsRelativeToGround, loadedConstantsRelativeToGround, usesAtmDensityTable, atmDensityDescription
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
+from wmpl.Utils.EarthRotation import inertialToECI
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, getAtmDensityTable, \
     atmDensTable, atmDensityTableInfo, ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, \
     msisModelName, setAtmosphere
@@ -272,8 +273,8 @@ class ECSVObservations(object):
                     # Compute the station coordinates at the given time
                     stat = np.array(geo2Cartesian(meteor.latitude, meteor.longitude, meteor.height, jd))
 
-                    # Compute measurement rays in cartesian coordinates
-                    meas = np.array(raDec2ECI(ra, dec))
+                    # Compute measurement rays in cartesian coordinates in the frame of the trajectory
+                    meas = inertialToECI(np.array(raDec2ECI(ra, dec)), getattr(self.traj, 'dut1', 0.0))
 
 
                     # Calculate closest points of approach (observed line of sight to radiant line)
@@ -401,8 +402,8 @@ class MetObservations(object):
                     # Compute the station coordinates at the given time
                     stat = np.array(geo2Cartesian(met.lat[site], met.lon[site], met.elev[site], jd))
 
-                    # Compute measurement rays in cartesian coordinates
-                    meas = np.array(raDec2ECI(ra, dec))
+                    # Compute measurement rays in cartesian coordinates in the frame of the trajectory
+                    meas = inertialToECI(np.array(raDec2ECI(ra, dec)), getattr(self.traj, 'dut1', 0.0))
 
 
                     # Calculate closest points of approach (observed line of sight to radiant line)
@@ -1862,8 +1863,8 @@ def loadWakeFile(traj, file_path):
             stat = np.array(geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
                 traj.jdt_ref))
 
-            # Compute measurement rays in cartesian coordinates
-            meas = np.array(raDec2ECI(ra, dec))
+            # Compute measurement rays in cartesian coordinates in the frame of the trajectory
+            meas = inertialToECI(np.array(raDec2ECI(ra, dec)), getattr(traj, 'dut1', 0.0))
 
             # Calculate closest points of approach (observed line of sight to radiant line)
             obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, traj.state_vect_mini, \
@@ -6184,7 +6185,7 @@ class MetSimGUI(QMainWindow):
         orb = calcOrbit(self.traj.radiant_eci_mini, self.traj.v_init + v_init_diff, self.traj.v_avg \
             + v_init_diff, self.traj.state_vect_mini, self.traj.rbeg_jd, \
             stations_fixed=(not los_success), reference_init=los_success, \
-            v_init_stddev_direct=self.traj.v_init_stddev)
+            v_init_stddev_direct=self.traj.v_init_stddev, dut1=getattr(self.traj, 'dut1', 0.0))
 
 
         print(orb)

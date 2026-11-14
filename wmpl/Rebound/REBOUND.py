@@ -55,6 +55,7 @@ from wmpl.Utils.TrajConversions import (
 )
 from wmpl.Utils.Math import rotateVector
 from wmpl.Utils.Earth import calcTrueObliquity
+from wmpl.Utils.EarthRotation import eciToInertial
 from wmpl.Utils.OrbitClassification import classifyBorovicka
 
 
@@ -2364,9 +2365,10 @@ def reboundSimulate(
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
 
-        # Extract the state vector from the trajectory
-        x, y, z = traj.state_vect_mini
-        vx, vy, vz = traj.v_init*traj.radiant_eci_mini
+        # Extract the state vector from the trajectory in the inertial frame
+        dut1 = getattr(traj, 'dut1', 0.0)
+        x, y, z = eciToInertial(traj.state_vect_mini, dut1)
+        vx, vy, vz = eciToInertial(traj.v_init*traj.radiant_eci_mini, dut1)
         state_vect = [x, y, z, vx, vy, vz]
 
         # Extract the Julian date from the trajectory

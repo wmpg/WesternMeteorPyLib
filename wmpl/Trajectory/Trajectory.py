@@ -28,6 +28,7 @@ import numpy as np
 import scipy.optimize
 import scipy.interpolate
 import scipy.stats
+import scipy.linalg
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -51,6 +52,7 @@ from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMS
     angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval, \
     medianStddev
 from wmpl.Utils.Misc import valueFormat
+from wmpl.Utils.EarthRotation import deltaUT1, eciToInertial, inertialToECI
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot
@@ -69,8 +71,8 @@ LEGEND_TEXT_SIZE = 6
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
         excluded_time=None, ignore_list=None, ignore_station=False, magnitudes=None, fov_beg=None, \
-        fov_end=None, obs_id=None, comment="", radec_jd=None):
-        """ Structure for containing data of observations from invidiual stations.
+        fov_end=None, obs_id=None, comment="", radec_jd=None, dut1=0.0):
+        """ Structure for containing data of observations from individual stations.
         
         Arguments:
             jdt_ref: [float] reference Julian date for the measurements. Add provided times should be given
@@ -120,6 +122,9 @@ class ObservedPoints(object):
                 computed at jdt_ref, as CAMS does. Give it for data that follows the passage of time during
                 the meteor, as RMS does: otherwise each line of sight is rotated by the Earth's rotation
                 since jdt_ref.
+            dut1: [float] UT1 - UTC (s), by which the measured directions are turned from the frame of the
+                stars into the ECI coordinates of wmpl (see wmpl.Utils.EarthRotation). 0.0 by default (no
+                rotation).
         """
 
         ### INPUT DATA ###
@@ -137,6 +142,9 @@ class ObservedPoints(object):
         self.radec_jd = None
         if radec_jd is not None:
             self.radec_jd = np.array(radec_jd, dtype=np.float64)
+
+        # UT1 - UTC (s)
+        self.dut1 = dut1
 
 
 
@@ -174,7 +182,7 @@ class ObservedPoints(object):
         self.station_id = station_id
 
         # Observed points
-        # - azim_data: azimuth +west of due north
+        # - azim_data: azimuth +east of due north
         # - elev_data: elevation angle (altitude)
         self.azim_data = None
         self.elev_data = None
@@ -296,7 +304,7 @@ class ObservedPoints(object):
         self.htmin_ele = None
         self.htmin_jd = None
 
-        # Absolute magntiudes
+        # Absolute magnitudes
         self.absolute_magnitudes = None
 
         ######################################################################################################
@@ -340,7 +348,7 @@ class ObservedPoints(object):
         # Calculate equatorial coordinates
         self.calcEquatorial()
 
-        # Calculate the Earth-centered interial coordinates of observed points
+        # Calculate the Earth-centered inertial coordinates of observed points
         self.calcECI()
 
         # Calculate position of the station in ECI coordinates (only for the reference JD, used for 
@@ -482,14 +490,15 @@ class ObservedPoints(object):
 
 
     def calcECI(self):
-        """ Calculate Earth-centered inertial coordinates from RA and Dec. """
+        """ Calculate Earth-centered inertial coordinates from RA and Dec, turned by UT1 - UTC. """
 
         # Calculate measurement ECI coordinates for the planes intersection method
-        self.meas_eci = np.array(raDec2ECI(self.ra_data, self.dec_data)).T
+        self.meas_eci = inertialToECI(np.array(raDec2ECI(self.ra_data, self.dec_data)).T, self.dut1)
         self.x_eci, self.y_eci, self.z_eci = self.meas_eci.T
 
         # Calculate measurement ECI coordinates for the line of sight method
-        self.meas_eci_los = np.ascontiguousarray(np.array(raDec2ECI(self.ra_data_los, self.dec_data_los)).T)
+        self.meas_eci_los = np.ascontiguousarray(inertialToECI(np.array(raDec2ECI(self.ra_data_los, \
+            self.dec_data_los)).T, self.dut1))
         self.x_eci_los, self.y_eci_los, self.z_eci_los = self.meas_eci_los.T
 
 
@@ -558,8 +567,8 @@ class PlaneIntersection(object):
         if np.dot(self.obs1.meas_eci[0], self.radiant_eci) < np.dot(self.obs1.meas_eci[-1], self.radiant_eci):
             self.radiant_eci = -self.radiant_eci
 
-        # Calculate the radiant position in RA and Dec
-        self.radiant_eq = eci2RaDec(self.radiant_eci)
+        # Calculate the radiant position in RA and Dec, against the stars
+        self.radiant_eq = eci2RaDec(eciToInertial(self.radiant_eci, getattr(self.obs1, 'dut1', 0.0)))
 
 
         ###### Calculate the closest point of approach (CPA) from the stations to the radiant line,
@@ -817,7 +826,7 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
-        al. (1990). The difference from the original approach is that the distancesfrom the radiant line
+        al. (1990). The difference from the original approach is that the distances from the radiant line
         have been replaced with angles.
 
     Arguments:
@@ -959,7 +968,7 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
             (see gravityDropReference). If None, the distance of the point itself is used.
 
     Return:
-        (hres, vres): [tuple of floats] residuals in horitontal and vertical direction from the radiant line
+        (hres, vres): [tuple of floats] Residuals in horizontal and vertical direction from the radiant line.
 
     """
 
@@ -1009,7 +1018,7 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
     rad_RA,rad_Dec = eci2RaDec(radiant_eci)
     rad_azim,rad_elev = raDec2AltAz(rad_RA, rad_Dec, jd, lat, lon)
 
-    # Form an orthgoonal right handed reference frame in ENU coordinates with the x axis pointing to the radiant.
+    # Form an orthogonal right handed ENU reference frame with the x axis pointing to the radiant
     # y axis pointing along horizon at 90 degrees counter-clockwise to radiant.
     # z-axis such that vz = hx^hy
 
@@ -1113,7 +1122,7 @@ def jacchiaLengthFunc(t, a1, a2, v_init, k):
     
     Arguments:
         t: [float] Time in seconds at which the Jacchia function will be evaluated.
-        a1: [float] 1st decelerationn term.
+        a1: [float] 1st deceleration term.
         a2: [float] 2nd deceleration term.
         v_init: [float] Initial velocity in m/s.
         k: [float] Initial offset in length.
@@ -1133,10 +1142,9 @@ def jacchiaVelocityFunc(t, a1, a2, v_init):
     
     Arguments:
         t: [float] Time in seconds at which the Jacchia function will be evaluated.
-        a1: [float] 1st decelerationn term.
+        a1: [float] 1st deceleration term.
         a2: [float] 2nd deceleration term.
         v_init: [float] Initial velocity in m/s.
-        k: [float] Initial offset in length.
 
     Return:
         [float] velocity at time t
@@ -2057,7 +2065,7 @@ def calcMCUncertainties(traj_list, traj_best):
         un.mean_anomaly_ci = confidenceInterval([traj.orbit.mean_anomaly for traj in traj_list], un.ci, \
             angle=True)
 
-        # Last perihelion uncertanty (days)
+        # Last perihelion uncertainty (days)
         last_perihelion_list = [datetime2JD(traj.orbit.last_perihelion) for traj \
             in traj_list if isinstance(traj.orbit.last_perihelion, datetime.datetime)]
         if len(last_perihelion_list):
@@ -2170,7 +2178,8 @@ def sampleMCVelocities(traj_list):
         # Recompute the orbit with the sampled velocity
         traj_sampled.orbit = calcOrbit(traj.radiant_eci_mini, traj_sampled.v_init, traj.v_avg, \
             traj.state_vect_mini, traj.rbeg_jd, stations_fixed=(not traj.orbit_los_success), \
-            reference_init=traj.orbit_los_success, v_init_stddev_direct=traj.v_init_stddev)
+            reference_init=traj.orbit_los_success, v_init_stddev_direct=traj.v_init_stddev, \
+            dut1=getattr(traj, 'dut1', 0.0))
 
         traj_list_sampled.append(traj_sampled)
 
@@ -2181,7 +2190,7 @@ def sampleMCVelocities(traj_list):
 
 def trajNoiseGenerator(traj, noise_sigma):
     """ Given a base trajectory object and the observation uncertainly, this generator will generate
-        new trajectory objects with noise-added obsevations. 
+        new trajectory objects with noise-added observations.
     
     Arguments:
         traj: [Trajectory] Trajectory instance.
@@ -2230,7 +2239,7 @@ def trajNoiseGenerator(traj, noise_sigma):
 
                 # # sqrt(2)/2*noise in each orthogonal dimension
                 # NOTE: This is a bad way to do it because the estimated fit residuals are already estimated
-                #   in the prependicular direction to the trajectory line
+                #   in the perpendicular direction to the trajectory line
                 # sigma = noise_sigma*np.abs(obs.ang_res_std)/np.sqrt(2.0)
 
                 # # Make sure sigma is positive, if not set it to 1/sqrt(2) degrees
@@ -2252,8 +2261,8 @@ def trajNoiseGenerator(traj, noise_sigma):
 
                 ###
 
-                # Calculate RA, Dec for the given point
-                ra, dec = eci2RaDec(meas_eci_noise)
+                # Calculate RA, Dec for the given point against the stars
+                ra, dec = eci2RaDec(eciToInertial(meas_eci_noise, getattr(obs, 'dut1', 0.0)))
 
                 # Calculate azimuth and altitude of this direction vector
                 azim, elev = raDec2AltAz(ra, dec, jd, obs.lat, obs.lon)
@@ -2351,10 +2360,10 @@ def _MCTrajSolve(params):
 
 def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False, \
     plot_results=True, mc_cores=None, max_runs=None):
-    """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
+    """ Estimates uncertainty in the trajectory solution by doing Monte Carlo runs. The MC runs are done
         in parallel on all available computer cores.
 
-        The uncertanty is taken as the standard deviation of angular measurements. Each point is sampled 
+        The uncertainty is taken as the standard deviation of angular measurements. Each point is sampled
         mc_pick_multiplier times using a symmetric 2D Gaussian kernel.
 
     Arguments:
@@ -2426,7 +2435,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Break the function of there are no trajectories to process
     if len(mc_results) < 2:
-        print('!!! Not enough good Monte Carlo runs for uncertaintly estimation!')
+        print("!!! Not enough good Monte Carlo runs for uncertainty estimation!")
         return traj, None
 
 
@@ -2798,18 +2807,19 @@ class Trajectory(object):
     """ Meteor trajectory solver designed at the University of Western Ontario.
 
     The solver makes a first estimate using the Ceplecha (1987) plane intersection approach, then refines the 
-    solution my miniming the angles between the observed lines of sight and the radiant line. The best 
+    solution by minimizing the angles between the observed lines of sight and the radiant line. The best
     solution is found by adding noise to original measurements and doing Monte Carlo runs to find the 
-    trajectory whose deceleratioins and velocity profiles match the best, as seen from individual stations.
+    trajectory whose decelerations and velocity profiles match the best, as seen from individual stations.
     The initial velocity is estimated from time vs. length by iteratively fitting a line to it and choosing
     the solution with the lowest standard deviation, which should correspond to the part of the trajectory 
-    before the meteor stared to decelerate.
+    before the meteor started to decelerate.
     """
 
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
+        dut1=None, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
@@ -2856,10 +2866,13 @@ class Trajectory(object):
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
+            dut1: [float] UT1 - UTC at the time of the meteor (s), by which the lines of sight are turned
+                into the ECI coordinates of wmpl (see wmpl.Utils.EarthRotation). If None, it is read from
+                the IERS tables. Give 0 for observations computed with UTC as UT1. None by default.
             show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
-            gravity_factor: [flat] Gravity correction factor. 1.0 by default (full correction). 
+            gravity_factor: [float] Gravity correction factor. 1.0 by default (full correction).
                 Can be between 0 - 1. Lower values used for lift compensation.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
@@ -2892,6 +2905,9 @@ class Trajectory(object):
 
         # Measurement type
         self.meastype = meastype
+
+        # UT1 - UTC (s), read from the IERS tables if not given
+        self.dut1 = deltaUT1(jdt_ref) if dut1 is None else float(dut1)
 
         # Directory where the trajectory estimation results will be saved
         self.output_dir = output_dir
@@ -3077,7 +3093,7 @@ class Trajectory(object):
         # Initial state vector (minimization)
         self.state_vect_mini = None
 
-        # Radiant in ECi and equatorial coordinatrs (minimiziation)
+        # Radiant in ECI and equatorial coordinates (minimization)
         self.radiant_eci_mini = None
         self.radiant_eq_mini = None
 
@@ -3128,7 +3144,7 @@ class Trajectory(object):
         # Initial state vector covariance matrix
         self.state_vect_cov = None
 
-        # flag to indicate whether only phase 1 solving ha been run
+        # Flag to indicate whether only phase 1 solving has been run
         # default False to handle existing trajectory data
         self.phase_1_only = False
 
@@ -3204,7 +3220,7 @@ class Trajectory(object):
             obs_id = self.meas_count
 
 
-        # Convert measuremet lists to numpy arrays
+        # Convert measurement lists to numpy arrays
         meas1 = np.array(meas1)
         meas2 = np.array(meas2)
         time_data = np.array(time_data)
@@ -3229,7 +3245,7 @@ class Trajectory(object):
         obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, 
             meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, ignore_station=ignore_station, 
             magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id, comment=comment,
-            radec_jd=radec_jd)
+            radec_jd=radec_jd, dut1=getattr(self, 'dut1', 0.0))
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -3383,7 +3399,7 @@ class Trajectory(object):
                 obs.model_azim)
 
 
-            # Calculate the standard deviaton of angular residuals in radians, taking the ignored points into
+            # Calculate the standard deviation of angular residuals in radians, taking the ignored points into
             #   account
             if not obs.ignore_station:
                 obs.ang_res_std = RMSD(obs.ang_res[obs.ignore_list == 0])
@@ -3593,7 +3609,7 @@ class Trajectory(object):
                 intercept: [float] Fit intercept (m).
         """
 
-        # Maker sure weight values are OK
+        # Make sure weight values are OK
         weights = checkWeights(observations, weights)
 
         # Construct arrays of times vs. distance from state vector
@@ -4276,7 +4292,7 @@ class Trajectory(object):
         max_svd_list = [np.max(obs.state_vect_dist[obs.ignore_list == 0]) for obs in nonignored_observations]
         last_end = max_svd_list.index(max(max_svd_list))
 
-        # Set coordinates of the lowest point as the last point
+        # Set the coordinates of the end point
         self.rend_lat = nonignored_observations[last_end].rend_lat
         self.rend_lon = nonignored_observations[last_end].rend_lon
         self.rend_ele = nonignored_observations[last_end].rend_ele
@@ -4366,7 +4382,7 @@ class Trajectory(object):
                 # Calculate the right ascension and declination of the modelled point from the observer's 
                 # point of view
                 stat_rad_eci = rad_cpa - stat
-                model_ra, model_dec = eci2RaDec(stat_rad_eci)
+                model_ra, model_dec = eci2RaDec(eciToInertial(stat_rad_eci, getattr(obs, 'dut1', 0.0)))
 
                 obs.model_ra[i] = model_ra
                 obs.model_dec[i] = model_dec
@@ -4684,18 +4700,18 @@ class Trajectory(object):
 
 
         def _uncer(str_format, std_name, multi=1.0, deg=False):
-            """ Internal function. Returns the formatted uncertanty, if the uncertanty is given. If not,
+            """ Internal function. Returns the formatted uncertainty, if the uncertainty is given. If not,
                 it returns nothing. 
 
             Arguments:
-                str_format: [str] String format for the unceertanty.
-                std_name: [str] Name of the uncertanty attribute, e.g. if it is 'x', then the uncertanty is 
+                str_format: [str] String format for the uncertainty.
+                std_name: [str] Name of the uncertainty attribute, e.g. if it is 'x', then the uncertainty is
                     stored in uncertainties.x.
         
             Keyword arguments:
-                multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
+                multi: [float] Uncertainty multiplier. 1.0 by default. Used to scale the uncertainty to
                     different units (e.g. from m/s to km/s).
-                deg: [bool] Converet radians to degrees if True. False by default.
+                deg: [bool] Convert radians to degrees if True. False by default.
                 """
 
             if deg:
@@ -4739,6 +4755,9 @@ class Trajectory(object):
             out_str += 'Azimuth +north of due east for meas1, Zenith angle for meas2\n'
         
         out_str += "\n"
+
+        # Write UT1 - UTC
+        out_str += "UT1 - UTC: {:+.4f} s\n\n".format(getattr(self, 'dut1', 0.0))
 
 
 
@@ -6521,7 +6540,7 @@ class Trajectory(object):
                 gravity correction is on, as it is the pass which applies the gravity drop.
             _rerun_bad_picks: [bool] Internal flag. Is is True when a second pass of trajectory estimation is
                 run with bad picks removed, thus improving the solution.
-            _mc_run: [bool] Internal flag. True if the solver is calculating the Carlo Run.
+            _mc_run: [bool] Internal flag. True if the solver is calculating a Monte Carlo run.
             _orig_obs: [list] Used for Monte Carlo. A list of original observations, with no added noise.
                 Used for calculating all other parameters after the trajectory with noise has been estimated.
             _prev_toffsets: [ndarray] Internal variable. Used for keeping the initially estimated timing 
@@ -6637,8 +6656,8 @@ class Trajectory(object):
         # Normalize the radiant vector to a unit vector
         self.avg_radiant = vectNorm(avg_radiant)
 
-        # Calculate the radiant position in RA and Dec
-        self.radiant_eq = eci2RaDec(self.avg_radiant)
+        # Calculate the radiant position in RA and Dec, against the stars
+        self.radiant_eq = eci2RaDec(eciToInertial(self.avg_radiant, getattr(self, 'dut1', 0.0)))
 
         if self.verbose:
             print('Multi-Track Weighted IP radiant:', np.degrees(self.radiant_eq))
@@ -6828,8 +6847,8 @@ class Trajectory(object):
             # Normalize radiant direction
             self.radiant_eci_mini = vectNorm(self.radiant_eci_mini)
 
-            # Convert the minimized radiant solution to RA and Dec
-            self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
+            # Convert the minimized radiant solution to RA and Dec, against the stars
+            self.radiant_eq_mini = eci2RaDec(eciToInertial(self.radiant_eci_mini, getattr(self, 'dut1', 0.0)))
 
             if self.verbose:
                 print('Position and radiant LMS solution:')
@@ -6840,14 +6859,14 @@ class Trajectory(object):
 
             print('Angle minimization failed altogether!')
 
-            # If the solution did not succeed, set the values to intersecting plates solution
+            # If the solution did not succeed, set the values to intersecting planes solution
             self.radiant_eci_mini = self.best_conv_inter.radiant_eci
 
             # Normalize radiant direction
             self.radiant_eci_mini = vectNorm(self.radiant_eci_mini)
 
-            # Convert the minimized radiant solution to RA and Dec
-            self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
+            # Convert the minimized radiant solution to RA and Dec, against the stars
+            self.radiant_eq_mini = eci2RaDec(eciToInertial(self.radiant_eci_mini, getattr(self, 'dut1', 0.0)))
 
             # Calculate the state vector
             self.state_vect_mini = moveStateVector(self.state_vect, self.radiant_eci_mini, 
@@ -7035,7 +7054,7 @@ class Trajectory(object):
 
 
         # If running a Monte Carlo runs, switch the observations to the original ones, so noise does not 
-        # infuence anything except the radiant position
+        #   influence anything except the radiant position
         if _mc_run and (_orig_obs is not None):
                 
             # Store the noisy observations for later
@@ -7181,7 +7200,8 @@ class Trajectory(object):
 
             self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, self.v_avg, self.state_vect_mini, \
                 self.rbeg_jd, stations_fixed=(not self.orbit_los_success), \
-                reference_init=self.orbit_los_success, v_init_stddev_direct=self.v_init_stddev)
+                reference_init=self.orbit_los_success, v_init_stddev_direct=self.v_init_stddev, \
+                dut1=getattr(self, 'dut1', 0.0))
 
             if self.verbose:
                 print(self.orbit.__repr__(v_init_ht=self.v_init_ht))
@@ -7208,7 +7228,7 @@ class Trajectory(object):
             if uncertainties is not None:
                 traj_uncer = copy.deepcopy(uncertainties)
 
-                # Remove the list of all MC trajectires (it is unnecessarily big)
+                # Remove the list of all MC trajectories (it is unnecessarily big)
                 traj_uncer.mc_traj_list = []
 
                 # Set the uncertainties to the best trajectory (maintain compatibility with older version 

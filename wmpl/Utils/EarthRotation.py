@@ -1,0 +1,144 @@
+""" UT1 - UTC, and the conversion between the ECI coordinates of wmpl and the inertial frame.
+
+The ECI coordinates of wmpl (geo2Cartesian, cartesian2Geo, altAz2RADec, raDec2AltAz) turn with the Earth by
+the sidereal time of UTC, while the Earth turns by UT1. They are thus turned from the inertial frame by the
+rotation of the Earth in UT1 - UTC, up to 13.5 arcsec. Positions on the Earth are converted exactly, but
+directions measured against the stars have to be turned by that angle (eciToInertial, inertialToECI).
+
+References:
+    IERS Conventions (2010), IERS Technical Note 36, chapter 5. The tables of UT1 - UTC are those of the
+    IERS (Bulletins A and B), read with astropy.utils.iers.
+"""
+
+from __future__ import print_function, division, absolute_import
+
+import os
+
+import numpy as np
+
+from wmpl.Utils.Math import rotationMatrixZ
+from wmpl.Utils.Physics import EARTH_ROTATION_RATE
+
+
+# Environment variable which gives UT1 - UTC (s) instead of the IERS tables
+DUT1_ENV = 'WMPL_UT1_UTC'
+
+# UT1 - UTC already looked up, by Julian date rounded to 0.001 days
+DUT1_CACHE = {}
+
+
+
+def lookupIERS(jd):
+    """ Look up UT1 - UTC in the IERS tables of astropy. The final values of Bulletin B are used when they
+        cover the date, later dates are read from Bulletin A, which astropy downloads.
+
+    Arguments:
+        jd: [float] Julian date (UTC).
+
+    Return:
+        [float] UT1 - UTC (s), or None if the tables do not cover the date or cannot be read.
+    """
+
+    try:
+        from astropy.utils import iers
+
+        mjd = jd - 2400000.5
+
+        # Final values
+        table = iers.IERS_B.open()
+        if table['MJD'][0].value <= mjd <= table['MJD'][-1].value:
+            return float(table.ut1_utc(jd, 0.0).to_value('s'))
+
+        # Rapid values and predictions
+        table = iers.IERS_Auto.open()
+        dut1, status = table.ut1_utc(jd, 0.0, return_status=True)
+        if status < 0:
+            return None
+
+        return float(dut1.to_value('s'))
+
+    except Exception as e:
+        print("UT1 - UTC could not be read from the IERS tables: {:s}".format(repr(e)))
+        return None
+
+
+
+def deltaUT1(jd):
+    """ Compute UT1 - UTC at the given time from the IERS tables. The environment variable WMPL_UT1_UTC
+        gives it instead when it is set, and 0 is returned where the tables do not reach.
+
+    Arguments:
+        jd: [float] Julian date (UTC).
+
+    Return:
+        [float] UT1 - UTC (s).
+    """
+
+    # Take the value from the environment if it is set
+    if os.environ.get(DUT1_ENV) is not None:
+        return float(os.environ[DUT1_ENV])
+
+    # Look up the tables once per 0.001 days
+    key = round(float(jd), 3)
+    if key not in DUT1_CACHE:
+
+        dut1 = lookupIERS(float(jd))
+
+        if dut1 is None:
+            print("UT1 - UTC is not known at JD {:.3f}, so it is taken as 0. The rotation of the Earth is " \
+                "then off by up to 13.5 arcsec. Set {:s} to give it.".format(jd, DUT1_ENV))
+            dut1 = 0.0
+
+        DUT1_CACHE[key] = dut1
+
+    return DUT1_CACHE[key]
+
+
+
+def utcRotationAngle(dut1):
+    """ Compute the angle by which the Earth turns in UT1 - UTC, i.e. by which the ECI coordinates of wmpl
+        lag behind the inertial frame.
+
+    Arguments:
+        dut1: [float] UT1 - UTC (s).
+
+    Return:
+        [float] Angle (rad), positive towards increasing right ascension.
+    """
+
+    # The ECI coordinates turn at the rate of the mean sidereal time
+    return EARTH_ROTATION_RATE*dut1
+
+
+
+def eciToInertial(vect, dut1):
+    """ Convert vectors from the ECI coordinates of wmpl, which turn with the Earth by UTC, to the inertial
+        frame of the equator of date, against which the stars and the radiant are given.
+
+    Arguments:
+        vect: [ndarray] A vector (3) or vectors (N x 3) in the ECI coordinates of wmpl.
+        dut1: [float] UT1 - UTC (s).
+
+    Return:
+        [ndarray] The vectors in the inertial frame.
+    """
+
+    # Turn the row vectors towards increasing right ascension
+    return np.dot(vect, rotationMatrixZ(utcRotationAngle(dut1)))
+
+
+
+def inertialToECI(vect, dut1):
+    """ Convert vectors from the inertial frame of the equator of date, e.g. directions measured against the
+        stars, to the ECI coordinates of wmpl, which turn with the Earth by UTC.
+
+    Arguments:
+        vect: [ndarray] A vector (3) or vectors (N x 3) in the inertial frame.
+        dut1: [float] UT1 - UTC (s).
+
+    Return:
+        [ndarray] The vectors in the ECI coordinates of wmpl.
+    """
+
+    # Turn the row vectors back
+    return np.dot(vect, rotationMatrixZ(-utcRotationAngle(dut1)))
