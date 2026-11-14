@@ -570,6 +570,40 @@ def atmDensTable(ht, table_ht, table_log10_rho):
 
 
 
+def loadAtmosphereProfile(file_path):
+    """ Load the air density of an atmosphere profile as a density table. The profile is a CSV file in the
+        format OpenDarkflight writes for model profiles (e.g. ERA5), of which only the height and density
+        columns are read.
+
+    Arguments:
+        file_path: [str] Path to the CSV file.
+
+    Return:
+        (table_ht, table_log10_rho): Density table in the form of getAtmDensityTable().
+            - table_ht: [list] Heights (m), ascending.
+            - table_log10_rho: [list] log10 of the density (kg/m^3) at the table heights.
+    """
+
+    # Read the height and density columns
+    data = np.genfromtxt(file_path, delimiter=',', names=True)
+    ht_arr = np.atleast_1d(data['height'])
+    dens_arr = np.atleast_1d(data['density'])
+
+    # Skip the levels without a valid density and sort the others by height
+    valid = np.isfinite(ht_arr) & np.isfinite(dens_arr) & (dens_arr > 0)
+    sort_ind = np.argsort(ht_arr[valid])
+    ht_arr = ht_arr[valid][sort_ind]
+    dens_arr = dens_arr[valid][sort_ind]
+
+    # Check that there are at least two levels at different heights
+    if (len(ht_arr) < 2) or np.any(np.diff(ht_arr) <= 0):
+        raise ValueError("The atmosphere profile {:s} needs at least 2 levels with a density, all at " \
+            "different heights".format(file_path))
+
+    return [float(ht) for ht in ht_arr], [float(lr) for lr in np.log10(dens_arr)]
+
+
+
 def atmTableSegments(table_ht, table_log10_rho):
     """ Compute the exponential segments of a density table.
 
