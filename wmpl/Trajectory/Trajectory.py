@@ -375,8 +375,9 @@ class ObservedPoints(object):
             # Make sure the excluded time is within the observations
             if (excluded_time_min >= np.min(self.time_data)) and (excluded_time_max <= np.max(time_data)):
 
+                # Start from the first and the last used point, as the indices count only the used points
                 excluded_indx_min = 0
-                excluded_indx_max = len(self.time_data) - 1
+                excluded_indx_max = np.count_nonzero(self.ignore_list == 0) - 1
 
                 # Find indices of excluded times, taking the ignored points into account
                 for i, t in enumerate(self.time_data[self.ignore_list == 0]):
