@@ -876,7 +876,8 @@ class DragFit(object):
 
     def ballisticCoeffAtLength(self, len_arr):
         """ Compute the ballistic coefficients at the given lengths along the trajectory, and their
-            uncertainties estimated from the fit.
+            uncertainties estimated from the fit, and also from the spread of the fragmentations if the fit
+            comes from spreadScan().
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -906,6 +907,10 @@ class DragFit(object):
         ramps = np.clip((len_clip[:, None] - self.ramp_beg[None, :])/self.ramp_len, 0.0, 1.0)
         grad = np.hstack([np.zeros((len(len_arr), 2)), np.ones((len(len_arr), 1)), ramps])
         log_k_std = self._paramStd(grad)
+
+        # Add the uncertainty from the spread of the fragmentations
+        if self.log_k_spread is not None:
+            log_k_std = np.hypot(log_k_std, np.interp(len_clip, *self.log_k_spread))
 
         # The coefficient is exactly zero above the first point without drag
         log_k_std[k_arr == 0] = 0.0
@@ -1116,7 +1121,8 @@ def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
         well as the best one within Delta chi2 <= 4 are acceptable. The result is the fit with jumps, and the
         largest difference of the ballistic coefficient at the last point of an acceptable spread from it is
         taken as its systematic uncertainty. The largest difference along the whole trajectory is kept in the
-        returned fit as log_k_spread, a tuple of lengths (m) and differences of ln K, for plotDragFit().
+        returned fit as log_k_spread, a tuple of lengths (m) and differences of ln K, which its uncertainties
+        of K and of the dynamic mass then include.
 
     Arguments:
         traj: [Trajectory object] Solved trajectory.
@@ -1176,8 +1182,7 @@ def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
 
 def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
     """ Plot the observed heights and velocities together with the drag model, and the fitted ballistic
-        coefficient with its uncertainty, which includes the spread of the fragmentations if the fit comes
-        from spreadScan().
+        coefficient with its uncertainty.
 
     Arguments:
         drag_fit: [DragFit object] Drag fit of the motion along the trajectory.
@@ -1215,12 +1220,7 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
 
     # Plot the model, with the extrapolated parts dashed
     k_grid, log_k_std = drag_fit.ballisticCoeffAtLength(drag_fit.len_grid)
-    band_label = '1$\\sigma$'
-
-    # Add the uncertainty from the spread of the fragmentations
-    if drag_fit.log_k_spread is not None:
-        log_k_std = np.hypot(log_k_std, np.interp(drag_fit.len_grid, *drag_fit.log_k_spread))
-        band_label = '1$\\sigma$, fit and spread'
+    band_label = '1$\\sigma$' if drag_fit.log_k_spread is None else '1$\\sigma$, fit and spread'
     valid = np.isfinite(drag_fit.time_grid)
     observed = valid & (drag_fit.len_grid >= drag_fit.len_first) & (drag_fit.len_grid <= drag_fit.len_last)
     for sel, line_style, label in [(observed, 'solid', 'Model'), \
@@ -1271,12 +1271,6 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
 
         mass, mass_lo, mass_hi = drag_fit.dynamicMassAtLength(drag_fit.len_last, gamma_a=gamma_a, \
             bulk_density=bulk_density)
-
-        # Add the uncertainty from the spread of the fragmentations
-        if drag_fit.log_k_spread is not None:
-            log_m_std = 3*np.hypot(drag_fit.ballisticCoeffAtLength(drag_fit.len_last)[1], \
-                np.interp(drag_fit.len_last, *drag_fit.log_k_spread))
-            mass_lo, mass_hi = mass*np.exp(-log_m_std), mass*np.exp(log_m_std)
         k_text += "\n" + "Final dynamic mass = {:.3g} kg ({:.3g} - {:.3g})".format(mass[0], mass_lo[0], \
             mass_hi[0]) + "\n" + "for $\\Gamma A$ = {:.2f}, ".format(gamma_a) + "$\\rho_m$ = " \
             + "{:.0f} kg/m$^3$".format(bulk_density)
@@ -1383,15 +1377,10 @@ if __name__ == "__main__":
                 d_chi2, np.exp(log_k)))
 
         # Split the uncertainty of K at the last point into the parts from the fit and from the spread
-        log_k_fit = drag_fit.ballisticCoeffAtLength(np.array([drag_fit.len_last]))[1][0]
-        log_k_sys = np.sqrt(max(log_k_std**2 - log_k_fit**2, 0.0))
+        log_k_sys = np.interp(drag_fit.len_last, *drag_fit.log_k_spread)
+        log_k_fit = np.sqrt(max(log_k_std**2 - log_k_sys**2, 0.0))
         print(("K at the last point: {:.3e} m^2/kg +/- {:.1f}% ({:.1f}% from the fit and {:.1f}% from the " \
-            + "spread)").format(np.exp(log_k_last[0]), 100*log_k_std, 100*log_k_fit, 100*log_k_sys))
-
-        # Give the final dynamic mass with the uncertainty of K from the fit and from the spread
-        mass = drag_fit.dynamicMassAtLength(np.array([drag_fit.len_last]), gamma_a=cml_args.ga, \
-            bulk_density=cml_args.dens)[0][0]
-        print("Final dynamic mass with this uncertainty = {:.3g} kg (1 sigma {:.3g} - {:.3g} kg)".format( \
-            mass, mass*np.exp(-3*log_k_std), mass*np.exp(3*log_k_std)))
+            + "spread, which the table above includes)").format(np.exp(log_k_last[0]), 100*log_k_std, \
+            100*log_k_fit, 100*log_k_sys))
 
     plotDragFit(drag_fit, gamma_a=cml_args.ga, bulk_density=cml_args.dens)

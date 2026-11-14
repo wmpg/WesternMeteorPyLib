@@ -65,6 +65,13 @@ def lastBallisticCoeff(drag_fit):
 
 
 
+def lastBallisticCoeffStd(drag_fit):
+    """ Standard deviation of the logarithm of the ballistic coefficient at the last point. """
+
+    return drag_fit.ballisticCoeffAtLength(np.array([drag_fit.len_last]))[1][0]
+
+
+
 @functools.lru_cache(maxsize=None)
 def fragmentedTrajectory(spread=0.0, gravity_correction=False):
     """ The synthetic fireball with the lengths of a drag model whose ballistic coefficient is constant,
@@ -163,7 +170,7 @@ def testTheScanTellsASpreadFragmentationFromAJump():
     traj, truth = fragmentedTrajectory(1500.0)
     drag_fit, spreads, delta_chi2, log_k_last, log_k_std = spreadScan(traj, [HT_FRAG], spread_max=SPREAD_MAX)
     acceptable = delta_chi2 <= 4.0
-    log_k_fit = drag_fit.ballisticCoeffAtLength(np.array([drag_fit.len_last]))[1][0]
+    log_k_fit = lastBallisticCoeffStd(fitDrag(traj, knot_hts=[HT_FRAG]))
 
     assert 1500.0 in spreads[acceptable]
     assert 0.0 not in spreads[acceptable]
@@ -173,6 +180,7 @@ def testTheScanTellsASpreadFragmentationFromAJump():
     assert abs(np.log(lastBallisticCoeff(drag_fit)/lastBallisticCoeff(truth))) < log_k_std
     assert np.isclose(np.interp(drag_fit.len_last, *drag_fit.log_k_spread), \
         np.max(np.abs(log_k_last[acceptable] - log_k_last[0])))
+    assert np.isclose(lastBallisticCoeffStd(drag_fit), log_k_std)
 
 
 
@@ -195,14 +203,14 @@ def testTheScanWithoutFragmentationsFitsOnce():
 
     assert np.array_equal(spreads, [0.0])
     assert np.array_equal(delta_chi2, [0.0])
-    assert np.isclose(log_k_std, drag_fit.ballisticCoeffAtLength(np.array([drag_fit.len_last]))[1][0])
+    assert np.isclose(log_k_std, lastBallisticCoeffStd(drag_fit))
 
 
 
 
 def testThePlotShowsTheUncertaintyFromTheSpread():
-    """ The plot of a fit from the scan gives the final dynamic mass with the uncertainty from the fit and
-        from the spread, and a plain fit only with that of the fit.
+    """ The plot and the table of a fit from the scan give the final dynamic mass with the uncertainty from
+        the fit and from the spread, and those of a plain fit only with that of the fit.
     """
 
     traj, _ = fragmentedTrajectory(1500.0)
@@ -213,7 +221,9 @@ def testThePlotShowsTheUncertaintyFromTheSpread():
     title = fig.axes[2].get_title()
     plt.close(fig)
 
-    assert "({:.3g} - {:.3g})".format(mass*np.exp(-3*log_k_std), mass*np.exp(3*log_k_std)) in title
+    mass_range = "{:.3g} - {:.3g}".format(mass*np.exp(-3*log_k_std), mass*np.exp(3*log_k_std))
+    assert "(" + mass_range + ")" in title
+    assert "(1 sigma " + mass_range + " kg)" in drag_fit.summaryTable(gamma_a=0.78)
 
     plain = fitDrag(traj, knot_hts=[HT_FRAG])
     _, mass_lo, mass_hi = plain.dynamicMassAtLength(plain.len_last, gamma_a=0.78)
