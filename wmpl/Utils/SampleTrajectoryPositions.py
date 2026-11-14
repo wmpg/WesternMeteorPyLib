@@ -273,10 +273,6 @@ if __name__ == "__main__":
         help='Compute the drag above the beginning with the ballistic coefficient at the beginning, ' \
         + 'instead of moving without drag.')
 
-    arg_parser.add_argument('-f', '--fragheights', metavar='HT', type=float, nargs='+', \
-        help='Heights of the fragmentations in km, e.g. those of the flares, where the ballistic ' \
-        + 'coefficient can jump (see wmpl.Utils.DragFit).')
-
     arg_parser.add_argument('-t', '--time', action='store_true', help='Sample by time instead of height. The begin, end and step are then given in seconds relative to the reference time of the trajectory, and -1 does not mean the observed begin and end.')
 
 
@@ -297,9 +293,6 @@ if __name__ == "__main__":
     beg_ht = units_conv*cml_args.beg_height
     end_ht = units_conv*cml_args.end_height
     sample_step = units_conv*cml_args.height_step
-
-    # Convert the heights of the fragmentations to meters
-    knot_hts = None if cml_args.fragheights is None else 1000*np.array(cml_args.fragheights)
 
     ############################
 
@@ -329,7 +322,7 @@ if __name__ == "__main__":
 
     # Run trajectory sampling
     sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True, by_time=cml_args.time, \
-        drag_above=cml_args.dragabove, knot_hts=knot_hts)
+        drag_above=cml_args.dragabove)
 
 
     # # Test the line and sphere intersection

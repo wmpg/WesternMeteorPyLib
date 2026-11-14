@@ -114,7 +114,6 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 | :--- | :--- |
 | `beg`, `end`, `step` | Heights of the first and last sample and the step (km). `-1` uses the observed beginning or end height. With `--time` they are times relative to the reference time of the trajectory (s), and `-1` has no special meaning. |
 | `-t`, `--time` | Sample by time instead of height. |
-| `-f`, `--fragheights` | As above: the samples follow the fit with the jumps at the fragmentations. |
 | `-a`, `--dragabove` | As above. |
 
 ---
