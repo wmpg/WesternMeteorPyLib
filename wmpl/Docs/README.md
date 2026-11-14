@@ -9,6 +9,8 @@ and what the options are for.
 - [Drag fit of the motion along a trajectory](DragFit.md) — the drag model of the motion along a solved
   trajectory, sampling it by height or time for dark flight, and what the ballistic coefficient says
   about ablation and fragmentation.
+- [Correlating RMS data](Correlator.md) — finding and solving trajectories automatically across a whole
+  RMS archive, the operation modes, the databases, and distributed processing across several servers.
 - [REBOUND orbital integration](REBOUND.md) — integrating a meteoroid orbit backwards or forwards,
   close encounters and impacts, Monte Carlo clones, radiation forces, and chaos indicators.
 - [DynestyMetSim](../Dynesty/README.md) — nested-sampling fits of the erosion ablation model to a
