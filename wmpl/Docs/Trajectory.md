@@ -9,6 +9,7 @@ one and what is inside it.
 
 - [Running the solver](#running-the-solver)
 - [The trajectory pickle](#the-trajectory-pickle)
+- [Time scale](#time-scale)
 - [Loading a pickle in Python](#loading-a-pickle-in-python)
 
 ---
@@ -57,6 +58,16 @@ other tools are:
 | `traj.state_vect_mini`, `traj.v_init`, `traj.radiant_eci_mini` | Position, speed and radiant direction at the reference point. Together these are the state vector REBOUND starts from. |
 | `traj.uncertainties` | One-sigma uncertainties from the Monte Carlo runs, used to draw clones. |
 | `traj.observations` | The per-station observations that went into the fit. |
+
+## Time scale
+
+The solver takes the times of the measurements as UTC and computes the rotation of the Earth (the sidereal
+time) from them, without the difference UT1 - UTC, which stays below 0.9 s. RMS and CAMS reduce their
+observations the same way. The R.A./Dec. of star-calibrated measurements are right in the inertial frame, so
+for them the Earth-fixed frame of the solution is turned by the rotation of the Earth during UT1 - UTC, up to
+13.5 arcsec. On the straight synthetic meteor of the tests (3 stations, 2.5 s at 30 km/s), with UT1 - UTC of
+0.5 s and 0.9 s the trajectory is 3.7 m and 6.6 m off the true line in the Earth-fixed frame and the radiant
+2.7 and 4.9 arcsec off in it, while the inertial radiant moves by 0.16 and 0.28 arcsec.
 
 ## Loading a pickle in Python
 
