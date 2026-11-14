@@ -2865,8 +2865,8 @@ class Trajectory(object):
                 the other vs. length). False by default.
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
             traj_id: [str] Trajectory solution identifier. None by default.
-            reject_n_sigma_outliers: [float] Reject angular outliers that are n sigma outside the fit.
-                This value is 3 (sigma) by default.
+            reject_n_sigma_outliers: [float] Reject angular outliers whose residual is above the mean plus n
+                times the RMS of the residuals of the kept picks. This value is 3 (sigma) by default.
             mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel processing. None by default,
                 which means that all cores will be used.
             fixed_times: [dict] Dictionary of fixed times for each station. None by default, meaning that
@@ -7105,20 +7105,37 @@ class Trajectory(object):
                 # Remove all picks which deviate more than N sigma in angular residuals
                 for obs in self.observations:
 
-                    # Find the indices of picks which are within N sigma
-                    good_picks = obs.ang_res < (np.mean(obs.ang_res) \
-                        + self.reject_n_sigma_outliers*obs.ang_res_std)
-
-                    # If the number of good picks is below 4, do not remove any picks
-                    if np.count_nonzero(good_picks) < 4:
+                    # Skip ignored stations
+                    if obs.ignore_station:
                         continue
 
-                    # Check if any picks were removed
-                    if np.count_nonzero(good_picks) < len(obs.ang_res):
-                        picks_rejected += len(obs.ang_res) - np.count_nonzero(good_picks)
+                    # Find the used picks within N sigma of the kept picks, until no more are rejected
+                    used = obs.ignore_list == 0
+                    good_picks = np.copy(used)
+                    for _ in range(len(obs.ang_res)):
+
+                        # Compute the limit from the kept picks
+                        ang_res_rms = np.sqrt(np.mean(obs.ang_res[good_picks]**2))
+                        kept = used & (obs.ang_res < (np.mean(obs.ang_res[good_picks]) \
+                            + self.reject_n_sigma_outliers*ang_res_rms))
+
+                        # Stop when no more picks are rejected
+                        if np.array_equal(kept, good_picks):
+                            break
+
+                        good_picks = kept
+
+                    # If the number of good picks is below 4, do not remove any picks
+                    if np.count_nonzero(good_picks & used) < 4:
+                        continue
+
+                    # Check if any used picks are rejected
+                    rejected = used & (~good_picks)
+                    if np.any(rejected):
+                        picks_rejected += np.count_nonzero(rejected)
 
                         # Ignore bad picks
-                        obs.ignore_list[~good_picks] = 1
+                        obs.ignore_list[rejected] = 1
 
 
                 # Run only if some picks were rejected
@@ -7147,7 +7164,7 @@ class Trajectory(object):
 
                 else:
                     if self.verbose:
-                        print("All picks are within 3 sigma...")
+                        print("All picks are within {:.1f} sigma...".format(self.reject_n_sigma_outliers))
 
 
             else:
