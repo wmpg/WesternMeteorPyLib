@@ -1203,10 +1203,10 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
 
     Return:
         [dict] For the key (ecsv_file, index) of every flare point of a station in the trajectory: its
-            station_id, jd (corrected time), ht (m above sea level), ht_time (height of the trajectory at the
-            time of the point, m), used (in the trajectory), frame_dt (duration of a frame, s), the ECI
-            vectors eci (point on the trajectory), stat (station) and los (line of sight), lat and lon of
-            the point on the trajectory (rad), ecsv_file, and row (position among the points of the main
+            station_id, jd (corrected time), ht (m above sea level), ht_time, lat_time and lon_time (point of
+            the trajectory at the time of the point, m and rad), used (in the trajectory), frame_dt
+            (duration of a frame, s), the ECI vectors eci (point on the trajectory), stat (station) and los
+            (line of sight), lat and lon of the point on the trajectory (rad), ecsv_file, and row (position among the points of the main
             fragment in the file in time, see loadECSVs(), None if not known).
     """
 
@@ -1270,11 +1270,18 @@ def projectFlares(traj, flare_meteors, input_meteors, noise_sigma=None, ang_res_
     main_ht = np.concatenate([obs.model_ht[obs.ignore_list == 0] for obs in main_obs])
     heightAt = localMotionFit(main_t, main_ht)
 
+    # Fit the latitudes and longitudes in the same way, for the point of the trajectory at a time
+    latAt = localMotionFit(main_t, np.concatenate([obs.model_lat[obs.ignore_list == 0] for obs in main_obs]))
+    lonAt = localMotionFit(main_t, np.unwrap(np.concatenate([obs.model_lon[obs.ignore_list == 0] \
+        for obs in main_obs])))
+
     projected = {}
     for meteor, obs in zip(obs_meteors, flare_obs):
         for i in range(len(obs.time_data)):
+            t_point = (obs.JD_data[i] - traj.jdt_ref)*86400
             projected[(meteor.ecsv_file, i)] = {'station_id': str(obs.station_id), 'jd': obs.JD_data[i], \
-                'ht': obs.model_ht[i], 'ht_time': heightAt((obs.JD_data[i] - traj.jdt_ref)*86400), \
+                'ht': obs.model_ht[i], 'ht_time': heightAt(t_point), 'lat_time': latAt(t_point), \
+                'lon_time': (lonAt(t_point) + np.pi)%(2*np.pi) - np.pi, \
                 'used': bool(meteor.trajectory_use[i]), \
                 'frame_dt': frame_dts[meteor.ecsv_file], 'eci': np.array(obs.model_eci[i]), \
                 'stat': np.array(obs.stat_eci_los[i]), 'los': np.array(obs.meas_eci_los[i]), \
@@ -1358,7 +1365,7 @@ def groundSpeedFit(traj):
 def flareHeights(traj, ecsv_paths, mc_trajs=None):
     """ Compute the times and heights of the points of the main fragment flagged as flares in ECSV files, on
         a solution of it (see projectFlares()), with their uncertainties from its Monte Carlo runs. A point
-        not used in the trajectory takes the height of the trajectory at its time.
+        not used in the trajectory takes the point of the trajectory at its time.
 
     Arguments:
         traj: [Trajectory object] Solved trajectory of the main fragment, the solution with the original
@@ -1428,12 +1435,13 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
 
             for key, flare in mc_projected.items():
                 if key in mc_values:
-                    ht = flare['ht'] if flare['used'] else flare['ht_time']
+                    ht, lat, lon = (flare['ht'], flare['lat'], flare['lon']) if flare['used'] \
+                        else (flare['ht_time'], flare['lat_time'], flare['lon_time'])
                     t_rel = (flare['jd'] - traj.jdt_ref)*86400
                     speed_shift = speed_draw*speed_std[key]
                     speed = (float(speedAt(t_rel)[0]) + speed_shift) if (speedAt is not None) else np.nan
                     mc_values[key].append(((flare['jd'] - projected[key]['jd'])*86400, ht, \
-                        pressureAt(t_rel, ht, flare['lat'], flare['lon'], speed_shift), speed))
+                        pressureAt(t_rel, ht, lat, lon, speed_shift), speed))
 
     # Heights of the trajectory in time, to compare flares seen at different times
     used_obs = [obs for obs in traj.observations if not obs.ignore_station]
@@ -1445,7 +1453,7 @@ def flareHeights(traj, ecsv_paths, mc_trajs=None):
 
         flare['t_rel'] = (flare['jd'] - traj.jdt_ref)*86400
         if not flare['used']:
-            flare['ht'] = flare['ht_time']
+            flare['ht'], flare['lat'], flare['lon'] = flare['ht_time'], flare['lat_time'], flare['lon_time']
 
         # Local rate of change of the height, from the points of the trajectory within 0.3 s
         near = np.abs(traj_t - flare['t_rel']) <= 0.3
