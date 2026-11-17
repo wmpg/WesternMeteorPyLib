@@ -564,9 +564,12 @@ def trajectoryToKML(traj, output_kml_path, measured=False, n_samples=500, fragme
         star.style.iconstyle.icon.href = WEB_ICON + "color={:02x}{:02x}{:02x}&id=371&scale=4".format( \
             *[int(round(c*255)) for c in station_colors.get(flare['station_id'], (1.0, 1.0, 1.0))[:3]])
         star.style.labelstyle.scale = 0
-        star.description = "Flare of station {:s}, {:s} in the trajectory<br>t = {:.3f} s<br>" \
-            "Alt = {:.3f} km".format(flare['station_id'], "used" if flare['used'] else "not used", \
-            flare['t_rel'], flare['ht']/1000)
+
+        # Say whether the flare was used in the trajectory, which sets where it is
+        used_str = "yes, projected from its line of sight" if flare['used'] \
+            else "no, at the point of the trajectory at its time"
+        star.description = "Flare of station {:s}<br>Used in the trajectory: {:s}<br>t = {:.3f} s<br>" \
+            "Alt = {:.3f} km".format(flare['station_id'], used_str, flare['t_rel'], flare['ht']/1000)
 
     for i, obs in enumerate(traj.observations):
 
