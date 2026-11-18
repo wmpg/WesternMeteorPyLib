@@ -74,8 +74,11 @@ G_SURFACE = 9.80665
 GAMMA_A = 0.78
 BULK_DENSITY = 3500.0
 
-# Iterations of the scale of the drag for the speed relative to the air
-DRAG_SCALE_ITERATIONS = 4
+# Iterations of the scale of the drag for the speed relative to the air: the most, the number after which
+#   the scale is damped so it cannot oscillate, and the change of the speeds at which they stop (m/s)
+DRAG_SCALE_MAX_ITERATIONS = 50
+DRAG_SCALE_DAMPED_AFTER = 10
+DRAG_SCALE_TOL = 1e-3
 
 
 
@@ -317,7 +320,8 @@ class DragFit(object):
         #   the squared ratio of that speed to the inertial one (see _airDragScale), iterating from the inertial
         #   speed
         drag_scale = 1.0
-        for _ in range(DRAG_SCALE_ITERATIONS if self.v_rotation else 1):
+        vel_prev = None
+        for i in range(DRAG_SCALE_MAX_ITERATIONS if self.v_rotation else 1):
 
             # Compute the integral of 2*K*rho from the first point
             a = 2*np.exp(self._logK(params, len_arr))*rho*drag_scale
@@ -329,7 +333,18 @@ class DragFit(object):
             energy = (0.5*params[1]**2 + grav)/exp_phi
             vel = np.sqrt(np.maximum(2*energy, 1.0))
 
-            drag_scale = self._airDragScale(vel)
+            # Stop when the speeds no longer change
+            if (vel_prev is not None) and (np.max(np.abs(vel - vel_prev)) < DRAG_SCALE_TOL):
+                break
+
+            vel_prev = vel
+
+            # Take the scale at the new speeds, damped after a few iterations, as a meteor which slows close
+            #   to the speed of the air can make it alternate
+            if i < DRAG_SCALE_DAMPED_AFTER:
+                drag_scale = self._airDragScale(vel)
+            else:
+                drag_scale = 0.5*(drag_scale + self._airDragScale(vel))
 
         # Integrate the time
         time = params[0] + np.concatenate([[0.0], np.cumsum(0.5*(1/vel[1:] + 1/vel[:-1])*dlen)])
