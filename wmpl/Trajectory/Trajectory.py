@@ -48,9 +48,9 @@ except ImportError:
 import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.DragVelocity import fitDragVelocity
-from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
-    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval, \
-    medianStddev
+from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, findClosestPoints_vect, \
+    RMSD, angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, \
+    confidenceInterval, medianStddev
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
@@ -857,7 +857,7 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
 
 
 def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
-                              gravity_factor=1.0, v0z=None, r0=None, gravity_vel=None):
+                              gravity_factor=1.0, v0z=None, r0=None, gravity_vel=None, smoothing=0.0):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -880,6 +880,10 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
         gravity_vel: [tuple] Speeds of the meteor against time (see Trajectory.gravity_vel), with which the
             drop is computed across the path and slowed by the drag (see gravityDropTable). If None, the
             meteor is dropped vertically with applyGravityDrop, using v0z and r0.
+        smoothing: [float] Smoothing of the angles near zero (rad). Each angle is replaced by
+            sqrt(angle**2 + smoothing**2) - smoothing, which is smooth at zero, as the sum of the angles has
+            a kink where an angle is zero, at which the Nelder-Mead minimization can stop (see
+            nelderMeadLine). 0.0 by default, when the angles are not smoothed.
 
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
@@ -913,85 +917,71 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     # Find the earliest point in time
     t0 = dropTimeOrigin(observations)
 
-    angle_sum = 0.0
-    weights_sum = 1e-10
+    # Stack the points of all stations which are not ignored, with the weights of their stations
+    used_masks = [np.array(obs.ignore_list) == 0 for obs in observations]
+    stat_eci = np.concatenate([np.reshape(obs.stat_eci_los, (-1, 3))[used] \
+        for obs, used in zip(observations, used_masks)])
+    meas_eci = np.concatenate([np.reshape(obs.meas_eci_los, (-1, 3))[used] \
+        for obs, used in zip(observations, used_masks)])
+    time_rel = np.concatenate([np.array(obs.time_data, dtype=np.float64)[used] \
+        for obs, used in zip(observations, used_masks)]) - t0
+    point_weights = np.repeat(np.array(weights, dtype=np.float64), \
+        [np.count_nonzero(used) for used in used_masks])
 
-    # Compute the drop across the path at the times of the used points, if the speeds of the meteor are given.
-    #   The drop is tabulated over the used points only, so the ignored points do not change it
-    drops = None
+    # Get the ECI coordinates of the projections of the measurement lines of sight on the radiant line
+    _, rad_cpa, _ = findClosestPoints_vect(stat_eci, meas_eci, state_vect, radiant_eci)
+
+    # Take the gravity drop across the path into account if the speeds of the meteor are given, tabulated over
+    #   the used points only so that the ignored points do not change it
     if gravity and (gravity_vel is not None):
 
-        used_masks = [np.array(obs.ignore_list) == 0 for obs in observations]
-        time_used = np.concatenate([obs.time_data[used] for obs, used in zip(observations, used_masks)])
+        if len(time_rel):
 
-        drops = [np.zeros((len(obs.time_data), 3)) for obs in observations]
+            drops = gravityDropVectors(gravityDropOrigin(observations, state_vect, radiant_eci, \
+                gravity_vel, t0), radiant_eci, time_rel, gravity_vel, t0, gravity_factor)
 
-        if len(time_used):
+            _, rad_cpa, _ = findClosestPoints_vect(stat_eci, meas_eci, rad_cpa + drops, radiant_eci)
 
-            drop_used = gravityDropVectors(gravityDropOrigin(observations, state_vect, radiant_eci, \
-                gravity_vel, t0), radiant_eci, time_used - t0, gravity_vel, t0, gravity_factor)
+    # Take the vertical gravity drop into account
+    #   Note: here we assume that the acceleration due to gravity is fixed at the given height,
+    #   which might cause an offset of a few meters for events longer than 5 seconds
+    elif gravity:
 
-            # Split the drops between the stations
-            drop_used = np.split(drop_used, np.cumsum([np.count_nonzero(used) for used in used_masks])[:-1])
-            for drop, used, drop_stat in zip(drops, used_masks, drop_used):
-                drop[used] = drop_stat
+        # Compute the model point modified due to gravity, assuming zero vertical velocity
+        if v0z is None:
+            v0z = 0.0
 
-    # Go through all observations from all stations
-    for i, obs in enumerate(observations):
-        
-        # Go through all measured positions
-        for j, (t, meas_eci, stat_eci, ignore) in enumerate(zip(obs.time_data, obs.meas_eci_los, \
-            obs.stat_eci_los, obs.ignore_list)):
+        # Take the distance of the beginning of the meteor, or of each point itself if it is not given
+        if r0 is None:
+            r0_points = np.linalg.norm(rad_cpa, axis=1)
+        else:
+            r0_points = np.full(len(time_rel), r0, dtype=np.float64)
 
-            # Skip the point if it is to be ignored
-            if ignore:
-                continue
+        # If the distance is 0, set it to 1 to avoid a division by zero
+        r0_points[r0_points == 0] = 1.0
 
-            # Get the ECI coordinates of the projection of the measurement line of sight on the radiant line
-            _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
-
-
-            # Take the gravity drop across the path into account
-            if drops is not None:
-                _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa + drops[i][j], radiant_eci)
-
-            # Take the vertical gravity drop into account
-            #   Note: here we assume that the acceleration due to gravity is fixed at the given height,
-            #   which might cause an offset of a few meters for events longer than 5 seconds
-            elif gravity:
+        rad_cpa_grav = applyGravityDrop_vect(rad_cpa, time_rel, r0_points, gravity_factor, v0z)
+        _, rad_cpa, _ = findClosestPoints_vect(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
 
-                # Calculate the time in seconds from the beginning of the meteor
-                t_rel = t - t0
+    # Calculate the unit vectors pointing from the stations to the points on the trajectory, which are not
+    #   finite for lines of sight parallel to the line
+    station_rays = rad_cpa - stat_eci
+    with np.errstate(invalid='ignore'):
+        station_rays = station_rays/np.linalg.norm(station_rays, axis=1)[:, None]
 
-                # Compute the model point modified due to gravity, assuming zero vertical velocity
-                if v0z is None:
-                    v0z = 0.0
+    # Calculate the angles between the observed LoS and the radiant line from the chords between the
+    #   unit vectors, which is precise for small angles
+    chords = np.linalg.norm(station_rays - meas_eci, axis=1)
+    angles = 2*np.arcsin(np.minimum(chords/2, 1.0))
 
-                # Take the distance of the beginning of the meteor, or of the point itself if it is not given
-                r0_point = r0
-                if r0_point is None:
-                    r0_point = vectMag(rad_cpa)
+    # Smooth the angles near zero, as sqrt(angle**2 + smoothing**2) - smoothing written without the
+    #   cancellation of the difference
+    if smoothing > 0:
+        angles = angles**2/(np.sqrt(angles**2 + smoothing**2) + smoothing)
 
-                # If the distance is 0, set it to 1 to avoid a division by zero
-                if r0_point == 0:
-                    r0_point = 1.0
-
-                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, gravity_factor, v0z)
-                _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
-
-
-
-            # Calculate the unit vector pointing from the station to the point on the trajectory
-            station_ray = rad_cpa - stat_eci
-            station_ray = vectNorm(station_ray)
-
-            # Calculate the angle between the observed LoS and the radiant line from the chord between the
-            #   unit vectors, which is precise for small angles
-            chord = vectMag(station_ray - meas_eci)
-            angle_sum += weights[i]*2*np.arcsin(min(chord/2, 1.0))
-
-            weights_sum += weights[i]
+    angle_sum = np.sum(point_weights*angles)
+    weights_sum = 1e-10 + np.sum(point_weights)
 
 
     return angle_sum/weights_sum
@@ -1000,13 +990,13 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
-    r0=None, gravity_vel=None):
+    r0=None, gravity_vel=None, smoothing=0.0):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
     
     return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity,\
-        gravity_factor=gravity_factor, v0z=v0z, r0=r0, gravity_vel=gravity_vel)
+        gravity_factor=gravity_factor, v0z=v0z, r0=r0, gravity_vel=gravity_vel, smoothing=smoothing)
 
 
 
@@ -1504,6 +1494,10 @@ LOS_MAX_SIMPLICES = 10
 LOS_SIMPLEX_DIRECTIONS = [np.eye(4), 0.5*np.array([[1.0, 1.0, 1.0, 1.0], [1.0, -1.0, 1.0, -1.0], \
     [1.0, 1.0, -1.0, -1.0], [1.0, -1.0, -1.0, 1.0]])]
 
+# Smoothings of the angles of the line-of-sight fit near zero, in the minimizations before the exact one
+#   (arcsec)
+LOS_SMOOTHING = [10.0, 1.0, 0.1, 0.01]
+
 
 
 def lineFrame(state_vect, radiant_eci, observations):
@@ -1582,49 +1576,37 @@ def lineFromFrame(coords, frame):
 
 
 
-def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
-    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame).
-        It is given to scipy.optimize.minimize as the method. With the six parameters of a state vector and a
-        radiant, the simplex can collapse and stop short of the minimum (McKinnon 1998). The minimization is
-        therefore restarted with a fresh simplex (Kelley 1999) until two in a row move the line by less than
-        LOS_RESTART_TOLERANCE.
-
-        References:
-            McKinnon, K. I. M. (1998). Convergence of the Nelder-Mead simplex method to a nonstationary
-                point. SIAM Journal on Optimization, 9(1), 148-158.
-            Kelley, C. T. (1999). Detection and remediation of stagnation in the Nelder-Mead algorithm using
-                a sufficient decrease condition. SIAM Journal on Optimization, 10(1), 43-55.
+def nelderMeadLineRestarts(fun, x0, args, maxfev=None, fun_kwargs=None):
+    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame),
+        restarted with a fresh simplex until two in a row move the line by less than LOS_RESTART_TOLERANCE
+        (see nelderMeadLine).
 
     Arguments:
-        fun: [function] Cost of the line, called as fun(params, *args), where params are the ECI coordinates
-            of a point on the line (meters) and the radiant vector, joined.
+        fun: [function] Cost of the line, called as fun(params, *args, **fun_kwargs), where params are the ECI
+            coordinates of a point on the line (meters) and the radiant vector, joined.
         x0: [ndarray] Initial parameters of the line.
+        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects.
 
     Keyword arguments:
-        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects. It must
-            be given.
         maxfev: [int] Largest number of evaluations of the cost in all minimizations. None by default, when
             each minimization has the limit of the Nelder-Mead method of scipy.
-        kwargs: [dict] Other arguments given by scipy.optimize.minimize, not used.
+        fun_kwargs: [dict] Keyword arguments of the cost. None by default.
 
     Return:
-        [OptimizeResult] Result of the last Nelder-Mead minimization, with the point on the line moved to the
-            beginning of the meteor, a unit radiant vector, and the iterations and evaluations of all
-            minimizations. Its cost is never higher than at the start, which is returned if no minimization
-            lowered it. If the line still moved after LOS_MAX_SIMPLICES fresh simplices, the success of the
-            last minimization is kept and the message says so.
+        [OptimizeResult] Result of the last Nelder-Mead minimization, with the parameters of the line and the
+            iterations and evaluations of all minimizations. If the line still moved after LOS_MAX_SIMPLICES
+            fresh simplices, the message says so.
     """
+
+    if fun_kwargs is None:
+        fun_kwargs = {}
 
     observations = args[0]
     params = np.array(x0, dtype=np.float64)
     simplex_size = LOS_SIMPLEX_SIZE
     still_runs = 0
     nit = 0
-
-    # Compute the cost at the start, which the result must not exceed
-    start_params = np.array(params)
-    start_cost = fun(start_params, *args)
-    nfev = 1
+    nfev = 0
 
     for i in range(LOS_MAX_SIMPLICES):
 
@@ -1640,8 +1622,8 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
         if maxfev is not None:
             options['maxfev'] = maxfev - nfev
 
-        solution = scipy.optimize.minimize(lambda coords: fun(lineFromFrame(coords, frame), *args), \
-            np.zeros(4), method='Nelder-Mead', options=options)
+        solution = scipy.optimize.minimize(lambda coords: fun(lineFromFrame(coords, frame), *args, \
+            **fun_kwargs), np.zeros(4), method='Nelder-Mead', options=options)
 
         nit += solution.nit
         nfev += solution.nfev
@@ -1667,6 +1649,91 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
     # Say when the line still moved after the last fresh simplex, which is kept as it lowered the cost
     if solution.success and (still_runs < 2):
         solution.message = "The line still moved after {:d} fresh simplices".format(LOS_MAX_SIMPLICES)
+
+    solution.x = params
+    solution.nit = nit
+    solution.nfev = nfev
+
+
+    return solution
+
+
+
+def nelderMeadLine(fun, x0, args=(), maxfev=None, smoothing=None, **kwargs):
+    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame).
+        It is given to scipy.optimize.minimize as the method. With the six parameters of a state vector and a
+        radiant, the simplex can collapse and stop short of the minimum (McKinnon 1998). The minimization is
+        therefore restarted with a fresh simplex (Kelley 1999) until two in a row move the line by less than
+        LOS_RESTART_TOLERANCE (see nelderMeadLineRestarts).
+
+        The sum of the angles between the lines of sight and the line has a kink where an angle is zero, at
+        which the simplex can also stop short of the minimum. The cost is therefore first minimized with the
+        angles smoothed near zero by decreasing amounts (see angleSumMeasurements2Line), each time from the
+        minimum of the one before, and then exactly.
+
+        References:
+            McKinnon, K. I. M. (1998). Convergence of the Nelder-Mead simplex method to a nonstationary
+                point. SIAM Journal on Optimization, 9(1), 148-158.
+            Kelley, C. T. (1999). Detection and remediation of stagnation in the Nelder-Mead algorithm using
+                a sufficient decrease condition. SIAM Journal on Optimization, 10(1), 43-55.
+
+    Arguments:
+        fun: [function] Cost of the line, called as fun(params, *args), where params are the ECI coordinates
+            of a point on the line (meters) and the radiant vector, joined. With the smoothing, it is also
+            called as fun(params, *args, smoothing=smoothing), with the smoothing of the angles (rad).
+        x0: [ndarray] Initial parameters of the line.
+
+    Keyword arguments:
+        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects. It must
+            be given.
+        maxfev: [int] Largest number of evaluations of the cost in all minimizations. None by default, when
+            each minimization has the limit of the Nelder-Mead method of scipy.
+        smoothing: [list] Smoothings of the angles in the minimizations before the exact one (arcsec). None
+            by default, when LOS_SMOOTHING is used. An empty list minimizes the exact cost only.
+        kwargs: [dict] Other arguments given by scipy.optimize.minimize, not used.
+
+    Return:
+        [OptimizeResult] Result of the last Nelder-Mead minimization of the exact cost, with the point on the
+            line moved to the beginning of the meteor, a unit radiant vector, and the iterations and
+            evaluations of all minimizations. Its cost is never higher than at the start, which is returned
+            if no minimization lowered it. If the line still moved after LOS_MAX_SIMPLICES fresh simplices,
+            the success of the last minimization is kept and the message says so.
+    """
+
+    if smoothing is None:
+        smoothing = LOS_SMOOTHING
+
+    observations = args[0]
+
+    # Compute the cost at the start, which the result must not exceed
+    start_params = np.array(x0, dtype=np.float64)
+    start_cost = fun(start_params, *args)
+    nfev = 1
+    nit = 0
+
+    # Minimize the smoothed costs in turn, each with at most half of the evaluations which are left
+    params = start_params
+    for smoothing_arcsec in smoothing:
+
+        maxfev_stage = None
+        if maxfev is not None:
+            maxfev_stage = (maxfev - nfev)//2
+
+            if maxfev_stage < 1:
+                break
+
+        solution = nelderMeadLineRestarts(fun, params, args, maxfev=maxfev_stage, \
+            fun_kwargs={'smoothing': np.radians(smoothing_arcsec/3600)})
+
+        nit += solution.nit
+        nfev += solution.nfev
+        params = solution.x
+
+    # Minimize the exact cost from the minimum of the last smoothed cost
+    solution = nelderMeadLineRestarts(fun, params, args, maxfev=(None if maxfev is None else maxfev - nfev))
+    nit += solution.nit
+    nfev += solution.nfev
+    params = solution.x
 
     # Keep the start if the minimizations did not lower its cost
     if np.isfinite(start_cost) and (not (solution.fun <= start_cost)):
@@ -2825,6 +2892,45 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     # Apply gravity drop to ECI coordinates
     return eci_coord - gravity_factor*drop*vectNorm(eci_coord)
+
+
+
+def applyGravityDrop_vect(eci_coords, t, r0, gravity_factor, vz):
+    """ Apply the gravity drop to many points at once, as applyGravityDrop does to one.
+
+    Arguments:
+        eci_coords: [ndarray] (x, y, z) ECI coordinates of the meteor (meters), one point per row.
+        t: [ndarray] Times of the points since the beginning of the trajectory (s).
+        r0: [ndarray] Distances from the centre of the Earth of the beginning of the meteor, one per point
+            (meters).
+        gravity_factor: [float] Factor by which the gravity drop will be multiplied.
+        vz: [float] Vertical component of the meteor's velocity (m/s).
+
+    Return:
+        [ndarray] ECI coordinates of the points corrected for the gravity drop, one point per row.
+    """
+
+    # Make sure r0 is not 0
+    r0 = np.where(r0 == 0, 1e-10, r0)
+
+    # Use the classical drop function for small vz's
+    if abs(vz) < 100:
+        drop = (1.0/2)*(G*EARTH.MASS/r0**2)*t**2
+
+    # Compute the drop using a drop model with a constant vertical velocity, which is not finite for points
+    #   which are not finite
+    else:
+        denominator = r0 + vz*t
+        denominator = np.where(denominator == 0, 1e-10, denominator)
+
+        with np.errstate(invalid='ignore'):
+            drop = (G*EARTH.MASS/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
+
+    # Apply gravity drop to ECI coordinates, which are not finite for lines of sight parallel to the line
+    with np.errstate(invalid='ignore'):
+        units = eci_coords/np.linalg.norm(eci_coords, axis=1)[:, None]
+
+    return eci_coords - (gravity_factor*drop)[:, None]*units
 
 
 

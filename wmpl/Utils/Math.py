@@ -524,6 +524,54 @@ def findClosestPoints(P, u, Q, v):
     return S, T, d
 
 
+def findClosestPoints_vect(P, u, Q, v):
+    """ Calculate the closest points of approach between pairs of lines, as findClosestPoints does for one
+        pair. Each argument is either one vector, used for all pairs, or an array with one vector per row.
+
+    Arguments:
+        P: [ndarray] Points on the 1st lines.
+        u: [ndarray] Direction vectors of the 1st lines.
+        Q: [ndarray] Points on the 2nd lines.
+        v: [ndarray] Direction vectors of the 2nd lines.
+
+    Return:
+        (S, T, d):
+            - S: [ndarray] Points on the 1st lines closest to the 2nd lines, one per row.
+            - T: [ndarray] Points on the 2nd lines closest to the 1st lines, one per row.
+            - d: [ndarray] Distances between the points. The points and the distances of parallel lines are
+                infinite.
+    """
+
+    # Calculate the difference in position between the points on the lines
+    w = P - Q
+
+    # Calculate cosines of angles between various vectors
+    a = np.einsum('...j,...j->...', u, u)
+    b = np.einsum('...j,...j->...', u, v)
+    c = np.einsum('...j,...j->...', v, v)
+    d = np.einsum('...j,...j->...', u, w)
+    e = np.einsum('...j,...j->...', v, w)
+
+    # Calculate the denominator, close to zero for parallel lines
+    denom = a*c - b**2
+    parallel = np.atleast_1d(np.abs(denom) < 1e-10)
+    denom = np.where(np.abs(denom) < 1e-10, 1.0, denom)
+
+    # Points on the lines closest to the other lines
+    S = np.atleast_2d(P + u*np.reshape((b*e - c*d)/denom, (-1, 1)))
+    T = np.atleast_2d(Q + v*np.reshape((a*e - b*d)/denom, (-1, 1)))
+
+    # Calculate the distances between the points
+    dist = np.linalg.norm(S - T, axis=1)
+
+    # Return infinite points and distances for parallel lines
+    S[parallel] = np.inf
+    T[parallel] = np.inf
+    dist[parallel] = np.inf
+
+    return S, T, dist
+
+
 def lineAndSphereIntersections(centre, radius, origin, direction):
     """Finds intersections between a sphere of given radius and coordinates of the centre and a line
         defined by an origin and a direction vector.

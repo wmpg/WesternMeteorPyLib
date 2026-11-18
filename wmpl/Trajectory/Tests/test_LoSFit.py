@@ -27,8 +27,8 @@ import scipy.optimize
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import angleSumMeasurements2Line, lineFrame, lineFromFrame, \
-    minimizeAngleCost, moveStateVector, nelderMeadLine, stateVectorDiverged
+from wmpl.Trajectory.Trajectory import LOS_SMOOTHING, angleSumMeasurements2Line, lineFrame, \
+    lineFromFrame, minimizeAngleCost, moveStateVector, nelderMeadLine, stateVectorDiverged
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.Math import angleBetweenVectors, vectNorm
 
@@ -499,7 +499,7 @@ def testTheLineFitStartedAlongALineOfSightGivesAFiniteLine():
 
     assert np.all(np.isfinite(result.x))
     assert np.isfinite(result.fun)
-    assert result.nfev < 1000
+    assert result.nfev < 1000*(len(LOS_SMOOTHING) + 1)
 
 
 
