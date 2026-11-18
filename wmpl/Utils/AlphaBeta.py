@@ -451,7 +451,7 @@ def _alphaBetaVelocityGrid(v_normed, ht_normed, n_grid=13):
 
 
 
-def minimizeAlphaBeta(v_normed, ht_normed):
+def minimizeAlphaBeta(v_normed, ht_normed, fast=False):
     """ initiates and calls the Q4 minimisation given in Gritsevich 2007 -
         'Validity of the photometric formula for estimating the mass of a fireball projectile'
 
@@ -461,6 +461,9 @@ def minimizeAlphaBeta(v_normed, ht_normed):
     the lag: both of its terms shrink as 1/beta, so the residual falls as beta grows to the bound
     while alpha falls to match, whatever the shape of the deceleration. The lower bound of beta (no
     mass loss) is a physical limit of the model, so a fit which ends there is kept.
+
+    Keyword arguments:
+        fast: [bool] Passed to alphaBetaVelocityNormed() in the velocity fit - see its docstring.
     """
 
     def _alphaBetaMinimization(x, v_normed, ht_normed):
@@ -505,11 +508,11 @@ def minimizeAlphaBeta(v_normed, ht_normed):
         alpha0, beta0 = _alphaBetaVelocityGrid(v_normed, ht_normed)
 
         # Robust (MAD) scatter of the velocity residuals of the grid solution, as in _estimateSigmaV()
-        v_res = alphaBetaVelocityNormed(ht_normed, alpha0, beta0) - v_normed
+        v_res = alphaBetaVelocityNormed(ht_normed, alpha0, beta0, fast=fast) - v_normed
         sigma_v_normed = max(1.4826*np.median(np.abs(v_res - np.median(v_res))), 1e-6)
 
         alpha_vel, beta_vel = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, \
-            x0_alpha_beta=(alpha0, beta0))
+            x0_alpha_beta=(alpha0, beta0), fast=fast)
 
         print("NOTE: The Q4 alpha-beta fit ended at the upper bound of beta, so the velocity residuals "
             "were fitted instead: alpha = {:.3f}, beta = {:.4f} (Q4: alpha = {:.3f}, beta = {:.4f})".format( \
@@ -633,7 +636,7 @@ def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1',
     """
 
     if x0_alpha_beta is None:
-        x0_alpha_beta = minimizeAlphaBeta(v_normed, ht_normed)
+        x0_alpha_beta = minimizeAlphaBeta(v_normed, ht_normed, fast=fast)
 
     log_bounds = _logAlphaBetaBounds()
 
@@ -1088,10 +1091,10 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
     ht_normed = ht_data/HT_NORM_CONST
 
     if method == 'q4':
-        alpha, beta = minimizeAlphaBeta(v_normed, ht_normed)
+        alpha, beta = minimizeAlphaBeta(v_normed, ht_normed, fast=fast)
 
     elif method == 'robust':
-        alpha0, beta0 = minimizeAlphaBeta(v_normed, ht_normed)
+        alpha0, beta0 = minimizeAlphaBeta(v_normed, ht_normed, fast=fast)
 
         if sigma_v is None:
             sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init, fast=fast)
@@ -3241,7 +3244,7 @@ def fitAlphaBetaMass(
     sigma_v_normed = None
     if method == 'robust':
 
-        alpha0_q4, beta0_q4 = minimizeAlphaBeta(v_normed, ht_normed)
+        alpha0_q4, beta0_q4 = minimizeAlphaBeta(v_normed, ht_normed, fast=fast)
 
         if not sigma_v_given:
             sigma_v = _estimateSigmaV(alpha0_q4, beta0_q4, v_normed, ht_normed, v_init)
@@ -4644,7 +4647,7 @@ def fitAlphaBetaLightCurve(
     # --- Stage 0: dynamics-only fit, used as the seed for the joint stage below and (unless
     # overridden) as the 'alpha_dyn'/'beta_dyn' reference. Always starts from the classic Q4 fit
     # (minimizeAlphaBeta()), exactly like fitAlphaBeta() does.
-    alpha0, beta0 = minimizeAlphaBeta(v_normed, ht_normed)
+    alpha0, beta0 = minimizeAlphaBeta(v_normed, ht_normed, fast=fast)
 
     # Estimate sigma_v from the Q4 residuals if not given (robust MAD estimator, shared with
     # fitAlphaBeta(method='robust')). Always derived from the Q4 fit specifically, even when
