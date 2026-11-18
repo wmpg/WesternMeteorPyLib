@@ -115,6 +115,18 @@ which were already in Cython, take most of the time there.
 
 ![Speed of the loop in Cython](figures/MetSim_cython_speedup.png)
 
+The substeps are also chosen so that few are wasted. Each fragment remembers the last substep which resolved
+its motion and starts the next step from it, instead of from the full step. After a resolved substep, the
+next one is twice as long only if the last one changed the mass and the speed by at most half of the 30 %
+limit, as a substep which changed them by more would fail when doubled. Before, 43 % of the Runge-Kutta
+steps of the Dynesty runs were such failed tries. The powers in the Runge-Kutta steps are also computed with
+the real `pow()` of C, which Cython compiled to the slower complex `pow()` before. Together, this makes the
+Dynesty runs 1.9 times faster (median of 41 runs) and the 24 saved fits 1.3 times faster in total, and
+changes their light curves by at most 0.01 mag and their lengths by at most 0.3 m. The figure shows the
+largest change of every case against the loop before, where a change of 1e-14 mag or 1e-7 m is none.
+
+![Speed and change of the results of the substeps](figures/MetSim_rk4_substeps.png)
+
 ## Erosion into grains
 
 A fragment that erodes loses mass to grains at the rate `-K*eta*m^(2/3)*rho_atm*v^3`, where `eta` is the

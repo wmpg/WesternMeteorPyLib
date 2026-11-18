@@ -182,6 +182,32 @@ def testLoadFragmentPickledByThePythonClass():
 
 
 
+def testFragmentPickledWithoutANewFieldIsLoaded():
+    """ Check that a fragment is pickled by the names of its attributes, so that a fragment pickled before a
+        field was added is loaded, with the default value of the new field.
+    """
+
+    frag, _ = initFragment(MetSimErosion)
+    frag.rk4_substep = 0.001
+
+    # The pickled state is the dictionary of the attributes
+    cls, args, state = frag.__reduce__()
+    assert cls is MetSimErosion.Fragment
+    assert state == frag.toDict()
+
+    # Remove the substep from the state, as in a fragment pickled before it was added
+    del state['rk4_substep']
+
+    # Load it as pickle does
+    frag_loaded = cls(*args)
+    frag_loaded.__setstate__(state)
+
+    assert frag_loaded.rk4_substep == 0
+    assert frag_loaded.m == frag.m
+    assert frag_loaded.n_grains == frag.n_grains
+
+
+
 def testFragmentSavedAsJSONHasAllAttributes():
     """ Check that toDict() gives every attribute of the Python class, also the added ones, and that the JSON
         export of Dynesty saves them, although most of them are not in the __dict__ of the fragment.

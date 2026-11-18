@@ -1,3 +1,5 @@
+# Compute the powers of doubles with pow() of C, without the check of Python for a complex result
+# cython: cpow=True
 """ Fast cython functions for the MetSimErosion module. """
 
 
@@ -156,6 +158,10 @@ cdef class FragmentCy:
     # Identifier of the complex fragmentation entry
     cdef public object complex_id
 
+    # Last substep of the Runge-Kutta integration which resolved the motion and was not shortened by the end
+    #   of a time step, from which the next time step starts (0 to start from the full time step)
+    cdef public double rk4_substep
+
     # Number of grains the fragment stands for, as it was set (an int, or a float for a fraction), and as a
     #   double for the computations, converted once as Python converts it in every product
     cdef object n_grains_obj
@@ -200,8 +206,13 @@ cdef class FragmentCy:
         self.q = 0
         self.dyn_press = 0
 
-        # Erosion coefficient, and the indicators of how it is set
+        # Erosion coefficient
         self.erosion_coeff = 0
+
+        # Start the Runge-Kutta integration from the full time step
+        self.rk4_substep = 0
+
+        # Indicators of how the erosion coefficient is set
         self.disruption_child = False
         self.erosion_height_change_applied = False
 
@@ -358,6 +369,7 @@ cdef class FragmentCy:
             'grain': self.grain,
             'complex': self.is_complex,
             'complex_id': self.complex_id,
+            'rk4_substep': self.rk4_substep,
             'h': self.h,
             'gamma': self.gamma,
             'zenith_angle': self.zenith_angle
@@ -402,6 +414,7 @@ cdef class FragmentCy:
         child.gamma = self.gamma
         child.zenith_angle = self.zenith_angle
         child.erosion_coeff = self.erosion_coeff
+        child.rk4_substep = self.rk4_substep
         child.disruption_child = self.disruption_child
         child.erosion_height_change_applied = self.erosion_height_change_applied
         child.erosion_mass_index = self.erosion_mass_index
@@ -459,21 +472,39 @@ class Fragment(FragmentCy):
 
 
 
+    def __reduce__(self):
+        """ Pickle the fragment by the names and the values of all of its attributes (see toDict()), as the
+            Python class it replaced was pickled. The state which Cython would pickle is the tuple of the C
+            fields, with a checksum of their names which has to match when the fragment is loaded, so a
+            fragment pickled before a field was added could not be loaded any more. A fragment pickled by
+            names is loaded by any version of the class, and a field which it does not have keeps its default
+            value.
+
+        Return:
+            (cls, args, state): [tuple] The class, no arguments for making a new fragment, and the dictionary
+                of the attributes, which __setstate__() sets.
+        """
+
+        return (type(self), (), self.toDict())
+
+
+
     def __setstate__(self, state):
         """ Restore a pickled fragment, also one pickled by an older version of wmpl, in which Fragment was a
             Python class with all attributes in its __dict__.
 
         Arguments:
-            state: [dict or tuple] The __dict__ of a fragment pickled as a Python class, or the state of a
-                fragment pickled as this class.
+            state: [dict or tuple] The attributes of the fragment by name (see __reduce__()), which is also
+                the __dict__ of a fragment pickled as a Python class, or the tuple of the C fields of a
+                fragment pickled by Cython before __reduce__() was added.
         """
 
-        # Set every attribute of a fragment pickled as a Python class
+        # Set every attribute by its name
         if isinstance(state, dict):
             for name, value in state.items():
                 setattr(self, name, value)
 
-        # Restore the C fields and the __dict__ of a fragment pickled as this class
+        # Restore the C fields and the __dict__ of a fragment pickled by Cython
         else:
             self.__setstate_cython__(state)
 
@@ -1031,10 +1062,10 @@ cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, doub
 cdef void ablationStepRK4C(double dt, double K, double sigma, double m, double v, double length, \
     double h_init, double cos_zc, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
     const double[::1] dens_co, double ablation_fraction, int lum_eff_type, double lum_eff, double mu, \
-    double v_kill, double *out):
+    double v_kill, double *out, double *h_substep):
     """ Integrate the mass, the speed and the length of a fragment over one time step, as ablationStepRK4,
-        but with the cosine of the zenith angle, and give the results through a pointer to an array, so that
-        the fragment loop calls it without making Python objects.
+        but with the cosine of the zenith angle, starting from the given substep, and give the results through
+        pointers, so that the fragment loop calls it without making Python objects.
 
     Arguments:
         dt: [double] Time step (s).
@@ -1057,6 +1088,9 @@ cdef void ablationStepRK4C(double dt, double K, double sigma, double m, double v
         out: [double *] Array of 5 doubles, set to the change of the mass (kg), the change of the speed
             (m/s), the change of the length (m), the radiated energy (J) and the electron line density
             multiplied by the time step (s/m), as returned by ablationStepRK4.
+        h_substep: [double *] Substep to start with (s), the full time step if 0, set to the last substep
+            which resolved the motion and was not shortened by the end of the time step (0 if there was
+            none).
 
     Return:
         None
@@ -1090,8 +1124,16 @@ cdef void ablationStepRK4C(double dt, double K, double sigma, double m, double v
     cdef double m_mid, v_mid
     cdef double rho_atm
 
-    # Indicate that a substep changed the mass and the speed by at most RK4_MAX_CHANGE
-    cdef bint resolved
+    # Last substep which resolved the motion and was not shortened by the end of the time step
+    cdef double h_resolved = 0.0
+
+    # Indicate that a substep changed the mass and the speed by at most RK4_MAX_CHANGE, and that it was
+    #   shortened to end at the end of the time step
+    cdef bint resolved, shortened
+
+    # Start from the substep which resolved the motion in the previous time step
+    if (h_substep[0] > 0) and (h_substep[0] < dt):
+        h = h_substep[0]
 
     # A fragment without mass or speed does not change
     if (m <= 0) or (v <= 0):
@@ -1106,7 +1148,8 @@ cdef void ablationStepRK4C(double dt, double K, double sigma, double m, double v
     while t < dt:
 
         # Do not step past the end of the time step
-        if h > dt - t:
+        shortened = h > dt - t
+        if shortened:
             h = dt - t
 
         resolved = rk4Substep(h, K, sigma, m_now, v_now, length + l_now, h_init, cos_zc, r_earth, h_drop, \
@@ -1154,13 +1197,21 @@ cdef void ablationStepRK4C(double dt, double K, double sigma, double m, double v
         l_now += dl
         t += h
 
+        # Remember the substep for the next time step
+        if resolved and (not shortened):
+            h_resolved = h
+
         # Stop integrating a fragment which is ablated or stopped
         if (m_now <= 0) or (v_now <= 0):
             break
 
-        # Try a longer substep after a resolved one
-        if resolved:
+        # Try a longer substep after a resolved one, if it changed the mass and the speed by at most half of
+        #   RK4_MAX_CHANGE, as the change grows in proportion to the substep and a longer one would fail
+        if resolved and (-dm <= 0.5*RK4_MAX_CHANGE*(m_now - dm)) and (-dv <= 0.5*RK4_MAX_CHANGE*(v_now - dv)):
             h *= 2.0
+
+    # Give the substep to start the next time step with
+    h_substep[0] = h_resolved
 
     # Give the changes over the time step
     out[0] = m_now - m
@@ -1216,11 +1267,64 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
     # Results of the step, written by the C function
     cdef double out[5]
 
+    # Start from the full time step
+    cdef double h_substep = 0.0
+
     # Integrate the step with the cosine of the zenith angle
     ablationStepRK4C(dt, K, sigma, m, v, length, h_init, cos(zenith_angle), r_earth, h_drop, atm_table, \
-        dens_co, ablation_fraction, lum_eff_type, lum_eff, mu, v_kill, out)
+        dens_co, ablation_fraction, lum_eff_type, lum_eff, mu, v_kill, out, &h_substep)
 
     return out[0], out[1], out[2], out[3], out[4]
+
+
+
+@cython.cdivision(True)
+cpdef tuple ablationStepRK4Substep(double dt, double K, double sigma, double m, double v, double length, \
+    double h_init, double zenith_angle, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
+    const double[::1] dens_co, double ablation_fraction, int lum_eff_type, double lum_eff, double mu, \
+    double v_kill, double h_substep):
+    """ Integrate a fragment over one time step as ablationStepRK4, starting from the given substep, as the
+        fragment loop does with the substep it remembers for every fragment.
+
+    Arguments:
+        dt: [double] Time step (s).
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Sum of the ablation and the erosion coefficients (s^2/m^2).
+        m: [double] Mass (kg).
+        v: [double] Speed (m/s).
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        zenith_angle: [double] Zenith angle of the path at the beginning (rad).
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity, kept over the step (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+        ablation_fraction: [double] Fraction of the mass loss which is ablated, the rest is eroded.
+        lum_eff_type: [int] Type of the luminous efficiency (see luminousEfficiency).
+        lum_eff: [double] Constant luminous efficiency, used by the type 0 (%).
+        mu: [double] Mean mass of an atom of the meteoroid (kg).
+        v_kill: [double] Speed below which a fragment gives no light and no ionization (m/s).
+        h_substep: [double] Substep to start with (s), the full time step if 0.
+
+    Return:
+        (dm, dv, dl, energy, electrons, h_substep):
+            - dm: [double] Change of the mass over the step (kg).
+            - dv: [double] Change of the speed by the air over the step (m/s).
+            - dl: [double] Change of the length over the step (m).
+            - energy: [double] Energy radiated over the step (J).
+            - electrons: [double] Electron line density multiplied by the time step (s/m).
+            - h_substep: [double] Last substep which resolved the motion and was not shortened by the end of
+                the time step (s), 0 if there was none.
+    """
+
+    # Results of the step, written by the C function
+    cdef double out[5]
+
+    # Integrate the step with the cosine of the zenith angle, starting from the given substep
+    ablationStepRK4C(dt, K, sigma, m, v, length, h_init, cos(zenith_angle), r_earth, h_drop, atm_table, \
+        dens_co, ablation_fraction, lum_eff_type, lum_eff, mu, v_kill, out, &h_substep)
+
+    return out[0], out[1], out[2], out[3], out[4], h_substep
 
 
 
@@ -1329,6 +1433,9 @@ def ablateAllCy(list fragments, const_obj, bint compute_wake, wake_heights_queue
     # Results of the Runge-Kutta integration of a fragment, written by ablationStepRK4C
     cdef double rk4_out[5]
 
+    # Substep of the Runge-Kutta integration which a fragment starts the step with
+    cdef double h_substep
+
     # Values of a fragment in the step, as C numbers
     cdef double rho_atm, erosion_coeff, m_start, v_start, ablation_fraction, mass_loss_total, velocity_change
     cdef double length_change, energy_step, electrons_step, mass_loss_erosion, mass_loss_ablation, m_new
@@ -1408,10 +1515,15 @@ def ablateAllCy(list fragments, const_obj, bint compute_wake, wake_heights_queue
 
         # Integrate the mass, the speed and the length over the step together, with the air density at the
         #   height of every stage, as the density changes by about 1% in a step of a fast meteor, and add up
-        #   the radiated energy and the ionization over the step
+        #   the radiated energy and the ionization over the step, starting from the substep which resolved the
+        #   motion in the previous step
+        h_substep = frag.rk4_substep
         ablationStepRK4C(dt, frag.K, frag.sigma + erosion_coeff, frag.m, frag.v, frag.length, h_init, \
             cos_zc, r_earth, frag.h_grav_drop_total, atm_table, dens_co, ablation_fraction, lum_eff_type, \
-            lum_eff, mu, v_kill, rk4_out)
+            lum_eff, mu, v_kill, rk4_out, &h_substep)
+
+        # Remember the substep for the next time step of the fragment
+        frag.rk4_substep = h_substep
 
         # Take the results of the integration from the output array
         mass_loss_total = rk4_out[0]

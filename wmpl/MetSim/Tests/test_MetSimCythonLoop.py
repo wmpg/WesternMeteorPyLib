@@ -6,7 +6,10 @@ The tests check that:
       would replace pow(x, 2.0) by x*x, which is not always the same double,
     - a fragment without speed raises ZeroDivisionError, as in the Python loop, by which Dynesty rejects a
       draw,
-    - an object which is not a fragment raises TypeError.
+    - an object which is not a fragment raises TypeError,
+    - the substep which resolved the motion of a small grain is returned, and a step started from it gives
+      the same change of the mass as a step started from the full time step, to the accuracy of the
+      integration.
 
 Run with pytest:
     python -m pytest wmpl/MetSim/Tests/test_MetSimCythonLoop.py -v
@@ -14,12 +17,14 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import math
+
 import numpy as np
 import pytest
 
 import wmpl.MetSim.MetSimErosion as MetSimErosion
 import wmpl.MetSim.Tests.MetSimErosionReference as MetSimErosionReference
-from wmpl.MetSim.MetSimErosionCyTools import pythonPow
+from wmpl.MetSim.MetSimErosionCyTools import pythonPow, ablationStepRK4, ablationStepRK4Substep
 from wmpl.MetSim.Tests.DefaultFragment import initFragment
 
 
@@ -68,3 +73,34 @@ def testOtherObjectRaisesTypeError():
 
     with pytest.raises(TypeError):
         MetSimErosion.ablateAll([frag], const)
+
+
+
+def testSubstepIsRemembered():
+    """ Check that a small fast grain deep in the atmosphere is integrated in substeps, that the last of them
+        is returned, and that a step started from it gives the same change of the mass as one started from the
+        full time step, to the accuracy of the integration.
+    """
+
+    # Take the default constants and a time step of 5 ms
+    const = MetSimErosion.Constants()
+    dens_co = np.ascontiguousarray(const.dens_co, dtype=np.float64)
+    dt = 0.005
+    m = 1e-11
+
+    # A 1e-11 kg grain at 60 km/s at 90 km, which loses most of its mass in a step
+    args = (dt, 1.21*3000**(-2/3.0), 0.02e-6, m, 60000.0, 0.0, 90000.0, math.radians(45), const.r_earth, \
+        0.0, None, dens_co, 1.0, const.lum_eff_type, const.lum_eff, const.mu, const.v_kill)
+
+    # Integrate the step from the full time step, which the grain must split into substeps
+    results = ablationStepRK4Substep(*args, 0.0)
+    h_substep = results[5]
+
+    assert 0 < h_substep < dt
+
+    # Starting from the full time step is the same as ablationStepRK4
+    assert results[:5] == ablationStepRK4(*args)
+
+    # Starting from the remembered substep changes the mass by the same amount
+    results_substep = ablationStepRK4Substep(*args, h_substep)
+    assert abs(results_substep[0] - results[0]) < 1e-5*m
