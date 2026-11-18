@@ -314,7 +314,8 @@ class DragFit(object):
         dlen = np.diff(len_arr)
 
         # The drag acts on the speed relative to the air, which moves with the ground, so 2*K*rho is scaled by
-        #   the squared ratio of that speed to the inertial one, iterating from the inertial speed
+        #   the squared ratio of that speed to the inertial one (see _airDragScale), iterating from the inertial
+        #   speed
         drag_scale = 1.0
         for _ in range(DRAG_SCALE_ITERATIONS if self.v_rotation else 1):
 
@@ -328,7 +329,7 @@ class DragFit(object):
             energy = (0.5*params[1]**2 + grav)/exp_phi
             vel = np.sqrt(np.maximum(2*energy, 1.0))
 
-            drag_scale = (1 - self.v_rotation/vel)**2
+            drag_scale = self._airDragScale(vel)
 
         # Integrate the time
         time = params[0] + np.concatenate([[0.0], np.cumsum(0.5*(1/vel[1:] + 1/vel[:-1])*dlen)])
@@ -607,6 +608,24 @@ class DragFit(object):
 
 
 
+    def _airDragScale(self, vel):
+        """ Compute the factor by which the drag on the speed relative to the air differs from the drag on the
+            inertial speed. The sign is kept, so the drag pushes the meteor forward if the air moves faster
+            along the line than the meteor.
+
+        Arguments:
+            vel: [float or ndarray] Inertial speed (m/s).
+
+        Return:
+            [float or ndarray] Factor of the drag term.
+        """
+
+        ratio = 1 - self.v_rotation/vel
+
+        return ratio*np.abs(ratio)
+
+
+
     def _airEnergyStep(self, energy, a, g, dlen, vel):
         """ Advance the energy equation by dlen, with the drag term scaled for the speed relative to the air
             at the mean speed of the step.
@@ -623,10 +642,10 @@ class DragFit(object):
         """
 
         # Estimate the speed at the end of the step with the scale at its start
-        energy_end = self._energyStep(energy, a*(1 - self.v_rotation/vel)**2, g, dlen)
+        energy_end = self._energyStep(energy, a*self._airDragScale(vel), g, dlen)
         vel_mean = 0.5*(vel + np.sqrt(max(2*energy_end, 1.0)))
 
-        return self._energyStep(energy, a*(1 - self.v_rotation/vel_mean)**2, g, dlen)
+        return self._energyStep(energy, a*self._airDragScale(vel_mean), g, dlen)
 
 
 

@@ -50,8 +50,8 @@ class DragMeteor(object):
         Keyword arguments:
             dt: [float] Integration step (s). 0.001 s by default.
             duration: [float] Duration of the integration (s). 20 s by default.
-            ground_drag: [bool] If True, the drag acts on the speed relative to the ground, which moves with
-                the air, as on a real meteor. False by default, in which case it acts on the inertial speed.
+            ground_drag: [bool] If True, the drag acts on the speed relative to the air, which moves with
+                the ground, as on a real meteor. False by default, in which case it acts on the inertial speed.
         """
 
         self.t_vis_beg = t_vis_beg
@@ -87,7 +87,7 @@ class DragMeteor(object):
             rho = np.exp(np.interp(len_val, len_table, log_rho_table))
             g = np.interp(len_val, len_table, g_table)
 
-            return -k*rho*(vel - v_rotation)**2 + g
+            return -k*rho*(vel - v_rotation)*np.abs(vel - v_rotation) + g
 
 
         # Integrate with the 4th order Runge-Kutta method
