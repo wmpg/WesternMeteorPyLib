@@ -1187,6 +1187,7 @@ def disruptFragment(const, frag):
         frag_children_all: [list] Fragments and grains made by the disruption.
     """
 
+    # Fragments and grains made by the disruption
     frag_children_all = []
 
     # Compute the mass that should be disrupted into fragments
@@ -1214,6 +1215,7 @@ def disruptFragment(const, frag):
         # Assign the height of disruption
         const.disruption_height = frag.h
 
+        # Print the masses of the fragments made by the disruption
         print('Disrupting id', frag.id)
         print('Height: {:.3f} km'.format(const.disruption_height/1000))
         print('Disrupted mass: {:e}'.format(mass_frag_disruption))
@@ -1232,7 +1234,7 @@ def disruptFragment(const, frag):
         frag_children_all += grain_children
         const.n_active += len(grain_children)
 
-    # Deactivate the disrupted fragment
+    # Deactivate the disrupted fragment, which releases the grains it has not released yet
     frag.m = 0
     frag_children_all += killFragment(const, frag)
 
@@ -1763,6 +1765,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
                     # Find the corresponding fragmentation entry (O(1) via the id index built above)
                     frag_entry = fragmentation_entry_by_id.get(frag.complex_id)
 
+                    # Add the light of the fragment to the light curve of its entry
                     if frag_entry is not None:
                         trackIndividualLightCurve(const, frag_entry, frag, tau)
 
@@ -1833,10 +1836,14 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
         # Disrupt the fragment if the dynamic pressure exceeds its strength
         if frag.disruption_enabled and const.disruption_on:
             if dyn_press > const.compressive_strength:
+
+                # Break the fragment into fragments and grains, and keep them with the other children
                 frag_children_all += disruptFragment(const, frag)
 
         # Handle complex fragmentation and status changes of the main fragment
         if frag.main and const.fragmentation_on:
+
+            # Apply the fragmentation entries whose height the main fragment has passed
             applyFragmentationEntries(const, frag, fragments, frag_children_all, dyn_press)
 
         # If the fragment is done, stop ablating
@@ -1872,9 +1879,11 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
 
     ### Compute the wake profile ###
 
+    # Compute the wake around the leading fragment, if it is requested at this time step
     wake = computeWake(const, fragments, leading_frag_length, leading_frag_height, compute_wake, \
         wake_heights_queue)
 
+    ### ###
 
     # Add generated fragment children to the list of fragments
     fragments += frag_children_all
