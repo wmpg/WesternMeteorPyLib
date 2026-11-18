@@ -13,6 +13,7 @@ the old code. Such a file is skipped if it is older than its .pyx, and the modul
 
 import hashlib
 import importlib.abc
+import importlib.machinery
 import os
 import sys
 
@@ -73,21 +74,21 @@ def staleCompiledModules(wmpl_dir=None):
             pyx_path = os.path.join(dir_path, file_name)
             module_base = file_name[:-len(".pyx")]
 
-            # The compiled file is e.g. MetSimErosionCyTools.cpython-311-x86_64-linux-gnu.so on Linux and
-            #   MetSimErosionCyTools.cp311-win_amd64.pyd on Windows
-            for compiled_name in file_names:
+            # Take the compiled file which this Python would import, e.g.
+            #   MetSimErosionCyTools.cpython-311-x86_64-linux-gnu.so on Linux, in the order Python tries them,
+            #   so that files compiled for other versions of Python or other systems are not checked
+            for suffix in importlib.machinery.EXTENSION_SUFFIXES:
 
-                if not (compiled_name.startswith(module_base + ".") \
-                    and compiled_name.endswith((".so", ".pyd"))):
+                compiled_path = os.path.join(dir_path, module_base + suffix)
 
-                    continue
+                if os.path.isfile(compiled_path):
 
-                compiled_path = os.path.join(dir_path, compiled_name)
+                    if os.path.getmtime(compiled_path) < os.path.getmtime(pyx_path):
 
-                if os.path.getmtime(compiled_path) < os.path.getmtime(pyx_path):
+                        module_path = os.path.relpath(os.path.join(dir_path, module_base), package_root)
+                        stale[".".join(module_path.split(os.sep))] = compiled_path
 
-                    module_path = os.path.relpath(os.path.join(dir_path, module_base), package_root)
-                    stale[".".join(module_path.split(os.sep))] = compiled_path
+                    break
 
     return stale
 

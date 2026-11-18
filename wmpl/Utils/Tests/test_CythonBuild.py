@@ -6,6 +6,7 @@ Run with pytest:
     python -m pytest wmpl/Utils/Tests/test_CythonBuild.py -v
 """
 
+import importlib.machinery
 import os
 import sys
 import tempfile
@@ -84,9 +85,12 @@ def touchFile(file_path, mtime):
 
 
 def testStaleCompiledModulesAreFound():
-    """ Check that a module compiled into the source tree before its .pyx was changed is found, with the
-        name of the module, on Linux and Windows, and that a module compiled after it is not.
+    """ Check that a module compiled into the source tree for this Python before its .pyx was changed is
+        found, with the name of the module, and that a module compiled after it is not, nor a file compiled
+        for another version of Python or another system.
     """
+
+    suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
@@ -96,21 +100,23 @@ def testStaleCompiledModulesAreFound():
         os.makedirs(metsim_dir)
         os.makedirs(utils_dir)
 
-        # Compiled before a git pull changed the .pyx, as on Windows
-        touchFile(os.path.join(metsim_dir, "MetSimErosionCyTools.cp311-win_amd64.pyd"), 1000.0)
+        # Compiled before a git pull changed the .pyx
+        touchFile(os.path.join(metsim_dir, "MetSimErosionCyTools" + suffix), 1000.0)
         touchFile(os.path.join(metsim_dir, "MetSimErosionCyTools.pyx"), 2000.0)
 
-        # Compiled after the .pyx was changed, as on Linux
+        # Compiled after the .pyx was changed, next to an old file of another version of Python
         touchFile(os.path.join(utils_dir, "FastTools.pyx"), 1000.0)
-        touchFile(os.path.join(utils_dir, "FastTools.cpython-311-x86_64-linux-gnu.so"), 2000.0)
+        touchFile(os.path.join(utils_dir, "FastTools" + suffix), 2000.0)
+        touchFile(os.path.join(utils_dir, "FastTools.cp27-win_amd64.pyd"), 500.0)
 
-        # A module of a similar name is not its compiled file
-        touchFile(os.path.join(utils_dir, "FastToolsExtra.cpython-311-x86_64-linux-gnu.so"), 500.0)
+        # Only compiled for another version of Python, which this Python does not import
+        touchFile(os.path.join(utils_dir, "OtherTools.pyx"), 1000.0)
+        touchFile(os.path.join(utils_dir, "OtherTools.cpython-27-x86_64-linux-gnu.so"), 500.0)
 
         stale = staleCompiledModules(wmpl_dir)
 
         assert stale == {"wmpl.MetSim.MetSimErosionCyTools": \
-            os.path.join(metsim_dir, "MetSimErosionCyTools.cp311-win_amd64.pyd")}
+            os.path.join(metsim_dir, "MetSimErosionCyTools" + suffix)}
 
 
 
