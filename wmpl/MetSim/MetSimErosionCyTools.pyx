@@ -6,7 +6,7 @@ cimport cython
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10, cos, pow
+from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10, cos, sin, pow
 
 
 # Define cython types for numpy arrays
@@ -14,269 +14,303 @@ FLOAT_TYPE = np.float64
 ctypedef np.float64_t FLOAT_TYPE_t
 
 
-### ATTEMPTED TO CONVERT THESE CLASSES TO CYTHON, BUT THERE ARE STILL ERRORS AND THE EXECUTION IS NOT ANY 
-### FASTER
+# Do not let the C compiler fuse a multiplication and an addition into one rounding (FMA, done by default by
+#   GCC for arm64 and by Clang), so that the results are the same as of the same arithmetic in Python
+cdef extern from *:
+    """
+    #if defined(__clang__)
+    #pragma STDC FP_CONTRACT OFF
+    #elif defined(__GNUC__)
+    #pragma GCC optimize ("fp-contract=off")
+    #endif
+    """
 
-# @cython.auto_pickle(True)
-# cdef class ConstantsCy:
-#     cdef double dt, total_time, m_kill, v_kill, h_kill, h_init, P_0m
-#     cdef double wake_psf, wake_extension
-#     cdef double rho, m_init, v_init, shape_factor, sigma, zenith_angle, gamma, rho_grain
-#     cdef double erosion_height_start, erosion_coeff, erosion_height_change, erosion_coeff_change, \
-#         erosion_mass_index, erosion_mass_min, erosion_mass_max
-#     cdef double compressive_strength, disruption_height, disruption_erosion_coeff, disruption_mass_index, \
-#         disruption_mass_min_ratio, disruption_mass_max_ratio, disruption_mass_grain_ratio
-#     cdef int n_active, total_fragments
-#     cdef FLOAT_TYPE_t[:] dens_co
-#     cdef bint erosion_on, disruption_on
-    
 
-#     def __init__(self):
-#         """ Constant parameters for the ablation modelling. """
 
-#         ### Simulation parameters ###
+cdef class FragmentCy:
+    """ A fragment of the meteoroid: the main fragment, a fragment of a disruption or a fragmentation entry,
+        or a set of n_grains equal grains. The numbers used in every time step are C fields, which the
+        fragment loop reads without Python objects. Use the Python class Fragment below, which adds the
+        'complex' attribute.
+    """
 
-#         # Time step
-#         self.dt = 0.005
+    # Identifier of the fragment
+    cdef public object id
 
-#         # Time elapsed since the beginning
-#         self.total_time = 0
+    # Shape-density coeff
+    cdef public double K
 
-#         # Number of active fragments
-#         self.n_active = 0
+    # Initial fragment mass, and the instantaneous fragment mass (kg)
+    cdef public double m_init, m
 
-#         # Minimum possible mass for ablation (kg)
-#         self.m_kill = 1e-14
+    # Density (kg/m^3)
+    cdef public double rho
 
-#         # Minimum ablation velocity (m/s)
-#         self.v_kill = 3000
+    # Ablation coefficient (s^2/m^2)
+    cdef public double sigma
 
-#         # Minimum height (m)
-#         self.h_kill = 60000
+    # Velocity, and its vertical and horizontal components (m/s)
+    cdef public double v, vv, vh
 
-#         # Initial meteoroid height (m)
-#         self.h_init = 180000
+    # Total drop due to gravity (m)
+    cdef public double h_grav_drop_total
 
-#         # Power of a 0 magnitude meteor
-#         self.P_0m = 840
+    # Speed of the drop due to gravity across the path (m/s)
+    cdef public double v_grav_drop
 
-#         # Atmosphere density coefficients
-#         self.dens_co = np.array([-9.02726494,
-#                         0.108986696,
-#                         -0.0005189,
-#                         -2.0646e-5,
-#                         1.93881e-7,
-#                         -4.7231e-10])
+    # Length along the trajectory (m)
+    cdef public double length
 
+    # Height (m)
+    cdef public double h
 
-#         self.total_fragments = 0
+    # Luminous intensity (Watts)
+    cdef public double lum
 
-#         ### ###
+    # Electron line density
+    cdef public double q
 
+    # Dynamic pressure (Gamma = 1.0, Pa)
+    cdef public double dyn_press
 
-#         ### Wake parameters ###
+    # Drag coefficient
+    cdef public double gamma
 
-#         # PSF stddev (m)
-#         self.wake_psf = 3.0
+    # Zenith angle (radians)
+    cdef public double zenith_angle
 
-#         # Wake extension from the leading fragment (m)
-#         self.wake_extension = 200
+    # Erosion coefficient value
+    cdef public double erosion_coeff
 
-#         ### ###
+    # Indicates that this fragment was born from a disruption event and uses a fixed, disruption-
+    #   specific erosion coefficient (const.disruption_erosion_coeff) instead of the ordinary height-
+    #   dependent one, so it's excluded from the height-based erosion_coeff recompute
+    cdef public bint disruption_child
 
+    # Indicates that the one-time density/ablation coeff change at erosion_height_change has already
+    #   been applied to this (main) fragment, so it isn't silently re-applied (and doesn't clobber a
+    #   later manual sigma change, e.g. from a complex fragmentation "A" event) on every subsequent tick
+    cdef public bint erosion_height_change_applied
 
+    # Grain mass distribution index
+    cdef public double erosion_mass_index
 
-#         ### Main meteoroid properties ###
+    # Mass range for grains (kg)
+    cdef public double erosion_mass_min, erosion_mass_max
 
-#         # Meteoroid bulk density (kg/m^3)
-#         self.rho = 1000
+    cdef public bint erosion_enabled
 
-#         # Initial meteoroid mass (kg)
-#         self.m_init = 2e-5
+    cdef public bint disruption_enabled
 
-#         # Initial meteoroid veocity (m/s)
-#         self.v_init = 23570
+    cdef public bint active
 
-#         # Shape factor (1.21 is sphere)
-#         self.shape_factor = 1.21
+    # Fractional numbers of grains which the fragment eroded into each mass bin and did not release yet,
+    #   and the parameters of the bins (see erodeIntoGrains)
+    cdef public object erosion_bin_counts, erosion_bin_params
 
-#         # Main fragment ablation coefficient
-#         self.sigma = 0.023/1e6
+    # Indicate that a fragmentation entry set the erosion coefficient, so the height does not change it
+    cdef public bint erosion_coeff_fixed
 
-#         # Zenith angle (radians)
-#         self.zenith_angle = np.radians(45)
+    # Indicate that this is the main fragment
+    cdef public bint main
 
-#         # Drag coefficient
-#         self.gamma = 1.0
+    # Indicate that the fragment is a grain
+    cdef public bint grain
 
-#         # Grain bulk density (kg/m^3)
-#         self.rho_grain = 3000
+    # Indicate that this is born out of complex fragmentation (the attribute 'complex' of Fragment, as
+    #   'complex' is a keyword of C)
+    cdef public bint is_complex
 
-#         ### ###
+    # Identifier of the complex fragmentation entry
+    cdef public object complex_id
 
+    # Number of grains the fragment stands for, as it was set (an int, or a float for a fraction), and as a
+    #   double for the computations, converted once as Python converts it in every product
+    cdef object n_grains_obj
+    cdef double n_grains_double
 
-#         ### Erosion properties ###
+    # Other attributes, among them 'const', which is a keyword of Cython
+    cdef dict __dict__
 
-#         # Toggle erosion on/off
-#         self.erosion_on = True
 
-        
-#         # Height at which the erosion starts (meters)
-#         self.erosion_height_start = 102000
 
-#         # Erosion coefficient (s^2/m^2)
-#         self.erosion_coeff = 0.33/1e6
+    def __init__(self):
 
-        
-#         # Height at which the erosion coefficient changes (meters)
-#         self.erosion_height_change = 90000
+        self.id = 0
 
-#         # Erosion coefficient after the change (s^2/m^2)
-#         self.erosion_coeff_change = 0.33/1e6
+        self.__dict__['const'] = None
 
+        self.K = 0
+        self.m_init = 0
+        self.m = 0
+        self.rho = 0
+        self.sigma = 0
+        self.v = 0
+        self.vv = 0
+        self.vh = 0
+        self.h_grav_drop_total = 0
+        self.v_grav_drop = 0
+        self.length = 0
+        self.lum = 0
+        self.q = 0
+        self.dyn_press = 0
+        self.erosion_coeff = 0
+        self.disruption_child = False
+        self.erosion_height_change_applied = False
+        self.erosion_mass_index = 2.5
+        self.erosion_mass_min = 1.0e-11
+        self.erosion_mass_max = 5.0e-10
+        self.erosion_enabled = False
+        self.disruption_enabled = False
+        self.active = False
+        self.n_grains = 1
+        self.erosion_bin_counts = None
+        self.erosion_bin_params = None
+        self.erosion_coeff_fixed = False
+        self.main = False
+        self.grain = False
+        self.is_complex = False
+        self.complex_id = None
+
+
+
+    @property
+    def n_grains(self):
+        """ Number of grains the fragment stands for. """
+
+        return self.n_grains_obj
+
+
+
+    @n_grains.setter
+    def n_grains(self, value):
+
+        self.n_grains_obj = value
+        self.n_grains_double = value
 
-#         # Grain mass distribution index
-#         self.erosion_mass_index = 2.5
 
-#         # Mass range for grains (kg)
-#         self.erosion_mass_min = 1.0e-11
-#         self.erosion_mass_max = 5.0e-10
 
-#         ###
+    def init(self, sim_const, m, rho, v_init, sigma, gamma, zenith_angle, erosion_mass_index, \
+        erosion_mass_min, erosion_mass_max):
 
+        self.__dict__['const'] = sim_const
 
-#         ### Disruption properties ###
+        self.m = m
+        self.m_init = m
+        self.h = sim_const.h_init
+        self.rho = rho
+        self.v = v_init
+        self.sigma = sigma
+        self.gamma = gamma
+        self.zenith_angle = zenith_angle
 
-#         # Toggle disruption on/off
-#         self.disruption_on = True
+        # Compute shape-density coeff
+        self.updateShapeDensityCoeff()
 
-#         # Meteoroid compressive strength (Pa)
-#         self.compressive_strength = 2000
+        self.erosion_mass_index = erosion_mass_index
+        self.erosion_mass_min = erosion_mass_min
+        self.erosion_mass_max = erosion_mass_max
 
-#         # Height of disruption (will be assigned when the disruption occurs)
-#         self.disruption_height = -1
+        # Compute velocity components
+        self.vv = -v_init*cos(zenith_angle)
+        self.vh = v_init*sin(zenith_angle)
 
-#         # Erosion coefficient to use after disruption
-#         self.disruption_erosion_coeff = self.erosion_coeff
+        self.active = True
+        self.n_grains = 1
 
-#         # Disruption mass distribution index
-#         self.disruption_mass_index = 2.0
 
 
-#         # Mass ratio for disrupted fragments as the ratio of the disrupted mass
-#         self.disruption_mass_min_ratio = 1.0/100
-#         self.disruption_mass_max_ratio = 10.0/100
+    def updateShapeDensityCoeff(self):
+        """ Update the value of the shape-density coefficient. """
 
-#         # Ratio of mass that will disrupt into grains
-#         self.disruption_mass_grain_ratio = 0.25
+        self.K = self.gamma*self.__dict__['const'].shape_factor*pow(self.rho, -2/3.0)
 
-#         ### ###
 
 
-#     ### These two functions enable the object to be pickled
-#     ### More info: https://stackoverflow.com/questions/43760919/save-cython-extension-by-pickle
-#     ### Be careful when returning numpy arrays, .base needs to be added (e.g. see self.dens_co)
+    def spawn_child(self):
+        """ Create a child of the Fragment instance. Copy over the reference to the shared 'const' object
+        and copy values of all other attributes. Note: if a mutable attribute that is not shared across
+        Fragment instances is added, this function will need to be revised.
+        """
 
-#     def __getstate__(self):
-#         return self.dt, self.total_time, self.n_active, self.m_kill, self.v_kill, self.h_kill, self.h_init, \
-#         self.P_0m, self.dens_co.base, self.total_fragments, self.wake_psf, self.wake_extension, self.rho, \
-#         self.m_init, self.v_init, self.shape_factor, self.sigma, self.zenith_angle, self.gamma, \
-#         self.rho_grain, self.erosion_on, self.erosion_height_start, self.erosion_coeff, \
-#         self.erosion_height_change, self.erosion_coeff_change, self.erosion_mass_index, \
-#         self.erosion_mass_min, self.erosion_mass_max, self.disruption_on, self.compressive_strength, \
-#         self.disruption_height, self.disruption_erosion_coeff, self.disruption_mass_index, \
-#         self.disruption_mass_min_ratio, self.disruption_mass_max_ratio, self.disruption_mass_grain_ratio
+        cdef FragmentCy child = type(self).__new__(type(self))
 
+        child.id = self.id
+        child.K = self.K
+        child.m_init = self.m_init
+        child.m = self.m
+        child.rho = self.rho
+        child.sigma = self.sigma
+        child.v = self.v
+        child.vv = self.vv
+        child.vh = self.vh
+        child.h_grav_drop_total = self.h_grav_drop_total
+        child.v_grav_drop = self.v_grav_drop
+        child.length = self.length
+        child.h = self.h
+        child.lum = self.lum
+        child.q = self.q
+        child.dyn_press = self.dyn_press
+        child.gamma = self.gamma
+        child.zenith_angle = self.zenith_angle
+        child.erosion_coeff = self.erosion_coeff
+        child.disruption_child = self.disruption_child
+        child.erosion_height_change_applied = self.erosion_height_change_applied
+        child.erosion_mass_index = self.erosion_mass_index
+        child.erosion_mass_min = self.erosion_mass_min
+        child.erosion_mass_max = self.erosion_mass_max
+        child.erosion_enabled = self.erosion_enabled
+        child.disruption_enabled = self.disruption_enabled
+        child.active = self.active
+        child.n_grains_obj = self.n_grains_obj
+        child.n_grains_double = self.n_grains_double
+        child.erosion_coeff_fixed = self.erosion_coeff_fixed
+        child.main = self.main
+        child.grain = self.grain
+        child.is_complex = self.is_complex
+        child.complex_id = self.complex_id
+        child.__dict__ = dict(self.__dict__)
 
-#     def __setstate__(self, x):
-#         self.dt, self.total_time, self.n_active, self.m_kill, self.v_kill, self.h_kill, self.h_init, \
-#         self.P_0m, self.dens_co, self.total_fragments, self.wake_psf, self.wake_extension, self.rho, \
-#         self.m_init, self.v_init, self.shape_factor, self.sigma, self.zenith_angle, self.gamma, \
-#         self.rho_grain, self.erosion_on, self.erosion_height_start, self.erosion_coeff, \
-#         self.erosion_height_change, self.erosion_coeff_change, self.erosion_mass_index, \
-#         self.erosion_mass_min, self.erosion_mass_max, self.disruption_on, self.compressive_strength, \
-#         self.disruption_height, self.disruption_erosion_coeff, self.disruption_mass_index, \
-#         self.disruption_mass_min_ratio, self.disruption_mass_max_ratio, self.disruption_mass_grain_ratio = x
+        # The child starts without grains of its own to release, and does not share the list of the parent
+        child.erosion_bin_counts = None
+        child.erosion_bin_params = None
 
-#     ### ###
+        return child
 
 
-# # Create a class that Python can access and has a __dict__
-# class Constants(ConstantsCy):
-#     pass
 
+class Fragment(FragmentCy):
+    """ A fragment of the meteoroid (see FragmentCy), with the attribute 'complex', which indicates that the
+        fragment is born out of complex fragmentation.
+    """
 
 
-# cdef class FragmentCy:
-#     cdef public:
-#         int id, n_grains
-#         double K, m, rho, v, vv, vh, length, lum, erosion_coeff
-#         bint erosion_enabled, disruption_enabled, active, main
 
-#     def __init__(self):
+    def _getComplex(self):
+        return self.is_complex
 
-#         self.id = 0
 
-#         # Shape-density coeff
-#         self.K = 0
 
-#         # Mass (kg)
-#         self.m = 0
+    def _setComplex(self, value):
+        self.is_complex = value
 
-#         # Density (kg/m^3)
-#         self.rho = 0
 
-#         # Velocity (m/s)
-#         self.v = 0
 
-#         # Velocity components (vertical and horizontal)
-#         self.vv = 0
-#         self.vh = 0
+    complex = property(_getComplex, _setComplex)
 
-#         # Length along the trajectory
-#         self.length = 0
 
-#         # Luminous intensity (Watts)
-#         self.lum = 0
 
-#         # Erosion coefficient value
-#         self.erosion_coeff = 0
+    def __setstate__(self, state):
+        """ Restore a pickled fragment, also one pickled by an older version of wmpl, in which Fragment was a
+            Python class with all attributes in its __dict__.
+        """
 
-#         self.erosion_enabled = False
+        if isinstance(state, dict):
+            for name, value in state.items():
+                setattr(self, name, value)
 
-#         self.disruption_enabled = False
-
-#         self.active = False
-#         self.n_grains = 1
-
-#         # Indicate that this is the main fragment
-#         self.main = False
-
-
-#     cpdef void init(self, ConstantsCy const, double m, double rho, double v_init, double zenith_angle):
-
-
-#         self.m = m
-#         self.h = const.h_init
-#         self.rho = rho
-#         self.v = v_init
-#         self.zenith_angle = zenith_angle
-
-#         # Compute shape-density coeff
-#         self.K = const.gamma*const.shape_factor*self.rho**(-2/3.0)
-
-#         # Compute velocity components
-#         self.vv = -v_init*np.cos(zenith_angle)
-#         self.vh = v_init*np.sin(zenith_angle)
-
-#         self.active = True
-#         self.n_grains = 1
-
-
-
-# # Create a class that Python can access and has a __dict__
-# class Fragment(FragmentCy):
-#     pass
+        else:
+            self.__setstate_cython__(state)
 
 
 
