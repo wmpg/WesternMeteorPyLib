@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import scipy.interpolate
 
 from wmpl.MetSim.GUI import SimulationResults
-from wmpl.MetSim.MetSimErosion import Constants
+from wmpl.MetSim.MetSimErosion import Constants, Fragment
 from wmpl.MetSim.MetSimErosion import runSimulation as runSimulationErosion
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import padOrTruncate
@@ -526,7 +526,8 @@ class ErosionSimContainer(object):
 
         file_path = os.path.join(output_dir, self.file_name + ".json")
         with open(file_path, 'w') as f:
-            json.dump(self2, f, default=lambda o: o.__dict__, indent=4)
+            json.dump(self2, f, default=lambda o: o.toDict() if isinstance(o, Fragment) else o.__dict__, \
+                indent=4)
 
         print("Saved fit parameters to:", file_path)
 

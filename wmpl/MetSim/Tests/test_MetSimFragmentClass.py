@@ -2,7 +2,7 @@
 
 The tests check that the fragment has every attribute of the Python class it replaced (the class in
 MetSimErosionReference.py), with the same values after init(), and that spawning a child, copying,
-pickling and loading a fragment pickled by the Python class keep all of them.
+pickling, loading a fragment pickled by the Python class and saving it as JSON keep all of them.
 
 Run with pytest:
     python -m pytest wmpl/MetSim/Tests/test_MetSimFragmentClass.py -v
@@ -11,10 +11,13 @@ Run with pytest:
 from __future__ import print_function, division, absolute_import
 
 import copy
+import json
 import pickle
 
 import wmpl.MetSim.MetSimErosion as MetSimErosion
 import wmpl.MetSim.Tests.MetSimErosionReference as MetSimErosionReference
+from wmpl.Dynesty.DynestyMetSim import jsonDefault
+from wmpl.MetSim.Tests.DefaultFragment import initFragment
 
 
 # Attributes which are integers, booleans and objects in the Python class, and keep their type
@@ -22,26 +25,6 @@ INT_ATTRIBUTES = ['id', 'n_grains']
 BOOL_ATTRIBUTES = ['disruption_child', 'erosion_height_change_applied', 'erosion_enabled', \
     'disruption_enabled', 'active', 'erosion_coeff_fixed', 'main', 'grain', 'complex']
 OBJECT_ATTRIBUTES = ['const', 'erosion_bin_counts', 'erosion_bin_params', 'complex_id']
-
-
-
-def initFragment(module):
-    """ Make an initialized fragment of the given module with the default constants.
-
-    Arguments:
-        module: [module] MetSimErosion or MetSimErosionReference.
-
-    Return:
-        (frag, const): [tuple] Fragment and the constants.
-    """
-
-    const = MetSimErosion.Constants()
-
-    frag = module.Fragment()
-    frag.init(const, const.m_init, const.rho, const.v_init, const.sigma, const.gamma, const.zenith_angle, \
-        const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max)
-
-    return frag, const
 
 
 
@@ -177,3 +160,29 @@ def testLoadFragmentPickledByThePythonClass():
     names.remove('const')
     assertSameAttributes(frag, frag_ref, names)
     assert frag.const.m_init == frag_ref.const.m_init
+
+
+
+def testFragmentSavedAsJSONHasAllAttributes():
+    """ Check that toDict() gives every attribute of the Python class, also the added ones, and that the JSON
+        export of Dynesty saves them, although most of them are not in the __dict__ of the fragment. """
+
+    frag, const = initFragment(MetSimErosion)
+    frag.complex = True
+    frag.n_grains = 4
+    frag.extra_attribute = 'kept'
+
+    frag_ref, _ = initFragment(MetSimErosionReference)
+
+    frag_dict = frag.toDict()
+    names = list(vars(frag_ref))
+    assert list(frag_dict)[:len(names)] == names
+    assert frag_dict['const'] is frag.const
+    assert frag_dict['complex'] is True
+    assert frag_dict['n_grains'] == 4
+    assert frag_dict['extra_attribute'] == 'kept'
+
+    saved = json.loads(json.dumps(frag, default=jsonDefault))
+    for name in ['m', 'v', 'h', 'K', 'n_grains', 'complex', 'extra_attribute']:
+        assert saved[name] == frag_dict[name], name
+    assert saved['const']['m_init'] == const.m_init
