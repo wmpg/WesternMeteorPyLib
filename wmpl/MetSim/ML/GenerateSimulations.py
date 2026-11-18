@@ -525,6 +525,7 @@ class ErosionSimContainer(object):
 
 
         file_path = os.path.join(output_dir, self.file_name + ".json")
+        # Save the fragments with all their attributes, most of which are not in their __dict__
         with open(file_path, 'w') as f:
             json.dump(self2, f, default=lambda o: o.toDict() if isinstance(o, Fragment) else o.__dict__, \
                 indent=4)

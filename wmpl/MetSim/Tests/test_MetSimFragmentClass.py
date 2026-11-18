@@ -44,9 +44,11 @@ def assertSameAttributes(frag, frag_ref, names):
 
         value, value_ref = getattr(frag, name), getattr(frag_ref, name)
 
+        # Compare the numbers by their bits, so that they are equal only if they are the same double
         if isinstance(value_ref, (int, float)) and not isinstance(value_ref, bool):
             assert float(value).hex() == float(value_ref).hex(), name
 
+        # Compare the other values directly
         else:
             assert value == value_ref, name
 
@@ -54,14 +56,18 @@ def assertSameAttributes(frag, frag_ref, names):
 
 def testFragmentHasTheAttributesOfThePythonClass():
     """ Check that a new fragment has every attribute of the Python class, with the same value, and the same
-        type for the integers, the booleans and the objects. """
+        type for the integers, the booleans and the objects.
+    """
 
+    # Make a new fragment of each class
     frag = MetSimErosion.Fragment()
     frag_ref = MetSimErosionReference.Fragment()
 
+    # Compare the values of all attributes of the Python class
     names = list(vars(frag_ref))
     assertSameAttributes(frag, frag_ref, names)
 
+    # Check that the integers, the booleans and the objects keep their types
     for name in INT_ATTRIBUTES:
         assert type(getattr(frag, name)) is int, name
 
@@ -76,11 +82,13 @@ def testFragmentHasTheAttributesOfThePythonClass():
 def testInitGivesTheValuesOfThePythonClass():
     """ Check that init() gives the same values as the Python class to the last bit. """
 
+    # Initialize a fragment of each class with the same constants
     frag, const = initFragment(MetSimErosion)
     frag_ref = MetSimErosionReference.Fragment()
     frag_ref.init(const, const.m_init, const.rho, const.v_init, const.sigma, const.gamma, \
         const.zenith_angle, const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max)
 
+    # Compare all attributes, and check that the constants are shared
     assertSameAttributes(frag, frag_ref, list(vars(frag_ref)))
     assert frag.const is const
 
@@ -94,8 +102,10 @@ def testInitGivesTheValuesOfThePythonClass():
 
 def testSpawnChildCopiesTheFragment():
     """ Check that a child has every value of its parent, shares the constants, starts without the mass bins
-        of the parent, and keeps attributes added to the parent. """
+        of the parent, and keeps attributes added to the parent.
+    """
 
+    # Make a parent with values which differ from the defaults, and an added attribute
     frag, const = initFragment(MetSimErosion)
     frag.complex = True
     frag.complex_id = 3
@@ -106,11 +116,14 @@ def testSpawnChildCopiesTheFragment():
 
     child = frag.spawn_child()
 
+    # Compare all attributes of the child with the parent, except the mass bins
     assert type(child) is MetSimErosion.Fragment
     names = [name for name in vars(MetSimErosionReference.Fragment()) \
         if name not in ['erosion_bin_counts', 'erosion_bin_params']] + ['h', 'gamma', 'zenith_angle']
     assertSameAttributes(child, frag, names)
     assert child.const is const
+
+    # The child starts without the mass bins of the parent, and keeps the added attribute
     assert child.erosion_bin_counts is None
     assert child.erosion_bin_params is None
     assert child.extra_attribute == 'kept'
@@ -126,15 +139,18 @@ def testSpawnChildCopiesTheFragment():
 def testCopyAndPickleKeepTheFragment():
     """ Check that a deep copy and a pickled fragment keep all values, also the added attributes. """
 
+    # Make a fragment with values which differ from the defaults, and an added attribute
     frag, _ = initFragment(MetSimErosion)
     frag.complex = True
     frag.n_grains = 3
     frag.erosion_bin_counts = [0.5]
     frag.extra_attribute = [1, 2]
 
+    # Compare all attributes but the constants, which are copied too
     names = list(vars(MetSimErosionReference.Fragment())) + ['h', 'gamma', 'zenith_angle', 'extra_attribute']
     names.remove('const')
 
+    # Check a deep copy and a pickled fragment
     for frag_copy in [copy.deepcopy(frag), pickle.loads(pickle.dumps(frag))]:
 
         assert type(frag_copy) is MetSimErosion.Fragment
@@ -145,8 +161,10 @@ def testCopyAndPickleKeepTheFragment():
 
 def testLoadFragmentPickledByThePythonClass():
     """ Check that a fragment pickled when Fragment was a Python class is loaded with all of its
-        attributes. """
+        attributes.
+    """
 
+    # Make a fragment of the Python class with values which differ from the defaults
     frag_ref, _ = initFragment(MetSimErosionReference)
     frag_ref.complex = True
     frag_ref.n_grains = 5
@@ -156,6 +174,7 @@ def testLoadFragmentPickledByThePythonClass():
     frag = MetSimErosion.Fragment.__new__(MetSimErosion.Fragment)
     frag.__setstate__(copy.deepcopy(vars(frag_ref)))
 
+    # Compare all attributes, and the copied constants
     names = list(vars(frag_ref))
     names.remove('const')
     assertSameAttributes(frag, frag_ref, names)
@@ -165,8 +184,10 @@ def testLoadFragmentPickledByThePythonClass():
 
 def testFragmentSavedAsJSONHasAllAttributes():
     """ Check that toDict() gives every attribute of the Python class, also the added ones, and that the JSON
-        export of Dynesty saves them, although most of them are not in the __dict__ of the fragment. """
+        export of Dynesty saves them, although most of them are not in the __dict__ of the fragment.
+    """
 
+    # Make a fragment with values which differ from the defaults, and an added attribute
     frag, const = initFragment(MetSimErosion)
     frag.complex = True
     frag.n_grains = 4
@@ -174,6 +195,7 @@ def testFragmentSavedAsJSONHasAllAttributes():
 
     frag_ref, _ = initFragment(MetSimErosionReference)
 
+    # The dictionary has the attributes in the order of the Python class, then the added ones
     frag_dict = frag.toDict()
     names = list(vars(frag_ref))
     assert list(frag_dict)[:len(names)] == names
@@ -182,6 +204,7 @@ def testFragmentSavedAsJSONHasAllAttributes():
     assert frag_dict['n_grains'] == 4
     assert frag_dict['extra_attribute'] == 'kept'
 
+    # Save the fragment as JSON as Dynesty does, and compare the saved values
     saved = json.loads(json.dumps(frag, default=jsonDefault))
     for name in ['m', 'v', 'h', 'K', 'n_grains', 'complex', 'extra_attribute']:
         assert saved[name] == frag_dict[name], name

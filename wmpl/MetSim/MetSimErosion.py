@@ -982,6 +982,7 @@ def disruptFragment(const, frag):
         frag_children_all: [list] Fragments and grains made by the disruption.
     """
 
+    # Fragments and grains made by the disruption
     frag_children_all = []
 
     # Compute the mass that should be disrupted into fragments
@@ -1009,6 +1010,7 @@ def disruptFragment(const, frag):
         # Assign the height of disruption
         const.disruption_height = frag.h
 
+        # Print the masses of the fragments made by the disruption
         print('Disrupting id', frag.id)
         print('Height: {:.3f} km'.format(const.disruption_height/1000))
         print('Disrupted mass: {:e}'.format(mass_frag_disruption))
@@ -1027,7 +1029,7 @@ def disruptFragment(const, frag):
         frag_children_all += grain_children
         const.n_active += len(grain_children)
 
-    # Deactivate the disrupted fragment
+    # Deactivate the disrupted fragment, which releases the grains it has not released yet
     frag.m = 0
     frag_children_all += killFragment(const, frag)
 

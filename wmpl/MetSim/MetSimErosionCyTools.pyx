@@ -127,10 +127,13 @@ cdef class FragmentCy:
     # Mass range for grains (kg)
     cdef public double erosion_mass_min, erosion_mass_max
 
+    # Indicate that the fragment erodes into grains
     cdef public bint erosion_enabled
 
+    # Indicate that the fragment is disrupted when the dynamic pressure exceeds the compressive strength
     cdef public bint disruption_enabled
 
+    # Indicate that the fragment is still ablating
     cdef public bint active
 
     # Fractional numbers of grains which the fragment eroded into each mass bin and did not release yet,
@@ -164,37 +167,62 @@ cdef class FragmentCy:
 
 
     def __init__(self):
+        """ Make a fragment with the default values of all attributes, which init() sets to the initial
+            conditions of the simulation. The height, the drag coefficient and the zenith angle are 0 until
+            init() sets them.
+        """
 
+        # Identifier of the fragment
         self.id = 0
 
+        # Reference to the simulation constants, kept in the __dict__ as 'const' is a keyword of Cython
         self.__dict__['const'] = None
 
+        # Shape-density coefficient, masses, density and ablation coefficient
         self.K = 0
         self.m_init = 0
         self.m = 0
         self.rho = 0
         self.sigma = 0
+
+        # Velocity and its vertical and horizontal components
         self.v = 0
         self.vv = 0
         self.vh = 0
+
+        # Drop due to gravity, and the length along the trajectory
         self.h_grav_drop_total = 0
         self.v_grav_drop = 0
         self.length = 0
+
+        # Luminous intensity, electron line density and dynamic pressure
         self.lum = 0
         self.q = 0
         self.dyn_press = 0
+
+        # Erosion coefficient, and the indicators of how it is set
         self.erosion_coeff = 0
         self.disruption_child = False
         self.erosion_height_change_applied = False
+
+        # Grain mass distribution index and the mass range of the grains (kg)
         self.erosion_mass_index = 2.5
         self.erosion_mass_min = 1.0e-11
         self.erosion_mass_max = 5.0e-10
+
+        # The fragment does not erode, is not disrupted and is not active until it is set up
         self.erosion_enabled = False
         self.disruption_enabled = False
         self.active = False
+
+        # A single body
         self.n_grains = 1
+
+        # No grains eroded into the mass bins yet
         self.erosion_bin_counts = None
         self.erosion_bin_params = None
+
+        # Type of the fragment, and the identifier of the fragmentation entry it is born out of
         self.erosion_coeff_fixed = False
         self.main = False
         self.grain = False
@@ -213,17 +241,44 @@ cdef class FragmentCy:
 
     @n_grains.setter
     def n_grains(self, value):
+        """ Set the number of grains the fragment stands for.
 
+        Arguments:
+            value: [int or float] Number of grains, an int, or a float for a fraction.
+        """
+
+        # Keep the value as it was given, for the callers which format it as an integer
         self.n_grains_obj = value
+
+        # Convert it once to a double for the computations of the fragment loop
         self.n_grains_double = value
 
 
 
     def init(self, sim_const, m, rho, v_init, sigma, gamma, zenith_angle, erosion_mass_index, \
         erosion_mass_min, erosion_mass_max):
+        """ Set the initial conditions of the fragment at the beginning of the simulation, and activate it.
 
+        Arguments:
+            sim_const: [Constants object] Simulation constants, kept as the attribute 'const'.
+            m: [float] Initial mass (kg).
+            rho: [float] Density (kg/m^3).
+            v_init: [float] Initial velocity (m/s).
+            sigma: [float] Ablation coefficient (s^2/m^2).
+            gamma: [float] Drag coefficient.
+            zenith_angle: [float] Zenith angle of the trajectory (rad).
+            erosion_mass_index: [float] Grain mass distribution index.
+            erosion_mass_min: [float] Smallest grain mass (kg).
+            erosion_mass_max: [float] Largest grain mass (kg).
+
+        Return:
+            None
+        """
+
+        # Keep the reference to the simulation constants
         self.__dict__['const'] = sim_const
 
+        # Set the initial mass, height, density, velocity and the coefficients
         self.m = m
         self.m_init = m
         self.h = sim_const.h_init
@@ -236,6 +291,7 @@ cdef class FragmentCy:
         # Compute shape-density coeff
         self.updateShapeDensityCoeff()
 
+        # Set the mass distribution of the grains
         self.erosion_mass_index = erosion_mass_index
         self.erosion_mass_min = erosion_mass_min
         self.erosion_mass_max = erosion_mass_max
@@ -244,6 +300,7 @@ cdef class FragmentCy:
         self.vv = -v_init*cos(zenith_angle)
         self.vh = v_init*sin(zenith_angle)
 
+        # Activate the fragment as a single body
         self.active = True
         self.n_grains = 1
 
@@ -252,6 +309,7 @@ cdef class FragmentCy:
     def updateShapeDensityCoeff(self):
         """ Update the value of the shape-density coefficient. """
 
+        # Compute the coefficient from the drag coefficient, the shape factor and the density
         self.K = self.gamma*self.__dict__['const'].shape_factor*pow(self.rho, -2/3.0)
 
 
@@ -262,9 +320,10 @@ cdef class FragmentCy:
             attributes added by callers.
 
         Return:
-            [dict] Names and values of the attributes.
+            frag_dict: [dict] Names and values of the attributes.
         """
 
+        # Take the C fields in the order of the attributes of the Python class
         frag_dict = {
             'id': self.id,
             'const': self.__dict__.get('const'),
@@ -313,12 +372,17 @@ cdef class FragmentCy:
 
     def spawn_child(self):
         """ Create a child of the Fragment instance. Copy over the reference to the shared 'const' object
-        and copy values of all other attributes. Note: if a mutable attribute that is not shared across
-        Fragment instances is added, this function will need to be revised.
+            and copy values of all other attributes. Note: if a mutable attribute that is not shared across
+            Fragment instances is added, this function will need to be revised.
+
+        Return:
+            child: [Fragment object] A new fragment of the same class with the values of this one.
         """
 
+        # Make a new fragment of the same class, without setting the default values
         cdef FragmentCy child = type(self).__new__(type(self))
 
+        # Copy the values of all C fields
         child.id = self.id
         child.K = self.K
         child.m_init = self.m_init
@@ -353,6 +417,8 @@ cdef class FragmentCy:
         child.grain = self.grain
         child.is_complex = self.is_complex
         child.complex_id = self.complex_id
+
+        # Share the reference to the constants, and copy the attributes added by callers
         child.__dict__ = dict(self.__dict__)
 
         # The child starts without grains of its own to release, and does not share the list of the parent
@@ -371,15 +437,24 @@ class Fragment(FragmentCy):
 
 
     def _getComplex(self):
+        """ Return True if the fragment is born out of complex fragmentation. """
+
         return self.is_complex
 
 
 
     def _setComplex(self, value):
+        """ Set if the fragment is born out of complex fragmentation.
+
+        Arguments:
+            value: [bool] True if the fragment is born out of complex fragmentation.
+        """
+
         self.is_complex = value
 
 
 
+    # Indicate that this is born out of complex fragmentation (kept in the C field is_complex)
     complex = property(_getComplex, _setComplex)
 
 
@@ -387,12 +462,18 @@ class Fragment(FragmentCy):
     def __setstate__(self, state):
         """ Restore a pickled fragment, also one pickled by an older version of wmpl, in which Fragment was a
             Python class with all attributes in its __dict__.
+
+        Arguments:
+            state: [dict or tuple] The __dict__ of a fragment pickled as a Python class, or the state of a
+                fragment pickled as this class.
         """
 
+        # Set every attribute of a fragment pickled as a Python class
         if isinstance(state, dict):
             for name, value in state.items():
                 setattr(self, name, value)
 
+        # Restore the C fields and the __dict__ of a fragment pickled as this class
         else:
             self.__setstate_cython__(state)
 
