@@ -154,7 +154,8 @@ class DragFit(object):
                 default.
             knot_hts: [list] Heights of the fragmentations (m), as given by the trajectory solution, e.g.
                 those of the flares. The ballistic coefficient can jump without penalty at each one within
-                the observed part. None by default.
+                the observed part, between the heights of the used points of the solution, which are on the
+                path dropped by gravity. None by default.
             knot_spread: [float] Height below each of knot_hts over which the ballistic coefficient grows
                 without penalty (m). 0 by default, for a jump, which takes one step of the grid of the observed
                 part (a thousandth of its length).
@@ -191,9 +192,7 @@ class DragFit(object):
         self.ramp_len = np.full(n_knots, (self.len_last - self.len_first)/n_knots)
         self.pen_weight = np.ones(n_knots)
 
-        # Add a ramp without penalty below the height of every fragmentation within the observed part. The
-        #   heights are compared with those of the used points of the solution, which are on the path dropped
-        #   by gravity, as the line is only dropped after the first fit
+        # Add a ramp without penalty below every fragmentation between the heights of the used points
         self.knot_hts = np.array([] if knot_hts is None else knot_hts, dtype=float)
         self.knot_spread = knot_spread
         if len(self.knot_hts):
@@ -1169,7 +1168,8 @@ class DragFit(object):
 
         for n, i in enumerate(np.argsort(self.ramp_beg)):
 
-            len_seg = np.array([self.ramp_beg[i], self.ramp_beg[i] + self.ramp_len[i]])
+            # Clip the segment at the last point, below which K does not grow
+            len_seg = np.array([self.ramp_beg[i], min(self.ramp_beg[i] + self.ramp_len[i], self.len_last)])
             ht_seg = self.heightAtLength(len_seg)
             time_seg = self.timeAtLength(len_seg)
             vel_seg = self.velocityAtLength(len_seg)
@@ -1179,7 +1179,8 @@ class DragFit(object):
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
             dyn_pres = rho_beg*vel_seg[0]**2
 
-            # Compute the significance of the growth of K in the segment
+            # Compute the growth of K within the segment, and its significance
+            growth = np.exp(self.params[3 + i]*(len_seg[1] - len_seg[0])/self.ramp_len[i])
             if d_std[i] > 0:
                 signif = self.params[3 + i]/d_std[i]
             else:
@@ -1188,7 +1189,7 @@ class DragFit(object):
             out.append(("{:4d}, {:6.2f}, {:6.2f}, {:8.3f}, {:8.3f}, {:9.1f}, {:9.2e}, {:9.2e}, {:5.0f}, " \
                 + "{:6.2f}, {:6.1f}{:s}").format(n + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
                 vel_seg[0]/1000, dyn_pres/1000, k_seg[0], k_seg[1], 100*log_k_std[1], \
-                np.exp(self.params[3 + i]), signif, " *" if signif > 2 else ""))
+                growth, signif, " *" if signif > 2 else ""))
 
         out.append("The star * marks the segments where K grows significantly (more than 2 sigma). K std " \
             + "is the relative uncertainty of K at the segment end.")
