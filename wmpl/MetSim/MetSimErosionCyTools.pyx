@@ -1,3 +1,4 @@
+# Compute the powers of doubles with pow() of C, without the check of Python for a complex result
 # cython: cpow=True
 """ Fast cython functions for the MetSimErosion module. """
 
@@ -205,9 +206,13 @@ cdef class FragmentCy:
         self.q = 0
         self.dyn_press = 0
 
-        # Erosion coefficient, and the indicators of how it is set
+        # Erosion coefficient
         self.erosion_coeff = 0
+
+        # Start the Runge-Kutta integration from the full time step
         self.rk4_substep = 0
+
+        # Indicators of how the erosion coefficient is set
         self.disruption_child = False
         self.erosion_height_change_applied = False
 
@@ -1243,6 +1248,8 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
 
     # Results of the step, written by the C function
     cdef double out[5]
+
+    # Start from the full time step
     cdef double h_substep = 0.0
 
     # Integrate the step with the cosine of the zenith angle
@@ -1262,17 +1269,40 @@ cpdef tuple ablationStepRK4Substep(double dt, double K, double sigma, double m, 
         fragment loop does with the substep it remembers for every fragment.
 
     Arguments:
+        dt: [double] Time step (s).
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Sum of the ablation and the erosion coefficients (s^2/m^2).
+        m: [double] Mass (kg).
+        v: [double] Speed (m/s).
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        zenith_angle: [double] Zenith angle of the path at the beginning (rad).
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity, kept over the step (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+        ablation_fraction: [double] Fraction of the mass loss which is ablated, the rest is eroded.
+        lum_eff_type: [int] Type of the luminous efficiency (see luminousEfficiency).
+        lum_eff: [double] Constant luminous efficiency, used by the type 0 (%).
+        mu: [double] Mean mass of an atom of the meteoroid (kg).
+        v_kill: [double] Speed below which a fragment gives no light and no ionization (m/s).
         h_substep: [double] Substep to start with (s), the full time step if 0.
-        The other arguments are the same as of ablationStepRK4.
 
     Return:
-        (dm, dv, dl, energy, electrons, h_substep): [tuple] The results of ablationStepRK4, and the last
-            substep which resolved the motion and was not shortened by the end of the time step (s), 0 if
-            there was none.
+        (dm, dv, dl, energy, electrons, h_substep):
+            - dm: [double] Change of the mass over the step (kg).
+            - dv: [double] Change of the speed by the air over the step (m/s).
+            - dl: [double] Change of the length over the step (m).
+            - energy: [double] Energy radiated over the step (J).
+            - electrons: [double] Electron line density multiplied by the time step (s/m).
+            - h_substep: [double] Last substep which resolved the motion and was not shortened by the end of
+                the time step (s), 0 if there was none.
     """
 
+    # Results of the step, written by the C function
     cdef double out[5]
 
+    # Integrate the step with the cosine of the zenith angle, starting from the given substep
     ablationStepRK4C(dt, K, sigma, m, v, length, h_init, cos(zenith_angle), r_earth, h_drop, atm_table, \
         dens_co, ablation_fraction, lum_eff_type, lum_eff, mu, v_kill, out, &h_substep)
 
@@ -1473,6 +1503,8 @@ def ablateAllCy(list fragments, const_obj, bint compute_wake, wake_heights_queue
         ablationStepRK4C(dt, frag.K, frag.sigma + erosion_coeff, frag.m, frag.v, frag.length, h_init, \
             cos_zc, r_earth, frag.h_grav_drop_total, atm_table, dens_co, ablation_fraction, lum_eff_type, \
             lum_eff, mu, v_kill, rk4_out, &h_substep)
+
+        # Remember the substep for the next time step of the fragment
         frag.rk4_substep = h_substep
 
         # Take the results of the integration from the output array

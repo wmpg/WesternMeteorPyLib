@@ -79,8 +79,10 @@ def testOtherObjectRaisesTypeError():
 def testSubstepIsRemembered():
     """ Check that a small fast grain deep in the atmosphere is integrated in substeps, that the last of them
         is returned, and that a step started from it gives the same change of the mass as one started from the
-        full time step, to the accuracy of the integration. """
+        full time step, to the accuracy of the integration.
+    """
 
+    # Take the default constants and a time step of 5 ms
     const = MetSimErosion.Constants()
     dens_co = np.ascontiguousarray(const.dens_co, dtype=np.float64)
     dt = 0.005
@@ -90,6 +92,7 @@ def testSubstepIsRemembered():
     args = (dt, 1.21*3000**(-2/3.0), 0.02e-6, m, 60000.0, 0.0, 90000.0, math.radians(45), const.r_earth, \
         0.0, None, dens_co, 1.0, const.lum_eff_type, const.lum_eff, const.mu, const.v_kill)
 
+    # Integrate the step from the full time step, which the grain must split into substeps
     results = ablationStepRK4Substep(*args, 0.0)
     h_substep = results[5]
 
