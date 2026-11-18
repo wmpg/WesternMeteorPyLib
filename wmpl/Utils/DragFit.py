@@ -1241,8 +1241,12 @@ def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
             spread_max = fits[0].heightAtLength(np.array([np.max(fits[0].ramp_beg[knots])]))[0] \
                 - fits[0].heightAtLength(np.array([fits[0].len_last]))[0]
 
-    # Fit the other spreads, if there are fragmentations within the observed part
-    spreads = np.arange(0.0, spread_max + spread_step/2, spread_step) if np.any(knots) else np.zeros(1)
+
+    # Fit the other spreads, if there are fragmentations within the observed part, in steps and ending with the
+    #   largest spread itself, so a range shorter than a step is also scanned
+    spreads = np.zeros(1)
+    if np.any(knots) and (spread_max > 0):
+        spreads = np.unique(np.r_[np.arange(0.0, spread_max, spread_step), spread_max])
     fits += [DragFit(traj, knot_hts=knot_hts, knot_spread=spread, **kwargs) for spread in spreads[1:]]
 
     # Compute the Delta chi2 of every spread, with the variance of the residuals of the best one, at least
