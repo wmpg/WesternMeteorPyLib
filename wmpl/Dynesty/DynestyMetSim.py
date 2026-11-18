@@ -60,7 +60,7 @@ except ImportError:
 
 from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin, \
-    constantsRelativeToGround, constantsToInertial, atmDensityDescription
+    constantsRelativeToGround, constantsToInertial, atmDensityDescription, Fragment
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
@@ -115,6 +115,10 @@ def jsonDefault(o):
     # sets -> lists
     if isinstance(o, set):
         return list(o)
+
+    # fragments -> dict of all their attributes, most of which are not in their __dict__
+    if isinstance(o, Fragment):
+        return o.toDict()
 
     # custom objects -> dict (best effort)
     if hasattr(o, "__dict__"):
@@ -4725,6 +4729,8 @@ class ObservationData:
                 return {k: convertToSerializable(v) for k, v in obj.items()}
             elif isinstance(obj, list):
                 return [convertToSerializable(v) for v in obj]
+            elif isinstance(obj, Fragment):
+                return convertToSerializable(obj.toDict())
             elif hasattr(obj, '__dict__'):  # Convert objects with __dict__
                 return convertToSerializable(obj.__dict__)
             else:
