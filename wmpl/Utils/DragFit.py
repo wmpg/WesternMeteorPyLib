@@ -157,8 +157,8 @@ class DragFit(object):
                 the observed part, between the heights of the used points of the solution, which are on the
                 path dropped by gravity. None by default.
             knot_spread: [float] Height below each of knot_hts over which the ballistic coefficient grows
-                without penalty (m). 0 by default, for a jump, which takes one step of the grid of the observed
-                part (a thousandth of its length).
+                without penalty (m). 0 by default, for a jump, which takes one step of the grid of the
+                observed part (a thousandth of its length).
         """
 
         self.traj = traj
@@ -199,7 +199,8 @@ class DragFit(object):
 
             ht_used = np.concatenate([obs.model_ht[obs.ignore_list == 0] for obs in traj.observations \
                 if not obs.ignore_station])
-            self.knot_hts = self.knot_hts[(self.knot_hts < np.max(ht_used)) & (self.knot_hts > np.min(ht_used))]
+            inside = (self.knot_hts < np.max(ht_used)) & (self.knot_hts > np.min(ht_used))
+            self.knot_hts = self.knot_hts[inside]
 
             knot_beg, knot_len = self._knotRamps()
             self.ramp_beg = np.append(self.ramp_beg, knot_beg)
@@ -1245,8 +1246,8 @@ def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
                 - fits[0].heightAtLength(np.array([fits[0].len_last]))[0]
 
 
-    # Fit the other spreads, if there are fragmentations within the observed part, in steps and ending with the
-    #   largest spread itself, so a range shorter than a step is also scanned
+    # Fit the other spreads, if there are fragmentations within the observed part, in steps and ending with
+    #   the largest spread itself, so a range shorter than a step is also scanned
     spreads = np.zeros(1)
     if np.any(knots) and (spread_max > 0):
         spreads = np.unique(np.r_[np.arange(0.0, spread_max, spread_step), spread_max])
