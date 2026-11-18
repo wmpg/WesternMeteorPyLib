@@ -1,12 +1,8 @@
-""" Tests that the solver inverts a trajectory dropped with its own gravity drop model.
+""" Tests that the solver inverts a meteor moving under the central gravity of the Earth, without drag.
 
-applyGravityDrop descends from the beginning of the meteor, at distance r0 from the centre of the Earth,
-with the vertical velocity v0z. The line-of-sight fit and the spatial residuals passed the distance of each
-point instead, and the fit always ran with v0z=None (no vertical velocity), as calcLLA computes it only after
-the pass that applies the drop.
-
-The tests drop the noise-free straight meteor of SyntheticTrajectory with applyGravityDrop, as the solver
-models it, observe it from three stations, and solve it with the gravity correction.
+The tests move the noise-free meteor of SyntheticTrajectory under the central gravity of the Earth from its
+beginning, observe it from three stations, and solve it with the gravity correction, which must find where
+the drop begins and recover the line from which the meteor falls.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_GravityDropModel.py -v
@@ -160,7 +156,8 @@ def testIgnoredLeadingPicksDoNotShiftTheDrop():
     """ Check that the beginning of the gravity drop is moved back to the earliest time when the picks of
         the first 2 s of every station are ignored, as the drop is computed from the earliest time. The cost
         of the line-of-sight fit is checked at the true line, as Nelder-Mead does not always reach it (see
-        #154). Before, it was 0.27 arcsec there.
+        #154). Before, it was 0.27 arcsec there. The speeds of the drop are fitted to the picks after 2 s and
+        extrapolated back to the beginning, which leaves about 0.013 arcsec, or 6 mm at 100 km.
     """
 
     traj, begin, radiant_eci = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, \
@@ -180,9 +177,9 @@ def testIgnoredLeadingPicksDoNotShiftTheDrop():
 
     # Compute the cost of the gravity pass at the true line
     cost = angleSumMeasurements2Line(solved.observations, begin, radiant_eci, gravity=True, \
-        v0z=solved.v0z, r0=solved.gravity_r0)
+        v0z=solved.v0z, r0=solved.gravity_r0, gravity_vel=solved.gravity_vel)
 
-    assert 3600*np.degrees(cost) < 0.01
+    assert 3600*np.degrees(cost) < 0.02
 
 
 
