@@ -391,9 +391,76 @@ def _makeBoundChecker(warnings_list, tol=1e-2, log=False):
     return _checkBound
 
 
+def alphaBetaBoundWarnings(alpha, beta, tol=1e-2):
+    """ Check if alpha or beta are at the bounds of the fit (ALPHA_BETA_BOUNDS), which means that the
+        data did not constrain them.
+
+    Arguments:
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+
+    Keyword arguments:
+        tol: [float] Distance to a bound in the log space, relative to the span of the bounds.
+
+    Return:
+        [list] Warnings, one for each parameter at a bound. Empty if neither is.
+    """
+
+    bound_warnings = []
+
+    _checkBound = _makeBoundChecker(bound_warnings, tol=tol, log=True)
+    _checkBound("alpha", alpha, *ALPHA_BETA_BOUNDS[0])
+    _checkBound("beta", beta, *ALPHA_BETA_BOUNDS[1])
+
+    return bound_warnings
+
+
+
+def _alphaBetaVelocityGrid(v_normed, ht_normed, n_grid=13):
+    """ Find the alpha and beta with the smallest sum of squared velocity residuals on a grid evenly
+        spaced in the log space of ALPHA_BETA_BOUNDS. Used as the starting point of a velocity fit
+        when the Q4 fit has no minimum inside the bounds.
+
+    Arguments:
+        v_normed: [ndarray] Velocity data normalized to the initial velocity.
+        ht_normed: [ndarray] Height data normalized to the scale height.
+
+    Keyword arguments:
+        n_grid: [int] Number of grid values of each parameter.
+
+    Return:
+        (alpha, beta): [tuple] The grid values with the smallest residuals.
+    """
+
+    alpha_grid = np.geomspace(*ALPHA_BETA_BOUNDS[0], n_grid)
+    beta_grid = np.geomspace(*ALPHA_BETA_BOUNDS[1], n_grid)
+
+    best_cost = np.inf
+    best_alpha_beta = (alpha_grid[n_grid//2], beta_grid[n_grid//2])
+    for alpha in alpha_grid:
+        for beta in beta_grid:
+
+            # The fast inversion is precise enough to find the starting point
+            cost = np.sum((alphaBetaVelocityNormed(ht_normed, alpha, beta, fast=True) - v_normed)**2)
+
+            if cost < best_cost:
+                best_cost = cost
+                best_alpha_beta = (alpha, beta)
+
+    return best_alpha_beta
+
+
+
 def minimizeAlphaBeta(v_normed, ht_normed):
     """ initiates and calls the Q4 minimisation given in Gritsevich 2007 -
         'Validity of the photometric formula for estimating the mass of a fireball projectile'
+
+    If the Q4 fit ends at the upper bound of beta, the velocity residuals are fitted instead (see
+    minimizeAlphaBetaRobust()), starting from a grid search. The Q4 residual has no minimum inside
+    the bounds when no velocity exceeds the initial velocity, as for velocities smoothed by a fit to
+    the lag: both of its terms shrink as 1/beta, so the residual falls as beta grows to the bound
+    while alpha falls to match, whatever the shape of the deceleration. The lower bound of beta (no
+    mass loss) is a physical limit of the model, so a fit which ends there is kept.
     """
 
     def _alphaBetaMinimization(x, v_normed, ht_normed):
@@ -428,7 +495,29 @@ def minimizeAlphaBeta(v_normed, ht_normed):
     res = scipy.optimize.minimize(_alphaBetaMinimization, x0, args=(v_normed, ht_normed), bounds=bnds, \
         method='Nelder-Mead')
 
-    return res.x
+    alpha, beta = res.x
+
+    # If beta ended at its upper bound (within 1% of the span of the bounds in the log space, as in
+    #   alphaBetaBoundWarnings()), fit the velocity residuals instead
+    beta_lower, beta_upper = ALPHA_BETA_BOUNDS[1]
+    if np.log(beta_upper/beta) < 1e-2*np.log(beta_upper/beta_lower):
+
+        alpha0, beta0 = _alphaBetaVelocityGrid(v_normed, ht_normed)
+
+        # Robust (MAD) scatter of the velocity residuals of the grid solution, as in _estimateSigmaV()
+        v_res = alphaBetaVelocityNormed(ht_normed, alpha0, beta0) - v_normed
+        sigma_v_normed = max(1.4826*np.median(np.abs(v_res - np.median(v_res))), 1e-6)
+
+        alpha_vel, beta_vel = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, \
+            x0_alpha_beta=(alpha0, beta0))
+
+        print("NOTE: The Q4 alpha-beta fit ended at the upper bound of beta, so the velocity residuals "
+            "were fitted instead: alpha = {:.3f}, beta = {:.4f} (Q4: alpha = {:.3f}, beta = {:.4f})".format( \
+            alpha_vel, beta_vel, alpha, beta))
+
+        alpha, beta = alpha_vel, beta_vel
+
+    return np.array([alpha, beta])
 
 
 def _logAlphaBetaBounds():
@@ -5243,6 +5332,11 @@ if __name__ == "__main__":
         else:
             print("Alpha = {:.3f}".format(alpha))
             print("Beta  = {:.3f}".format(beta))
+
+        # Warn if alpha or beta are at a bound of the fit, where the data did not constrain them
+        for bound_warning in alphaBetaBoundWarnings(alpha, beta):
+            print("WARNING: {:s}".format(bound_warning))
+
         print("-------------------")
         print("ln(beta)             = {:.2f}".format(np.log(beta)))
         print("ln(alpha*sin(slope)) = {:.2f}".format(np.log(alpha*np.sin(slope))))
