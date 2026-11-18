@@ -27,6 +27,35 @@ cdef extern from *:
 
 
 
+# Call pow() through a volatile exponent, which a C compiler cannot replace by x*x for the exponent 2, so that
+#   the powers are the same doubles as x**y in Python, which calls pow() of the C library
+cdef extern from *:
+    """
+    #include <math.h>
+    static double wmplPyPow(double x, double y) {
+        volatile double y_volatile = y;
+        return pow(x, y_volatile);
+    }
+    """
+    double wmplPyPow(double x, double y) nogil
+
+
+
+def pythonPow(double x, double y):
+    """ Compute x**y as the fragment loop does, the same as x**y of Python floats.
+
+    Arguments:
+        x: [float] Base.
+        y: [float] Exponent.
+
+    Return:
+        [float] x**y.
+    """
+
+    return wmplPyPow(x, y)
+
+
+
 cdef class FragmentCy:
     """ A fragment of the meteoroid: the main fragment, a fragment of a disruption or a fragmentation entry,
         or a set of n_grains equal grains. The numbers used in every time step are C fields, which the
@@ -999,16 +1028,13 @@ cdef bint rk4Substep(double dt, double K, double sigma, double m, double v, doub
 
 
 @cython.cdivision(True)
-cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double v, double length, \
-    double h_init, double zenith_angle, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
+cdef void ablationStepRK4C(double dt, double K, double sigma, double m, double v, double length, \
+    double h_init, double cos_zc, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
     const double[::1] dens_co, double ablation_fraction, int lum_eff_type, double lum_eff, double mu, \
-    double v_kill):
-    """ Integrate the mass, the speed and the length of a fragment over one time step together with the
-        4th order Runge-Kutta method, taking the atmosphere density at the height of every stage, and add up
-        the light and the ionization over the step. If a step changes the mass or the speed by more than
-        RK4_MAX_CHANGE, e.g. for a small grain deep in the atmosphere, the step is split into substeps which
-        are halved until they resolve the motion, and doubled again after a resolved substep, and the light
-        and the ionization are added up over the substeps.
+    double v_kill, double *out):
+    """ Integrate the mass, the speed and the length of a fragment over one time step, as ablationStepRK4,
+        but with the cosine of the zenith angle, and give the results through a pointer to an array, so that
+        the fragment loop calls it without making Python objects.
 
     Arguments:
         dt: [double] Time step (s).
@@ -1018,7 +1044,7 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
         v: [double] Speed (m/s).
         length: [double] Length along the path from the beginning of the simulation (m).
         h_init: [double] Height of the beginning of the simulation (m).
-        zenith_angle: [double] Zenith angle of the path at the beginning (rad).
+        cos_zc: [double] Cosine of the zenith angle of the path at the beginning.
         r_earth: [double] Radius of the Earth (m).
         h_drop: [double] Drop of the height due to gravity, kept over the step (m).
         atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
@@ -1028,39 +1054,55 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
         lum_eff: [double] Constant luminous efficiency, used by the type 0 (%).
         mu: [double] Mean mass of an atom of the meteoroid (kg).
         v_kill: [double] Speed below which a fragment gives no light and no ionization (m/s).
+        out: [double *] Array of 5 doubles, set to the change of the mass (kg), the change of the speed
+            (m/s), the change of the length (m), the radiated energy (J) and the electron line density
+            multiplied by the time step (s/m), as returned by ablationStepRK4.
 
     Return:
-        (dm, dv, dl, energy, electrons): [tuple]
-            - dm: [double] Change of the mass over the step (kg).
-            - dv: [double] Change of the speed by the air over the step (m/s).
-            - dl: [double] Change of the length over the step (m).
-            - energy: [double] Energy radiated over the step (J), from the ablated mass and the deceleration
-                by the air, integrated with the motion.
-            - electrons: [double] Electron line density multiplied by the time step (s/m), integrated with
-                the motion.
+        None
     """
 
-    cdef double cos_zc = cos(zenith_angle)
+
+    # Smallest substep, to which a substep is halved at most
     cdef double dt_min = dt/RK4_MAX_SUBSTEPS
+
+    # Time integrated so far, and the substep, starting from the full time step
     cdef double t = 0.0
     cdef double h = dt
+
+    # Mass, speed and length at the current time
     cdef double m_now = m
     cdef double v_now = v
     cdef double l_now = 0.0
+
+    # Changes of the mass, the speed and the length over a substep
     cdef double dm = 0.0
     cdef double dv = 0.0
     cdef double dl = 0.0
+
+    # Radiated energy and electrons over the step, and over a substep
     cdef double energy = 0.0
     cdef double electrons = 0.0
     cdef double de = 0.0
     cdef double dq = 0.0
+
+    # Mass and speed in the middle of the smallest substep, and the air density at its start
     cdef double m_mid, v_mid
     cdef double rho_atm
+
+    # Indicate that a substep changed the mass and the speed by at most RK4_MAX_CHANGE
     cdef bint resolved
 
+    # A fragment without mass or speed does not change
     if (m <= 0) or (v <= 0):
-        return 0.0, 0.0, 0.0, 0.0, 0.0
+        out[0] = 0.0
+        out[1] = 0.0
+        out[2] = 0.0
+        out[3] = 0.0
+        out[4] = 0.0
+        return
 
+    # Integrate the substeps until the end of the time step
     while t < dt:
 
         # Do not step past the end of the time step
@@ -1102,9 +1144,11 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
                     *(ablation_fraction*dm*v_mid*v_mid/2.0 + m_mid*v_mid*dv)
                 dq = -ionizationEfficiency(v_mid)*ablation_fraction*dm/(mu*v_mid)
 
+        # Add up the light and the ionization of the substep
         energy += de
         electrons += dq
 
+        # Move the fragment to the end of the substep
         m_now += dm
         v_now += dv
         l_now += dl
@@ -1118,4 +1162,577 @@ cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double 
         if resolved:
             h *= 2.0
 
-    return m_now - m, v_now - v, l_now, energy, electrons
+    # Give the changes over the time step
+    out[0] = m_now - m
+    out[1] = v_now - v
+    out[2] = l_now
+    out[3] = energy
+    out[4] = electrons
+
+
+
+@cython.cdivision(True)
+cpdef tuple ablationStepRK4(double dt, double K, double sigma, double m, double v, double length, \
+    double h_init, double zenith_angle, double r_earth, double h_drop, AtmDensityTableCy atm_table, \
+    const double[::1] dens_co, double ablation_fraction, int lum_eff_type, double lum_eff, double mu, \
+    double v_kill):
+    """ Integrate the mass, the speed and the length of a fragment over one time step together with the
+        4th order Runge-Kutta method, taking the atmosphere density at the height of every stage, and add up
+        the light and the ionization over the step. If a step changes the mass or the speed by more than
+        RK4_MAX_CHANGE, e.g. for a small grain deep in the atmosphere, the step is split into substeps which
+        are halved until they resolve the motion, and doubled again after a resolved substep, and the light
+        and the ionization are added up over the substeps.
+
+    Arguments:
+        dt: [double] Time step (s).
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Sum of the ablation and the erosion coefficients (s^2/m^2).
+        m: [double] Mass (kg).
+        v: [double] Speed (m/s).
+        length: [double] Length along the path from the beginning of the simulation (m).
+        h_init: [double] Height of the beginning of the simulation (m).
+        zenith_angle: [double] Zenith angle of the path at the beginning (rad).
+        r_earth: [double] Radius of the Earth (m).
+        h_drop: [double] Drop of the height due to gravity, kept over the step (m).
+        atm_table: [AtmDensityTableCy] Density table, or None to use the polynomial.
+        dens_co: [ndarray] Coefficients of the density polynomial, used without the table.
+        ablation_fraction: [double] Fraction of the mass loss which is ablated, the rest is eroded.
+        lum_eff_type: [int] Type of the luminous efficiency (see luminousEfficiency).
+        lum_eff: [double] Constant luminous efficiency, used by the type 0 (%).
+        mu: [double] Mean mass of an atom of the meteoroid (kg).
+        v_kill: [double] Speed below which a fragment gives no light and no ionization (m/s).
+
+    Return:
+        (dm, dv, dl, energy, electrons): [tuple]
+            - dm: [double] Change of the mass over the step (kg).
+            - dv: [double] Change of the speed by the air over the step (m/s).
+            - dl: [double] Change of the length over the step (m).
+            - energy: [double] Energy radiated over the step (J), from the ablated mass and the deceleration
+                by the air, integrated with the motion.
+            - electrons: [double] Electron line density multiplied by the time step (s/m), integrated with
+                the motion.
+    """
+
+    # Results of the step, written by the C function
+    cdef double out[5]
+
+    # Integrate the step with the cosine of the zenith angle
+    ablationStepRK4C(dt, K, sigma, m, v, length, h_init, cos(zenith_angle), r_earth, h_drop, atm_table, \
+        dens_co, ablation_fraction, lum_eff_type, lum_eff, mu, v_kill, out)
+
+    return out[0], out[1], out[2], out[3], out[4]
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def ablateAllCy(list fragments, const_obj, bint compute_wake, wake_heights_queue, \
+    AtmDensityTableCy atm_table, const double[::1] dens_co, hooks):
+    """ Perform single body ablation of all fragments over one time step, the loop over the fragments of
+        MetSimErosion.ablateAll in Cython. The numbers of the fragments are read and written as C fields, and
+        the time step is integrated without making Python objects. The rare events (the erosion into grains,
+        the disruption, the fragmentation entries, the end of a fragment and the wake) are computed by the
+        Python functions of the module 'hooks', looked up at every call, so that a function replaced in the
+        module (e.g. by a test) is used.
+
+    Arguments:
+        fragments: [list] A list of Fragment instances.
+        const_obj: [Constants object] Simulation constants.
+        compute_wake: [bool] If True, the wake profile will be computed.
+        wake_heights_queue: [list] A list of heights at which the wake should be computed (m), or None.
+        atm_table: [AtmDensityTableCy] Atmosphere density table, or None to use the density polynomial.
+        dens_co: [ndarray] The 7 coefficients of the density polynomial, used without the table.
+        hooks: [module] The module MetSimErosion, which has the functions of the rare events.
+
+    Return:
+        (fragments, const_obj, luminosity_total, luminosity_main, luminosity_eroded, electron_density_total,
+            tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel,
+            leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press,
+            mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, wake):
+            - fragments: [list] Fragments after the step, with the new ones and without the dead grains.
+            - const_obj: [Constants object] Simulation constants, with the time of the step added.
+            - luminosity_total: [float] Luminosity of all fragments (W).
+            - luminosity_main: [float] Luminosity of the main fragment (W).
+            - luminosity_eroded: [float] Luminosity of the eroded and disrupted fragments (W).
+            - electron_density_total: [float] Electron line density of all fragments (1/m).
+            - tau_total: [float] Luminous efficiency of all fragments, weighted by their luminosity.
+            - tau_main: [float] Luminous efficiency of the main fragment.
+            - tau_eroded: [float] Luminous efficiency of the eroded and disrupted fragments, weighted by their
+                luminosity.
+            - brightest_height: [float] Height of the brightest fragment (m).
+            - brightest_length: [float] Length of the brightest fragment along the path (m).
+            - brightest_vel: [float] Velocity of the brightest fragment (m/s).
+            - leading_frag_height: [float] Height of the leading fragment (m), None if no fragment was
+                active.
+            - leading_frag_length: [float] Length of the leading fragment along the path (m), None if no
+                fragment was active.
+            - leading_frag_vel: [float] Velocity of the leading fragment (m/s), None if no fragment was
+                active.
+            - leading_frag_dyn_press: [float] Dynamic pressure on the leading fragment (Pa), None if no
+                fragment was active.
+            - mass_total_active: [float] Mass of all active fragments, also in their mass bins (kg).
+            - main_mass: [float] Mass of the main fragment (kg).
+            - main_height: [float] Height of the main fragment (m).
+            - main_length: [float] Length of the main fragment along the path (m).
+            - main_vel: [float] Velocity of the main fragment (m/s).
+            - main_dyn_press: [float] Dynamic pressure on the main fragment (Pa).
+            - wake: [Wake object] The wake, None if it was not computed in this step.
+    """
+
+    # Keep track of the total luminosity
+    cdef double luminosity_total = 0.0
+
+    # Keep track of the total luminosity weighted lum eff
+    cdef double tau_total = 0.0
+
+    # Keep track of the luminosity of the main fragment
+    cdef double luminosity_main = 0.0
+
+    # Keep track of the luminosity weighted lum eff of the main fragment
+    cdef double tau_main = 0.0
+
+    # Keep track of the luminosity of eroded and disrupted fragments
+    cdef double luminosity_eroded = 0.0
+
+    # Keep track of the luminosity weighted lum eff of eroded and disrupted fragments
+    cdef double tau_eroded = 0.0
+
+    # Keep track of the total electron density
+    cdef double electron_density_total = 0.0
+
+    # Keep track of parameters of the brightest fragment
+    cdef double brightest_height = 0.0
+    cdef double brightest_length = 0.0
+    cdef double brightest_lum = 0.0
+    cdef double brightest_vel = 0.0
+
+    # Keep track of the the main fragment parameters
+    cdef double main_mass = 0.0
+    cdef double main_height = 0.0
+    cdef double main_length = 0.0
+    cdef double main_vel = 0.0
+    cdef double main_dyn_press = 0.0
+
+    # Total active mass (grain-weighted), accumulated in the loop over the fragments
+    cdef double mass_total_active = 0.0
+
+    # Fragments made in this step, the fragments active at its start, and the fragmentation entries by id
+    cdef list frag_children_all = []
+    cdef list fragments_active_at_tick_start
+    cdef dict fragmentation_entry_by_id
+
+    # Fragment in the loop, the leading fragment, and the indices in the fragments and in a light curve
+    cdef FragmentCy frag
+    cdef FragmentCy leading_frag = None
+    cdef Py_ssize_t i, n_data
+
+    # Results of the Runge-Kutta integration of a fragment, written by ablationStepRK4C
+    cdef double rk4_out[5]
+
+    # Values of a fragment in the step, as C numbers
+    cdef double rho_atm, erosion_coeff, m_start, v_start, ablation_fraction, mass_loss_total, velocity_change
+    cdef double length_change, energy_step, electrons_step, mass_loss_erosion, mass_loss_ablation, m_new
+    cdef double deceleration_total, gv, cos_z, sin_z_sq, sin_z, accel_along, av, ah, tau, lum, q, dyn_press
+    cdef bint release_grains
+
+    # Constants which do not change within a time step, read once
+    cdef double dt = const_obj.dt
+    cdef double h_init = const_obj.h_init
+    cdef double zenith_angle = const_obj.zenith_angle
+    cdef double cos_zc = cos(zenith_angle)
+    cdef double r_earth = const_obj.r_earth
+    cdef double m_kill = const_obj.m_kill
+    cdef double v_kill = const_obj.v_kill
+    cdef double h_kill = const_obj.h_kill
+    cdef double len_kill = const_obj.len_kill
+    cdef int lum_eff_type = const_obj.lum_eff_type
+    cdef double lum_eff = const_obj.lum_eff
+    cdef double mu = const_obj.mu
+    cdef double erosion_height_start = const_obj.erosion_height_start
+    cdef bint erosion_on = const_obj.erosion_on
+    cdef bint disruption_on = const_obj.disruption_on
+    cdef bint fragmentation_on = const_obj.fragmentation_on
+    cdef bint show_individual_lcs = const_obj.fragmentation_show_individual_lcs
+    cdef double G0 = hooks.G0
+    cdef object dens_co_poly = const_obj.dens_co
+
+    # Distance of the beginning from the centre of the Earth times the cosine of the zenith angle, from which
+    #   the local zenith angle of the path is computed
+    cdef double r_cos_zc = (h_init + r_earth)*cos(zenith_angle)
+
+    # Snapshot which fragments were active at the start of this tick, before any of them can be killed below,
+    #   for the leading fragment, so a fragment that dies partway through this tick still counts with its
+    #   just-computed position for the tick it died on
+    fragments_active_at_tick_start = [frag_obj for frag_obj in fragments if (<FragmentCy?>frag_obj).active]
+
+    # Index the complex fragmentation entries by id once, so that the light curve of a fragment finds its
+    #   entry without a scan of all entries
+    if show_individual_lcs:
+        fragmentation_entry_by_id = {frag_entry.id: frag_entry for frag_entry \
+            in const_obj.fragmentation_entries}
+
+    # Go through all active fragments, also the ones added to the list in the loop, as a Python loop over the
+    #   list would
+    i = 0
+    while i < len(fragments):
+
+        # Take the fragment, which must be a Fragment (raises TypeError otherwise)
+        frag = <FragmentCy?>fragments[i]
+        i += 1
+
+        # Skip the fragment if it's not active
+        if not frag.active:
+            continue
+
+        # Get atmosphere density for the given height
+        if atm_table is None:
+            rho_atm = atmDensityPoly(frag.h, dens_co_poly)
+        else:
+            rho_atm = atm_table.density(frag.h)
+
+        # Take the erosion coefficient of the fragment if it erodes
+        if frag.erosion_enabled and (frag.erosion_coeff > 0):
+            erosion_coeff = frag.erosion_coeff
+        else:
+            erosion_coeff = 0.0
+
+        # Keep the mass and the speed at the beginning of the step for the luminous efficiency
+        m_start = frag.m
+        v_start = frag.v
+
+        # Take the fraction of the mass loss which is ablated, the rest is eroded
+        if (frag.sigma + erosion_coeff) > 0:
+            ablation_fraction = frag.sigma/(frag.sigma + erosion_coeff)
+        else:
+            ablation_fraction = 1.0
+
+        # Integrate the mass, the speed and the length over the step together, with the air density at the
+        #   height of every stage, as the density changes by about 1% in a step of a fast meteor, and add up
+        #   the radiated energy and the ionization over the step
+        ablationStepRK4C(dt, frag.K, frag.sigma + erosion_coeff, frag.m, frag.v, frag.length, h_init, \
+            cos_zc, r_earth, frag.h_grav_drop_total, atm_table, dens_co, ablation_fraction, lum_eff_type, \
+            lum_eff, mu, v_kill, rk4_out)
+
+        # Take the results of the integration from the output array
+        mass_loss_total = rk4_out[0]
+        velocity_change = rk4_out[1]
+        length_change = rk4_out[2]
+        energy_step = rk4_out[3]
+        electrons_step = rk4_out[4]
+
+        # Split the mass loss into erosion and ablation, which have the same form, so that a fragment which
+        #   does not erode loses no mass to erosion
+        if erosion_coeff > 0:
+            mass_loss_erosion = mass_loss_total*erosion_coeff/(frag.sigma + erosion_coeff)
+        else:
+            mass_loss_erosion = 0.0
+
+        mass_loss_ablation = mass_loss_total - mass_loss_erosion
+
+        # Compute new mass
+        m_new = frag.m + mass_loss_total
+
+        # Take the average deceleration by the air over the step
+        deceleration_total = velocity_change/dt
+
+        # Compute g at given height (the powers are taken as in Python, see wmplPyPow)
+        gv = G0/wmplPyPow(1 + frag.h/r_earth, 2.0)
+
+        # Compute the local zenith angle of the straight path, at the distance of the point on the path from
+        #   the centre of the Earth without the drop
+        cos_z = (r_cos_zc - frag.length)/(frag.h + frag.h_grav_drop_total + r_earth)
+        sin_z_sq = 1.0 - cos_z*cos_z
+        sin_z = sqrt(sin_z_sq) if (sin_z_sq > 0) else 0.0
+
+        # Gravity along the path changes the speed, and the drag is only the deceleration by the air
+        accel_along = deceleration_total + gv*cos_z
+
+        # Vertical and horizontal components of a
+        av = -accel_along*frag.vv/frag.v + frag.vh*frag.v/(r_earth + frag.h)
+        ah = -accel_along*frag.vh/frag.v - frag.vv*frag.v/(r_earth + frag.h)
+
+        # Gravity across the path drops the meteoroid below it, and the drag slows the speed of the drop as it
+        #   slows the meteoroid
+        frag.v_grav_drop += (gv*sin_z + deceleration_total*frag.v_grav_drop/frag.v)*dt
+
+        # Track the total drop of the height, the vertical part of the drop across the path
+        frag.h_grav_drop_total += frag.v_grav_drop*sin_z*dt
+
+        # Add the length gained from gravity along the path in this step
+        length_change += 0.5*gv*cos_z*wmplPyPow(dt, 2.0)
+
+        # Update the velocity
+        frag.vv -= av*dt
+        frag.vh -= ah*dt
+        frag.v = sqrt(wmplPyPow(frag.vh, 2.0) + wmplPyPow(frag.vv, 2.0))
+
+        # Only allow the meteoroid to go down, and stop the ablation if it stars going up
+        if frag.vv > 0:
+
+            frag.vv = 0
+
+            # Setting the height to zero will stop the ablation during the if catch below
+            frag.h = 0
+
+        # Update length along the track
+        frag.length += length_change
+
+        # Update the mass
+        frag.m = m_new
+
+        # Compute the height taking the curvature of the Earth and the gravity drop into account (the same
+        #   arithmetic as heightCurvature)
+        frag.h = sqrt(wmplPyPow(h_init + r_earth, 2.0) - 2*frag.length*cos(zenith_angle)*(h_init + r_earth) \
+            + wmplPyPow(frag.length, 2.0)) - r_earth
+        frag.h -= frag.h_grav_drop_total
+
+        # Take the luminous efficiency in the middle of the step, used to weight the efficiencies of the
+        #   fragments in the output
+        tau = luminousEfficiency(lum_eff_type, lum_eff, (v_start + frag.v)/2, (m_start + frag.m)/2)
+
+        # Compute the luminosity for one grain/fragment, from the ablated mass and the deceleration by the
+        #   air, as the energy radiated over the step (from its substeps) divided by the step
+        lum = energy_step/dt
+
+        # Compute the electron line density
+        q = electrons_step/dt
+
+        # Compute the total luminosity
+        frag.lum = lum*frag.n_grains_double
+
+        # Compute the total electron line density
+        frag.q = q*frag.n_grains_double
+
+        # Keep track of the total luminosity across all fragments
+        luminosity_total += frag.lum
+
+        # Keep track of the total number of produced electrons
+        electron_density_total += frag.q
+
+        # Keep track of the total luminosity weighted lum eff
+        tau_total += tau*frag.lum
+
+        # Compute aerodynamic loading on the grain (always assume Gamma = 1.0)
+        dyn_press = 1.0*rho_atm*wmplPyPow(frag.v, 2.0)
+        frag.dyn_press = dyn_press
+
+        # Keep track of the parameters of the main fragment
+        if frag.main:
+            luminosity_main = frag.lum
+            tau_main = tau
+            main_mass = frag.m
+            main_height = frag.h
+            main_length = frag.length
+            main_vel = frag.v
+            main_dyn_press = dyn_press
+
+        # Keep track of the brightest fragment (checked before the kill check below, so that a fragment
+        #   counts also on the step on which it dies)
+        if frag.lum > brightest_lum:
+            brightest_lum = frag.lum
+            brightest_height = frag.h
+            brightest_length = frag.length
+            brightest_vel = frag.v
+
+        # If the fragment is done, stop ablating
+        if (frag.m <= m_kill) or (frag.v < v_kill) or (frag.h < h_kill) or (frag.lum < 0) \
+            or ((len_kill > 0) and (frag.length > len_kill)):
+
+            # Grains released at the speed and the height of a fragment which is too slow, too low or too far
+            #   would be killed in their first step, which they would take outside of the range of the
+            #   luminous efficiency, so they are released only by a fragment which has run out of mass
+            release_grains = (frag.v >= v_kill) and (frag.h >= h_kill) \
+                and not ((len_kill > 0) and (frag.length > len_kill))
+
+            # Release the mass eroded in this step, as the grains are made below only for living fragments
+            if release_grains and frag.erosion_enabled and (abs(mass_loss_erosion) > 0):
+                grain_children = hooks.erodeIntoGrains(const_obj, frag, abs(mass_loss_erosion))
+                const_obj.n_active += len(grain_children)
+                frag_children_all += grain_children
+
+            # Deactivate the fragment, which releases the grains in its mass bins
+            frag_children_all += hooks.killFragment(const_obj, frag, release_grains=release_grains)
+
+            continue
+
+        # For fragments born out of complex fragmentation, keep track of their luminosity
+        if not frag.main:
+
+            # Keep track of magnitudes of complex fragmentation fragments (the light curves of the
+            #   individual entries are only computed if requested)
+            if frag.is_complex:
+
+                # Add the light of the fragment to the light curve of its fragmentation entry, of the grains
+                #   or of the main fragments of the entry, at the current time
+                if show_individual_lcs:
+
+                    # Find the corresponding fragmentation entry
+                    frag_entry = fragmentation_entry_by_id.get(frag.complex_id)
+
+                    if frag_entry is not None:
+
+                        # Take the light curve of the grains of the entry
+                        if frag.grain:
+                            time_data = frag_entry.grains_time_data
+                            luminosity_data = frag_entry.grains_luminosity
+                            tau_over_lum_data = frag_entry.grains_tau_over_lum
+
+                        # Take the light curve of the main fragments of the entry
+                        else:
+                            time_data = frag_entry.main_time_data
+                            luminosity_data = frag_entry.main_luminosity
+                            tau_over_lum_data = frag_entry.main_tau_over_lum
+
+                        n_data = len(time_data)
+                        total_time = const_obj.total_time
+
+                        # Add the current integration time, if the last time entry is not the current time
+                        if (not n_data) or (total_time != time_data[n_data - 1]):
+                            time_data.append(total_time)
+                            luminosity_data.append(frag.lum)
+                            tau_over_lum_data.append(tau*frag.lum)
+
+                        # Add to the total luminosity at the current time step that's already been added
+                        else:
+                            luminosity_data[n_data - 1] += frag.lum
+                            tau_over_lum_data[n_data - 1] += tau*frag.lum
+
+            # Keep track of luminosity of eroded and disrupted fragments ejected directly from the main
+            #   fragment (always tracked, also without the light curves of the individual entries)
+            else:
+                luminosity_eroded += frag.lum
+                tau_eroded += tau*frag.lum
+
+        # Check if the erosion should start, given the height, for the fragments not born out of complex
+        #   fragmentation
+        if (not frag.is_complex) and (frag.h < erosion_height_start) and frag.erosion_enabled and erosion_on:
+
+            # Turn on the erosion of the fragment (disruption daughters keep the fixed, disruption-specific
+            #   erosion coefficient they were assigned at birth, and the coefficient set by a fragmentation
+            #   entry is kept too)
+            if (not frag.disruption_child) and (not frag.erosion_coeff_fixed):
+                frag.erosion_coeff = hooks.getErosionCoeff(const_obj, frag.h)
+
+            # Update the main fragment physical parameters if it is changed after erosion coefficient change
+            #   (only once, so that a later change of sigma, e.g. by a complex fragmentation "A" event, is
+            #   kept)
+            if frag.main and (not frag.erosion_height_change_applied) \
+                and (const_obj.erosion_height_change >= frag.h):
+
+                # Update the density
+                frag.rho = const_obj.erosion_rho_change
+                frag.updateShapeDensityCoeff()
+
+                # Update the ablation coeff
+                frag.sigma = const_obj.erosion_sigma_change
+
+                frag.erosion_height_change_applied = True
+
+        # Create grains for erosion-enabled fragments
+        if frag.erosion_enabled:
+
+            # Generate new grains if there is some mass to distribute
+            if abs(mass_loss_erosion) > 0:
+
+                grain_children = hooks.erodeIntoGrains(const_obj, frag, abs(mass_loss_erosion))
+                const_obj.n_active += len(grain_children)
+                frag_children_all += grain_children
+
+                # Record physical parameters at the beginning of erosion for the main fragment
+                if frag.main:
+                    if const_obj.erosion_beg_vel is None:
+                        const_obj.erosion_beg_vel = frag.v
+                        const_obj.erosion_beg_mass = frag.m
+                        const_obj.erosion_beg_dyn_press = dyn_press
+
+                    # Record the mass when erosion is changed
+                    elif (const_obj.erosion_height_change >= frag.h) \
+                        and (const_obj.mass_at_erosion_change is None):
+
+                        const_obj.mass_at_erosion_change = frag.m
+
+        # Disrupt the fragment if the dynamic pressure exceeds its strength
+        if frag.disruption_enabled and disruption_on:
+            if dyn_press > const_obj.compressive_strength:
+
+                # Break the fragment into fragments and grains, and keep them with the other children
+                frag_children_all += hooks.disruptFragment(const_obj, frag)
+
+        # Handle complex fragmentation and status changes of the main fragment
+        if frag.main and fragmentation_on:
+
+            # Apply the fragmentation entries whose height the main fragment has passed
+            hooks.applyFragmentationEntries(const_obj, frag, fragments, frag_children_all, dyn_press)
+
+        # If the fragment is done, stop ablating
+        if frag.m <= m_kill:
+            frag_children_all += hooks.killFragment(const_obj, frag)
+            continue
+
+        # Add the grain-weighted mass of the fragment which survived this tick to the total active mass (the
+        #   killed and disrupted fragments skipped this above)
+        mass_total_active += frag.m*frag.n_grains_double
+
+        # Add the mass the fragment eroded into its mass bins and did not release as grains yet
+        if frag.erosion_bin_counts is not None:
+            mass_total_active += hooks.erosionBinMass(frag)
+
+    # Track the leading fragment, the first of the longest among those active at the start of the tick (as
+    #   max() of Python picks it), so that a fragment which died in this tick is still a candidate for it
+    for frag_obj in fragments_active_at_tick_start:
+        frag = <FragmentCy?>frag_obj
+        if (leading_frag is None) or (frag.length > leading_frag.length):
+            leading_frag = frag
+
+    # Take the parameters of the leading fragment
+    if leading_frag is not None:
+        leading_frag_length = leading_frag.length
+        leading_frag_height = leading_frag.h
+        leading_frag_vel = leading_frag.v
+        leading_frag_dyn_press = leading_frag.dyn_press
+
+    else:
+        leading_frag_length = None
+        leading_frag_height = None
+        leading_frag_vel = None
+        leading_frag_dyn_press = None
+
+    ### Compute the wake profile ###
+
+    # Compute the wake around the leading fragment, if it is requested at this time step
+    wake = hooks.computeWake(const_obj, fragments, leading_frag_length, leading_frag_height, compute_wake, \
+        wake_heights_queue)
+
+    ### ###
+
+    # Add generated fragment children to the list of fragments
+    fragments += frag_children_all
+
+    # Add the grain-weighted mass of the fragments and grains made in this tick, which are all active
+    for frag_obj in frag_children_all:
+        mass_total_active += (<FragmentCy?>frag_obj).m*(<FragmentCy?>frag_obj).n_grains_double
+
+    # Drop fully-ablated grains from the fragment list so that the next ticks do not scan them again, but
+    #   keep the dead non-grains (the main fragment and the complex fragmentation daughters), which
+    #   runSimulation() scans after the run for the main fragment and the final masses of the fragmentations
+    fragments = [frag_obj for frag_obj in fragments \
+        if (<FragmentCy?>frag_obj).active or (not (<FragmentCy?>frag_obj).grain)]
+
+    # Increment the running time
+    const_obj.total_time += const_obj.dt
+
+    # Weigh the tau by luminosity
+    if luminosity_total > 0:
+        tau_total /= luminosity_total
+    else:
+        tau_total = 0
+
+    if luminosity_eroded > 0:
+        tau_eroded /= luminosity_eroded
+    else:
+        tau_eroded = 0
+
+    return fragments, const_obj, luminosity_total, luminosity_main, luminosity_eroded, \
+        electron_density_total, tau_total, tau_main, tau_eroded, brightest_height, brightest_length, \
+        brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press, \
+        mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, wake

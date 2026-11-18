@@ -103,6 +103,18 @@ which would change the mass or the speed by more than 30 % is split into two hal
 until every piece resolves the motion, and the pieces get longer again once it does. Larger fragments are
 never split, as they change by much less than that in a step.
 
+The loop which takes every fragment through a step is written in Cython (`ablateAllCy()` in
+`MetSimErosionCyTools.pyx`, called by `ablateAll()` in `MetSimErosion.py`), and the fragments are a Cython
+class with typed fields, so that a step of a fragment runs without Python objects. The rare events, the
+erosion into grains, the disruption, the fragmentation entries, the end of a fragment and the wake, are the
+Python functions of `MetSimErosion.py`. The loop computes in the same order and with the same functions of
+the C library as the Python loop it replaced, so it gives the same results to the last bit. It runs 1.6-5.6
+times faster on 24 saved fits (3.7 times in total), most on meteors which erode into many grains. On the
+fast meteors of the Dynesty example it is 1.6 times faster (median of 41 runs), as the Runge-Kutta steps,
+which were already in Cython, take most of the time there.
+
+![Speed of the loop in Cython](figures/MetSim_cython_speedup.png)
+
 ## Erosion into grains
 
 A fragment that erodes loses mass to grains at the rate `-K*eta*m^(2/3)*rho_atm*v^3`, where `eta` is the
