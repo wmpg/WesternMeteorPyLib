@@ -8,7 +8,7 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
-from wmpl.Utils.Math import medianStddev, circPercentile
+from wmpl.Utils.Math import medianStddev, circPercentile, findClosestPoints, findClosestPoints_vect
 
 
 
@@ -84,11 +84,45 @@ def testCircPercentileOfAnglesFromMinus180To180():
 
 
 
+def testClosestPointsOfManyLinesAreThoseOfEachLine():
+    """ Check that the closest points of many pairs of lines at once are those of each pair, with one or many
+        second lines, and infinite for parallel lines.
+    """
+
+    rng = np.random.default_rng(1)
+    P = rng.normal(0, 1e5, (20, 3))
+    u = rng.normal(0, 1, (20, 3))
+    Q = rng.normal(0, 1e5, (20, 3))
+    v = rng.normal(0, 1, 3)
+
+    # One second line, and one second line per pair
+    for Q_test in (Q[0], Q):
+
+        S, T, d = findClosestPoints_vect(P, u, Q_test, v)
+        Q_rows = np.reshape(Q_test, (-1, 3))
+
+        for i in range(len(P)):
+            S_i, T_i, d_i = findClosestPoints(P[i], u[i], Q_rows[i%len(Q_rows)], v)
+
+            assert np.allclose(S[i], S_i, rtol=1e-12, atol=1e-6)
+            assert np.allclose(T[i], T_i, rtol=1e-12, atol=1e-6)
+            assert np.isclose(d[i], d_i, rtol=1e-9, atol=1e-6)
+
+    # Parallel lines have no closest points
+    u[3] = 2*v
+    S, T, d = findClosestPoints_vect(P, u, Q, v)
+
+    assert np.all(np.isinf(S[3])) and np.all(np.isinf(T[3])) and np.isinf(d[3])
+    assert np.all(np.isfinite(d[np.arange(len(P)) != 3]))
+
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testMedianStddev, testCircPercentileOfAnglesFrom0To360, \
-        testCircPercentileOfAnglesFromMinus180To180]
+        testCircPercentileOfAnglesFromMinus180To180, testClosestPointsOfManyLinesAreThoseOfEachLine]
 
     for test in test_list:
         test()

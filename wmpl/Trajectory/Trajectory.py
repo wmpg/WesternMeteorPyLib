@@ -48,9 +48,9 @@ except ImportError:
 import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.DragVelocity import fitDragVelocity
-from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
-    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval, \
-    medianStddev
+from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, findClosestPoints_vect, \
+    RMSD, angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, \
+    confidenceInterval, medianStddev
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
@@ -913,85 +913,66 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     # Find the earliest point in time
     t0 = dropTimeOrigin(observations)
 
-    angle_sum = 0.0
-    weights_sum = 1e-10
+    # Stack the points of all stations which are not ignored, with the weights of their stations
+    used_masks = [np.array(obs.ignore_list) == 0 for obs in observations]
+    stat_eci = np.concatenate([np.reshape(obs.stat_eci_los, (-1, 3))[used] \
+        for obs, used in zip(observations, used_masks)])
+    meas_eci = np.concatenate([np.reshape(obs.meas_eci_los, (-1, 3))[used] \
+        for obs, used in zip(observations, used_masks)])
+    time_rel = np.concatenate([np.array(obs.time_data, dtype=np.float64)[used] \
+        for obs, used in zip(observations, used_masks)]) - t0
+    point_weights = np.repeat(np.array(weights, dtype=np.float64), \
+        [np.count_nonzero(used) for used in used_masks])
 
-    # Compute the drop across the path at the times of the used points, if the speeds of the meteor are given.
-    #   The drop is tabulated over the used points only, so the ignored points do not change it
-    drops = None
+    # Get the ECI coordinates of the projections of the measurement lines of sight on the radiant line
+    _, rad_cpa, _ = findClosestPoints_vect(stat_eci, meas_eci, state_vect, radiant_eci)
+
+    # Take the gravity drop across the path into account if the speeds of the meteor are given, tabulated over
+    #   the used points only so that the ignored points do not change it
     if gravity and (gravity_vel is not None):
 
-        used_masks = [np.array(obs.ignore_list) == 0 for obs in observations]
-        time_used = np.concatenate([obs.time_data[used] for obs, used in zip(observations, used_masks)])
+        if len(time_rel):
 
-        drops = [np.zeros((len(obs.time_data), 3)) for obs in observations]
+            drops = gravityDropVectors(gravityDropOrigin(observations, state_vect, radiant_eci, \
+                gravity_vel, t0), radiant_eci, time_rel, gravity_vel, t0, gravity_factor)
 
-        if len(time_used):
+            _, rad_cpa, _ = findClosestPoints_vect(stat_eci, meas_eci, rad_cpa + drops, radiant_eci)
 
-            drop_used = gravityDropVectors(gravityDropOrigin(observations, state_vect, radiant_eci, \
-                gravity_vel, t0), radiant_eci, time_used - t0, gravity_vel, t0, gravity_factor)
+    # Take the vertical gravity drop into account
+    #   Note: here we assume that the acceleration due to gravity is fixed at the given height,
+    #   which might cause an offset of a few meters for events longer than 5 seconds
+    elif gravity:
 
-            # Split the drops between the stations
-            drop_used = np.split(drop_used, np.cumsum([np.count_nonzero(used) for used in used_masks])[:-1])
-            for drop, used, drop_stat in zip(drops, used_masks, drop_used):
-                drop[used] = drop_stat
+        # Compute the model point modified due to gravity, assuming zero vertical velocity
+        if v0z is None:
+            v0z = 0.0
 
-    # Go through all observations from all stations
-    for i, obs in enumerate(observations):
-        
-        # Go through all measured positions
-        for j, (t, meas_eci, stat_eci, ignore) in enumerate(zip(obs.time_data, obs.meas_eci_los, \
-            obs.stat_eci_los, obs.ignore_list)):
+        # Take the distance of the beginning of the meteor, or of each point itself if it is not given
+        if r0 is None:
+            r0_points = np.linalg.norm(rad_cpa, axis=1)
+        else:
+            r0_points = np.full(len(time_rel), r0, dtype=np.float64)
 
-            # Skip the point if it is to be ignored
-            if ignore:
-                continue
+        # If the distance is 0, set it to 1 to avoid a division by zero
+        r0_points[r0_points == 0] = 1.0
 
-            # Get the ECI coordinates of the projection of the measurement line of sight on the radiant line
-            _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
-
-
-            # Take the gravity drop across the path into account
-            if drops is not None:
-                _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa + drops[i][j], radiant_eci)
-
-            # Take the vertical gravity drop into account
-            #   Note: here we assume that the acceleration due to gravity is fixed at the given height,
-            #   which might cause an offset of a few meters for events longer than 5 seconds
-            elif gravity:
+        rad_cpa_grav = applyGravityDrop_vect(rad_cpa, time_rel, r0_points, gravity_factor, v0z)
+        _, rad_cpa, _ = findClosestPoints_vect(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
 
-                # Calculate the time in seconds from the beginning of the meteor
-                t_rel = t - t0
+    # Calculate the unit vectors pointing from the stations to the points on the trajectory, which are not
+    #   finite for lines of sight parallel to the line
+    station_rays = rad_cpa - stat_eci
+    with np.errstate(invalid='ignore'):
+        station_rays = station_rays/np.linalg.norm(station_rays, axis=1)[:, None]
 
-                # Compute the model point modified due to gravity, assuming zero vertical velocity
-                if v0z is None:
-                    v0z = 0.0
+    # Calculate the angles between the observed LoS and the radiant line from the chords between the
+    #   unit vectors, which is precise for small angles
+    chords = np.linalg.norm(station_rays - meas_eci, axis=1)
+    angles = 2*np.arcsin(np.minimum(chords/2, 1.0))
 
-                # Take the distance of the beginning of the meteor, or of the point itself if it is not given
-                r0_point = r0
-                if r0_point is None:
-                    r0_point = vectMag(rad_cpa)
-
-                # If the distance is 0, set it to 1 to avoid a division by zero
-                if r0_point == 0:
-                    r0_point = 1.0
-
-                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0_point, gravity_factor, v0z)
-                _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
-
-
-
-            # Calculate the unit vector pointing from the station to the point on the trajectory
-            station_ray = rad_cpa - stat_eci
-            station_ray = vectNorm(station_ray)
-
-            # Calculate the angle between the observed LoS and the radiant line from the chord between the
-            #   unit vectors, which is precise for small angles
-            chord = vectMag(station_ray - meas_eci)
-            angle_sum += weights[i]*2*np.arcsin(min(chord/2, 1.0))
-
-            weights_sum += weights[i]
+    angle_sum = np.sum(point_weights*angles)
+    weights_sum = 1e-10 + np.sum(point_weights)
 
 
     return angle_sum/weights_sum
@@ -2825,6 +2806,45 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     # Apply gravity drop to ECI coordinates
     return eci_coord - gravity_factor*drop*vectNorm(eci_coord)
+
+
+
+def applyGravityDrop_vect(eci_coords, t, r0, gravity_factor, vz):
+    """ Apply the gravity drop to many points at once, as applyGravityDrop does to one.
+
+    Arguments:
+        eci_coords: [ndarray] (x, y, z) ECI coordinates of the meteor (meters), one point per row.
+        t: [ndarray] Times of the points since the beginning of the trajectory (s).
+        r0: [ndarray] Distances from the centre of the Earth of the beginning of the meteor, one per point
+            (meters).
+        gravity_factor: [float] Factor by which the gravity drop will be multiplied.
+        vz: [float] Vertical component of the meteor's velocity (m/s).
+
+    Return:
+        [ndarray] ECI coordinates of the points corrected for the gravity drop, one point per row.
+    """
+
+    # Make sure r0 is not 0
+    r0 = np.where(r0 == 0, 1e-10, r0)
+
+    # Use the classical drop function for small vz's
+    if abs(vz) < 100:
+        drop = (1.0/2)*(G*EARTH.MASS/r0**2)*t**2
+
+    # Compute the drop using a drop model with a constant vertical velocity, which is not finite for points
+    #   which are not finite
+    else:
+        denominator = r0 + vz*t
+        denominator = np.where(denominator == 0, 1e-10, denominator)
+
+        with np.errstate(invalid='ignore'):
+            drop = (G*EARTH.MASS/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
+
+    # Apply gravity drop to ECI coordinates, which are not finite for lines of sight parallel to the line
+    with np.errstate(invalid='ignore'):
+        units = eci_coords/np.linalg.norm(eci_coords, axis=1)[:, None]
+
+    return eci_coords - (gravity_factor*drop)[:, None]*units
 
 
 
