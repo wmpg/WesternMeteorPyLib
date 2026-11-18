@@ -1158,9 +1158,6 @@ class DragFit(object):
             bulk_density))
         out.append("")
 
-        # Compute the uncertainties of the growth of K in every segment
-        d_std = self._paramStd(np.eye(len(self.params))[3:])
-
         out.append(" Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, " \
             + "Growth, Signif")
         out.append(("    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m{:s}/kg),   (m{:s}/kg), " \
@@ -1179,10 +1176,15 @@ class DragFit(object):
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
             dyn_pres = rho_beg*vel_seg[0]**2
 
-            # Compute the growth of K within the segment, and its significance
-            growth = np.exp(self.params[3 + i]*(len_seg[1] - len_seg[0])/self.ramp_len[i])
-            if d_std[i] > 0:
-                signif = self.params[3 + i]/d_std[i]
+            # Compute the growth of K within the segment from all the ramps which overlap it, and its
+            #   significance
+            ramps = np.clip((len_seg[:, None] - self.ramp_beg[None, :])/self.ramp_len, 0.0, 1.0)
+            grad = np.r_[np.zeros(3), ramps[1] - ramps[0]]
+            log_growth = grad.dot(self.params)
+            growth = np.exp(log_growth)
+            growth_std = self._paramStd(grad[None, :])[0]
+            if growth_std > 0:
+                signif = log_growth/growth_std
             else:
                 signif = 0.0
 
@@ -1221,7 +1223,7 @@ def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
         spread_step: [float] Step of the spreads (m). 250 m by default.
         spread_max: [float] Largest spread (m). None by default, down to the last point from the lowest
             fragmentation within the observed part.
-        **kwargs: Keyword arguments for DragFit.
+        **kwargs: [dict] Keyword arguments for DragFit.
 
     Return:
         (fit, spreads, delta_chi2, log_k_last, log_k_std):
