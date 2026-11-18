@@ -242,7 +242,9 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
         solver: [str] Solver choice:
             - "original" is the Monte Carlo solver
             - "gural" is the Gural solver (through C++ bindings)
-        **kwargs: Keyword arguments for the trajectory solver.
+        **kwargs: Keyword arguments for the trajectory solver. mc_systematics, the size of the systematic
+            errors of the stations for its Monte Carlo runs (see StationSystematics), is set on the
+            trajectory.
 
     """
 
@@ -250,9 +252,15 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
     output_dir = os.path.join(dir_path, jd2Date(jdt_ref, dt_obj=True).strftime("%Y%m%d-%H%M%S.%f"))
 
 
+    # Size of the systematic errors of the stations for the Monte Carlo runs (see StationSystematics)
+    mc_systematics = kwargs.pop('mc_systematics', None)
+
     # Init the trajectory solver
     if solver == 'original':
         traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=1, **kwargs)
+
+        if mc_systematics is not None:
+            traj.mc_systematics = mc_systematics
 
     elif solver.lower().startswith('gural'):
         velmodel = solver.lower().strip('gural')
