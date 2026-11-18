@@ -13,7 +13,8 @@ from wmpl.Utils.Physics import dynamicMass, groundSpeed, earthRotationVelocity, 
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
-from wmpl.Trajectory.Trajectory import applyGravityDrop, solutionDropTimeOrigin
+from wmpl.Trajectory.Trajectory import applyGravityDrop, gravityDropOrigin, gravityDropVectors, \
+    solutionDropTimeOrigin
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, atm_table=None):
@@ -220,9 +221,9 @@ def pointOnTrajectory(traj, length, t):
     """ Compute the ECI coordinates of a point on the fitted trajectory, including the gravity drop.
 
         The point lies at the given length from the state vector along the radiant, displaced by the gravity
-        drop the solver models from the fitted line (see Trajectory.applyGravityDrop). Only the component of
-        the drop perpendicular to the line is applied, as in the solver's model points, where the along-track
-        part is absorbed by the length.
+        drop the solver models from the fitted line, across the path (see Trajectory.gravityDropTable).
+        Solutions without the speeds for it were dropped vertically (see Trajectory.applyGravityDrop), of
+        which only the component perpendicular to the line is applied, as the length absorbed the rest.
 
     Arguments:
         traj: [Trajectory] Solved trajectory.
@@ -241,11 +242,20 @@ def pointOnTrajectory(traj, length, t):
         # Take the time from which the solver computed the drop
         t0 = solutionDropTimeOrigin(traj)
 
-        drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), getattr(traj, 'gravity_factor', 1.0), \
-            getattr(traj, 'v0z', None) or 0.0) - P
+        # Drop the point across the path with the speeds of the solution
+        if getattr(traj, 'gravity_vel', None) is not None:
+            eci0 = gravityDropOrigin(traj.observations, traj.state_vect_mini, traj.radiant_eci_mini, \
+                traj.gravity_vel, t0)
+            P = P + gravityDropVectors(eci0, traj.radiant_eci_mini, [t - t0], traj.gravity_vel, t0, \
+                getattr(traj, 'gravity_factor', 1.0))[0]
 
-        # Keep only the component perpendicular to the fitted line
-        P = P + drop - np.dot(drop, traj.radiant_eci_mini)*traj.radiant_eci_mini
+        else:
+
+            drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), \
+                getattr(traj, 'gravity_factor', 1.0), getattr(traj, 'v0z', None) or 0.0) - P
+
+            # Keep only the component perpendicular to the fitted line
+            P = P + drop - np.dot(drop, traj.radiant_eci_mini)*traj.radiant_eci_mini
 
     return P
 

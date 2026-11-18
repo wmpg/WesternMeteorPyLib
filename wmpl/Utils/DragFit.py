@@ -58,7 +58,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
-from wmpl.Trajectory.Trajectory import applyGravityDrop, solutionDropTimeOrigin
+from wmpl.Trajectory.Trajectory import applyGravityDrop, gravityDropOrigin, gravityDropVectors, \
+    solutionDropTimeOrigin
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.Physics import ballisticCoeffMass, earthRotationSpeed
@@ -691,9 +692,20 @@ class DragFit(object):
         #   point, where the positions are on the line
         line_eci = self._lineEci(self.len_grid)
         drop_grid = np.zeros_like(line_eci)
-        for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
-            if np.isfinite(t) and (t > t0):
-                drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, gravity_factor, v0z)
+        dropped = np.isfinite(self.time_grid) & (self.time_grid > t0)
+
+        # Drop across the path with the speeds of the solution, or vertically for solutions without them
+        if getattr(traj, 'gravity_vel', None) is not None:
+            if np.any(dropped):
+                eci0 = gravityDropOrigin(traj.observations, self.state_vect, self.radiant_eci, \
+                    traj.gravity_vel, t0)
+                drop_grid[dropped] = -gravityDropVectors(eci0, self.radiant_eci, \
+                    self.time_grid[dropped] - t0, traj.gravity_vel, t0, gravity_factor)
+
+        else:
+            for i in np.where(dropped)[0]:
+                drop_grid[i] = line_eci[i] - applyGravityDrop(line_eci[i], self.time_grid[i] - t0, r0, \
+                    gravity_factor, v0z)
 
         # Below the last point, continue the path along the direction bent by gravity
         valid = np.where(np.isfinite(self.time_grid))[0]
