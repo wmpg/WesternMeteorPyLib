@@ -10,6 +10,7 @@ one and what is inside it.
 - [Running the solver](#running-the-solver)
 - [The trajectory pickle](#the-trajectory-pickle)
 - [Loading a pickle in Python](#loading-a-pickle-in-python)
+- [How the line is fitted to the lines of sight](#how-the-line-is-fitted-to-the-lines-of-sight)
 - [How the solver takes gravity into account](#how-the-solver-takes-gravity-into-account)
 
 ---
@@ -75,6 +76,31 @@ print("a = {:.4f} AU, e = {:.4f}".format(traj.orbit.a, traj.orbit.e))
 
 Once you have the pickle, see [the REBOUND manual](REBOUND.md) for integrating the orbit backwards or
 forwards in time.
+
+
+
+## How the line is fitted to the lines of sight
+
+The solver starts from the line where the planes of the lines of sight of two stations intersect, and then
+fits the line to the lines of sight of all stations at once: it looks for the line with the smallest sum of
+the angles between it and every line of sight, with each station weighted by how well it sees the line
+(Borovicka 1990, with angles instead of distances, `angleSumMeasurements2Line()` in `Trajectory.py`). The
+sum is minimized with the Nelder-Mead simplex method over the four ways a line can move, two turns and two
+shifts, restarted with a fresh simplex until the line stops moving (`nelderMeadLine()`).
+
+The angles are not squared, so the sum has a sharp bend, like `|x|`, wherever the line passes through a line
+of sight. The simplex can stop at such a bend although the line could still get better. When 344 fireballs
+of the GMN and UWO databases were solved again, 40 of them (12 %) ended more than 1 arcsec from the best
+line, 4 more than 1 arcmin and one 19 arcmin away. The solver therefore first minimizes a smoothed sum, in
+which every angle is replaced by `sqrt(angle^2 + s^2) - s`, which is round near zero and the same as the
+angle minus `s` far from it. It takes `s` = 10, 1, 0.1 and 0.01 arcsec in turn (`LOS_SMOOTHING`), each time
+from the line found with the one before, and then minimizes the exact sum. The result is never worse in the
+exact sum than the line it started from.
+
+With the smoothing, 6 of the 344 fireballs (2 %) end more than 1 arcsec from the best line, and none more
+than 7 arcsec. Where the fit did not stop early, the radiant moves by 0.004 arcsec (median). The residuals do
+not change, and solving takes 26 % less time, although the smoothed sums take about three times as many
+evaluations, as the angles of all points are computed at once.
 
 
 

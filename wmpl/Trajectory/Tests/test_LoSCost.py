@@ -1,7 +1,8 @@
 """ Tests of the cost of the line-of-sight fit, the sum of the angles between the lines of sight and the
 line, which is computed for all points at once. It is tested against a computation point by point, without
 gravity, with the vertical gravity drop and with the drop across the path, with weights, ignored stations
-and ignored points.
+and ignored points. The cost with the angles smoothed near zero, with which the fit starts (see
+test_LoSFitSmoothing.py), is tested to tend to the exact cost.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_LoSCost.py -v
@@ -159,11 +160,34 @@ def testTheCostIsNotFiniteForALineOfSightAlongTheLine():
 
 
 
+def testTheSmoothedCostTendsToTheExactCost():
+    """ Check that the smoothed cost is below the exact one by less than the smoothing, and tends to it as
+        the smoothing decreases.
+    """
+
+    traj, begin, radiant = _observedMeteor()
+
+    exact = angleSumMeasurements2Line(traj.observations, begin, radiant, gravity=True)
+
+    differences = []
+    for smoothing in np.radians(np.array([10.0, 1.0, 0.1, 0.01, 0.001])/3600):
+
+        smoothed = angleSumMeasurements2Line(traj.observations, begin, radiant, gravity=True, \
+            smoothing=smoothing)
+
+        assert 0 < exact - smoothed < smoothing
+        differences.append(exact - smoothed)
+
+    assert np.all(np.diff(differences) < 0)
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testTheCostOfAllPointsAtOnceEqualsTheCostOfEachPoint, \
-        testTheCostIsNotFiniteForALineOfSightAlongTheLine]
+        testTheCostIsNotFiniteForALineOfSightAlongTheLine, \
+        testTheSmoothedCostTendsToTheExactCost]
 
     for test in test_list:
         test()

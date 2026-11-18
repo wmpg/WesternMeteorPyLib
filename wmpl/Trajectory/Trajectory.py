@@ -857,7 +857,7 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
 
 
 def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
-                              gravity_factor=1.0, v0z=None, r0=None, gravity_vel=None):
+                              gravity_factor=1.0, v0z=None, r0=None, gravity_vel=None, smoothing=0.0):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -880,6 +880,10 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
         gravity_vel: [tuple] Speeds of the meteor against time (see Trajectory.gravity_vel), with which the
             drop is computed across the path and slowed by the drag (see gravityDropTable). If None, the
             meteor is dropped vertically with applyGravityDrop, using v0z and r0.
+        smoothing: [float] Smoothing of the angles near zero (rad). Each angle is replaced by
+            sqrt(angle**2 + smoothing**2) - smoothing, which is smooth at zero, as the sum of the angles has
+            a kink where an angle is zero, at which the Nelder-Mead minimization can stop (see
+            nelderMeadLine). 0.0 by default, when the angles are not smoothed.
 
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
@@ -971,6 +975,11 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     chords = np.linalg.norm(station_rays - meas_eci, axis=1)
     angles = 2*np.arcsin(np.minimum(chords/2, 1.0))
 
+    # Smooth the angles near zero, as sqrt(angle**2 + smoothing**2) - smoothing written without the
+    #   cancellation of the difference
+    if smoothing > 0:
+        angles = angles**2/(np.sqrt(angles**2 + smoothing**2) + smoothing)
+
     angle_sum = np.sum(point_weights*angles)
     weights_sum = 1e-10 + np.sum(point_weights)
 
@@ -981,13 +990,13 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
-    r0=None, gravity_vel=None):
+    r0=None, gravity_vel=None, smoothing=0.0):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
     
     return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity,\
-        gravity_factor=gravity_factor, v0z=v0z, r0=r0, gravity_vel=gravity_vel)
+        gravity_factor=gravity_factor, v0z=v0z, r0=r0, gravity_vel=gravity_vel, smoothing=smoothing)
 
 
 
@@ -1485,6 +1494,10 @@ LOS_MAX_SIMPLICES = 10
 LOS_SIMPLEX_DIRECTIONS = [np.eye(4), 0.5*np.array([[1.0, 1.0, 1.0, 1.0], [1.0, -1.0, 1.0, -1.0], \
     [1.0, 1.0, -1.0, -1.0], [1.0, -1.0, -1.0, 1.0]])]
 
+# Smoothings of the angles of the line-of-sight fit near zero, in the minimizations before the exact one
+#   (arcsec)
+LOS_SMOOTHING = [10.0, 1.0, 0.1, 0.01]
+
 
 
 def lineFrame(state_vect, radiant_eci, observations):
@@ -1563,49 +1576,37 @@ def lineFromFrame(coords, frame):
 
 
 
-def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
-    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame).
-        It is given to scipy.optimize.minimize as the method. With the six parameters of a state vector and a
-        radiant, the simplex can collapse and stop short of the minimum (McKinnon 1998). The minimization is
-        therefore restarted with a fresh simplex (Kelley 1999) until two in a row move the line by less than
-        LOS_RESTART_TOLERANCE.
-
-        References:
-            McKinnon, K. I. M. (1998). Convergence of the Nelder-Mead simplex method to a nonstationary
-                point. SIAM Journal on Optimization, 9(1), 148-158.
-            Kelley, C. T. (1999). Detection and remediation of stagnation in the Nelder-Mead algorithm using
-                a sufficient decrease condition. SIAM Journal on Optimization, 10(1), 43-55.
+def nelderMeadLineRestarts(fun, x0, args, maxfev=None, fun_kwargs=None):
+    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame),
+        restarted with a fresh simplex until two in a row move the line by less than LOS_RESTART_TOLERANCE
+        (see nelderMeadLine).
 
     Arguments:
-        fun: [function] Cost of the line, called as fun(params, *args), where params are the ECI coordinates
-            of a point on the line (meters) and the radiant vector, joined.
+        fun: [function] Cost of the line, called as fun(params, *args, **fun_kwargs), where params are the ECI
+            coordinates of a point on the line (meters) and the radiant vector, joined.
         x0: [ndarray] Initial parameters of the line.
+        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects.
 
     Keyword arguments:
-        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects. It must
-            be given.
         maxfev: [int] Largest number of evaluations of the cost in all minimizations. None by default, when
             each minimization has the limit of the Nelder-Mead method of scipy.
-        kwargs: [dict] Other arguments given by scipy.optimize.minimize, not used.
+        fun_kwargs: [dict] Keyword arguments of the cost. None by default.
 
     Return:
-        [OptimizeResult] Result of the last Nelder-Mead minimization, with the point on the line moved to the
-            beginning of the meteor, a unit radiant vector, and the iterations and evaluations of all
-            minimizations. Its cost is never higher than at the start, which is returned if no minimization
-            lowered it. If the line still moved after LOS_MAX_SIMPLICES fresh simplices, the success of the
-            last minimization is kept and the message says so.
+        [OptimizeResult] Result of the last Nelder-Mead minimization, with the parameters of the line and the
+            iterations and evaluations of all minimizations. If the line still moved after LOS_MAX_SIMPLICES
+            fresh simplices, the message says so.
     """
+
+    if fun_kwargs is None:
+        fun_kwargs = {}
 
     observations = args[0]
     params = np.array(x0, dtype=np.float64)
     simplex_size = LOS_SIMPLEX_SIZE
     still_runs = 0
     nit = 0
-
-    # Compute the cost at the start, which the result must not exceed
-    start_params = np.array(params)
-    start_cost = fun(start_params, *args)
-    nfev = 1
+    nfev = 0
 
     for i in range(LOS_MAX_SIMPLICES):
 
@@ -1621,8 +1622,8 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
         if maxfev is not None:
             options['maxfev'] = maxfev - nfev
 
-        solution = scipy.optimize.minimize(lambda coords: fun(lineFromFrame(coords, frame), *args), \
-            np.zeros(4), method='Nelder-Mead', options=options)
+        solution = scipy.optimize.minimize(lambda coords: fun(lineFromFrame(coords, frame), *args, \
+            **fun_kwargs), np.zeros(4), method='Nelder-Mead', options=options)
 
         nit += solution.nit
         nfev += solution.nfev
@@ -1648,6 +1649,91 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, **kwargs):
     # Say when the line still moved after the last fresh simplex, which is kept as it lowered the cost
     if solution.success and (still_runs < 2):
         solution.message = "The line still moved after {:d} fresh simplices".format(LOS_MAX_SIMPLICES)
+
+    solution.x = params
+    solution.nit = nit
+    solution.nfev = nfev
+
+
+    return solution
+
+
+
+def nelderMeadLine(fun, x0, args=(), maxfev=None, smoothing=None, **kwargs):
+    """ Minimize a cost of a line with Nelder-Mead over the four coordinates of a line frame (see lineFrame).
+        It is given to scipy.optimize.minimize as the method. With the six parameters of a state vector and a
+        radiant, the simplex can collapse and stop short of the minimum (McKinnon 1998). The minimization is
+        therefore restarted with a fresh simplex (Kelley 1999) until two in a row move the line by less than
+        LOS_RESTART_TOLERANCE (see nelderMeadLineRestarts).
+
+        The sum of the angles between the lines of sight and the line has a kink where an angle is zero, at
+        which the simplex can also stop short of the minimum. The cost is therefore first minimized with the
+        angles smoothed near zero by decreasing amounts (see angleSumMeasurements2Line), each time from the
+        minimum of the one before, and then exactly.
+
+        References:
+            McKinnon, K. I. M. (1998). Convergence of the Nelder-Mead simplex method to a nonstationary
+                point. SIAM Journal on Optimization, 9(1), 148-158.
+            Kelley, C. T. (1999). Detection and remediation of stagnation in the Nelder-Mead algorithm using
+                a sufficient decrease condition. SIAM Journal on Optimization, 10(1), 43-55.
+
+    Arguments:
+        fun: [function] Cost of the line, called as fun(params, *args), where params are the ECI coordinates
+            of a point on the line (meters) and the radiant vector, joined. With the smoothing, it is also
+            called as fun(params, *args, smoothing=smoothing), with the smoothing of the angles (rad).
+        x0: [ndarray] Initial parameters of the line.
+
+    Keyword arguments:
+        args: [tuple] Arguments of the cost, starting with the list of ObservationPoints objects. It must
+            be given.
+        maxfev: [int] Largest number of evaluations of the cost in all minimizations. None by default, when
+            each minimization has the limit of the Nelder-Mead method of scipy.
+        smoothing: [list] Smoothings of the angles in the minimizations before the exact one (arcsec). None
+            by default, when LOS_SMOOTHING is used. An empty list minimizes the exact cost only.
+        kwargs: [dict] Other arguments given by scipy.optimize.minimize, not used.
+
+    Return:
+        [OptimizeResult] Result of the last Nelder-Mead minimization of the exact cost, with the point on the
+            line moved to the beginning of the meteor, a unit radiant vector, and the iterations and
+            evaluations of all minimizations. Its cost is never higher than at the start, which is returned
+            if no minimization lowered it. If the line still moved after LOS_MAX_SIMPLICES fresh simplices,
+            the success of the last minimization is kept and the message says so.
+    """
+
+    if smoothing is None:
+        smoothing = LOS_SMOOTHING
+
+    observations = args[0]
+
+    # Compute the cost at the start, which the result must not exceed
+    start_params = np.array(x0, dtype=np.float64)
+    start_cost = fun(start_params, *args)
+    nfev = 1
+    nit = 0
+
+    # Minimize the smoothed costs in turn, each with at most half of the evaluations which are left
+    params = start_params
+    for smoothing_arcsec in smoothing:
+
+        maxfev_stage = None
+        if maxfev is not None:
+            maxfev_stage = (maxfev - nfev)//2
+
+            if maxfev_stage < 1:
+                break
+
+        solution = nelderMeadLineRestarts(fun, params, args, maxfev=maxfev_stage, \
+            fun_kwargs={'smoothing': np.radians(smoothing_arcsec/3600)})
+
+        nit += solution.nit
+        nfev += solution.nfev
+        params = solution.x
+
+    # Minimize the exact cost from the minimum of the last smoothed cost
+    solution = nelderMeadLineRestarts(fun, params, args, maxfev=(None if maxfev is None else maxfev - nfev))
+    nit += solution.nit
+    nfev += solution.nfev
+    params = solution.x
 
     # Keep the start if the minimizations did not lower its cost
     if np.isfinite(start_cost) and (not (solution.fun <= start_cost)):
