@@ -6162,8 +6162,8 @@ if __name__ == "__main__":
 
         # The deceleration of a fit at a bound is not constrained by the data
         if alphaBetaBoundWarnings(alpha, beta):
-            print("NOTE: alpha or beta are at a bound of the fit, so the deceleration and the dynamic mass are "
-                "not constrained by the data")
+            print("NOTE: alpha or beta are at a bound of the fit, so the deceleration and the dynamic mass "
+                "are not constrained by the data")
 
         print("-----------------------------------")
 
