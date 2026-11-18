@@ -1288,7 +1288,38 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
             constants.
 
     Return:
-        ...
+        (fragments, const, luminosity_total, luminosity_main, luminosity_eroded, electron_density_total,
+            tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel,
+            leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press,
+            mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, wake):
+            - fragments: [list] Fragments after the step, with the new ones and without the dead grains.
+            - const: [Constants object] Simulation constants, with the time of the step added.
+            - luminosity_total: [float] Luminosity of all fragments (W).
+            - luminosity_main: [float] Luminosity of the main fragment (W).
+            - luminosity_eroded: [float] Luminosity of the eroded and disrupted fragments (W).
+            - electron_density_total: [float] Electron line density of all fragments (1/m).
+            - tau_total: [float] Luminous efficiency of all fragments, weighted by their luminosity.
+            - tau_main: [float] Luminous efficiency of the main fragment.
+            - tau_eroded: [float] Luminous efficiency of the eroded and disrupted fragments, weighted by their
+                luminosity.
+            - brightest_height: [float] Height of the brightest fragment (m).
+            - brightest_length: [float] Length of the brightest fragment along the path (m).
+            - brightest_vel: [float] Velocity of the brightest fragment (m/s).
+            - leading_frag_height: [float] Height of the leading fragment (m), None if no fragment was
+                active.
+            - leading_frag_length: [float] Length of the leading fragment along the path (m), None if no
+                fragment was active.
+            - leading_frag_vel: [float] Velocity of the leading fragment (m/s), None if no fragment was
+                active.
+            - leading_frag_dyn_press: [float] Dynamic pressure on the leading fragment (Pa), None if no
+                fragment was active.
+            - mass_total_active: [float] Mass of all active fragments, also in their mass bins (kg).
+            - main_mass: [float] Mass of the main fragment (kg).
+            - main_height: [float] Height of the main fragment (m).
+            - main_length: [float] Length of the main fragment along the path (m).
+            - main_vel: [float] Velocity of the main fragment (m/s).
+            - main_dyn_press: [float] Dynamic pressure on the main fragment (Pa).
+            - wake: [Wake object] The wake, None if it was not computed in this step.
 
     Note:
         const.dt is fixed for every fragment, including grains. A small grain deep in the atmosphere whose
@@ -1312,6 +1343,8 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
     else:
         dens_co = np.zeros(7)
 
+    # Ablate all fragments over the step in the loop in Cython, which takes the functions of the rare events
+    #   from this module
     return ablateAllCy(fragments, const, compute_wake, wake_heights_queue, atm_table, dens_co, \
         sys.modules[__name__])
 
