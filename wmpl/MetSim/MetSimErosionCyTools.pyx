@@ -227,6 +227,61 @@ cdef class FragmentCy:
 
 
 
+    def toDict(self):
+        """ Return all attributes of the fragment as a dictionary, as the __dict__ of the Python class it
+            replaced, e.g. to save the fragment as JSON. The __dict__ of this class only has 'const' and the
+            attributes added by callers.
+
+        Return:
+            [dict] Names and values of the attributes.
+        """
+
+        frag_dict = {
+            'id': self.id,
+            'const': self.__dict__.get('const'),
+            'K': self.K,
+            'm_init': self.m_init,
+            'm': self.m,
+            'rho': self.rho,
+            'sigma': self.sigma,
+            'v': self.v,
+            'vv': self.vv,
+            'vh': self.vh,
+            'h_grav_drop_total': self.h_grav_drop_total,
+            'v_grav_drop': self.v_grav_drop,
+            'length': self.length,
+            'lum': self.lum,
+            'q': self.q,
+            'dyn_press': self.dyn_press,
+            'erosion_coeff': self.erosion_coeff,
+            'disruption_child': self.disruption_child,
+            'erosion_height_change_applied': self.erosion_height_change_applied,
+            'erosion_mass_index': self.erosion_mass_index,
+            'erosion_mass_min': self.erosion_mass_min,
+            'erosion_mass_max': self.erosion_mass_max,
+            'erosion_enabled': self.erosion_enabled,
+            'disruption_enabled': self.disruption_enabled,
+            'active': self.active,
+            'n_grains': self.n_grains_obj,
+            'erosion_bin_counts': self.erosion_bin_counts,
+            'erosion_bin_params': self.erosion_bin_params,
+            'erosion_coeff_fixed': self.erosion_coeff_fixed,
+            'main': self.main,
+            'grain': self.grain,
+            'complex': self.is_complex,
+            'complex_id': self.complex_id,
+            'h': self.h,
+            'gamma': self.gamma,
+            'zenith_angle': self.zenith_angle
+            }
+
+        # Add the attributes added by callers
+        frag_dict.update(self.__dict__)
+
+        return frag_dict
+
+
+
     def spawn_child(self):
         """ Create a child of the Fragment instance. Copy over the reference to the shared 'const' object
         and copy values of all other attributes. Note: if a mutable attribute that is not shared across
