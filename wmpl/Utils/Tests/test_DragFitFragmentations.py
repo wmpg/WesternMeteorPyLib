@@ -208,7 +208,6 @@ def testTheScanWithoutFragmentationsFitsOnce():
 
 
 
-
 def testThePlotShowsTheUncertaintyFromTheSpread():
     """ The plot and the table of a fit from the scan give the final dynamic mass with the uncertainty from
         the fit and from the spread, and those of a plain fit only with that of the fit.
