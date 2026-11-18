@@ -1152,7 +1152,10 @@ def alphaBetaResidualTrend(v_data, ht_data, v_init, alpha, beta, n_bands=4, ht_l
     """ Compute the median velocity residual of an alpha-beta fit in height bands, and its z, to tell a
         meteor the model does not describe, e.g. one that fragments, from noise.
 
-    Give it the observed velocities, as the residuals of smoothed ones trend even for a good fit.
+    Give it the observed velocities, as the residuals of smoothed ones trend even for a good fit. The
+    point-to-point velocities are averages over the intervals between the points, which differ from the
+    model velocity at the points for a strongly decelerating meteor, so the residuals of a good fit of such
+    a meteor trend too.
 
     Arguments:
         v_data: [ndarray] Observed velocities (m/s).
@@ -6083,17 +6086,6 @@ if __name__ == "__main__":
             "it at the first point)".format(traj.v_init/1000, v_model_first - traj.v_init))
         print("  The masses below use V_e.")
 
-        # Check if the single-body model describes the meteor, from the residuals against the observed
-        #   velocities by height
-        bands, trend = alphaBetaResidualTrend(vel_data_nograv, ht_data_rescaled, v_init, alpha, beta, \
-            ht_label=ht_data)
-        print("Model minus observed velocities by height band (median, z): " + "; ".join(
-            "{:.1f}-{:.1f} km {:+.0f} m/s ({:+.1f})".format(b[0]/1000, b[1]/1000, b[3], b[4]) for b in bands))
-        if trend:
-            print("WARNING: the residuals trend with height beyond their noise (|z| > {:g}): the single-body "
-                "alpha-beta model does not describe this meteor over the fitted part, e.g. because it fragments, "
-                "and V_e, alpha and beta, and more so their uncertainties, are then unreliable.".format(
-                RESIDUAL_TREND_SIGMA))
         print()
         print("Alpha-beta analysis")
         print("-------------------")
