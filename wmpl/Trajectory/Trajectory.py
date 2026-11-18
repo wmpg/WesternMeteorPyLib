@@ -3632,9 +3632,10 @@ class Trajectory(object):
             weights: [list] A list of statistical weights for every station.
     
         Return:
-            (v_ht_avg, intercept): 
+            (v_ht_avg, intercept, v_ht_stddev):
                 v_ht_avg: [float] Average velocity above the given height (m/s).
                 intercept: [float] Fit intercept (m).
+                v_ht_stddev: [float] Standard deviation of the average velocity (m/s).
         """
 
         # Maker sure weight values are OK
@@ -3678,13 +3679,13 @@ class Trajectory(object):
         if len(all_times) < 4:
             print('!!! Error, there are less than 4 points for velocity estimation above the given height of {:.2f} km!'.format(bottom_ht/1000))
             print('Using automated velocity estimation with the sliding fit...')
-            return None, None
+            return None, None, None
 
         # Fit a line through the time vs. state vector distance data
-        line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
+        line_params, line_cov = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
             sigma=all_inv_weights)
 
-        return line_params
+        return line_params[0], line_params[1], np.sqrt(line_cov[0, 0])
 
 
 
@@ -7112,13 +7113,14 @@ class Trajectory(object):
         # Compute the initial velocity as the average velocity of all points above the given height
         #   (optional)
         if self.v_init_ht is not None:
-            v_ht_avg, intercept_ht_avg = self.calcAvgVelocityAboveHt(self.observations, 1000*self.v_init_ht, \
-                weights)
+            v_ht_avg, intercept_ht_avg, v_ht_stddev = self.calcAvgVelocityAboveHt(self.observations, \
+                1000*self.v_init_ht, weights)
 
             # Assign this average velocity as the initial velocity if the fit was successful
             if v_ht_avg is not None:
                 
                 self.v_init = v_ht_avg
+                self.v_init_stddev = v_ht_stddev
                 self.velocity_fit = [self.v_init, intercept_ht_avg]
 
                 # Recalculate the lag
