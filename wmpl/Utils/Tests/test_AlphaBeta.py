@@ -567,6 +567,34 @@ def testFitAlphaBetaRobust():
         raise AssertionError("fitAlphaBeta: ValueError not raised for a bad method name")
 
 
+
+def testFitAlphaBetaSmoothedVelocities():
+    """ Velocities which never exceed the initial velocity, as from a fit of the lag (constant down to a
+        height, then a constant deceleration), give a Q4 residual without a minimum inside the bounds. The
+        Q4 fit used to end at beta = 50 with a velocity curve far from the data, so the velocity residuals
+        must be fitted instead, for both methods.
+    """
+
+    ht_data = np.linspace(85000.0, 25000.0, 120)
+    v_init = 17000.0
+
+    # Constant velocity down to 40 km, then falling linearly with height to 0.2*v_init at 25 km
+    v_data = np.where(ht_data > 40000, v_init, v_init*(1 - 0.8*(40000 - ht_data)/15000))
+
+    for method in ['q4', 'robust']:
+
+        _, alpha, beta = fitAlphaBeta(v_data, ht_data, v_init=v_init, method=method)
+
+        # The fit must not end at a bound
+        _, beta_upper = ALPHA_BETA_BOUNDS[1]
+        assert beta < 0.5*beta_upper, "{:s}: beta = {:.2f} at the bound".format(method, beta)
+
+        # The velocity curve must follow the data (it was 2.9 km/s off at the bound)
+        rmse = np.sqrt(np.mean((alphaBetaVelocity(ht_data, alpha, beta, v_init) - v_data)**2))
+        assert rmse < 1000.0, "{:s}: velocity RMSE {:.0f} m/s".format(method, rmse)
+
+
+
 def testFitAlphaBetaErrorEstimationRejectsQ4():
     """ estimate_errors=True must be rejected for method='q4' - Q4's L1/Nelder-Mead fit has no
         natural Jacobian to build an analytic covariance from.
@@ -751,13 +779,15 @@ def testFitAlphaBetaErrorEstimationBoundPinned():
         an actual trajectory (beta landing at 49.99995, a hair under the upper bound of 50) came
         back with alpha_std_rel/beta_std_rel/cov_log/etc. all NaN and no explanation.
 
-        The true beta here is set well beyond the upper bound, so the constrained fit has no
-        choice but to pin against that edge - reproduces the same pathology deterministically.
+        The true alpha here is set well beyond its upper bound, so the meteor barely decelerates
+        over the heights of the data and the constrained fit has no choice but to pin beta against
+        its upper bound - reproduces the same pathology deterministically. A true beta beyond its
+        bound does not, as a velocity curve inside the bounds then fits the data well.
     """
 
-    beta_true_extreme = 150.0
+    alpha_true_extreme = 1e5
 
-    v_clean = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    v_clean = alphaBetaVelocity(HT_DATA, alpha_true_extreme, BETA_TRUE, V_INIT_TRUE)
     rng = np.random.RandomState(42)
     v_data = v_clean + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
 
@@ -895,9 +925,9 @@ def testAlphaBetaMassesErrorEstimationBoundPinnedPropagatesNaN():
         not raise - the same graceful-degradation contract as fitAlphaBeta() itself.
     """
 
-    beta_true_extreme = 150.0
+    alpha_true_extreme = 1e5
 
-    v_clean = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    v_clean = alphaBetaVelocity(HT_DATA, alpha_true_extreme, BETA_TRUE, V_INIT_TRUE)
     rng = np.random.RandomState(42)
     v_data = v_clean + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
 
@@ -1106,10 +1136,10 @@ def testPlotAlphaBetaGracefulDegradation():
     fig, axes = plotAlphaBeta(v_data, HT_DATA, fit, errors=None, residuals=True, seed=0)
     plt.close(fig)
 
-    # A true beta far beyond ALPHA_BETA_BOUNDS pins the fit against its upper bound, the same
-    #   deterministic setup as testFitAlphaBetaErrorEstimationBoundPinned()
-    beta_true_extreme = 150.0
-    v_clean_extreme = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    # A true alpha far beyond ALPHA_BETA_BOUNDS pins the fit against the upper bound of beta, the
+    #   same deterministic setup as testFitAlphaBetaErrorEstimationBoundPinned()
+    alpha_true_extreme = 1e5
+    v_clean_extreme = alphaBetaVelocity(HT_DATA, alpha_true_extreme, BETA_TRUE, V_INIT_TRUE)
     rng = np.random.RandomState(42)
     v_data_extreme = v_clean_extreme + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
 
@@ -1262,8 +1292,8 @@ def testPlotAlphaBetaSurvivalDiagramRuns():
     plt.close(fig3)
 
     # A NaN cov_log (bound-pinned fit, same setup as testFitAlphaBetaErrorEstimationBoundPinned)
-    beta_true_extreme = 150.0
-    v_clean_extreme = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    alpha_true_extreme = 1e5
+    v_clean_extreme = alphaBetaVelocity(HT_DATA, alpha_true_extreme, BETA_TRUE, V_INIT_TRUE)
     rng = np.random.RandomState(42)
     v_data_extreme = v_clean_extreme + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
 
@@ -1578,6 +1608,7 @@ if __name__ == "__main__":
         testFastFlagPropagation,
         testFastPipelineSpeedup,
         testFitAlphaBetaRobust,
+        testFitAlphaBetaSmoothedVelocities,
         testFitAlphaBetaErrorEstimationRejectsQ4,
         testFitAlphaBetaErrorEstimationRejectsBadCi,
         testFitAlphaBetaErrorEstimationPointEstimateUnchanged,
