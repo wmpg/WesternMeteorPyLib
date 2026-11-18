@@ -472,21 +472,39 @@ class Fragment(FragmentCy):
 
 
 
+    def __reduce__(self):
+        """ Pickle the fragment by the names and the values of all of its attributes (see toDict()), as the
+            Python class it replaced was pickled. The state which Cython would pickle is the tuple of the C
+            fields, with a checksum of their names which has to match when the fragment is loaded, so a
+            fragment pickled before a field was added could not be loaded any more. A fragment pickled by
+            names is loaded by any version of the class, and a field which it does not have keeps its default
+            value.
+
+        Return:
+            (cls, args, state): [tuple] The class, no arguments for making a new fragment, and the dictionary
+                of the attributes, which __setstate__() sets.
+        """
+
+        return (type(self), (), self.toDict())
+
+
+
     def __setstate__(self, state):
         """ Restore a pickled fragment, also one pickled by an older version of wmpl, in which Fragment was a
             Python class with all attributes in its __dict__.
 
         Arguments:
-            state: [dict or tuple] The __dict__ of a fragment pickled as a Python class, or the state of a
-                fragment pickled as this class.
+            state: [dict or tuple] The attributes of the fragment by name (see __reduce__()), which is also
+                the __dict__ of a fragment pickled as a Python class, or the tuple of the C fields of a
+                fragment pickled by Cython before __reduce__() was added.
         """
 
-        # Set every attribute of a fragment pickled as a Python class
+        # Set every attribute by its name
         if isinstance(state, dict):
             for name, value in state.items():
                 setattr(self, name, value)
 
-        # Restore the C fields and the __dict__ of a fragment pickled as this class
+        # Restore the C fields and the __dict__ of a fragment pickled by Cython
         else:
             self.__setstate_cython__(state)
 
