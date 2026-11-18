@@ -38,9 +38,6 @@ RESIDUAL_TREND_SIGMA = 2.0
 # Bounds of a fitted initial velocity, as fractions of the median speed of the highest points
 V_INIT_FIT_BOUNDS = (0.8, 1.5)
 
-# Height of the first point below which the command line advises fitting the initial velocity (m)
-FIT_V_INIT_ADVISED_HT = 80e3
-
 # Power of a zero absolute magnitude meteor (W), WMPL convention. Used to turn the
 # fitted light curve amplitude (a magnitude offset) into the physical amplitude K of
 # Gritsevich & Koschny (2011) Eq. (13): I = K*f(v), K = P_0M*10^(-0.4*mag_offset).
@@ -1693,8 +1690,9 @@ def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None,
         n_starts: [int] Number of the best grid points from which the fit is started. 5 by default.
         estimate_errors: [bool] Also return the uncertainties of alpha and beta, from the covariance of
             the least squares fit, in the format of fitAlphaBeta(estimate_errors=True), so they can be
-            passed to alphaBetaMasses() and plotAlphaBetaSurvivalDiagram(). NaN if alpha or beta end at
-            a bound of the fit. False by default.
+            passed to alphaBetaMasses() and plotAlphaBetaSurvivalDiagram(), with 'v_init_std' and the 3x3
+            covariance 'cov_full' of (v_init, ln alpha, ln beta) if the initial velocity is fitted. NaN if
+            alpha or beta end at a bound of the fit. False by default.
         ci: [float] Confidence level of the Wald intervals in the uncertainties (percent). 95 by default.
         fast: [bool] Passed to alphaBetaVelocityNormed(). True by default, as the model is integrated
             many times in the fit. The grid search always uses the fast inversion.
@@ -1774,7 +1772,8 @@ def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None,
 
     n_params = len(best_res.x)
     errors = {'alpha': alpha, 'beta': beta, 'v_init': v_init_fit, 'ci': ci, \
-        'cov_log': np.full((2, 2), np.nan), 'cov': np.full((2, 2), np.nan)}
+        'cov_log': np.full((2, 2), np.nan), 'cov': np.full((2, 2), np.nan), \
+        'cov_full': np.full((3, 3), np.nan)}
     for key in ['alpha_std_rel', 'beta_std_rel', 'alpha_std', 'beta_std', 'corr_log', 'corr', \
             'alpha_ci_wald_lower', 'alpha_ci_wald_upper', 'beta_ci_wald_lower', 'beta_ci_wald_upper']:
         errors[key] = np.nan
@@ -1820,6 +1819,11 @@ def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None,
         'beta_ci_wald_upper': beta*np.exp(z*beta_std_rel),
         'v_init_std': np.sqrt(cov_params[2, 2]) if fit_v_init else 0.0
         })
+
+    # The full covariance of (v_init, ln alpha, ln beta), as fitAlphaBeta(fit_v_init=True) gives it
+    if fit_v_init:
+        order = [2, 0, 1]
+        errors['cov_full'] = cov_params[np.ix_(order, order)]
 
     return v_init_fit, alpha, beta, length_residuals, errors
 
@@ -5869,12 +5873,6 @@ if __name__ == "__main__":
         help="1-sigma uncertainty on the bulk density, in kg/m^3, folded into the mass error "
         "estimate when --errors is set. Default: the density is treated as exactly known.")
 
-    arg_parser.add_argument('--fitvinit', action="store_true", \
-        help="Fit the initial velocity together with alpha and beta, using the robust fit on the observed " \
-        "velocities and starting from the trajectory's. Use it for a meteor which is already decelerating " \
-        "at its first point, e.g. a fireball first seen below about 70 km. The speed at 180 km with " \
-        "gravity is also printed.")
-
     arg_parser.add_argument('--atmrescale', choices=['column', 'density'], default='column', \
         help="How the heights are mapped to the exponential atmosphere of the alpha-beta model. 'column' " \
         "(default) maps them to the height with the same air column above, and 'density' to the height " \
@@ -6249,8 +6247,7 @@ if __name__ == "__main__":
                     for v0, a, b in zip(v0_draws[is_valid], alpha_draws[is_valid], beta_draws[is_valid])])
                 vel_lo, vel_hi = np.percentile(vel_draws, [15.865, 84.135], axis=0)
                 ax_ab.fill_betweenx(ht_arr/1000, vel_lo/1000, vel_hi/1000, color='k', alpha=0.15, \
-                    zorder=1, label=(r"1$\sigma$ ($v_0$, $\alpha$, $\beta$) band" if cml_args.fitvinit \
-                    else r"1$\sigma$ ($\alpha$, $\beta$) band"))
+                    zorder=1, label=r"1$\sigma$ ($v_0$, $\alpha$, $\beta$) band")
 
         ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
 
