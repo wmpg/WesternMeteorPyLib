@@ -666,6 +666,31 @@ def testFitAlphaBetaLag():
 
 
 
+def testFitAlphaBetaLagGravity():
+    """ The distance gained from gravity along the path biases the fit of the lag, as the model has no
+        gravity, and taking it out recovers the true parameters.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 11)
+
+    # Add the distance gained from gravity along the path of the synthetic meteor
+    gravity_length = 0.5*9.81*np.sin(SLOPE)*time_data**2
+    length_gravity = length_data + gravity_length
+
+    # Without the correction the initial velocity is biased by more than 1 m/s
+    v_init_biased, _, _, _ = fitAlphaBetaLag(time_data, length_gravity, ht_data, V_INIT_TRUE)
+    assert abs(v_init_biased - V_INIT_TRUE) > 1.0
+
+    # With the gravity taken out the true parameters are recovered
+    v_init, alpha, beta, _ = fitAlphaBetaLag(time_data, length_gravity - gravity_length, ht_data, \
+        V_INIT_TRUE)
+
+    _assertClose(alpha, ALPHA_TRUE, 0.05, "alpha (lag, gravity taken out)")
+    _assertClose(beta, BETA_TRUE, 0.05, "beta (lag, gravity taken out)")
+    _assertClose(v_init, V_INIT_TRUE, 0.001, "v_init (lag, gravity taken out)")
+
+
+
 def testFitAlphaBetaLagErrors():
     """ The uncertainties of the fit of the lag should cover the true values, and be large for a meteor
         which does not decelerate.
@@ -1712,6 +1737,7 @@ if __name__ == "__main__":
         testFitAlphaBetaRobust,
         testFitAlphaBetaSmoothedVelocities,
         testFitAlphaBetaLag,
+        testFitAlphaBetaLagGravity,
         testFitAlphaBetaLagErrors,
         testFitAlphaBetaErrorEstimationRejectsQ4,
         testFitAlphaBetaErrorEstimationRejectsBadCi,

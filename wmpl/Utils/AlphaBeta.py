@@ -1307,7 +1307,8 @@ def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None,
     Arguments:
         time_data: [ndarray] Time of every point (s), on the same time scale for all stations.
         length_data: [ndarray] Distance along the path of every point, from a common reference (m),
-            e.g. ObservedPoints.state_vect_dist.
+            e.g. ObservedPoints.state_vect_dist. The distance gained from gravity along the path should be
+            taken out (Trajectory.gravityLengthAlongPath()), as the model has no gravity.
         ht_data: [ndarray] Height of every point, rescaled to the exponential atmosphere of the alpha-beta
             model (m), see rescaleHeightToExponentialAtmosphere().
         v_init: [float] Initial velocity (m/s). The starting point of the fit if fit_v_init is True.
@@ -5581,6 +5582,14 @@ if __name__ == "__main__":
 
         # Rescale the heights to the exponential atmosphere used by alpha-beta
         ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, traj.jdt_ref)
+
+        # Take out the distance gained from gravity along the path, as the solver does for the lag, because
+        #   the alpha-beta model has no gravity
+        try:
+            length_data = length_data - traj.gravityLengthAlongPath(traj.observations, time_data)
+
+        except AttributeError:
+            print("NOTE: The trajectory has no gravity information, the gravity along the path is ignored")
 
         # Fit alpha-beta and the initial velocity directly to the lag, starting also from the Q4 fit of the
         #   observed velocities
