@@ -129,9 +129,10 @@ over the observed part (`wmpl.Utils.DragVelocity`). This takes about 30 ms. If t
 points or the fit fails, the Jacchia (1955) model of the length is fitted instead. The speeds are kept in the
 trajectory as `traj.gravity_vel`.
 
-As gravity along the path speeds the meteor up, the length it gained from it, `g_along*t^2/2`, is taken
-off the lengths before the initial velocity is fitted to them, so the initial velocity is the speed at the
-beginning.
+Gravity along the path speeds the meteor up, and the lengths keep the length it gained from it,
+`g_along*t^2/2`, as they are the real distances along the path (DragFit and MetSim model it). It is taken off
+before the initial velocity is fitted to the lengths, so the initial velocity is the speed at the beginning,
+and off the lag, so the lag is the deceleration by the air only.
 
 The drop starts at the first time of the used stations (`traj.gravity_t0`), so a station which the solver
 does not use does not change the solution.

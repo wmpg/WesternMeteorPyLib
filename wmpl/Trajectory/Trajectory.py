@@ -2950,6 +2950,10 @@ def gravityDropVectors(state_vect, radiant_eci, t_drop, gravity_vel, t0, gravity
 
     t_drop = np.atleast_1d(np.asarray(t_drop, dtype=np.float64))
 
+    # There is no drop at the origin
+    if np.all(t_drop == 0):
+        return np.zeros((len(t_drop), 3))
+
     # Tabulate the drop between the earliest and the latest time, with the origin among the times
     time_grid = np.union1d(np.linspace(min(np.min(t_drop), 0.0), max(np.max(t_drop), 0.0), \
         GRAVITY_DROP_POINTS), [0.0])
@@ -3866,6 +3870,10 @@ class Trajectory(object):
             print('Using automated velocity estimation with the sliding fit...')
             return None, None, None
 
+        # Take off the length gained from gravity along the path, so the slope is the velocity at the beginning
+        all_state_vect_dists = np.array(all_state_vect_dists) \
+            - self.gravityLengthAlongPath(observations, np.array(all_times))
+
         # Fit a line through the time vs. state vector distance data
         line_params, line_cov = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
             sigma=all_inv_weights)
@@ -3919,14 +3927,16 @@ class Trajectory(object):
                     obs.v_init_stddev = None
 
                 # Calculate lag
-                obs.lag = obs.length - lineFunc(obs.time_data, *obs.lag_line)
+                obs.lag = obs.length - self.gravityLengthAlongPath(observations, obs.time_data) \
+                    - lineFunc(obs.time_data, *obs.lag_line)
 
             else:
                 
                 obs.lag_line = list(velocity_fit)
 
                 # Calculate lag
-                obs.lag = obs.state_vect_dist - lineFunc(obs.time_data, *obs.lag_line)
+                obs.lag = obs.state_vect_dist - self.gravityLengthAlongPath(observations, obs.time_data) \
+                    - lineFunc(obs.time_data, *obs.lag_line)
 
 
             # Initial velocity is the slope of the fitted line
@@ -4316,7 +4326,8 @@ class Trajectory(object):
 
                 # Calculate the lag for every site
                 for obs in observations:
-                    obs.lag = obs.state_vect_dist - lineFunc(obs.time_data, *velocity_fit)
+                    obs.lag = obs.state_vect_dist - self.gravityLengthAlongPath(observations, obs.time_data) \
+                        - lineFunc(obs.time_data, *velocity_fit)
 
 
 
@@ -4405,12 +4416,18 @@ class Trajectory(object):
 
         Return:
             (time_rel, vel): [tuple] Times, as the times of the observations (s), and speeds (m/s), from the
-                first to the last time of the used points.
+                first to the last time of the used points. None if there are fewer than 4 used points or the
+                speeds cannot be fitted, in which case the meteor is dropped vertically (see
+                applyGravityDrop).
         """
 
         used = [obs for obs in observations if not obs.ignore_station] or observations
         time_all = np.concatenate([obs.time_data[obs.ignore_list == 0] for obs in used])
         dist_all = np.concatenate([obs.state_vect_dist[obs.ignore_list == 0] for obs in used])
+
+        # The Jacchia model has 4 parameters
+        if len(time_all) < 4:
+            return None
 
         time_rel = np.linspace(np.min(time_all), np.max(time_all), GRAVITY_DROP_POINTS)
 
@@ -4437,12 +4454,15 @@ class Trajectory(object):
             (a1, a2, v_init, _), _ = scipy.optimize.curve_fit(jacchiaLengthFunc, time_all, dist_drag, p0=p0, \
                 maxfev=10000)
 
-        except RuntimeError:
+        except (RuntimeError, TypeError, ValueError):
             a1, a2, v_init = 0.0, 0.0, self.v_init
 
         # Add the speed gained from gravity along the path to the speed decelerated by the air
         t0 = dropTimeOrigin(observations)
         vel = jacchiaVelocityFunc(time_rel, a1, a2, v_init) + self.gravityAlongPath()*(time_rel - t0)
+
+        if not np.all(np.isfinite(vel)):
+            return None
 
 
         return time_rel, vel
@@ -7355,6 +7375,12 @@ class Trajectory(object):
             if self.estimate_timing_vel or self.gravity_correction:
 
 
+                # Fit the speeds of the meteor against time in this pass, with which the gravity pass drops it.
+                #   In a Monte Carlo run they are fitted to the observations the velocity was computed on, before
+                #   switching back to the noisy ones, which have the same times
+                if self.gravity_correction:
+                    self.gravity_vel = self.calcGravityVelocity(self.observations)
+
                 # If doing a Monte Carlo run, switch back to noisy observations
                 if _mc_run and (_orig_obs is not None):
 
@@ -7364,11 +7390,6 @@ class Trajectory(object):
 
                     # Switch back to noisy observations, but with updated timing
                     self.observations = self.obs_noisy
-
-
-                # Fit the speeds of the meteor against time in this pass, with which the gravity pass drops it
-                if self.gravity_correction:
-                    self.gravity_vel = self.calcGravityVelocity(self.observations)
 
                 # Make a copy of observations
                 temp_observations = copy.deepcopy(self.observations)

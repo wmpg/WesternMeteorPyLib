@@ -18,8 +18,9 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import applyGravityDrop, solutionDropTimeOrigin
-from wmpl.Trajectory.Tests.SyntheticTrajectory import GravityDragMeteor, observeMeteor, JDT_REF
+from wmpl.Trajectory.Trajectory import applyGravityDrop, gravityDropVectors, solutionDropTimeOrigin
+from wmpl.Trajectory.Tests.SyntheticTrajectory import GravityDragMeteor, observeMeteor, observeStraightMeteor, \
+    JDT_REF
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 from wmpl.Utils.Math import angleBetweenVectors, vectMag
 
@@ -109,10 +110,70 @@ def testSolutionsWithoutTheSpeedsDropVertically():
 
 
 
+def testMonteCarloRunsWithTheGravityDrop():
+    """ Check that the Monte Carlo runs, which switch between the original and the noisy observations, fit the
+        speeds of the drop and solve.
+    """
+
+    traj, _, _ = observeStraightMeteor(noise=1e-5, duration=2.5, gravity_drop=True, gravity_correction=True, \
+        monte_carlo=True, mc_runs=2, mc_cores=1, mc_runs_max=4, filter_picks=False, estimate_timing_vel=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj = traj.run()
+
+    assert traj is not None
+    assert traj.gravity_vel is not None
+
+
+
+def testTheLagOfAMeteorWithoutDragIsZero():
+    """ Check that the lag is the deceleration by the air only, without the length gained from gravity along
+        the path, which the lengths have, so a meteor moving under gravity without drag has no lag.
+    """
+
+    traj, _, _ = observeStraightMeteor(noise=0.0, duration=5.0, v_init=15000.0, elevation=60.0, \
+        gravity_drop=True, gravity_correction=True, filter_picks=False, calc_orbit=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj = traj.run()
+
+    for obs in traj.observations:
+        assert np.max(np.abs(obs.lag)) < 1.0
+
+
+
+def testTheDropAtItsOriginIsZero():
+    """ Check that the drop at the origin alone is zero, as a table of one time cannot be integrated. """
+
+    gravity_vel = (np.array([0.0, 1.0]), np.array([15000.0, 14000.0]))
+    drop = gravityDropVectors(np.array([0.0, 0.0, 6.45e6]), np.array([0.0, 0.6, 0.8]), [0.0], gravity_vel, 0.0, \
+        1.0)
+
+    assert np.all(drop == 0)
+
+
+
+def testNoUsedPointsGiveNoSolution():
+    """ Check that a solution in which every station is ignored for too few overlapping points ends without a
+        trajectory, as without the gravity drop, rather than failing to fit the speeds of the drop.
+    """
+
+    meteor = GravityDragMeteor(13000.0, 210.0, 60.0, 50.0, 10.0, ht_beg=85000.0)
+    traj = observeMeteor(meteor, noise=0.0, fps=0.7, seed=0, gravity_correction=True, filter_picks=False, \
+        calc_orbit=False, estimate_timing_vel=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj = traj.run()
+
+    assert traj is None
+
+
+
 if __name__ == "__main__":
 
     testDeceleratingFireball()
     testShallowFireball()
     testSolutionsWithoutTheSpeedsDropVertically()
+    testMonteCarloRunsWithTheGravityDrop()
+    testTheLagOfAMeteorWithoutDragIsZero()
+    testTheDropAtItsOriginIsZero()
+    testNoUsedPointsGiveNoSolution()
 
     print("All tests passed.")
