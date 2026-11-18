@@ -190,17 +190,20 @@ class DragFit(object):
         self.ramp_len = np.full(n_knots, (self.len_last - self.len_first)/n_knots)
         self.pen_weight = np.ones(n_knots)
 
-        # Add a ramp without penalty below the height of every fragmentation within the observed part
+        # Add a ramp without penalty below the height of every fragmentation within the observed part. The
+        #   heights are compared with those of the used points of the solution, which are on the path dropped
+        #   by gravity, as the line is only dropped after the first fit
         self.knot_hts = np.array([] if knot_hts is None else knot_hts, dtype=float)
         self.knot_spread = knot_spread
         if len(self.knot_hts):
 
-            knot_beg, knot_len = self._knotRamps()
-            inside = (knot_beg > self.len_first) & (knot_beg < self.len_last)
-            self.knot_hts = self.knot_hts[inside]
+            ht_used = np.concatenate([obs.model_ht[obs.ignore_list == 0] for obs in traj.observations \
+                if not obs.ignore_station])
+            self.knot_hts = self.knot_hts[(self.knot_hts < np.max(ht_used)) & (self.knot_hts > np.min(ht_used))]
 
-            self.ramp_beg = np.append(self.ramp_beg, knot_beg[inside])
-            self.ramp_len = np.append(self.ramp_len, knot_len[inside])
+            knot_beg, knot_len = self._knotRamps()
+            self.ramp_beg = np.append(self.ramp_beg, knot_beg)
+            self.ramp_len = np.append(self.ramp_len, knot_len)
             self.pen_weight = np.append(self.pen_weight, np.zeros(len(self.knot_hts)))
             n_knots += len(self.knot_hts)
 
@@ -588,7 +591,8 @@ class DragFit(object):
             *np.diff(self.len_grid[obs_slice]))])
 
         # Take the ballistic coefficient at the first and the last point outside the observed part
-        log_k_grid = self._logK(self.params, self.len_grid)
+        # Keep K at its value at the last point below it, also if a ramp has not ended there
+        log_k_grid = self._logK(self.params, np.minimum(self.len_grid, self.len_last))
         if not self.drag_above:
             log_k_grid[:self.i_first] = -np.inf
 
@@ -1249,7 +1253,10 @@ def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
     log_k_std = np.hypot(k_last[0][1][0], log_k_sys)
 
     # Keep the largest difference of K of an acceptable spread from the jumps along the trajectory
-    len_arr = np.union1d(fits[0].len_grid, [fits[0].len_first, fits[0].len_last])
+    # Take K on the grid and at the beginnings and ends of the ramps of all fits, so the envelope does not
+    #   miss a jump between the nodes of the grid
+    ramp_ends = np.concatenate([np.r_[fit.ramp_beg, fit.ramp_beg + fit.ramp_len] for fit in fits])
+    len_arr = np.union1d(fits[0].len_grid, np.r_[fits[0].len_first, fits[0].len_last, ramp_ends])
     log_k_arr = np.log([fit.ballisticCoeffAtLength(len_arr)[0] for fit in fits])
     fits[0].log_k_spread = (len_arr, np.max(np.abs(log_k_arr[delta_chi2 <= 4.0] - log_k_arr[0]), axis=0))
 
