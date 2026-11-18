@@ -181,8 +181,9 @@ cdef class FragmentCy:
         # Identifier of the fragment
         self.id = 0
 
-        # Reference to the simulation constants, kept in the __dict__ as 'const' is a keyword of Cython
-        self.__dict__['const'] = None
+        # Reference to the simulation constants, kept in the __dict__ as 'const' is a keyword of Cython (the
+        #   __dict__ is reached through the Python object, as Cython 3.3 does not allow self.__dict__)
+        (<object>self).__dict__['const'] = None
 
         # Shape-density coefficient, masses, density and ablation coefficient
         self.K = 0
@@ -287,7 +288,7 @@ cdef class FragmentCy:
         """
 
         # Keep the reference to the simulation constants
-        self.__dict__['const'] = sim_const
+        (<object>self).__dict__['const'] = sim_const
 
         # Set the initial mass, height, density, velocity and the coefficients
         self.m = m
@@ -321,7 +322,7 @@ cdef class FragmentCy:
         """ Update the value of the shape-density coefficient. """
 
         # Compute the coefficient from the drag coefficient, the shape factor and the density
-        self.K = self.gamma*self.__dict__['const'].shape_factor*pow(self.rho, -2/3.0)
+        self.K = self.gamma*(<object>self).__dict__['const'].shape_factor*pow(self.rho, -2/3.0)
 
 
 
@@ -337,7 +338,7 @@ cdef class FragmentCy:
         # Take the C fields in the order of the attributes of the Python class
         frag_dict = {
             'id': self.id,
-            'const': self.__dict__.get('const'),
+            'const': (<object>self).__dict__.get('const'),
             'K': self.K,
             'm_init': self.m_init,
             'm': self.m,
@@ -376,7 +377,7 @@ cdef class FragmentCy:
             }
 
         # Add the attributes added by callers
-        frag_dict.update(self.__dict__)
+        frag_dict.update((<object>self).__dict__)
 
         return frag_dict
 
@@ -432,7 +433,7 @@ cdef class FragmentCy:
         child.complex_id = self.complex_id
 
         # Share the reference to the constants, and copy the attributes added by callers
-        child.__dict__ = dict(self.__dict__)
+        (<object>child).__dict__.update((<object>self).__dict__)
 
         # The child starts without grains of its own to release, and does not share the list of the parent
         child.erosion_bin_counts = None
