@@ -1771,7 +1771,7 @@ def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None,
     ### Estimate the uncertainties from the covariance of the least squares fit ###
 
     n_params = len(best_res.x)
-    errors = {'alpha': alpha, 'beta': beta, 'v_init': v_init_fit, 'ci': ci, \
+    errors = {'alpha': alpha, 'beta': beta, 'v_init': v_init_fit, 'ci': ci, 'v_init_std': np.nan, \
         'cov_log': np.full((2, 2), np.nan), 'cov': np.full((2, 2), np.nan), \
         'cov_full': np.full((3, 3), np.nan)}
     for key in ['alpha_std_rel', 'beta_std_rel', 'alpha_std', 'beta_std', 'corr_log', 'corr', \
@@ -5837,6 +5837,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     from wmpl.Utils.Pickling import loadPickle
+    from wmpl.Trajectory.Trajectory import dropTimeOrigin
 
 
 
@@ -5986,18 +5987,21 @@ if __name__ == "__main__":
         ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, traj.jdt_ref, \
             method=cml_args.atmrescale)
 
-        # Take out the distance gained from gravity along the path, as the solver does for the lag, because
-        #   the alpha-beta model has no gravity
+        # Take out the distance and the speed gained from gravity along the path, as the solver does for the
+        #   lag, because the alpha-beta model has no gravity
         try:
             length_data = length_data - traj.gravityLengthAlongPath(traj.observations, time_data)
+            vel_data_nograv = vel_data - traj.gravityAlongPath()*(time_data \
+                - dropTimeOrigin(traj.observations))
 
         except AttributeError:
             print("NOTE: The trajectory has no gravity information, the gravity along the path is ignored")
+            vel_data_nograv = vel_data
 
         # Fit alpha-beta and the initial velocity directly to the lag, starting also from the Q4 fit of the
         #   observed velocities
         print("Fitting alpha-beta to the lag...")
-        x0_alpha_beta = [fitAlphaBeta(vel_data, ht_data_rescaled, v_init=traj.v_init)[1:]]
+        x0_alpha_beta = [fitAlphaBeta(vel_data_nograv, ht_data_rescaled, v_init=traj.v_init)[1:]]
         if cml_args.errors:
             v_init, alpha, beta, lag_residuals, fit_errors = fitAlphaBetaLag(time_data, length_data, \
                 ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta, estimate_errors=True)
@@ -6067,7 +6071,7 @@ if __name__ == "__main__":
 
         # Print the entry velocity, the model speed at the first point and the trajectory's velocity
         print("Velocities:")
-        v_init_std = fit_errors['v_init_std'] if (fit_errors is not None) else np.nan
+        v_init_std = fit_errors.get('v_init_std', np.nan) if (fit_errors is not None) else np.nan
         print("  V_e, alpha-beta entry velocity (asymptote above the atmosphere, without gravity)")
         print("                                             = {:.3f}{:s} km/s (fitted to the lag)".format(
             v_init/1000, " +/- {:.3f}".format(v_init_std/1000) if np.isfinite(v_init_std) else ""))
@@ -6081,7 +6085,8 @@ if __name__ == "__main__":
 
         # Check if the single-body model describes the meteor, from the residuals against the observed
         #   velocities by height
-        bands, trend = alphaBetaResidualTrend(vel_data, ht_data_rescaled, v_init, alpha, beta, ht_label=ht_data)
+        bands, trend = alphaBetaResidualTrend(vel_data_nograv, ht_data_rescaled, v_init, alpha, beta, \
+            ht_label=ht_data)
         print("Model minus observed velocities by height band (median, z): " + "; ".join(
             "{:.1f}-{:.1f} km {:+.0f} m/s ({:+.1f})".format(b[0]/1000, b[1]/1000, b[3], b[4]) for b in bands))
         if trend:
@@ -6154,6 +6159,12 @@ if __name__ == "__main__":
         print("Gamma*A      = {:5.2f}".format(cml_args.ga))
         print()
         print("Dynamic mass = {:5.3f} kg".format(dyn_mass))
+
+        # The deceleration of a fit at a bound is not constrained by the data
+        if alphaBetaBoundWarnings(alpha, beta):
+            print("NOTE: alpha or beta are at a bound of the fit, so the deceleration and the dynamic mass are "
+                "not constrained by the data")
+
         print("-----------------------------------")
 
         ### ###

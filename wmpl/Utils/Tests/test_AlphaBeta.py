@@ -716,6 +716,11 @@ def testFitAlphaBetaLagErrors():
         vel_end=v_final, estimate_errors=True, cov_log=errors['cov_log'])
     assert np.isfinite(mass_errors['m_init_std_rel'])
 
+    # Without more points than parameters the uncertainties are NaN, with all keys present
+    _, _, _, _, errors_few = fitAlphaBetaLag(time_data[:3], length_data[:3], ht_data[:3], V_INIT_TRUE, \
+        estimate_errors=True)
+    assert np.isnan(errors_few['v_init_std']) and np.all(np.isnan(errors_few['cov_full']))
+
     # A meteor which does not decelerate leaves beta unconstrained
     length_const = V_INIT_TRUE*time_data + np.random.RandomState(3).normal(0, 20.0, len(time_data))
     _, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_const, ht_data, V_INIT_TRUE, \
