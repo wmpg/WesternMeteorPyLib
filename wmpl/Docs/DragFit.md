@@ -107,6 +107,7 @@ last 20% of the points and predicting them from the rest gives errors of 233 m a
 | `-a`, `--dragabove` | Keep the ballistic coefficient of the first point above the beginning, instead of moving without drag. |
 | `-g`, `--ga` | The product of the drag coefficient Gamma and the shape factor A, assumed for the dynamic mass. 0.78 by default. |
 | `-d`, `--dens` | The bulk density assumed for the dynamic mass (kg/m³). 3500 by default. |
+| `-f`, `--fragheights` | Heights of the fragmentations (km), e.g. those of the flares, where `K` can jump without penalty. The spread of the fragmentations is then scanned, and the uncertainty of `K` and of the dynamic mass in the table and the plot includes it. |
 
 `python -m wmpl.Utils.SampleTrajectoryPositions traj.pickle beg end step [options]`
 
@@ -254,6 +255,18 @@ Keep in mind:
   ramp, often a few km below the real break, so the dynamic pressure at the start of the growth
   tends to overestimate the strength. Steps closer than a segment cannot be separated, and growths
   by less than about 20% (a mass loss below about 40%) are not detectable.
+- **Known fragmentations can be given.** If the heights of the fragmentations are known, e.g. from the
+  flares, `-f` (or `knot_hts`) lets `K` jump there without penalty. This matters most when the last
+  fragmentation is close to the end: the smoothed ramp then overestimates `K` at the last point and
+  underestimates the final dynamic mass. On 165 MetSim fireballs with 2 or 3 fragmentations, the last
+  one 1.5 to 9 km above the last point, the median error of `K` at the last point went from +8-12% to
+  -3 to +0.5%, and `K` was within 10% of the truth in 61-76% of them instead of 31-44%.
+- **How spread the fragmentation was is not known.** The motion alone does not tell a jump from a
+  fragmentation spread over a few km, so with `-f` the fit is repeated with the growth spread below
+  the heights, in steps of 250 m down to the last point, and the farthest `K` at the last point among
+  the spreads which fit within `Delta chi2 <= 4` is added to its uncertainty. On the same 165
+  fireballs, the uncertainty of the fit alone covered the true `K` in 61% (1 sigma) and 81% (2 sigma)
+  of them, and with the spread in 86% and 96%.
 - **K cannot decrease.** A change of shape that lowers the drag cannot be followed.
 - **The centroid is not the leading fragment.** After a large fragmentation the measured positions
   follow the centroid of the luminous cloud, which can lag the leading fragment and inflate `K`.

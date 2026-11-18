@@ -32,6 +32,13 @@ beginning of the dark flight. Ablation essentially stops below about 3 km/s, so 
 exact. A meteor which ends faster probably still ablates below its end, but letting K grow there by
 single-body ablation did not predict the hidden ends of real fireballs better.
 
+A fragmentation makes K jump, which the penalty on the growth of K spreads over the segments around it. If the
+heights of the fragmentations are known, e.g. from the flares, K can jump at them without penalty. How
+spread the last fragmentation was below its height is not fixed by the motion alone, so spreadScan() also fits
+the growth spread below the heights, the same spread for all of them, over a range of spreads, and the
+farthest K at the last point among those which fit within Delta chi2 <= 4 is taken as its systematic
+uncertainty.
+
 Gravity bends the path of the meteor by the angle theta, dtheta/dt = g_perp/v, where g_perp is the component
 of gravity perpendicular to the path. Drag damps the velocity gained from gravity in the same way as the rest
 of the velocity, so the bending grows quickly as the meteor slows down. The model is only computed until the
@@ -125,7 +132,7 @@ def usedPoints(traj):
 
 class DragFit(object):
     def __init__(self, traj, n_knots=None, h_top=200000.0, penalty=1.0, drag_above=False, max_bending=5.0, \
-        max_vel_growth=0.1):
+        max_vel_growth=0.1, knot_hts=None, knot_spread=0.0):
         """ Fit the drag model to the lengths and times of the used points of the given trajectory.
 
         Arguments:
@@ -146,6 +153,13 @@ class DragFit(object):
             max_vel_growth: [float] Largest relative growth of the velocity above the beginning of the
                 observed part, only used if drag_above is True. The model is not computed further. 0.1 by
                 default.
+            knot_hts: [list] Heights of the fragmentations (m), as given by the trajectory solution, e.g.
+                those of the flares. The ballistic coefficient can jump without penalty at each one within
+                the observed part, between the heights of the used points of the solution, which are on the
+                path dropped by gravity. None by default.
+            knot_spread: [float] Height below each of knot_hts over which the ballistic coefficient grows
+                without penalty (m). 0 by default, for a jump, which takes one step of the grid of the
+                observed part (a thousandth of its length).
         """
 
         self.traj = traj
@@ -175,9 +189,30 @@ class DragFit(object):
         if n_knots is None:
             n_knots = int(np.clip(len(self.len_data)/25, 3, 15))
 
-        self.n_knots = n_knots
         self.ramp_beg = np.linspace(self.len_first, self.len_last, n_knots + 1)[:-1]
-        self.ramp_len = (self.len_last - self.len_first)/n_knots
+        self.ramp_len = np.full(n_knots, (self.len_last - self.len_first)/n_knots)
+        self.pen_weight = np.ones(n_knots)
+
+        # Add a ramp without penalty below every fragmentation between the heights of the used points
+        self.knot_hts = np.array([] if knot_hts is None else knot_hts, dtype=float)
+        self.knot_spread = knot_spread
+        if len(self.knot_hts):
+
+            ht_used = np.concatenate([obs.model_ht[obs.ignore_list == 0] for obs in traj.observations \
+                if not obs.ignore_station])
+            inside = (self.knot_hts < np.max(ht_used)) & (self.knot_hts > np.min(ht_used))
+            self.knot_hts = self.knot_hts[inside]
+
+            knot_beg, knot_len = self._knotRamps()
+            self.ramp_beg = np.append(self.ramp_beg, knot_beg)
+            self.ramp_len = np.append(self.ramp_len, knot_len)
+            self.pen_weight = np.append(self.pen_weight, np.zeros(len(self.knot_hts)))
+            n_knots += len(self.knot_hts)
+
+        self.n_knots = n_knots
+
+        # The uncertainty of ln K from the spread of the fragmentations, set by spreadScan()
+        self.log_k_spread = None
 
         # Fit the model and compute the solution along the whole line
         self._fit(penalty)
@@ -189,6 +224,10 @@ class DragFit(object):
         if self.gravity_correction:
 
             self._computeGravityDrop()
+
+            # Move the ramps to the heights of the fragmentations on the dropped path
+            self.ramp_beg[self.pen_weight == 0], self.ramp_len[self.pen_weight == 0] = self._knotRamps()
+
             self._fit(penalty, params_init=self.params)
             self._checkFit()
             self._solveFull()
@@ -207,6 +246,30 @@ class DragFit(object):
         if (not np.isfinite(self.res_rms)) or (abs(self.params[0] - self.time_data[0]) > max(1.0, duration)):
             raise ValueError("The drag model could not be fitted, the lengths and times of the points of " \
                 + "the trajectory are not consistent")
+
+
+
+    def _knotRamps(self):
+        """ Compute the ramps below the heights of the fragmentations, on the descending part of the current
+            path.
+
+        Return:
+            (knot_beg, knot_len):
+                - knot_beg: [ndarray] Lengths where the ramps begin (m).
+                - knot_len: [ndarray] Lengths of the ramps (m), at least one step of the grid of the observed
+                    part, so the motion, which is integrated on that grid, follows the same K as the one
+                    reported.
+        """
+
+        i_low = np.argmin(self.ht_grid)
+        ht_desc, len_desc = self.ht_grid[:i_low + 1][::-1], self.len_grid[:i_low + 1][::-1]
+        knot_beg = np.interp(self.knot_hts, ht_desc, len_desc)
+        knot_end = np.interp(self.knot_hts - self.knot_spread, ht_desc, len_desc)
+
+        # Take the step of the grid of the observed part
+        len_step = (self.len_last - self.len_first)/(self.i_last - self.i_first)
+
+        return knot_beg, np.maximum(knot_end - knot_beg, len_step)
 
 
 
@@ -377,7 +440,7 @@ class DragFit(object):
         len_model = np.where(self.time_data > time[-1], len_arr[-1] + vel[-1]*(self.time_data - time[-1]), \
             len_model)
 
-        return np.concatenate([len_model - self.len_data, w_pen*params[3:]])
+        return np.concatenate([len_model - self.len_data, w_pen*self.pen_weight*params[3:]])
 
 
 
@@ -535,7 +598,8 @@ class DragFit(object):
             *np.diff(self.len_grid[obs_slice]))])
 
         # Take the ballistic coefficient at the first and the last point outside the observed part
-        log_k_grid = self._logK(self.params, self.len_grid)
+        # Keep K at its value at the last point below it, also if a ramp has not ended there
+        log_k_grid = self._logK(self.params, np.minimum(self.len_grid, self.len_last))
         if not self.drag_above:
             log_k_grid[:self.i_first] = -np.inf
 
@@ -912,7 +976,8 @@ class DragFit(object):
 
     def ballisticCoeffAtLength(self, len_arr):
         """ Compute the ballistic coefficients at the given lengths along the trajectory, and their
-            uncertainties estimated from the fit.
+            uncertainties estimated from the fit, and also from the spread of the fragmentations if the fit
+            comes from spreadScan().
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -942,6 +1007,10 @@ class DragFit(object):
         ramps = np.clip((len_clip[:, None] - self.ramp_beg[None, :])/self.ramp_len, 0.0, 1.0)
         grad = np.hstack([np.zeros((len(len_arr), 2)), np.ones((len(len_arr), 1)), ramps])
         log_k_std = self._paramStd(grad)
+
+        # Add the uncertainty from the spread of the fragmentations
+        if self.log_k_spread is not None:
+            log_k_std = np.hypot(log_k_std, np.interp(len_clip, *self.log_k_spread))
 
         # The coefficient is exactly zero above the first point without drag
         log_k_std[k_arr == 0] = 0.0
@@ -1102,17 +1171,15 @@ class DragFit(object):
             bulk_density))
         out.append("")
 
-        # Compute the uncertainties of the growth of K in every segment
-        d_std = self._paramStd(np.eye(len(self.params))[3:])
-
         out.append(" Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, " \
             + "Growth, Signif")
         out.append(("    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m{:s}/kg),   (m{:s}/kg), " \
             + "  (%),    (x), (sigma)").format(sq, sq))
 
-        for i in range(self.n_knots):
+        for n, i in enumerate(np.argsort(self.ramp_beg)):
 
-            len_seg = np.array([self.ramp_beg[i], self.ramp_beg[i] + self.ramp_len])
+            # Clip the segment at the last point, below which K does not grow
+            len_seg = np.array([self.ramp_beg[i], min(self.ramp_beg[i] + self.ramp_len[i], self.len_last)])
             ht_seg = self.heightAtLength(len_seg)
             time_seg = self.timeAtLength(len_seg)
             vel_seg = self.velocityAtLength(len_seg)
@@ -1122,24 +1189,106 @@ class DragFit(object):
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
             dyn_pres = rho_beg*vel_seg[0]**2
 
-            # Compute the significance of the growth of K in the segment
-            if d_std[i] > 0:
-                signif = self.params[3 + i]/d_std[i]
+            # Compute the growth of K within the segment from all the ramps which overlap it, and its
+            #   significance
+            ramps = np.clip((len_seg[:, None] - self.ramp_beg[None, :])/self.ramp_len, 0.0, 1.0)
+            grad = np.r_[np.zeros(3), ramps[1] - ramps[0]]
+            log_growth = grad.dot(self.params)
+            growth = np.exp(log_growth)
+            growth_std = self._paramStd(grad[None, :])[0]
+            if growth_std > 0:
+                signif = log_growth/growth_std
             else:
                 signif = 0.0
 
             out.append(("{:4d}, {:6.2f}, {:6.2f}, {:8.3f}, {:8.3f}, {:9.1f}, {:9.2e}, {:9.2e}, {:5.0f}, " \
-                + "{:6.2f}, {:6.1f}{:s}").format(i + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
+                + "{:6.2f}, {:6.1f}{:s}").format(n + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
                 vel_seg[0]/1000, dyn_pres/1000, k_seg[0], k_seg[1], 100*log_k_std[1], \
-                np.exp(self.params[3 + i]), signif, " *" if signif > 2 else ""))
+                growth, signif, " *" if signif > 2 else ""))
 
         out.append("The star * marks the segments where K grows significantly (more than 2 sigma). K std " \
             + "is the relative uncertainty of K at the segment end.")
         out.append("The final dynamic mass is the mass of the leading body at the last point for the " \
             + "assumed Gamma*A and density, m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is " \
             + "propagated.")
+        if len(self.knot_hts):
+            out.append("The segments which begin at the heights of the fragmentations have no penalty on " \
+                + "the growth of K.")
 
         return "\n".join(out)
+
+
+
+def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
+    """ Fit the drag model with the fragmentations as jumps and spread over a range of heights below them,
+        as how spread the last fragmentation was is not fixed by the motion alone. The spreads which fit as
+        well as the best one within Delta chi2 <= 4 are acceptable. The result is the fit with jumps, and the
+        largest difference of the ballistic coefficient at the last point of an acceptable spread from it is
+        taken as its systematic uncertainty. The largest difference along the whole trajectory is kept in the
+        returned fit as log_k_spread, a tuple of lengths (m) and differences of ln K, which its uncertainties
+        of K and of the dynamic mass then include.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+        knot_hts: [list] Heights of the fragmentations (m).
+
+    Keyword arguments:
+        spread_step: [float] Step of the spreads (m). 250 m by default.
+        spread_max: [float] Largest spread (m). None by default, down to the last point from the lowest
+            fragmentation within the observed part.
+        **kwargs: [dict] Keyword arguments for DragFit.
+
+    Return:
+        (fit, spreads, delta_chi2, log_k_last, log_k_std):
+            - fit: [DragFit object] Fit with the fragmentations as jumps.
+            - spreads: [ndarray] Spreads (m).
+            - delta_chi2: [ndarray] Delta chi2 of the fit with every spread from the best one.
+            - log_k_last: [ndarray] Logarithm of the ballistic coefficient at the last point for every spread.
+            - log_k_std: [float] Uncertainty of the logarithm of the ballistic coefficient at the last point
+                of the fit with jumps, from the fit and from the spread.
+    """
+
+    # Fit the jumps, and find how far below the lowest fragmentation the last point is
+    fits = [DragFit(traj, knot_hts=knot_hts, **kwargs)]
+    knots = fits[0].pen_weight == 0
+    if spread_max is None:
+        spread_max = 0.0
+        if np.any(knots):
+            spread_max = fits[0].heightAtLength(np.array([np.max(fits[0].ramp_beg[knots])]))[0] \
+                - fits[0].heightAtLength(np.array([fits[0].len_last]))[0]
+
+
+    # Fit the other spreads, if there are fragmentations within the observed part, in steps and ending with
+    #   the largest spread itself, so a range shorter than a step is also scanned
+    spreads = np.zeros(1)
+    if np.any(knots) and (spread_max > 0):
+        spreads = np.unique(np.r_[np.arange(0.0, spread_max, spread_step), spread_max])
+    fits += [DragFit(traj, knot_hts=knot_hts, knot_spread=spread, **kwargs) for spread in spreads[1:]]
+
+    # Compute the Delta chi2 of every spread, with the variance of the residuals of the best one, at least
+    #   (1 mm)^2 so an exact fit of noise-free lengths does not divide by zero
+    ssr = np.array([np.sum(fit.residuals**2) for fit in fits])
+    best = int(np.argmin(ssr))
+    n_dof = max(len(fits[best].len_data) - 3 - fits[best].n_knots, 1)
+    delta_chi2 = (ssr - ssr[best])/max(ssr[best]/n_dof, 1e-6)
+
+    # Take the largest difference of K at the last point of an acceptable spread from the jumps as its
+    #   systematic uncertainty
+    k_last = [fit.ballisticCoeffAtLength(np.array([fit.len_last])) for fit in fits]
+    log_k_last = np.log([k[0][0] for k in k_last])
+    log_k_sys = np.max(np.abs(log_k_last[delta_chi2 <= 4.0] - log_k_last[0]))
+    log_k_std = np.hypot(k_last[0][1][0], log_k_sys)
+
+    # Keep the largest difference of K of an acceptable spread from the jumps along the trajectory
+    # Take K on the grid and at the beginnings and ends of the ramps of all fits, so the envelope does not
+    #   miss a jump between the nodes of the grid
+    ramp_ends = np.concatenate([np.r_[fit.ramp_beg, fit.ramp_beg + fit.ramp_len] for fit in fits])
+    len_arr = np.union1d(fits[0].len_grid, np.r_[fits[0].len_first, fits[0].len_last, ramp_ends])
+    log_k_arr = np.log([fit.ballisticCoeffAtLength(len_arr)[0] for fit in fits])
+    fits[0].log_k_spread = (len_arr, np.max(np.abs(log_k_arr[delta_chi2 <= 4.0] - log_k_arr[0]), axis=0))
+
+
+    return fits[0], spreads, delta_chi2, log_k_last, log_k_std
 
 
 
@@ -1183,6 +1332,7 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
 
     # Plot the model, with the extrapolated parts dashed
     k_grid, log_k_std = drag_fit.ballisticCoeffAtLength(drag_fit.len_grid)
+    band_label = '1$\\sigma$' if drag_fit.log_k_spread is None else '1$\\sigma$, fit and spread'
     valid = np.isfinite(drag_fit.time_grid)
     observed = valid & (drag_fit.len_grid >= drag_fit.len_first) & (drag_fit.len_grid <= drag_fit.len_last)
     for sel, line_style, label in [(observed, 'solid', 'Model'), \
@@ -1218,7 +1368,7 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
         k_lo = np.exp(np.clip(log_k - log_std, log_min, log_max))
         k_hi = np.exp(np.clip(log_k + log_std, log_min, log_max))
 
-    ax_k.fill_betweenx(drag_fit.ht_grid[observed]/1000, k_lo, k_hi, color='0.7', label='1$\\sigma$', zorder=2)
+    ax_k.fill_betweenx(drag_fit.ht_grid[observed]/1000, k_lo, k_hi, color='0.7', label=band_label, zorder=2)
 
 
     # Show the growth of the ballistic coefficient in the observed part and the equivalent mass loss of a
@@ -1304,6 +1454,10 @@ if __name__ == "__main__":
         help='Bulk density in kg/m^3 used for computing the dynamic mass. Default is {:.0f} kg/m^3.'.format( \
         BULK_DENSITY))
 
+    arg_parser.add_argument('-f', '--fragheights', metavar='HT', type=float, nargs='+', \
+        help='Heights of the fragmentations in km, e.g. those of the flares, where the ballistic ' \
+        + 'coefficient can jump without penalty.')
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1314,9 +1468,31 @@ if __name__ == "__main__":
     dir_path, file_name = os.path.split(cml_args.traj_pickle_file)
     traj = loadPickle(dir_path, file_name)
 
-    # Fit the drag model
-    drag_fit = DragFit(traj, n_knots=cml_args.knots, drag_above=cml_args.dragabove)
+    # Fit the drag model, and scan the spread of the fragmentations if any are given
+    fit_kwargs = dict(n_knots=cml_args.knots, drag_above=cml_args.dragabove)
+    if cml_args.fragheights is None:
+        drag_fit = DragFit(traj, **fit_kwargs)
+    else:
+        drag_fit, spreads, delta_chi2, log_k_last, log_k_std = spreadScan(traj, \
+            1000*np.array(cml_args.fragheights), **fit_kwargs)
 
     print(drag_fit.summaryTable(gamma_a=cml_args.ga, bulk_density=cml_args.dens))
+
+    # Report the scan of the spread of the fragmentations
+    if cml_args.fragheights is not None:
+
+        print()
+        print("Spread of the fragmentations below their heights, acceptable (*) within Delta chi2 <= 4")
+        print(" Spread (km), Delta chi2, K last (m^2/kg)")
+        for spread, d_chi2, log_k in zip(spreads, delta_chi2, log_k_last):
+            print("  {:6.2f}{:s}    {:8.2f}      {:.3e}".format(spread/1000, "*" if d_chi2 <= 4 else " ", \
+                d_chi2, np.exp(log_k)))
+
+        # Split the uncertainty of K at the last point into the parts from the fit and from the spread
+        log_k_sys = np.interp(drag_fit.len_last, *drag_fit.log_k_spread)
+        log_k_fit = np.sqrt(max(log_k_std**2 - log_k_sys**2, 0.0))
+        print(("K at the last point: {:.3e} m^2/kg +/- {:.1f}% ({:.1f}% from the fit and {:.1f}% from the " \
+            + "spread, which the table above includes)").format(np.exp(log_k_last[0]), 100*log_k_std, \
+            100*log_k_fit, 100*log_k_sys))
 
     plotDragFit(drag_fit, gamma_a=cml_args.ga, bulk_density=cml_args.dens)
