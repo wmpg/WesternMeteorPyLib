@@ -1139,6 +1139,319 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
     return v_init, alpha, beta
 
 
+class AlphaBetaPath(object):
+    def __init__(self, length_data, ht_data, margin=0.3, n_grid=800):
+        """ Path of a meteor for integrating the alpha-beta velocity over time: the height along the path,
+            on a grid of distances which extends beyond the observed points on both sides, so that the
+            distance at a given time is defined also for a model which is faster or slower than the data.
+
+        Arguments:
+            length_data: [ndarray] Distance along the path of every point, from a common reference (m),
+                e.g. ObservedPoints.state_vect_dist.
+            ht_data: [ndarray] Height of every point, rescaled to the exponential atmosphere of the
+                alpha-beta model (m), see rescaleHeightToExponentialAtmosphere().
+
+        Keyword arguments:
+            margin: [float] Extension of the grid beyond the first and the last point, relative to the
+                length of the observed path. 0.3 by default.
+            n_grid: [int] Number of grid points between the first and the last point. 800 by default.
+        """
+
+        # Sort the points along the path and make the height decrease monotonically, as the rescaled
+        #   heights of points at almost the same distance can be out of order
+        sort_indices = np.argsort(length_data)
+        length_sorted = length_data[sort_indices]
+        ht_sorted = np.minimum.accumulate(ht_data[sort_indices])
+
+        # Extrapolate the height linearly beyond the first and the last point, from the slope of the
+        #   points at the ends, but not above the first or below the last height
+        span = length_sorted[-1] - length_sorted[0]
+        n_end = max(5, len(length_sorted)//10)
+        top_coeffs = np.polyfit(length_sorted[:n_end], ht_sorted[:n_end], 1)
+        bottom_coeffs = np.polyfit(length_sorted[-n_end:], ht_sorted[-n_end:], 1)
+
+        length_top = np.linspace(length_sorted[0] - margin*span, length_sorted[0], 50, endpoint=False)
+        length_mid = np.linspace(length_sorted[0], length_sorted[-1], n_grid)
+        length_bottom = np.linspace(length_sorted[-1], length_sorted[-1] + margin*span, 51)[1:]
+
+        ht_top = np.maximum(np.polyval(top_coeffs, length_top), ht_sorted[0])
+        ht_mid = np.interp(length_mid, length_sorted, ht_sorted)
+        ht_bottom = np.minimum(np.polyval(bottom_coeffs, length_bottom), ht_sorted[-1])
+
+        # Store the grid of distances and the normalized heights, which must not be negative
+        self.length_grid = np.concatenate([length_top, length_mid, length_bottom])
+        ht_grid = np.minimum.accumulate(np.concatenate([ht_top, ht_mid, ht_bottom]))
+        self.ht_normed_grid = np.maximum(ht_grid, 0.0)/HT_NORM_CONST
+
+
+
+    def times(self, alpha, beta, v_init, fast=True):
+        """ Time at which the alpha-beta model reaches every distance of the grid, from the first one.
+
+        Arguments:
+            alpha: [float] Ballistic coefficient.
+            beta: [float] Mass loss parameter.
+            v_init: [float] Initial velocity (m/s).
+
+        Keyword arguments:
+            fast: [bool] Passed to alphaBetaVelocityNormed(). True by default.
+
+        Return:
+            time_grid: [ndarray] Time at every distance of the grid (s).
+        """
+
+        # Velocity along the path, at least 1 m/s, as the meteor never stops in the model
+        vel_grid = v_init*alphaBetaVelocityNormed(self.ht_normed_grid, alpha, beta, fast=fast)
+        vel_grid = np.maximum(vel_grid, 1.0)
+
+        # Integrate dt = dl/v along the path with the trapezoidal rule
+        dt = 0.5*(1.0/vel_grid[1:] + 1.0/vel_grid[:-1])*np.diff(self.length_grid)
+
+        return np.concatenate([[0.0], np.cumsum(dt)])
+
+
+
+    def lengths(self, time_data, alpha, beta, v_init, t0=None, length_data=None, fast=True):
+        """ Distance along the path of the alpha-beta model at the given times.
+
+        Arguments:
+            time_data: [ndarray] Times (s).
+            alpha: [float] Ballistic coefficient.
+            beta: [float] Mass loss parameter.
+            v_init: [float] Initial velocity (m/s).
+
+        Keyword arguments:
+            t0: [float] Time at the first distance of the grid (s). It is a shift of the whole model in
+                time, so it is found directly from the observed distances (length_data) if not given, as
+                the median difference between the observed times and the model times at the observed
+                distances. None by default.
+            length_data: [ndarray] Observed distances at the times time_data (m), used if t0 is None. None
+                by default.
+            fast: [bool] Passed to alphaBetaVelocityNormed(). True by default.
+
+        Return:
+            (length_model, t0):
+                - length_model: [ndarray] Model distance at every time (m).
+                - t0: [float] Time at the first distance of the grid (s).
+        """
+
+        time_grid = self.times(alpha, beta, v_init, fast=fast)
+
+        # Find the time of the first grid point from the observed distances
+        if t0 is None:
+            t0 = np.median(time_data - np.interp(length_data, self.length_grid, time_grid))
+
+        time_rel = time_data - t0
+        length_model = np.interp(time_rel, time_grid, self.length_grid)
+
+        # Beyond the ends of the grid, continue with the velocity at the ends
+        vel_top = (self.length_grid[1] - self.length_grid[0])/(time_grid[1] - time_grid[0])
+        vel_bottom = (self.length_grid[-1] - self.length_grid[-2])/max(time_grid[-1] - time_grid[-2], 1e-12)
+        length_model = np.where(time_rel < time_grid[0], \
+            self.length_grid[0] + vel_top*(time_rel - time_grid[0]), length_model)
+        length_model = np.where(time_rel > time_grid[-1], \
+            self.length_grid[-1] + vel_bottom*(time_rel - time_grid[-1]), length_model)
+
+        return length_model, t0
+
+
+
+    def velocityDeceleration(self, length, alpha, beta, v_init, fast=True):
+        """ Velocity and deceleration of the alpha-beta model at the given distances along the path, e.g.
+            to compute the dynamic mass at the end of the trajectory.
+
+        Arguments:
+            length: [float or ndarray] Distance along the path (m), on the scale of the observed distances.
+            alpha: [float] Ballistic coefficient.
+            beta: [float] Mass loss parameter.
+            v_init: [float] Initial velocity (m/s).
+
+        Keyword arguments:
+            fast: [bool] Passed to alphaBetaVelocityNormed(). True by default.
+
+        Return:
+            (vel, decel):
+                - vel: [float or ndarray] Velocity (m/s).
+                - decel: [float or ndarray] Deceleration, positive when the meteor slows down (m/s^2).
+        """
+
+        # Velocity on the grid
+        vel_grid = v_init*alphaBetaVelocityNormed(self.ht_normed_grid, alpha, beta, fast=fast)
+
+        # The deceleration is -dv/dt = -v*dv/dl along the path
+        decel_grid = -vel_grid*np.gradient(vel_grid, self.length_grid)
+
+        vel = np.interp(length, self.length_grid, vel_grid)
+        decel = np.interp(length, self.length_grid, decel_grid)
+
+        return vel, decel
+
+
+def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None, fit_v_init=True, \
+    v_init_range=0.1, n_starts=5, estimate_errors=False, ci=95.0, fast=True):
+    """ Fit the alpha-beta model directly to the distance along the path in time, i.e. to the lag, instead
+        of to velocities.
+
+        The alpha-beta velocity is integrated along the path (AlphaBetaPath) to give the distance at every
+        observed time, and alpha, beta and the initial velocity are fitted by least squares to the
+        observed distances. The residuals are those of the lag, as the lag is the distance minus the
+        initial velocity times the time, so the deceleration is fitted from the data directly, without
+        a smoothing model of the lag (lagFitVelocity()) or noisy point-to-point velocities. The initial
+        velocity is fitted by default, as a slightly wrong one would leave a linear trend in the lag
+        which the model could only follow by decelerating. The time offset of the model is found
+        directly at every step (AlphaBetaPath.lengths()).
+
+        The fit starts from the best points of a grid in the log space of ALPHA_BETA_BOUNDS and from the
+        given initial guesses, and keeps the best result, as the fit has local minima.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s), on the same time scale for all stations.
+        length_data: [ndarray] Distance along the path of every point, from a common reference (m),
+            e.g. ObservedPoints.state_vect_dist.
+        ht_data: [ndarray] Height of every point, rescaled to the exponential atmosphere of the alpha-beta
+            model (m), see rescaleHeightToExponentialAtmosphere().
+        v_init: [float] Initial velocity (m/s). The starting point of the fit if fit_v_init is True.
+
+    Keyword arguments:
+        x0_alpha_beta: [list] Additional (alpha, beta) starting points, e.g. the results of fitAlphaBeta().
+            None by default.
+        fit_v_init: [bool] Fit the initial velocity. True by default.
+        v_init_range: [float] Range of the fitted initial velocity, relative to v_init. 0.1 by default.
+        n_starts: [int] Number of the best grid points from which the fit is started. 5 by default.
+        estimate_errors: [bool] Also return the uncertainties of alpha and beta, from the covariance of
+            the least squares fit, in the format of fitAlphaBeta(estimate_errors=True), so they can be
+            passed to alphaBetaMasses() and plotAlphaBetaSurvivalDiagram(). NaN if alpha or beta end at
+            a bound of the fit. False by default.
+        ci: [float] Confidence level of the Wald intervals in the uncertainties (percent). 95 by default.
+        fast: [bool] Passed to alphaBetaVelocityNormed(). True by default, as the model is integrated
+            many times in the fit. The grid search always uses the fast inversion.
+
+    Return:
+        (v_init, alpha, beta, length_residuals), or (v_init, alpha, beta, length_residuals, errors) if
+            estimate_errors is True:
+            - v_init: [float] Fitted (or the given) initial velocity (m/s).
+            - alpha: [float] Ballistic coefficient.
+            - beta: [float] Mass loss parameter.
+            - length_residuals: [ndarray] Observed minus model distance at every point (m), equal to the
+                lag residuals.
+            - errors: [dict] See estimate_errors.
+    """
+
+    path = AlphaBetaPath(length_data, ht_data)
+
+    def _lengthResiduals(x, fast):
+        """ Residuals of the distances (m) for the parameters (ln alpha, ln beta[, v_init]). """
+
+        alpha, beta = np.exp(x[:2])
+        v_init_fit = x[2] if fit_v_init else v_init
+
+        length_model, _ = path.lengths(time_data, alpha, beta, v_init_fit, length_data=length_data, \
+            fast=fast)
+
+        return length_data - length_model
+
+
+    # Bounds of the fitted parameters
+    log_bounds = _logAlphaBetaBounds()
+    lower_bounds = list(log_bounds[0])
+    upper_bounds = list(log_bounds[1])
+    if fit_v_init:
+        lower_bounds.append((1.0 - v_init_range)*v_init)
+        upper_bounds.append((1.0 + v_init_range)*v_init)
+
+    # Compute the residuals on a grid of alpha and beta with the given initial velocity
+    grid = []
+    for alpha in np.geomspace(*ALPHA_BETA_BOUNDS[0], 13):
+        for beta in np.geomspace(*ALPHA_BETA_BOUNDS[1], 13):
+
+            x = [np.log(alpha), np.log(beta)] + ([v_init] if fit_v_init else [])
+            grid.append((np.sum(_lengthResiduals(x, True)**2), alpha, beta))
+
+    # Start from the best grid points and the given starting points
+    grid.sort(key=lambda entry: entry[0])
+    starts = [entry[1:] for entry in grid[:n_starts]]
+    if x0_alpha_beta is not None:
+        starts += [tuple(x0) for x0 in x0_alpha_beta]
+
+    # Run the fit from every starting point and keep the best one
+    best_res = None
+    for alpha0, beta0 in starts:
+
+        # Keep the starting point strictly inside the bounds
+        x0 = list(np.log(np.clip([alpha0, beta0], np.exp(log_bounds[0] + 1e-6), \
+            np.exp(log_bounds[1] - 1e-6))))
+        if fit_v_init:
+            x0.append(v_init)
+
+        res = scipy.optimize.least_squares(_lengthResiduals, x0, args=(fast,), \
+            bounds=(lower_bounds, upper_bounds), x_scale='jac')
+
+        if (best_res is None) or (res.cost < best_res.cost):
+            best_res = res
+
+    alpha, beta = np.exp(best_res.x[:2])
+    v_init_fit = best_res.x[2] if fit_v_init else v_init
+    length_residuals = best_res.fun
+
+    if not estimate_errors:
+        return v_init_fit, alpha, beta, length_residuals
+
+
+    ### Estimate the uncertainties from the covariance of the least squares fit ###
+
+    n_params = len(best_res.x)
+    errors = {'alpha': alpha, 'beta': beta, 'v_init': v_init_fit, 'ci': ci, \
+        'cov_log': np.full((2, 2), np.nan), 'cov': np.full((2, 2), np.nan)}
+    for key in ['alpha_std_rel', 'beta_std_rel', 'alpha_std', 'beta_std', 'corr_log', 'corr', \
+            'alpha_ci_wald_lower', 'alpha_ci_wald_upper', 'beta_ci_wald_lower', 'beta_ci_wald_upper']:
+        errors[key] = np.nan
+
+    # The Gaussian approximation is not valid at a bound, nor without more points than parameters
+    if alphaBetaBoundWarnings(alpha, beta) or (len(length_residuals) <= n_params):
+        return v_init_fit, alpha, beta, length_residuals, errors
+
+    # Covariance of the parameters, scaled by the variance of the residuals
+    jac = best_res.jac
+    residual_var = np.sum(length_residuals**2)/(len(length_residuals) - n_params)
+    try:
+        cov_params = residual_var*np.linalg.inv(jac.T.dot(jac))
+    except np.linalg.LinAlgError:
+        return v_init_fit, alpha, beta, length_residuals, errors
+
+    # The block of (ln alpha, ln beta), which includes the uncertainty of the fitted initial velocity
+    cov_log = cov_params[:2, :2]
+    if (not np.all(np.isfinite(cov_log))) or np.any(np.diag(cov_log) <= 0):
+        return v_init_fit, alpha, beta, length_residuals, errors
+
+    alpha_std_rel, beta_std_rel = np.sqrt(np.diag(cov_log))
+
+    # Linear (alpha, beta) space, via the delta method
+    scale = np.array([alpha, beta])
+    cov = np.outer(scale, scale)*cov_log
+
+    # Log-normal Wald intervals
+    z = scipy.special.ndtri(0.5 + ci/200.0)
+
+    errors.update({
+        'alpha_std_rel': alpha_std_rel,
+        'beta_std_rel': beta_std_rel,
+        'alpha_std': alpha*alpha_std_rel,
+        'beta_std': beta*beta_std_rel,
+        'cov_log': cov_log,
+        'corr_log': cov_log[0, 1]/(alpha_std_rel*beta_std_rel),
+        'cov': cov,
+        'corr': cov[0, 1]/np.sqrt(cov[0, 0]*cov[1, 1]),
+        'alpha_ci_wald_lower': alpha*np.exp(-z*alpha_std_rel),
+        'alpha_ci_wald_upper': alpha*np.exp(z*alpha_std_rel),
+        'beta_ci_wald_lower': beta*np.exp(-z*beta_std_rel),
+        'beta_ci_wald_upper': beta*np.exp(z*beta_std_rel),
+        'v_init_std': np.sqrt(cov_params[2, 2]) if fit_v_init else 0.0
+        })
+
+    return v_init_fit, alpha, beta, length_residuals, errors
+
+
+
 def _profileCostAt(fixed_value, fixed_idx, free_log_guess, v_normed, ht_normed, sigma_v_normed,
         free_bounds, loss, f_scale, fast=False):
     """ Cost at a fixed alpha or beta value, re-optimizing the other (profiled-out) parameter -
@@ -5132,14 +5445,14 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Fit the alpha-beta model to the trajectory.")
+    arg_parser = argparse.ArgumentParser(description="Fit the alpha-beta model to the lag of the trajectory.")
 
     arg_parser.add_argument('traj_path', nargs="?", metavar='TRAJ_PATH', type=str, \
         help="Path to the trajectory pickle file.")
 
-    arg_parser.add_argument('-v', '--obsvel', action="store_true", \
-        help="""Fit alpha-beta on the observed velocity instead of the lag-smoothed model. """
-        )
+    arg_parser.add_argument('--lagsmooth', action="store_true", \
+        help="Also fit a smooth model to the lag (exponential, then constant deceleration) and show its "
+        "velocities, dynamic mass and dynamic pressure, for comparison with the alpha-beta fit.")
 
     arg_parser.add_argument('-d', '--dens', metavar='DENS', \
         help='Bulk density in kg/m^3 used to compute the final dynamic mass. Default is 3500 kg/m^3.', \
@@ -5149,14 +5462,10 @@ if __name__ == "__main__":
         help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
         type=float, default=0.55)
 
-    arg_parser.add_argument('-r', '--robust', action="store_true", \
-        help="Fit alpha-beta with the robust velocity-residual fit (method='robust') instead of "
-        "the default Q4 fit. Implied by --errors, which always uses the robust fit.")
-
     arg_parser.add_argument('-e', '--errors', action="store_true", \
-        help="Estimate and report alpha/beta and initial/final mass uncertainties. Always uses "
-        "the robust fit (method='robust'), propagates the fitted (ln alpha, ln beta) covariance "
-        "into the masses, and draws an uncertainty ellipse on the survival diagram.")
+        help="Estimate and report alpha/beta and initial/final mass uncertainties, from the covariance "
+        "of the fit of the lag. Propagates the fitted (ln alpha, ln beta) covariance into the masses, and "
+        "draws an uncertainty ellipse on the survival diagram.")
 
     arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
         help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
@@ -5215,6 +5524,7 @@ if __name__ == "__main__":
         lon_data = []
         vel_data = []
         lag_data = []
+        length_data = []
         for obs in traj.observations:
             
             if obs.ignore_station:
@@ -5229,6 +5539,9 @@ if __name__ == "__main__":
             vel_data += obs.velocities[filter_mask].tolist()
             lag_data += obs.lag[filter_mask].tolist()
 
+            # Distance along the path from the state vector, the same reference for all stations
+            length_data += obs.state_vect_dist[filter_mask].tolist()
+
             # Store the data for each station
             ht_data_dict[obs.station_id] = [obs.time_data[filter_mask], obs.model_ht[filter_mask], 
                                             obs.velocities[filter_mask]]
@@ -5240,6 +5553,7 @@ if __name__ == "__main__":
         lon_data = np.array(lon_data)
         vel_data = np.array(vel_data)
         lag_data = np.array(lag_data)
+        length_data = np.array(length_data)
 
 
         # Print time, height, velocity for each station
@@ -5258,6 +5572,7 @@ if __name__ == "__main__":
         sorted_indices = np.argsort(ht_data)
         vel_data = vel_data[sorted_indices]
         lag_data  = lag_data[sorted_indices]
+        length_data = length_data[sorted_indices]
         time_data = time_data[sorted_indices]
         lat_data = lat_data[sorted_indices]
         lon_data = lon_data[sorted_indices]
@@ -5267,27 +5582,25 @@ if __name__ == "__main__":
         # Rescale the heights to the exponential atmosphere used by alpha-beta
         ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, traj.jdt_ref)
 
-        # Fit a functional model to the lag and use that for the alpha-beta fit instead of the noisy
-        #   point-to-point velocity measurements
-        print("Fitting lag function...")
-        vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, traj.v_init)
-
-        # Choose which data will be used for alpha-beta fitting
-        if cml_args.obsvel:
-            vel_input = vel_data
-        else:
-            vel_input = vel_data_smooth
-
-        # Estimate the alpha, beta parameters. With --errors, use the robust fit (the only one
-        #   that can produce a covariance - estimate_errors=True is rejected for the q4 default)
-        #   and keep its (ln alpha, ln beta) covariance for the mass error propagation below.
+        # Fit alpha-beta and the initial velocity directly to the lag, starting also from the Q4 fit of the
+        #   observed velocities
+        print("Fitting alpha-beta to the lag...")
+        x0_alpha_beta = [fitAlphaBeta(vel_data, ht_data_rescaled, v_init=traj.v_init)[1:]]
         if cml_args.errors:
-            v_init, alpha, beta, fit_errors = fitAlphaBeta(vel_input, ht_data_rescaled, \
-                v_init=traj.v_init, method='robust', estimate_errors=True)
+            v_init, alpha, beta, lag_residuals, fit_errors = fitAlphaBetaLag(time_data, length_data, \
+                ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta, estimate_errors=True)
         else:
-            v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init, \
-                method='robust' if cml_args.robust else 'q4')
+            v_init, alpha, beta, lag_residuals = fitAlphaBetaLag(time_data, length_data, ht_data_rescaled, \
+                traj.v_init, x0_alpha_beta=x0_alpha_beta)
             fit_errors = None
+
+        # Model velocity at the observed points
+        vel_model = alphaBetaVelocity(ht_data_rescaled, alpha, beta, v_init)
+
+        # Fit the smooth model of the lag (exponential, then constant deceleration), if asked for
+        if cml_args.lagsmooth:
+            print("Fitting lag function...")
+            vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, traj.v_init)
 
         # Estimate the final velocity from the fitted alpha-beta solution
         vel_end = alphaBetaVelocity(ht_data_rescaled[0], alpha, beta, v_init)
@@ -5306,25 +5619,29 @@ if __name__ == "__main__":
         if cml_args.errors:
             m_init_mu0, m_final_mu0, mass_err_mu0 = alphaBetaMasses(alpha, beta, slope, \
                 mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-                vel_init=traj.v_init, vel_end=vel_end, estimate_errors=True, \
+                vel_init=v_init, vel_end=vel_end, estimate_errors=True, \
                 cov_log=fit_errors['cov_log'], sigma_slope=sigma_slope, sigma_dens=sigma_dens)
             m_init_mu23, m_final_mu23, mass_err_mu23 = alphaBetaMasses(alpha, beta, slope, \
                 mu=2/3, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-                vel_init=traj.v_init, vel_end=vel_end, estimate_errors=True, \
+                vel_init=v_init, vel_end=vel_end, estimate_errors=True, \
                 cov_log=fit_errors['cov_log'], sigma_slope=sigma_slope, sigma_dens=sigma_dens)
         else:
             m_init_mu0, m_final_mu0 = alphaBetaMasses(alpha, beta, slope, \
                 mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-                vel_init=traj.v_init, vel_end=vel_end)
+                vel_init=v_init, vel_end=vel_end)
             m_init_mu23, m_final_mu23 = alphaBetaMasses(alpha, beta, slope, \
                 mu=2/3, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-                vel_init=traj.v_init, vel_end=vel_end)
+                vel_init=v_init, vel_end=vel_end)
             mass_err_mu0 = None
             mass_err_mu23 = None
 
 
         print()
         print("Initial velocity = {:.2f} km/s".format(traj.v_init/1000))
+
+        print("Initial velocity of the alpha-beta fit to the lag = {:.2f} km/s".format(v_init/1000))
+        print("Lag residuals RMS = {:.1f} m".format(np.sqrt(np.mean(lag_residuals**2))))
+
         print()
         print("Alpha-beta analysis")
         print("-------------------")
@@ -5366,13 +5683,44 @@ if __name__ == "__main__":
         _printMass("Final  ", m_final_mu23, mass_err_mu23, 'm_final')
 
         print("*********************************************")
+
+
+        ### Compute the dynamic mass at the end from the alpha-beta fit ###
+
+        # Velocity and deceleration of the alpha-beta model at the last point along the path
+        ab_path = AlphaBetaPath(length_data, ht_data_rescaled)
+        end_index = np.argmax(length_data)
+        vel_dyn, decel_dyn = ab_path.velocityDeceleration(length_data[end_index], alpha, beta, v_init)
+        ht_dyn = ht_data[end_index]
+
+        # Compute the dynamic mass
+        dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
+            vel_dyn, decel_dyn, gamma=1.0, shape_factor=cml_args.ga)
+
         print()
-        print("Lag fit:")
-        print("-------------------")
-        print("    - a1    = {:.3f}".format(abs(lag_fit_params[0])))
-        print("    - a2    = {:.3f}".format(abs(lag_fit_params[1])))
-        print("    - t0    = {:.3f} s".format(abs(lag_fit_params[2])))
-        print("    - decel = {:.3f} km/s^2".format(abs(lag_fit_params[3])))
+        print("Alpha-beta dynamic mass at the end:")
+        print("-----------------------------------")
+        print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
+        print("Height       = {:5.2f} km".format(ht_dyn/1000))
+        print("Velocity     = {:5.2f} km/s".format(vel_dyn/1000))
+        print("Deceleration = {:5.2f} km/s^2".format(decel_dyn/1000))
+        print("Gamma*A      = {:5.2f}".format(cml_args.ga))
+        print()
+        print("Dynamic mass = {:5.3f} kg".format(dyn_mass))
+        print("-----------------------------------")
+
+        ### ###
+
+
+        # Print the parameters of the smooth model of the lag
+        if cml_args.lagsmooth:
+            print()
+            print("Lag smoothing:")
+            print("-------------------")
+            print("    - a1    = {:.3f}".format(abs(lag_fit_params[0])))
+            print("    - a2    = {:.3f}".format(abs(lag_fit_params[1])))
+            print("    - t0    = {:.3f} s".format(abs(lag_fit_params[2])))
+            print("    - decel = {:.3f} km/s^2".format(abs(lag_fit_params[3])))
 
 
 
@@ -5394,8 +5742,9 @@ if __name__ == "__main__":
         ax_ab.scatter(vel_data/1000, ht_data_rescaled/1000, s=5, label="Rescaled height to exp. atm")
 
         # Plot the smoothed velocity
-        ax_ab.scatter(vel_data_smooth/1000, ht_data_rescaled/1000, color='r', s=1, \
-            label="Lag-based velocity smoothing")
+        if cml_args.lagsmooth:
+            ax_ab.scatter(vel_data_smooth/1000, ht_data_rescaled/1000, color='r', s=1, \
+                label="Lag-based velocity smoothing")
 
         # Plot the alpha-beta fit (annotate alpha/beta with their 1-sigma errors if --errors)
         if cml_args.errors:
@@ -5453,16 +5802,23 @@ if __name__ == "__main__":
         ax_ab.legend(loc='upper left')
 
 
-        ### Plot the lag fit ###
+        ### Plot the velocities at the observed heights ###
 
         # Plot the original data
         ax_vel.scatter(vel_data/1000, ht_data/1000, s=5, label="Observed heights")
 
-        # Plot the smoothed velocity
-        ax_vel.scatter(vel_data_smooth/1000, ht_data/1000, color='r', s=1, \
-            label="Lag-based velocity smoothing")
+        # Plot the alpha-beta velocity at the observed heights
+        ax_vel.plot(vel_model/1000, ht_data/1000, color='k', label="Alpha-beta fit")
 
-        if not cml_args.obsvel:
+        # Plot the point where the dynamic mass is estimated
+        ax_vel.scatter([vel_dyn/1000], [ht_dyn/1000], color='k', zorder=3, \
+            label="Dynamic mass = {:.3f} kg\ndecel = {:.2f} km/s$^2$".format(dyn_mass, decel_dyn/1000))
+
+        # Plot the smoothed velocity and its dynamic mass
+        if cml_args.lagsmooth:
+
+            ax_vel.scatter(vel_data_smooth/1000, ht_data/1000, color='r', s=1, \
+                label="Lag-based velocity smoothing")
 
             # If the exponental to linear transition point was used by the fit, plot it
             t0 = lag_fit_params[2]
@@ -5476,60 +5832,71 @@ if __name__ == "__main__":
                 h_rescaled_t0 = ht_data_rescaled[t0_index]
 
                 # Plot the t0 point
-                ax_ab.scatter([v_t0/1000], [h_rescaled_t0/1000], label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)),\
-                    color='r')
-                ax_vel.scatter([v_t0/1000], [h_t0/1000], label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)),\
-                    color='r')
+                ax_ab.scatter([v_t0/1000], [h_rescaled_t0/1000], \
+                    label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)), color='r')
+                ax_vel.scatter([v_t0/1000], [h_t0/1000], \
+                    label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)), color='r')
 
 
-                ### Compute the dynamic mass at the end ###
+                ### Compute the dynamic mass at the end from the lag smoothing ###
 
-                # Compute the values at the point that is 1/4 before the end and t0
-                midpoint_index = int(round((t0_index + 0)*1/4)) # Sorted by increasing height!
-                ht_dyn = ht_data[midpoint_index]
+                # Compute the values at the point that is 1/4 before the end and t0 (sorted by increasing
+                #   height)
+                midpoint_index = int(round(t0_index*1/4))
+                ht_dyn_smooth = ht_data[midpoint_index]
                 t_dyn = time_data[midpoint_index]
-                v_dyn = expLinearVelocity(t_dyn, traj.v_init, *lag_fit_params)
+                v_dyn_smooth = expLinearVelocity(t_dyn, traj.v_init, *lag_fit_params)
 
                 # Compute the dynamic mass
-                dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
-                    v_dyn, 1000*abs(decel), gamma=1.0, shape_factor=cml_args.ga)
+                dyn_mass_smooth = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn_smooth, \
+                    traj.jdt_ref, v_dyn_smooth, 1000*abs(decel), gamma=1.0, shape_factor=cml_args.ga)
 
                 # Plot the point where the dynamic mass is estimated
-                ax_vel.scatter([v_dyn/1000], [ht_dyn/1000], label='Dynamic mass = {:.3f} kg'.format(dyn_mass),\
-                    color='k')
-
+                ax_vel.scatter([v_dyn_smooth/1000], [ht_dyn_smooth/1000], color='r', marker='s', \
+                    label='Lag smoothing dynamic mass = {:.3f} kg'.format(dyn_mass_smooth))
 
                 print()
-                print("Lag fit dynamic mass:")
-                print("---------------------")
+                print("Lag smoothing dynamic mass:")
+                print("---------------------------")
                 print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
-                print("Height       = {:5.2f} km".format(ht_dyn/1000))
-                print("Velocity     = {:5.2f} km/s".format(v_dyn/1000))
+                print("Height       = {:5.2f} km".format(ht_dyn_smooth/1000))
+                print("Velocity     = {:5.2f} km/s".format(v_dyn_smooth/1000))
                 print("Deceleration = {:5.2f} km/s^2".format(abs(decel)))
                 print("Gamma*A      = {:5.2f}".format(cml_args.ga))
                 print()
-                print("Dynamic mass = {:5.3f} kg".format(dyn_mass))
-                print("---------------------")
+                print("Dynamic mass = {:5.3f} kg".format(dyn_mass_smooth))
+                print("---------------------------")
 
                 ### ###
 
-        ###
-
         ax_vel.set_xlabel("Velocity (km/s)")
-        
+
         ax_vel.legend(loc='upper left')
 
 
-        # Plot the lag and the lag fit
+        # Plot the lag and the alpha-beta model of it, which differs from the data by the residuals
         ax_lag.scatter(lag_data/1000, ht_data/1000, s=5)
-        ax_lag.plot(expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, color='r', \
-            label="Lag-based velocity smoothing")
+        ax_lag.plot((lag_data - lag_residuals)/1000, ht_data/1000, color='k', label="Alpha-beta fit")
+
+        # Plot the smooth model of the lag
+        if cml_args.lagsmooth:
+            ax_lag.plot(expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, color='r', \
+                label="Lag-based velocity smoothing")
+
         ax_lag.set_xlabel("Lag (km)")
+        ax_lag.legend(loc='lower left')
 
 
-        # Plot the lag fit residuals
-        ax_lag_res.scatter(lag_data/1000 - expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, s=5)
-        ax_lag_res.set_xlabel("Lag fit residuals (km)")
+        # Plot the residuals of the alpha-beta fit to the lag
+        ax_lag_res.scatter(lag_residuals/1000, ht_data/1000, s=5, color='k', label="Alpha-beta fit")
+
+        # Plot the residuals of the smooth model of the lag
+        if cml_args.lagsmooth:
+            ax_lag_res.scatter(lag_data/1000 - expLinearLag(time_data, *lag_fit_params)/1000, \
+                ht_data/1000, s=5, color='r', label="Lag-based velocity smoothing")
+
+        ax_lag_res.set_xlabel("Lag residuals (km)")
+        ax_lag_res.legend(loc='upper left')
 
         plt.tight_layout()
 
@@ -5565,25 +5932,32 @@ if __name__ == "__main__":
         # Compute the dynamic pressure using alpha and beta
         dyn_pressure = dynamicPressure(lat_mean, lon_mean, ht_arr, traj.jdt_ref, vel_arr)
 
-        # Compute the dynamic pressure with the lag fit
-        dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data_rescaled, traj.jdt_ref, 
-            vel_data_smooth)
-
         def findPeakDynPressure(dyn_pressure, ht_arr):
-            """Find the peak dynamic pressure. """
+            """ Find the peak dynamic pressure.
+
+            Arguments:
+                dyn_pressure: [ndarray] Dynamic pressure (Pa).
+                ht_arr: [ndarray] Heights (m).
+
+            Return:
+                (peak_dyn_pressure_index, peak_dyn_pressure, peak_dyn_pressure_ht):
+                    - peak_dyn_pressure_index: [int] Index of the peak.
+                    - peak_dyn_pressure: [float] Peak dynamic pressure (MPa).
+                    - peak_dyn_pressure_ht: [float] Height of the peak (km).
+            """
+
             peak_dyn_pressure_index = np.argmax(dyn_pressure)
             peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
             peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
+
             return peak_dyn_pressure_index, peak_dyn_pressure, peak_dyn_pressure_ht
 
-        # Find the alpha-beta and the lag fit dyn pressure peaks
+
+        # Find the alpha-beta dyn pressure peak
         peak_dyn_pressure_index, peak_dyn_pressure, peak_dyn_pressure_ht = findPeakDynPressure( \
             dyn_pressure, ht_arr)
-        peak_dyn_pressure_index_lag, peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = \
-            findPeakDynPressure(dyn_pressure_lag, ht_data_rescaled)
 
-
-        # Print height, model velocity (from alpha-beta and lag), and the dynamic pressure computed from both
+        # Print height, model velocity and the dynamic pressure of the alpha-beta model
         print()
         print("AlphaBeta model:")
         print("Height (km)  Vel (km/s)  DynPress (MPa)")
@@ -5591,51 +5965,54 @@ if __name__ == "__main__":
 
             # Compute the index from reverse
             i_rev = len(ht_arr) - i - 1
-            print("{:11.2f}  {:10.4f}  {:14.5f}".format(
-                ht_arr[i_rev]/1000, 
-                vel_arr[i_rev]/1000, 
-                dyn_pressure[i_rev]/1e6
-                )
-                )
+            print("{:11.2f}  {:10.4f}  {:14.5f}".format(ht_arr[i_rev]/1000, vel_arr[i_rev]/1000, \
+                dyn_pressure[i_rev]/1e6))
 
-        print()
-        print("Lag fit:")
-        print("Height (km)  Vel (km/s)  DynPress (MPa)")
-        for i in range(len(ht_data_rescaled)):
+        # Compute the dynamic pressure with the lag smoothing and find its peak
+        if cml_args.lagsmooth:
 
-            # Compute the index from reverse
-            i_rev = len(ht_data_rescaled) - i - 1
+            dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data_rescaled, traj.jdt_ref, \
+                vel_data_smooth)
 
-            print("{:11.2f}  {:10.4f}  {:14.5f}".format(
-                ht_data_rescaled[i_rev]/1000, 
-                vel_data_smooth[i_rev]/1000,
-                dyn_pressure_lag[i_rev]/1e6
-                )
-                )
+            peak_dyn_pressure_index_lag, peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = \
+                findPeakDynPressure(dyn_pressure_lag, ht_data_rescaled)
+
+            print()
+            print("Lag smoothing:")
+            print("Height (km)  Vel (km/s)  DynPress (MPa)")
+            for i in range(len(ht_data_rescaled)):
+
+                # Compute the index from reverse
+                i_rev = len(ht_data_rescaled) - i - 1
+                print("{:11.2f}  {:10.4f}  {:14.5f}".format(ht_data_rescaled[i_rev]/1000, \
+                    vel_data_smooth[i_rev]/1000, dyn_pressure_lag[i_rev]/1e6))
 
         print()
         print("Peak dynamic pressure:")
         print("----------------------")
         print("AlphaBeta model = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
             peak_dyn_pressure, peak_dyn_pressure_ht, vel_arr[peak_dyn_pressure_index]/1000))
-        print("Lag fit         = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
-            peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag,
-            vel_data_smooth[peak_dyn_pressure_index_lag]/1000))
+        if cml_args.lagsmooth:
+            print("Lag smoothing   = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
+                peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag,
+                vel_data_smooth[peak_dyn_pressure_index_lag]/1000))
         print("----------------------")
 
 
         # Plot dyn pressure
         fig_dyn = plt.figure()
         plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k', label='AlphaBeta')
-        plt.plot(dyn_pressure_lag/1e6, ht_data_rescaled/1000, color='r', label='Lag fit')
 
         # Mark alpha-beta dyn pressure peak on the graph
         plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', \
             label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht))
 
-        # Mark lag fit dyn pressure peak on the graph
-        plt.scatter(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, c='r', \
-            label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag))
+        # Plot the dynamic pressure of the lag smoothing and mark its peak
+        if cml_args.lagsmooth:
+            plt.plot(dyn_pressure_lag/1e6, ht_data_rescaled/1000, color='r', label='Lag smoothing')
+            plt.scatter(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, c='r', \
+                label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure_lag, \
+                peak_dyn_pressure_ht_lag))
 
 
         plt.legend()
