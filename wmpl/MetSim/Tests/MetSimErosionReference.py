@@ -16,7 +16,7 @@ import numpy as np
 
 from wmpl.MetSim.MetSimErosion import G0, Wake, heightCurvature, erodeIntoGrains, generateFragments, \
     getErosionCoeff, erosionBinMass, killFragment, prepareAtmDensityTable, atmDensityTableCy
-from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency, atmDensityPoly, ablationStepRK4
+from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency, atmDensityPoly, ablationStepRK4Substep
 
 
 
@@ -114,6 +114,10 @@ class Fragment(object):
 
         # Identifier of the complex fragmentation entry
         self.complex_id = None
+
+        # Last substep of the Runge-Kutta integration which resolved the motion, from which the next time
+        #   step starts (0 to start from the full time step)
+        self.rk4_substep = 0
 
 
     def init(self, const, m, rho, v_init, sigma, gamma, zenith_angle, erosion_mass_index, erosion_mass_min, \
@@ -281,12 +285,13 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm
 
         # Integrate the mass, the speed and the length over the step together, with the air density at the
         #   height of every stage, as the density changes by about 1% in a step of a fast meteor, and add up
-        #   the radiated energy and the ionization over the step
-        mass_loss_total, velocity_change, length_change, energy_step, electrons_step = ablationStepRK4( \
-            const.dt, frag.K, frag.sigma + erosion_coeff, frag.m, frag.v, frag.length, const.h_init, \
-            const.zenith_angle, const.r_earth, frag.h_grav_drop_total, atm_table, dens_co, \
-            frag.sigma/(frag.sigma + erosion_coeff) if (frag.sigma + erosion_coeff) > 0 else 1.0, \
-            const.lum_eff_type, const.lum_eff, const.mu, const.v_kill)
+        #   the radiated energy and the ionization over the step, starting from the substep which resolved the
+        #   motion in the previous step
+        mass_loss_total, velocity_change, length_change, energy_step, electrons_step, frag.rk4_substep \
+            = ablationStepRK4Substep(const.dt, frag.K, frag.sigma + erosion_coeff, frag.m, frag.v, \
+            frag.length, const.h_init, const.zenith_angle, const.r_earth, frag.h_grav_drop_total, atm_table, \
+            dens_co, frag.sigma/(frag.sigma + erosion_coeff) if (frag.sigma + erosion_coeff) > 0 else 1.0, \
+            const.lum_eff_type, const.lum_eff, const.mu, const.v_kill, frag.rk4_substep)
 
         # Split the mass loss into erosion and ablation, which have the same form, so that a fragment which
         #   does not erode loses no mass to erosion
