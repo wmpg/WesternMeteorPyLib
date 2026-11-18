@@ -1,3 +1,4 @@
+# cython: cpow=True
 """ Fast cython functions for the MetSimErosion module. """
 
 
