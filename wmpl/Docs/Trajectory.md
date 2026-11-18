@@ -102,6 +102,8 @@ than 7 arcsec. Where the fit did not stop early, the radiant moves by 0.004 arcs
 not change, and solving takes 26 % less time, although the smoothed sums take about three times as many
 evaluations, as the angles of all points are computed at once.
 
+![How far the radiants of 344 fireballs were from the best line, before and after the smoothing](figures/Trajectory_los_smoothing.png)
+
 
 
 ## How the solver takes gravity into account
