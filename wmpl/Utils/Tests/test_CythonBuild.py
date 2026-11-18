@@ -1,17 +1,19 @@
 """ Tests that wmpl compiles its Cython modules with pyximport in a build directory of its own copy
-(wmpl.Utils.CythonBuild), not in the ~/.pyxbld shared by every copy on the machine.
+(wmpl.Utils.CythonBuild), not in the ~/.pyxbld shared by every copy on the machine, and that a module
+compiled into the source tree before its .pyx was changed is compiled again from the .pyx.
 
 Run with pytest:
     python -m pytest wmpl/Utils/Tests/test_CythonBuild.py -v
 """
 
+import importlib.machinery
 import os
 import sys
 import tempfile
 
 # Importing any wmpl module installs pyximport
 import wmpl.MetSim.MetSimErosion
-from wmpl.Utils.CythonBuild import pyximportBuildDir
+from wmpl.Utils.CythonBuild import pyximportBuildDir, staleCompiledModules, StaleCompiledModuleFinder
 
 
 
@@ -64,11 +66,82 @@ def testWmplInstallsPyximportWithTheBuildDirOfItsCopy():
 
 
 
+def touchFile(file_path, mtime):
+    """ Make an empty file with the given modification time.
+
+    Arguments:
+        file_path: [str] Path of the file.
+        mtime: [float] Modification time (Unix time).
+
+    Return:
+        None
+    """
+
+    with open(file_path, "w"):
+        pass
+
+    os.utime(file_path, (mtime, mtime))
+
+
+
+def testStaleCompiledModulesAreFound():
+    """ Check that a module compiled into the source tree for this Python before its .pyx was changed is
+        found, with the name of the module, and that a module compiled after it is not, nor a file compiled
+        for another version of Python or another system.
+    """
+
+    suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        wmpl_dir = os.path.join(tmp_dir, "wmpl")
+        metsim_dir = os.path.join(wmpl_dir, "MetSim")
+        utils_dir = os.path.join(wmpl_dir, "Utils")
+        os.makedirs(metsim_dir)
+        os.makedirs(utils_dir)
+
+        # Compiled before a git pull changed the .pyx
+        touchFile(os.path.join(metsim_dir, "MetSimErosionCyTools" + suffix), 1000.0)
+        touchFile(os.path.join(metsim_dir, "MetSimErosionCyTools.pyx"), 2000.0)
+
+        # Compiled after the .pyx was changed, next to an old file of another version of Python
+        touchFile(os.path.join(utils_dir, "FastTools.pyx"), 1000.0)
+        touchFile(os.path.join(utils_dir, "FastTools" + suffix), 2000.0)
+        touchFile(os.path.join(utils_dir, "FastTools.cp27-win_amd64.pyd"), 500.0)
+
+        # Only compiled for another version of Python, which this Python does not import
+        touchFile(os.path.join(utils_dir, "OtherTools.pyx"), 1000.0)
+        touchFile(os.path.join(utils_dir, "OtherTools.cpython-27-x86_64-linux-gnu.so"), 500.0)
+
+        stale = staleCompiledModules(wmpl_dir)
+
+        assert stale == {"wmpl.MetSim.MetSimErosionCyTools": \
+            os.path.join(metsim_dir, "MetSimErosionCyTools" + suffix)}
+
+
+
+def testStaleModulesAreTakenFromThePyx():
+    """ Check that the finder hands only the stale modules to the finder of pyximport. """
+
+    class PyxFinder(object):
+        def find_spec(self, fullname, path, target=None):
+            return "spec of " + fullname
+
+    finder = StaleCompiledModuleFinder({"wmpl.MetSim.MetSimErosionCyTools": "old.pyd"}, PyxFinder())
+
+    assert finder.find_spec("wmpl.MetSim.MetSimErosionCyTools", None) \
+        == "spec of wmpl.MetSim.MetSimErosionCyTools"
+    assert finder.find_spec("wmpl.MetSim.MetSimErosion", None) is None
+
+
+
+
 
 if __name__ == "__main__":
 
     # Run all tests
-    test_list = [testBuildDirIsOnePerCopy, testWmplInstallsPyximportWithTheBuildDirOfItsCopy]
+    test_list = [testBuildDirIsOnePerCopy, testWmplInstallsPyximportWithTheBuildDirOfItsCopy, \
+        testStaleCompiledModulesAreFound, testStaleModulesAreTakenFromThePyx]
 
     for test in test_list:
         test()
