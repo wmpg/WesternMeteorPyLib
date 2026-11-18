@@ -18,6 +18,7 @@ or standalone (no pytest required):
 import time
 
 import numpy as np
+import scipy.integrate
 import scipy.special
 
 import matplotlib
@@ -29,7 +30,7 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     alphaBetaVelocityNormedLUT, alphaBetaHeightNormed, alphaBetaLuminosityF,
     alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
     plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
-    getDefaultInverseEiLUT, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+    getDefaultInverseEiLUT, fitAlphaBetaLag, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -592,6 +593,107 @@ def testFitAlphaBetaSmoothedVelocities():
         # The velocity curve must follow the data (it was 2.9 km/s off at the bound)
         rmse = np.sqrt(np.mean((alphaBetaVelocity(ht_data, alpha, beta, v_init) - v_data)**2))
         assert rmse < 1000.0, "{:s}: velocity RMSE {:.0f} m/s".format(method, rmse)
+
+
+
+def _syntheticLag(v_init_true, noise_std, seed):
+    """ Generate the distances along the path of a synthetic meteor at regular times, by integrating the
+        alpha-beta velocity of ALPHA_TRUE and BETA_TRUE in time, independently of AlphaBetaPath.
+
+    Arguments:
+        v_init_true: [float] Initial velocity (m/s).
+        noise_std: [float] Standard deviation of the Gaussian noise added to the distances (m).
+        seed: [int] Seed of the random noise.
+
+    Return:
+        (time_data, length_data, ht_data):
+            - time_data: [ndarray] Times (s).
+            - length_data: [ndarray] Noisy distances along the path (m).
+            - ht_data: [ndarray] Heights at the true distances (m).
+    """
+
+    # Straight path from 90 km at the slope of the synthetic trajectory
+    ht_begin = 90000.0
+
+    def _velocity(t, length):
+        """ Velocity along the path at the given distance (m/s). """
+
+        ht_normed = (ht_begin - length*np.sin(SLOPE))/HT_NORM_CONST
+
+        return v_init_true*alphaBetaVelocityNormed(ht_normed, ALPHA_TRUE, BETA_TRUE)
+
+    # Integrate the distance at regular times, down to 40 km
+    time_data = np.arange(0.0, 6.0, 0.02)
+    sol = scipy.integrate.solve_ivp(_velocity, (time_data[0], time_data[-1]), [0.0], t_eval=time_data, \
+        rtol=1e-10, atol=1e-6)
+    length_true = sol.y[0]
+    ht_data = ht_begin - length_true*np.sin(SLOPE)
+
+    # Keep the points above 40 km and add the noise
+    keep = ht_data > 40000.0
+    rng = np.random.RandomState(seed)
+    length_data = length_true[keep] + rng.normal(0, noise_std, np.sum(keep))
+
+    return time_data[keep], length_data, ht_data[keep]
+
+
+
+def testFitAlphaBetaLag():
+    """ The fit of the lag should recover alpha, beta and the initial velocity of a synthetic meteor, from
+        an initial velocity which is 1% off, with residuals consistent with the noise.
+    """
+
+    noise_std = 20.0
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, noise_std, 42)
+
+    v_init, alpha, beta, residuals = fitAlphaBetaLag(time_data, length_data, ht_data, 1.01*V_INIT_TRUE)
+
+    _assertClose(alpha, ALPHA_TRUE, 0.05, "alpha (lag)")
+    _assertClose(beta, BETA_TRUE, 0.05, "beta (lag)")
+    _assertClose(v_init, V_INIT_TRUE, 0.001, "v_init (lag)")
+
+    # The residuals must be close to the noise
+    rmse = np.sqrt(np.mean(residuals**2))
+    assert rmse < 1.2*noise_std, "lag fit RMSE {:.1f} m > {:.1f} m".format(rmse, 1.2*noise_std)
+
+    # With the initial velocity fixed to the true one, alpha and beta are recovered too
+    v_init_fixed, alpha, beta, _ = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        fit_v_init=False)
+
+    assert v_init_fixed == V_INIT_TRUE
+    _assertClose(alpha, ALPHA_TRUE, 0.05, "alpha (lag, fixed v_init)")
+    _assertClose(beta, BETA_TRUE, 0.05, "beta (lag, fixed v_init)")
+
+
+
+def testFitAlphaBetaLagErrors():
+    """ The uncertainties of the fit of the lag should cover the true values, and be large for a meteor
+        which does not decelerate.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    # The covariance must be finite, with the true values within 3 sigma in the log space
+    assert np.all(np.isfinite(errors['cov_log']))
+    assert abs(np.log(alpha/ALPHA_TRUE)) < 3*errors['alpha_std_rel']
+    assert abs(np.log(beta/BETA_TRUE)) < 3*errors['beta_std_rel']
+    assert errors['alpha_ci_wald_lower'] < alpha < errors['alpha_ci_wald_upper']
+    assert errors['v_init_std'] > 0
+
+    # The masses take the covariance directly
+    v_final = np.min(alphaBetaVelocity(ht_data, alpha, beta, v_init))
+    _, _, mass_errors = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, vel_init=v_init, \
+        vel_end=v_final, estimate_errors=True, cov_log=errors['cov_log'])
+    assert np.isfinite(mass_errors['m_init_std_rel'])
+
+    # A meteor which does not decelerate leaves beta unconstrained
+    length_const = V_INIT_TRUE*time_data + np.random.RandomState(3).normal(0, 20.0, len(time_data))
+    _, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_const, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+    assert (not np.isfinite(errors['beta_std_rel'])) or (errors['beta_std_rel'] > 1.0)
 
 
 
@@ -1609,6 +1711,8 @@ if __name__ == "__main__":
         testFastPipelineSpeedup,
         testFitAlphaBetaRobust,
         testFitAlphaBetaSmoothedVelocities,
+        testFitAlphaBetaLag,
+        testFitAlphaBetaLagErrors,
         testFitAlphaBetaErrorEstimationRejectsQ4,
         testFitAlphaBetaErrorEstimationRejectsBadCi,
         testFitAlphaBetaErrorEstimationPointEstimateUnchanged,
