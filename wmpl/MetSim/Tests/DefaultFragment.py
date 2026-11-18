@@ -18,8 +18,10 @@ def initFragment(module):
         (frag, const): [tuple] Fragment and the constants.
     """
 
+    # Take the default constants
     const = MetSimErosion.Constants()
 
+    # Make the fragment and set its initial conditions from the constants
     frag = module.Fragment()
     frag.init(const, const.m_init, const.rho, const.v_init, const.sigma, const.gamma, const.zenith_angle, \
         const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max)
