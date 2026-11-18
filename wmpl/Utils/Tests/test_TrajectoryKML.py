@@ -276,3 +276,35 @@ def testTheKMLColor():
 
     assert TrajectoryKML.kmlColor((1.0, 0.5, 0.0)) == 'ff0080ff'
     assert TrajectoryKML.kmlColor((0.0, 0.0, 1.0), alpha=130) == '82ff0000'
+
+
+
+def testTheFragmentsAreDrawnInTheirColoursInSkyFit2():
+    """ Check that every additional fragment is a line from its first to its last point, in the colour of
+        its number in SkyFit2, which repeat after fragment 8.
+    """
+
+    traj = _solve()
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        kml_path = TrajectoryKML.trajectoryToKML(traj, os.path.join(tmp_dir, 'test_3D.kml'), \
+            fragments=[(2, traj), (10, traj)])
+        root = ET.parse(kml_path).getroot()
+
+    folders = {folder.find(KML_NS + 'name').text: folder for folder in root.iter(KML_NS + 'Folder')}
+    styles = {style.get('id'): style for style in root.iter(KML_NS + 'Style')}
+    placemarks = folders["3. Fragments"].findall(KML_NS + 'Placemark')
+
+    assert [placemark.find(KML_NS + 'name').text for placemark in placemarks] == ["Fragment 2", "Fragment 10"]
+
+    # Check the green of fragment 2, and the cyan of fragment 10 as for fragment 1
+    colors = [styles[placemark.find(KML_NS + 'styleUrl').text[1:]].find('.//' + KML_NS + 'color').text \
+        for placemark in placemarks]
+
+    assert colors == ['ff00ff00', 'ffffff00']
+
+    # Check the first and the last point
+    ends = np.array([[np.degrees(traj.rbeg_lon), np.degrees(traj.rbeg_lat), traj.rbeg_ele], \
+        [np.degrees(traj.rend_lon), np.degrees(traj.rend_lat), traj.rend_ele]])
+
+    assert np.allclose(_coordinates(placemarks[0]), ends, rtol=0, atol=COORD_TOL)
