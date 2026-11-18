@@ -1245,11 +1245,12 @@ def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
     spreads = np.arange(0.0, spread_max + spread_step/2, spread_step) if np.any(knots) else np.zeros(1)
     fits += [DragFit(traj, knot_hts=knot_hts, knot_spread=spread, **kwargs) for spread in spreads[1:]]
 
-    # Compute the Delta chi2 of every spread, with the variance of the residuals of the best one
+    # Compute the Delta chi2 of every spread, with the variance of the residuals of the best one, at least
+    #   (1 mm)^2 so an exact fit of noise-free lengths does not divide by zero
     ssr = np.array([np.sum(fit.residuals**2) for fit in fits])
     best = int(np.argmin(ssr))
     n_dof = max(len(fits[best].len_data) - 3 - fits[best].n_knots, 1)
-    delta_chi2 = (ssr - ssr[best])/(ssr[best]/n_dof)
+    delta_chi2 = (ssr - ssr[best])/max(ssr[best]/n_dof, 1e-6)
 
     # Take the largest difference of K at the last point of an acceptable spread from the jumps as its
     #   systematic uncertainty
