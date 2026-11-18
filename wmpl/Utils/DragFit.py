@@ -6,17 +6,21 @@ which computes the mass from the drag equation for an assumed shape and density.
 The meteor is assumed to move along the straight line of the trajectory solution and to decelerate by
 atmospheric drag:
 
-    dv/dt = -K*rho*v**2 + g_along
+    dv/dt = -K*rho*v_air**2 + g_along
 
 where rho is the NRLMSISE-00 air density, g_along the component of gravity along the line and K the ballistic
-coefficient (Gamma*A/(m**(1/3)*rho_m**(2/3))). Both ablation and fragmentation increase K, so it is only
+coefficient (Gamma*A/(m**(1/3)*rho_m**(2/3))). The drag acts on the speed relative to the air, which moves
+with the ground, v_air = v - v_rot, where v is the inertial speed and v_rot the speed of the Earth's rotation
+along the trajectory (Physics.earthRotationSpeed). Both ablation and fragmentation increase K, so it is only
 allowed to grow along the trajectory, which keeps the velocity positive and decreasing. With the specific
-kinetic energy E = v**2/2 and the length L along the line, the drag equation is linear:
+kinetic energy E = v**2/2 and the length L along the line, the drag equation is linear for a given ratio
+v_air/v:
 
-    dE/dL = -2*K*rho*E + g_along
+    dE/dL = -2*K*rho*(v_air/v)**2*E + g_along
 
-and is solved exactly. The logarithm of K is a sum of non-negative ramps in L, which is fitted to the lengths
-and times of all used points with a robust loss and a small penalty on the growth of K.
+and is solved exactly, iterating on that ratio. The logarithm of K is a sum of non-negative ramps in L, which
+is fitted to the lengths and times of all used points with a robust loss and a small penalty on the growth
+of K.
 
 Above the first observed point the meteor is assumed to move without drag, only accelerated by gravity, as
 it barely decelerates in the thin air. Optionally, K can be kept at its first value instead. As K can only
@@ -61,10 +65,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
-from wmpl.Trajectory.Trajectory import applyGravityDrop
+from wmpl.Trajectory.Trajectory import applyGravityDrop, solutionDropTimeOrigin
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
-from wmpl.Utils.Physics import ballisticCoeffMass
+from wmpl.Utils.Physics import ballisticCoeffMass, earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
 
@@ -76,6 +80,12 @@ G_SURFACE = 9.80665
 #   dynamic mass by default
 GAMMA_A = 0.78
 BULK_DENSITY = 3500.0
+
+# Iterations of the scale of the drag for the speed relative to the air: the most, the number after which
+#   the scale is damped so it cannot oscillate, and the change of the speeds at which they stop (m/s)
+DRAG_SCALE_MAX_ITERATIONS = 50
+DRAG_SCALE_DAMPED_AFTER = 10
+DRAG_SCALE_TOL = 1e-3
 
 
 
@@ -157,6 +167,10 @@ class DragFit(object):
 
         self.state_vect = np.array(traj.state_vect_mini)
         self.radiant_eci = np.array(traj.radiant_eci_mini)
+
+        # Speed of the Earth's rotation along the trajectory, by which the inertial speed exceeds the speed
+        #   relative to the air
+        self.v_rotation = earthRotationSpeed(traj)
 
         # Get the data
         self.time_data, self.len_data = usedPoints(traj)
@@ -356,15 +370,35 @@ class DragFit(object):
         g = self.g_grid[self.i_first:self.i_last + 1]
         dlen = np.diff(len_arr)
 
-        # Compute the integral of 2*K*rho from the first point
-        a = 2*np.exp(self._logK(params, len_arr))*rho
-        phi = np.concatenate([[0.0], np.cumsum(0.5*(a[1:] + a[:-1])*dlen)])
-        exp_phi = np.exp(np.clip(phi, None, 700.0))
+        # The drag acts on the speed relative to the air, which moves with the ground, so 2*K*rho is scaled by
+        #   the squared ratio of that speed to the inertial one (see _airDragScale), iterating from the inertial
+        #   speed
+        drag_scale = 1.0
+        vel_prev = None
+        for i in range(DRAG_SCALE_MAX_ITERATIONS if self.v_rotation else 1):
 
-        # Compute the energy, including the work done by gravity
-        grav = np.concatenate([[0.0], np.cumsum(0.5*(g[1:]*exp_phi[1:] + g[:-1]*exp_phi[:-1])*dlen)])
-        energy = (0.5*params[1]**2 + grav)/exp_phi
-        vel = np.sqrt(np.maximum(2*energy, 1.0))
+            # Compute the integral of 2*K*rho from the first point
+            a = 2*np.exp(self._logK(params, len_arr))*rho*drag_scale
+            phi = np.concatenate([[0.0], np.cumsum(0.5*(a[1:] + a[:-1])*dlen)])
+            exp_phi = np.exp(np.clip(phi, None, 700.0))
+
+            # Compute the energy, including the work done by gravity
+            grav = np.concatenate([[0.0], np.cumsum(0.5*(g[1:]*exp_phi[1:] + g[:-1]*exp_phi[:-1])*dlen)])
+            energy = (0.5*params[1]**2 + grav)/exp_phi
+            vel = np.sqrt(np.maximum(2*energy, 1.0))
+
+            # Stop when the speeds no longer change
+            if (vel_prev is not None) and (np.max(np.abs(vel - vel_prev)) < DRAG_SCALE_TOL):
+                break
+
+            vel_prev = vel
+
+            # Take the scale at the new speeds, damped after a few iterations, as a meteor which slows close
+            #   to the speed of the air can make it alternate
+            if i < DRAG_SCALE_DAMPED_AFTER:
+                drag_scale = self._airDragScale(vel)
+            else:
+                drag_scale = 0.5*(drag_scale + self._airDragScale(vel))
 
         # Integrate the time
         time = params[0] + np.concatenate([[0.0], np.cumsum(0.5*(1/vel[1:] + 1/vel[:-1])*dlen)])
@@ -572,7 +606,7 @@ class DragFit(object):
             else:
                 a = 0.0
 
-            energy = self._energyStep(energy, a, g, -dlen)
+            energy = self._airEnergyStep(energy, a, g, -dlen, vel[i])
 
             # Stop when the velocity has grown too much, as K above the beginning is not known
             if np.sqrt(max(2*energy, 0.0)) > (1 + self.max_vel_growth)*vel[self.i_first]:
@@ -590,7 +624,7 @@ class DragFit(object):
             a = 2*np.exp(log_k_grid[i])*0.5*(self.rho_grid[i] + self.rho_grid[i + 1])
             g = 0.5*(self.g_grid[i] + self.g_grid[i + 1])
 
-            energy = self._energyStep(energy, a, g, dlen)
+            energy = self._airEnergyStep(energy, a, g, dlen, vel[i])
 
             # Stop if the meteor comes to a halt (e.g. an Earth-grazer going up)
             if energy <= 0.5:
@@ -643,6 +677,47 @@ class DragFit(object):
 
 
 
+    def _airDragScale(self, vel):
+        """ Compute the factor by which the drag on the speed relative to the air differs from the drag on the
+            inertial speed. The sign is kept, so the drag pushes the meteor forward if the air moves faster
+            along the line than the meteor.
+
+        Arguments:
+            vel: [float or ndarray] Inertial speed (m/s).
+
+        Return:
+            [float or ndarray] Factor of the drag term.
+        """
+
+        ratio = 1 - self.v_rotation/vel
+
+        return ratio*np.abs(ratio)
+
+
+
+    def _airEnergyStep(self, energy, a, g, dlen, vel):
+        """ Advance the energy equation by dlen, with the drag term scaled for the speed relative to the air
+            at the mean speed of the step.
+
+        Arguments:
+            energy: [float] Specific kinetic energy at the start (J/kg).
+            a: [float] Drag term 2*K*rho (1/m) for the inertial speed.
+            g: [float] Component of gravity along the line (m/s^2).
+            dlen: [float] Step along the line (m), negative when going up.
+            vel: [float] Inertial speed at the start (m/s).
+
+        Return:
+            [float] Specific kinetic energy at the end of the step (J/kg).
+        """
+
+        # Estimate the speed at the end of the step with the scale at its start
+        energy_end = self._energyStep(energy, a*self._airDragScale(vel), g, dlen)
+        vel_mean = 0.5*(vel + np.sqrt(max(2*energy_end, 1.0)))
+
+        return self._energyStep(energy, a*self._airDragScale(vel_mean), g, dlen)
+
+
+
     def _computeGravityDrop(self):
         """ Compute the gravity drop along the line in the same way as the trajectory solver does in the
             observed part, and from the bending by gravity below it, and update the heights and the air
@@ -651,11 +726,14 @@ class DragFit(object):
 
         traj = self.traj
 
-        # Take the time of the first point and the largest distance from the centre of the Earth of the first
-        #   points of all stations as the reference, as the trajectory solver does
-        t0 = min([obs.time_data[0] for obs in traj.observations])
+        # Take the time from which the solver computed the drop, and the largest distance from the centre of
+        #   the Earth of the first points of the used stations as the reference
+        t0 = solutionDropTimeOrigin(traj)
+
+        # Take all stations if none is used
+        used = [obs for obs in traj.observations if not obs.ignore_station] or traj.observations
         r0 = max([vectMag(findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], self.state_vect, \
-            self.radiant_eci)[1]) for obs in traj.observations])
+            self.radiant_eci)[1]) for obs in used])
 
         v0z = getattr(traj, 'v0z', None)
         if v0z is None:

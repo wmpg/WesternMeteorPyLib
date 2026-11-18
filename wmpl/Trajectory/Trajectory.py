@@ -745,6 +745,49 @@ def numStationsNotIgnored(observations):
 
 
 
+def dropTimeOrigin(observations):
+    """ Find the first time of the used stations, from which the gravity drop is computed.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+
+    Return:
+        [float] First time of the used stations, or of all stations if none is used (s).
+    """
+
+    # Take the first times of the used stations
+    times = [obs.time_data[0] for obs in observations if not obs.ignore_station]
+
+    # Take all stations if none is used
+    if not times:
+        times = [obs.time_data[0] for obs in observations]
+
+
+    return min(times)
+
+
+
+def solutionDropTimeOrigin(traj):
+    """ Find the time from which a solved trajectory computed the gravity drop.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+
+    Return:
+        [float] Time of the beginning of the drop (s).
+    """
+
+    t0 = getattr(traj, 'gravity_t0', None)
+
+    # Solutions from before the time was stored took the first time of all stations
+    if t0 is None:
+        t0 = min([obs.time_data[0] for obs in traj.observations])
+
+
+    return t0
+
+
+
 def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     """ Compute the beginning point of the trajectory, from which the gravity drop is computed.
 
@@ -785,7 +828,7 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
     radiant_eci = vectNorm(radiant_eci)
 
     # Find the earliest time, from which the drop is computed
-    t0 = min([obs.time_data[0] for obs in observations])
+    t0 = dropTimeOrigin(observations)
 
     dist_list = []
     for obs, i in first_picks:
@@ -864,7 +907,7 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     radiant_eci = np.ascontiguousarray(radiant_eci)
 
     # Find the earliest point in time
-    t0 = min([obs.time_data[0] for obs in observations])
+    t0 = dropTimeOrigin(observations)
 
     angle_sum = 0.0
     weights_sum = 1e-10
@@ -2707,7 +2750,8 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     Arguments:
         eci_coord: [ndarray] (x, y, z) ECI coordinates of the meteor at the given time t (meters).
-        t: [float] Time of meteor since the beginning of the trajectory.
+        t: [float] Time of meteor since the beginning of the trajectory. Negative before the beginning, where
+            the meteor is below the line too, as the path is a parabola about the beginning.
         r0: [float] Distance from the centre of the Earth of the beginning of the meteor.
         gravity_factor: [float] Factor by which the gravity drop will be multiplied.
         vz: [float] Vertical component of the meteor's velocity.
@@ -2716,9 +2760,6 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     # Define the mass of the Earth
     earth_mass = 5.9722e24 # kg
-
-    # Determine the sign of the initial time
-    time_sign = np.sign(t)
 
     # The derived drop function does not work for small vz's, thus the classical drop function is used
     if abs(vz) < 100:
@@ -2731,7 +2772,7 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
         g = G*earth_mass/r0**2
 
         # Calculate the amount of gravity drop from a straight trajectory
-        drop = time_sign*(1.0/2)*g*t**2
+        drop = (1.0/2)*g*t**2
 
 
     else:
@@ -2745,7 +2786,7 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
             denominator = 1e-10
 
         # Compute the drop using a drop model with a constant vertical velocity
-        drop = time_sign*(G*earth_mass/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
+        drop = (G*earth_mass/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
 
 
     # Apply gravity drop to ECI coordinates
@@ -3091,6 +3132,9 @@ class Trajectory(object):
         #   the line-of-sight fit (see gravityDropReference)
         self.gravity_r0 = None
 
+        # Time from which the gravity drop is computed (s), see dropTimeOrigin
+        self.gravity_t0 = None
+
         # Calculated average velocity
         self.v_avg = None
 
@@ -3419,7 +3463,7 @@ class Trajectory(object):
         """
 
         # Same reference time and beginning point as the line-of-sight fit
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
         if gravity:
             r0 = self.gravity_r0
             if r0 is None:
@@ -3588,9 +3632,10 @@ class Trajectory(object):
             weights: [list] A list of statistical weights for every station.
     
         Return:
-            (v_ht_avg, intercept): 
+            (v_ht_avg, intercept, v_ht_stddev):
                 v_ht_avg: [float] Average velocity above the given height (m/s).
                 intercept: [float] Fit intercept (m).
+                v_ht_stddev: [float] Standard deviation of the average velocity (m/s).
         """
 
         # Maker sure weight values are OK
@@ -3634,13 +3679,13 @@ class Trajectory(object):
         if len(all_times) < 4:
             print('!!! Error, there are less than 4 points for velocity estimation above the given height of {:.2f} km!'.format(bottom_ht/1000))
             print('Using automated velocity estimation with the sliding fit...')
-            return None, None
+            return None, None, None
 
         # Fit a line through the time vs. state vector distance data
-        line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
+        line_params, line_cov = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
             sigma=all_inv_weights)
 
-        return line_params
+        return line_params[0], line_params[1], np.sqrt(line_cov[0, 0])
 
 
 
@@ -4135,7 +4180,7 @@ class Trajectory(object):
         ### Compute parameters for gravity drop ###
 
         # Determine the first time
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
 
         # Beginning point for the gravity drop, and the vertical velocity
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
@@ -4313,7 +4358,7 @@ class Trajectory(object):
         ### Compute parameters for gravity drop ###
 
         # Determine the first time of observation
-        t0 = min([obs.time_data[0] for obs in observations])
+        t0 = dropTimeOrigin(observations)
 
         # Beginning point for the gravity drop, and the vertical velocity
         eci0, r0 = gravityDropReference(observations, state_vect, radiant_eci, v_init=self.v_init)
@@ -7058,6 +7103,9 @@ class Trajectory(object):
         # Do a Jacchia exponential fit to the lag, per every station
         self.jacchia_fit = self.fitJacchiaLag(self.observations)
 
+        # Store the time from which the drop is computed, for the fits which take the solution later
+        self.gravity_t0 = dropTimeOrigin(self.observations)
+
         # Calculate latitude, longitude and altitude of each point closest to the radiant line, in WGS84
         self.calcLLA(self.state_vect_mini, self.radiant_eci_mini, self.observations)
 
@@ -7065,13 +7113,14 @@ class Trajectory(object):
         # Compute the initial velocity as the average velocity of all points above the given height
         #   (optional)
         if self.v_init_ht is not None:
-            v_ht_avg, intercept_ht_avg = self.calcAvgVelocityAboveHt(self.observations, 1000*self.v_init_ht, \
-                weights)
+            v_ht_avg, intercept_ht_avg, v_ht_stddev = self.calcAvgVelocityAboveHt(self.observations, \
+                1000*self.v_init_ht, weights)
 
             # Assign this average velocity as the initial velocity if the fit was successful
             if v_ht_avg is not None:
                 
                 self.v_init = v_ht_avg
+                self.v_init_stddev = v_ht_stddev
                 self.velocity_fit = [self.v_init, intercept_ht_avg]
 
                 # Recalculate the lag
