@@ -156,7 +156,8 @@ class DragFit(object):
                 those of the flares. The ballistic coefficient can jump without penalty at each one within
                 the observed part. None by default.
             knot_spread: [float] Height below each of knot_hts over which the ballistic coefficient grows
-                without penalty (m). 0 by default, for a jump.
+                without penalty (m). 0 by default, for a jump, which takes one step of the grid of the observed
+                part (a thousandth of its length).
         """
 
         self.traj = traj
@@ -254,7 +255,9 @@ class DragFit(object):
         Return:
             (knot_beg, knot_len):
                 - knot_beg: [ndarray] Lengths where the ramps begin (m).
-                - knot_len: [ndarray] Lengths of the ramps (m), at least 1 m.
+                - knot_len: [ndarray] Lengths of the ramps (m), at least one step of the grid of the observed
+                    part, so the motion, which is integrated on that grid, follows the same K as the one
+                    reported.
         """
 
         i_low = np.argmin(self.ht_grid)
@@ -262,7 +265,10 @@ class DragFit(object):
         knot_beg = np.interp(self.knot_hts, ht_desc, len_desc)
         knot_end = np.interp(self.knot_hts - self.knot_spread, ht_desc, len_desc)
 
-        return knot_beg, np.maximum(knot_end - knot_beg, 1.0)
+        # Take the step of the grid of the observed part
+        len_step = (self.len_last - self.len_first)/(self.i_last - self.i_first)
+
+        return knot_beg, np.maximum(knot_end - knot_beg, len_step)
 
 
 
