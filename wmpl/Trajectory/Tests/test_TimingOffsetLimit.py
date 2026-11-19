@@ -121,6 +121,20 @@ def testStationWithinTheLimitIsKept():
 
 
 
+def testStationAtTheLimitIsKept():
+    """ A station whose clock is off by max_toffset, or by a little less, is at the limit but can be aligned
+        within it, so it is kept and its offset is estimated.
+    """
+
+    for clock_error in [4.99999, 5.0]:
+
+        traj, time_offsets = solveWithClockError('C', clock_error, stations=SAME_STATIONS, max_toffset=5.0)
+
+        assert ignoredStations(traj) == []
+        assert abs(time_offsets['C'] + clock_error) < 1e-3
+
+
+
 def testStationOffTheOtherWayIsNotTakenForTheFaultyOne():
     """ With three stations on the same part of the meteor and the clock of C 20 s behind, the minimizer
         holds C at +5 s and pulls B to -5 s, so B and C are equally far from the median clock. C must be
@@ -192,7 +206,8 @@ if __name__ == "__main__":
 
     # Run all tests
     test_list = [testStationBeyondTheLimitIsIgnored, testReferenceStationBeyondTheLimitIsIgnored, \
-        testStationWithinTheLimitIsKept, testStationOffTheOtherWayIsNotTakenForTheFaultyOne, \
+        testStationWithinTheLimitIsKept, testStationAtTheLimitIsKept, \
+        testStationOffTheOtherWayIsNotTakenForTheFaultyOne, \
         testHealthyStationIsNotIgnoredWithTheBridgeStation, testBridgeBetweenTwoGroupsIsNotIgnored, \
         testBridgeAcrossAnExcludedRangeIsNotIgnored]
 

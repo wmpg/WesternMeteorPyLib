@@ -4205,7 +4205,7 @@ class Trajectory(object):
 
 
     def estimateTimingAndVelocity(self, observations, weights, estimate_timing_vel=True, \
-        _timing_only=False):
+        _timing_only=False, _max_toffset=None):
         """ Estimates time offsets between the stations by matching time vs. distance from state vector. 
             The initial velocity is calculated by ineratively fitting a line from the beginning to 20% of the 
             total trajectory, and up to the 80% of the total trajectory. The fit with the lowest standard
@@ -4223,6 +4223,8 @@ class Trajectory(object):
         Keyword arguments (internal flags, DO NOT SPECIFY MANUALLY!):
             _timing_only: [bool] Internal flag. If True, only the time offsets are estimated, without ignoring
                 the stations whose offset is at the limit and without fitting the velocity. False by default.
+            _max_toffset: [float] Internal flag. Maximum time offset used instead of max_toffset (s). None by
+                default.
 
         Return:
             (fit_success, velocity_fit, v_init_mini, time_diffs, observations): [tuple]
@@ -4295,9 +4297,10 @@ class Trajectory(object):
                                                                       weights=weights))
 
             # Set bounds for timing to +/- given maximum time offset
+            max_toffset = self.max_toffset if _max_toffset is None else _max_toffset
             bounds = []
             for i in range(len(p0)):
-                bounds.append([-self.max_toffset, self.max_toffset])
+                bounds.append([-max_toffset, max_toffset])
 
 
             ### Try different methods of optimization until it is successful ##
@@ -4352,10 +4355,28 @@ class Trajectory(object):
 
                 if numOffsetsAtLimit(observations, self.stations_time_dict, time_offsets, self.max_toffset):
 
-                    # Keep the timing state, which the estimations without each station overwrite
+                    # Keep the timing state, which the estimations below overwrite
                     stations_time_dict = self.stations_time_dict
                     stations_time_dict_copy = self.stations_time_dict_copy
                     timing_res = self.timing_res
+
+                    # Estimate only the timing with twice the maximum time offset, on a copy of the
+                    #   observations, to check if an offset at the limit really needs to be larger
+                    wide_observations = copy.deepcopy(observations)
+                    wide_results = self.estimateTimingAndVelocity(wide_observations, weights, \
+                        estimate_timing_vel=estimate_timing_vel, _timing_only=True, \
+                        _max_toffset=2*self.max_toffset)
+                    wide_offsets = [t_diff for obs, t_diff in zip(wide_observations, wide_results[4]) \
+                        if (not obs.ignore_station) \
+                        and isinstance(self.stations_time_dict[str(obs.station_id)], bool)]
+
+                    # Look for a station to ignore only if an offset is beyond the limit by more than 10%, as
+                    #   the lines of sight of a station whose clock is off bias its offset in the first pass
+                    search_indices = []
+                    if wide_results[0] and np.any(np.abs(wide_offsets) > 1.1*self.max_toffset):
+                        search_indices = [i for i, obs in enumerate(observations) \
+                            if (not obs.ignore_station) \
+                            and (str(obs.station_id) not in self.fixed_time_offsets)]
 
                     best_index = None
                     best_timing_res = np.inf
@@ -4365,10 +4386,9 @@ class Trajectory(object):
 
                     # Estimate only the timing without each used station whose offset is not fixed, on a copy
                     #   of the observations
-                    for i, obs in enumerate(observations):
+                    for i in search_indices:
 
-                        if obs.ignore_station or (str(obs.station_id) in self.fixed_time_offsets):
-                            continue
+                        obs = observations[i]
 
                         # Skip the station if without it the other used stations are not one group linked by
                         #   compared times, as the clocks of separate groups are not tied together
