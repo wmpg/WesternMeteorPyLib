@@ -81,18 +81,18 @@ def testVelocityVectorSigmaIsTheSpreadOfTheRuns():
 
 
 def testNegativeComponentIsNotUnderestimated():
-    """ Check that the spread of the initial velocity does not reduce the uncertainty of a negative component
-        of the velocity vector.
+    """ Check that the spreads of the initial velocity and of the radiant do not cancel out in the
+        uncertainty of a negative component of the velocity vector.
     """
 
-    # Negative Z component dominated by the spread of the initial velocity
-    runs = makeRuns(vectNorm(np.array([0.25, 0.30, -0.92])), v_sigma=100.0, radiant_sigma=1e-5)
+    # Negative Z component with similar spreads from the speed and from the direction
+    runs = makeRuns(vectNorm(np.array([0.25, 0.30, -0.92])), v_sigma=100.0, radiant_sigma=7e-3)
     un = calcMCUncertainties(runs, runs[0])
 
     vz = np.array([run.v_init*run.radiant_eci_mini[2] for run in runs])
 
-    # The spread of Vz is about 0.92*100 m/s
-    assert un.vz > 0.8*92.0
+    # The spread of the speed alone gives 0.92*100 m/s of Vz
+    assert un.vz > 92.0
     assert abs(un.vz - np.std(vz)) < 1e-9
 
 
