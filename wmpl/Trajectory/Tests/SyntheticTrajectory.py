@@ -276,9 +276,9 @@ def stationAzimAlt(eci_points, jds, lat, lon, ele):
 
 
 
-def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
-    """ Observe the visible part of the synthetic meteor from three stations and make a trajectory object.
-        The times are relative to the beginning of the visible part.
+def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, stations=None, clock_offsets=None, **kwargs):
+    """ Observe the visible part of the synthetic meteor from the stations, three by default, and make a
+        trajectory object. The times are relative to the beginning of the visible part.
 
     Arguments:
         meteor: [DragMeteor or GravityDragMeteor object] Synthetic meteor.
@@ -287,6 +287,9 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
         noise: [float] Noise of the azimuth and elevation (arcsec). 30 by default.
         fps: [float] Frame rate of the cameras. 25 by default.
         seed: [int] Seed of the noise. 1 by default.
+        stations: [list] Stations in the form of STATIONS. None by default, in which case STATIONS is used.
+        clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
+            default, when all clocks are exact.
         kwargs: Passed to the Trajectory object.
 
     Return:
@@ -294,6 +297,12 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
     """
 
     rng = np.random.default_rng(seed)
+
+    if stations is None:
+        stations = STATIONS
+
+    if clock_offsets is None:
+        clock_offsets = {}
 
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
         show_plots=False, save_results=False, verbose=False)
@@ -303,7 +312,7 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
     duration = meteor.t_vis_end - meteor.t_vis_beg
     noise = np.radians(noise/3600.0)
 
-    for station_id, lat, lon, ele, frac_beg, frac_end in STATIONS:
+    for station_id, lat, lon, ele, frac_beg, frac_end in stations:
 
         # Sample the frames with a random phase
         times = np.arange(frac_beg*duration + rng.uniform(0, 1/fps), frac_end*duration, 1/fps)
@@ -316,7 +325,8 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
         azim = azim + rng.normal(0, noise, len(azim))/np.cos(elev)
         elev = elev + rng.normal(0, noise, len(elev))
 
-        traj.infillTrajectory(azim, elev, times, np.radians(lat), np.radians(lon), ele, station_id=station_id)
+        traj.infillTrajectory(azim, elev, times + clock_offsets.get(station_id, 0.0), np.radians(lat), \
+            np.radians(lon), ele, station_id=station_id)
 
 
     return traj
