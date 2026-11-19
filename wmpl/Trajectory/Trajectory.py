@@ -74,7 +74,7 @@ class ObservedPoints(object):
         """ Structure for containing data of observations from individual stations.
         
         Arguments:
-            jdt_ref: [float] reference Julian date for the measurements. Add provided times should be given
+            jdt_ref: [float] reference Julian date for the measurements. All provided times should be given
                 relative to this number. This is user selectable and can be the time of the first camera, or 
                 the first measurement, or some average time for the meteor, but should be close to the time of 
                 the meteor. This same reference date/time will be used on all camera measurements for the 
@@ -1011,9 +1011,8 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
     rad_RA,rad_Dec = eci2RaDec(radiant_eci)
     rad_azim,rad_elev = raDec2AltAz(rad_RA, rad_Dec, jd, lat, lon)
 
-    # Form an orthogonal right handed ENU reference frame with the x axis pointing to the radiant
-    # y axis pointing along horizon at 90 degrees counter-clockwise to radiant.
-    # z-axis such that vz = hx^hy
+    # Form an orthogonal right handed reference frame in ENU coordinates, with the x axis pointing to the
+    #   radiant, the y axis along the horizon 90 deg counter-clockwise from it and the z axis as x cross y
 
     # Azimx points towards the radiant
     azimx = rad_azim
@@ -1985,7 +1984,7 @@ def sampleMCVelocities(traj_list):
 
 
 def trajNoiseGenerator(traj, noise_sigma):
-    """ Given a base trajectory object and the observation uncertainly, this generator will generate
+    """ Given a base trajectory object and the observation uncertainty, this generator will generate
         new trajectory objects with noise-added observations.
     
     Arguments:
@@ -2229,7 +2228,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ##########################################################################################################
 
 
-    # Break the function of there are no trajectories to process
+    # Break the function if there are no trajectories to process
     if len(mc_results) < 2:
         print("!!! Not enough good Monte Carlo runs for uncertainty estimation!")
         return traj, None
@@ -2622,7 +2621,7 @@ class Trajectory(object):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
-            jdt_ref: [float] reference Julian date for the measurements. Add provided times should be given
+            jdt_ref: [float] reference Julian date for the measurements. All provided times should be given
                 relative to this number. This is user selectable and can be the time of the first camera, or 
                 the first measurement, or some average time for the meteor, but should be close to the time of 
                 the meteor. This same reference date/time will be used on all camera measurements for the 
@@ -2645,7 +2644,7 @@ class Trajectory(object):
                 data this might be bumped up to 0.5.
             v_init_ht: [float] If given, the initial velocity will be estimated as the average velocity
                 above the given height in kilometers using data from all stations. None by default, in which
-                case the initial velocity will be estimated using the automated siliding fit.
+                case the initial velocity will be estimated using the automated sliding fit.
             estimate_timing_vel: [bool/str] Try to estimate the difference in timing and velocity. True by  
                 default. A string with the list of fixed time offsets can also be given, e.g. 
                 "CA001A":0.42,"CA0005":-0.3.
@@ -4067,7 +4066,7 @@ class Trajectory(object):
         min_svd_list = [np.min(obs.state_vect_dist[obs.ignore_list == 0]) for obs in nonignored_observations]
         first_begin = min_svd_list.index(min(min_svd_list))
 
-        # Set the coordinates of the height point as the first point
+        # Set the coordinates of the begin point
         self.rbeg_lat = nonignored_observations[first_begin].rbeg_lat
         self.rbeg_lon = nonignored_observations[first_begin].rbeg_lon
         self.rbeg_ele = nonignored_observations[first_begin].rbeg_ele
@@ -6324,7 +6323,7 @@ class Trajectory(object):
                 the difference in timings, so it breaks the second trajectory run after updating the values
                 of R.A., Dec, velocity, etc. The second pass also runs without the timing estimation when the
                 gravity correction is on, as it is the pass which applies the gravity drop.
-            _rerun_bad_picks: [bool] Internal flag. Is is True when a second pass of trajectory estimation is
+            _rerun_bad_picks: [bool] Internal flag. It is True when a second pass of trajectory estimation is
                 run with bad picks removed, thus improving the solution.
             _mc_run: [bool] Internal flag. True if the solver is calculating a Monte Carlo run.
             _orig_obs: [list] Used for Monte Carlo. A list of original observations, with no added noise.
