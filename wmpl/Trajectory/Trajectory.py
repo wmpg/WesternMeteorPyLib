@@ -4310,9 +4310,13 @@ class Trajectory(object):
                         if not trial_results[0]:
                             continue
 
-                        # Skip the station if an offset is still at the limit
-                        if numOffsetsAtLimit(trial_observations, self.stations_time_dict, trial_results[4], \
-                            self.max_toffset):
+                        # Skip the station if another station loses its overlap and is ignored too, or if an
+                        #   offset is still at the limit
+                        lost_overlap = numStationsNotIgnored(trial_observations) \
+                            < numStationsNotIgnored(observations) - 1
+                        at_limit = numOffsetsAtLimit(trial_observations, self.stations_time_dict, \
+                            trial_results[4], self.max_toffset)
+                        if lost_overlap or at_limit:
                             continue
 
                         # Choose the station without which the timing residual is the lowest

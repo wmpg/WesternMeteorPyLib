@@ -22,6 +22,10 @@ FOUR_STATIONS = STATIONS + [('D', 45.3, 15.5, 300.0, 0.0, 1.0)]
 # The three stations of SyntheticTrajectory.py, all seeing the whole visible part
 SAME_STATIONS = [station[:4] + (0.0, 1.0) for station in STATIONS]
 
+# Stations A and C see the first 20% of the visible part and D the last 20%, so D overlaps only with B
+BRIDGE_STATIONS = [('A', 45.6, 14.6, 200.0, 0.0, 0.2), ('B', 44.5, 15.3, 400.0, 0.0, 1.0), \
+    ('C', 45.1, 15.9, 150.0, 0.0, 0.2), ('D', 45.3, 15.5, 300.0, 0.8, 1.0)]
+
 
 
 def solveWithClockError(station_id, clock_error, stations=FOUR_STATIONS, max_toffset=MAX_TOFFSET):
@@ -118,11 +122,23 @@ def testStationOffTheOtherWayIsNotTakenForTheFaultyOne():
 
 
 
+def testHealthyStationIsNotIgnoredWithTheBridgeStation():
+    """ Station D overlaps only with B, whose clock is 20 s ahead. Ignoring B would make D lose its overlap
+        and be ignored too, so the solver must not ignore a station for its clock in that case.
+    """
+
+    traj, _ = solveWithClockError('B', 20.0, stations=BRIDGE_STATIONS, max_toffset=5.0)
+
+    assert 'D' not in ignoredStations(traj)
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testStationBeyondTheLimitIsIgnored, testReferenceStationBeyondTheLimitIsIgnored, \
-        testStationWithinTheLimitIsKept, testStationOffTheOtherWayIsNotTakenForTheFaultyOne]
+        testStationWithinTheLimitIsKept, testStationOffTheOtherWayIsNotTakenForTheFaultyOne, \
+        testHealthyStationIsNotIgnoredWithTheBridgeStation]
 
     for test in test_list:
         test()
