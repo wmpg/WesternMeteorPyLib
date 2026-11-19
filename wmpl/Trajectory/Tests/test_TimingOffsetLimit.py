@@ -7,6 +7,8 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import copy
+
 import numpy as np
 
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, STATIONS, observeMeteor
@@ -29,6 +31,12 @@ BRIDGE_STATIONS = [('A', 45.6, 14.6, 200.0, 0.0, 0.2), ('B', 44.5, 15.3, 400.0, 
 # The bridge stations and a fifth one, E, which sees the last 20% with D, so B is the only overlap between the
 #   group of A and C and the group of D and E
 TWO_GROUP_STATIONS = BRIDGE_STATIONS + [('E', 44.9, 14.9, 250.0, 0.8, 1.0)]
+
+# Stations A, B and C see the whole visible part, and D and E the middle 20%, inside the middle 60% which A
+#   and C exclude in the test
+EXCLUDED_MIDDLE_STATIONS = [('A', 45.6, 14.6, 200.0, 0.0, 1.0), ('B', 44.5, 15.3, 400.0, 0.0, 1.0), \
+    ('C', 45.1, 15.9, 150.0, 0.0, 1.0), ('D', 45.3, 15.5, 300.0, 0.4, 0.6), \
+    ('E', 44.9, 14.9, 250.0, 0.4, 0.6)]
 
 
 
@@ -151,12 +159,42 @@ def testBridgeBetweenTwoGroupsIsNotIgnored():
 
 
 
+def testBridgeAcrossAnExcludedRangeIsNotIgnored():
+    """ Stations A and C exclude the middle 60% of the meteor, where D and E see it, so D and E are compared
+        only to B, whose clock is 20 s ahead. Without B the clocks of D and E, 3 s ahead, are not tied to
+        those of A and C, so B must not be ignored for its clock.
+    """
+
+    traj = observeMeteor(METEOR, noise=0.0, stations=EXCLUDED_MIDDLE_STATIONS, \
+        clock_offsets={'B': 20.0, 'D': 3.0, 'E': 3.0}, max_toffset=5.0)
+
+    # Ignore and exclude the middle 60% of A and C
+    duration = METEOR.t_vis_end - METEOR.t_vis_beg
+    obs_list = copy.deepcopy(traj.observations)
+    for obs in obs_list:
+        if obs.station_id in ['A', 'C']:
+            middle = (obs.time_data > 0.2*duration) & (obs.time_data < 0.8*duration)
+            obs.ignore_list = middle.astype(np.uint8)
+            obs.excluded_time = [0.2*duration, 0.8*duration]
+
+    # Initialize the observations again
+    traj.observations = []
+    for obs in obs_list:
+        traj.infillWithObs(obs)
+
+    traj.run()
+
+    assert 'B' not in ignoredStations(traj)
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testStationBeyondTheLimitIsIgnored, testReferenceStationBeyondTheLimitIsIgnored, \
         testStationWithinTheLimitIsKept, testStationOffTheOtherWayIsNotTakenForTheFaultyOne, \
-        testHealthyStationIsNotIgnoredWithTheBridgeStation, testBridgeBetweenTwoGroupsIsNotIgnored]
+        testHealthyStationIsNotIgnoredWithTheBridgeStation, testBridgeBetweenTwoGroupsIsNotIgnored, \
+        testBridgeAcrossAnExcludedRangeIsNotIgnored]
 
     for test in test_list:
         test()

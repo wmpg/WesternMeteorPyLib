@@ -1261,51 +1261,97 @@ def checkWeights(observations, weights):
 
 
 
-def lengthOverlap(len1, len2):
-    """ Find the points of the second station within the range of lengths of the first station.
+def pairTimingPoints(obs1, obs2, time1, time2):
+    """ Take the points of two stations whose times are compared in the timing residuals. The points of the
+        second station are compared to the times of the first station interpolated at their lengths.
 
     Arguments:
-        len1: [ndarray] Lengths of the first station (m).
-        len2: [ndarray] Lengths of the second station (m).
+        obs1: [ObservedPoints object] First station.
+        obs2: [ObservedPoints object] Second station.
+        time1: [ndarray] Times of all points of the first station, with its time offset (s).
+        time2: [ndarray] Times of all points of the second station, with its time offset (s).
 
     Return:
-        [ndarray] Indices of the points of the second station within the lengths of the first station, or
-            None if there are fewer than 4, which is too few to compare the timing of the stations.
+        (time1, len1, time2, len2): [tuple] Times (s) and lengths (m) of the used points of the first station,
+            and of the points of the second station which are compared to them, or None if fewer than 4 points
+            of the second station are within the lengths of the first station.
     """
 
-    common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))[0]
+    # Exclude ignored points
+    len1 = obs1.state_vect_dist[obs1.ignore_list == 0]
+    time1 = time1[obs1.ignore_list == 0]
+    len2 = obs2.state_vect_dist[obs2.ignore_list == 0]
+    time2 = time2[obs2.ignore_list == 0]
 
-    if len(common_pts) < 4:
+    # Find common points in length between both stations
+    common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))
+
+
+    # Do not compare the stations if there is no, or almost no overlap
+    if len(common_pts[0]) < 4:
         return None
 
-    return common_pts
+
+    # Take only the common points
+    time2 = time2[common_pts]
+    len2 = len2[common_pts]
+
+
+    # If there are any excluded points in the reference observations, do not take their
+    # pairs from the other site into consideration
+    if obs1.excluded_indx_range:
+
+        # Extract excluded indices
+        excluded_indx_min, excluded_indx_max = obs1.excluded_indx_range
+
+        # Get the range of lengths inside the exclusion zone
+        len1_excluded_min = len1[excluded_indx_min]
+        len1_excluded_max = len1[excluded_indx_max]
+
+        # Select only those lengths in the other station which are outside the exclusion zone
+        temp_arr = np.c_[time2, len2]
+        temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
+            & (temp_arr[:, 1] <= len1_excluded_max))]
+
+        time2, len2 = temp_arr.T
+
+
+    return time1, len1, time2, len2
 
 
 
-def overlappingStationPairs(observations):
-    """ Find the pairs of used stations which overlap in length, as the timing residuals pair them.
+def comparedStationPairs(observations, weights=None):
+    """ Find the pairs of used stations whose times are compared in the timing residuals, with at least one
+        point and a weight.
 
     Arguments:
         observations: [list] A list of ObservedPoints objects.
 
+    Keyword arguments:
+        weights: [list] A list of statistical weights for every station. None by default, in which case the
+            used stations have equal weights.
+
     Return:
-        [list] Pairs of indices of the stations which overlap.
+        [list] Pairs of indices of the stations whose times are compared.
     """
 
-    overlap_pairs = []
+    weights = checkWeights(observations, weights)
+
+    compared_pairs = []
     for i, obs1 in enumerate(observations):
         for j, obs2 in enumerate(observations):
 
             if (j <= i) or obs1.ignore_station or obs2.ignore_station:
                 continue
 
-            if lengthOverlap(obs1.state_vect_dist[obs1.ignore_list == 0], \
-                obs2.state_vect_dist[obs2.ignore_list == 0]) is not None:
+            pair_points = pairTimingPoints(obs1, obs2, obs1.time_data, obs2.time_data)
 
-                overlap_pairs.append((i, j))
+            # Take the pair only if a point is compared and the pair has a weight in the residuals
+            if (pair_points is not None) and len(pair_points[2]) and (weights[i]*weights[j] > 0):
+                compared_pairs.append((i, j))
 
 
-    return overlap_pairs
+    return compared_pairs
 
 
 
@@ -1401,52 +1447,19 @@ def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=Fa
             if j <= i:
                 continue
 
-            # Extract times and lengths from both stations
-            time1, len1 = state_vect_distances[i]
-            time2, len2 = state_vect_distances[j]
-
-            # Exclude ignored points
-            time1 = time1[observations[i].ignore_list == 0]
-            len1 = len1[observations[i].ignore_list == 0]
-            time2 = time2[observations[j].ignore_list == 0]
-            len2 = len2[observations[j].ignore_list == 0]
-
-            # Find common points in length between both stations
-            common_pts = lengthOverlap(len1, len2)
-
-
-            # Continue without fitting the timing is there is no, or almost no overlap
-            if common_pts is None:
+            # Take the points of both stations which are compared, skipping the pair if there is no, or almost
+            #   no overlap
+            pair_points = pairTimingPoints(observations[i], observations[j], state_vect_distances[i][0], \
+                state_vect_distances[j][0])
+            if pair_points is None:
                 continue
 
 
             # Keep track of stations with confirmed overlaps
             confirmed_overlaps.append(observations[i].station_id)
             confirmed_overlaps.append(observations[j].station_id)
-            
 
-            # Take only the common points
-            time2 = time2[common_pts]
-            len2 = len2[common_pts]
-
-
-            # If there are any excluded points in the reference observations, do not take their
-            # pairs from the other site into consideration
-            if observations[i].excluded_indx_range:
-
-                # Extract excluded indices
-                excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
-
-                # Get the range of lengths inside the exclusion zone
-                len1_excluded_min = len1[excluded_indx_min]
-                len1_excluded_max = len1[excluded_indx_max]
-
-                # Select only those lengths in the other station which are outside the exclusion zone
-                temp_arr = np.c_[time2, len2]
-                temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
-                    & (temp_arr[:, 1] <= len1_excluded_max))]
-
-                time2, len2 = temp_arr.T
+            time1, len1, time2, len2 = pair_points
 
 
             # Interpolate the first (i.e. reference length)
@@ -4347,8 +4360,8 @@ class Trajectory(object):
                     best_index = None
                     best_timing_res = np.inf
 
-                    # Find the pairs of used stations which overlap in length
-                    overlap_pairs = overlappingStationPairs(observations)
+                    # Find the pairs of used stations whose times are compared
+                    compared_pairs = comparedStationPairs(observations, weights=weights)
 
                     # Estimate only the timing without each used station whose offset is not fixed, on a copy
                     #   of the observations
@@ -4358,10 +4371,10 @@ class Trajectory(object):
                             continue
 
                         # Skip the station if without it the other used stations are not one group linked by
-                        #   overlaps, as the clocks of separate groups are not tied together
+                        #   compared times, as the clocks of separate groups are not tied together
                         other_indices = [j for j, other_obs in enumerate(observations) \
                             if (j != i) and (not other_obs.ignore_station)]
-                        if not isGraphConnected(other_indices, overlap_pairs):
+                        if not isGraphConnected(other_indices, compared_pairs):
                             continue
 
                         trial_observations = copy.deepcopy(observations)
