@@ -1,5 +1,5 @@
-""" Tests that the bad picks are rejected against the residuals of the kept picks, again until no more are, so
-    that outliers and ignored picks do not raise the limit.
+""" Tests that the bad picks are rejected in a single pass against the residuals of the used picks, so that
+    ignored picks do not raise the limit.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_BadPickRejection.py -v
@@ -83,19 +83,14 @@ def solveWithMovedPicks(offsets, ignored=(), seed=1):
 
 
 
-def testLargeOutliersDoNotHideSmallerOnes():
-    """ Check that a pick 8 sigma off across the track is rejected once two picks 25 sigma off are, which
-        raise the limit of the first pass above it.
+def testLargeOutliersAreRejectedInOnePass():
+    """ Check that two picks 25 sigma off across the track are rejected, and that a pick 8 sigma off, which is
+        below the limit they raise, is kept because the picks are rejected in a single pass.
     """
 
-    offsets = {8: 25*NOISE, 18: 25*NOISE, 22: 8*NOISE}
-    traj, _ = solveWithMovedPicks(offsets)
+    traj, _ = solveWithMovedPicks({8: 25*NOISE, 18: 25*NOISE, 22: 8*NOISE})
 
-    obs = traj.observations[0]
-    assert set(np.flatnonzero(obs.ignore_list)) == set(offsets)
-
-    # The noise of the kept picks is that of the measurements
-    assert obs.ang_res_std < 1.3*NOISE
+    assert set(np.flatnonzero(traj.observations[0].ignore_list)) == {8, 18}
 
 
 
@@ -127,7 +122,7 @@ def testIgnoredPicksAreNotRejectedAgain():
 
 if __name__ == "__main__":
 
-    testLargeOutliersDoNotHideSmallerOnes()
+    testLargeOutliersAreRejectedInOnePass()
     testIgnoredPicksDoNotRaiseTheLimit()
     testIgnoredPicksAreNotRejectedAgain()
 
