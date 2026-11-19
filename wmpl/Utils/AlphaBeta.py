@@ -1899,7 +1899,7 @@ def _lagFitFixed(path, time_data, length_data, x_start, fixed, lower_bounds, upp
 
 
 def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fit_v_init=True, \
-    v_init_range=0.1, ci=95.0, step_min=0.01, step_max=0.5, n_grid=40, fast=True):
+    v_init_start=None, v_init_range=0.1, ci=95.0, step_min=0.01, step_max=0.5, n_grid=40, fast=True):
     """ Profile likelihood intervals of alpha and beta of the fit to the lag (fitAlphaBetaLag()), and the
         likelihood on a grid of alpha and beta.
 
@@ -1924,10 +1924,15 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
 
     Keyword arguments:
         fit_v_init: [bool] The initial velocity was fitted. True by default.
-        v_init_range: [float] Range of the fitted initial velocity, relative to v_init. 0.1 by default.
+        v_init_start: [float] Initial velocity given to fitAlphaBetaLag() as the starting point (m/s), on
+            which the bounds of the fitted initial velocity are centered, so the profiles stay within the
+            bounds of the fit. v_init by default.
+        v_init_range: [float] Range of the fitted initial velocity, relative to v_init_start. 0.1 by
+            default.
         ci: [float] Confidence level of the intervals (percent). 95 by default.
-        step_min: [float] Smallest step of the profiles in ln alpha and ln beta. The step grows where the
-            profile is flat. 0.01 by default.
+        step_min: [float] First step of the profiles in ln alpha and ln beta. The step grows where the
+            profile is flat, and shrinks where it is steep or when the first steps already cross the 3 sigma
+            level. 0.01 by default.
         step_max: [float] Largest step of the profiles in ln alpha and ln beta. 0.5 by default.
         n_grid: [int] Number of grid points along each axis of the 2D grid. 40 by default. 0 skips the
             grid.
@@ -1958,8 +1963,10 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
     upper_bounds = list(log_bounds[1])
     x_best = [np.log(alpha), np.log(beta)]
     if fit_v_init:
-        lower_bounds.append((1.0 - v_init_range)*v_init)
-        upper_bounds.append((1.0 + v_init_range)*v_init)
+        if v_init_start is None:
+            v_init_start = v_init
+        lower_bounds.append((1.0 - v_init_range)*v_init_start)
+        upper_bounds.append((1.0 + v_init_range)*v_init_start)
         x_best.append(v_init)
 
     # Cost and the variance of the residuals at the best fit
@@ -1978,6 +1985,7 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
 
         values = [x_best[idx]]
         delta_chi2 = [0.0]
+        x_values = [list(x_best)]
 
         # Walk from the best fit to each bound, starting every fit from the previous one
         for direction in [-1, 1]:
@@ -1987,38 +1995,50 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
             bound = lower_bounds[idx] if direction < 0 else upper_bounds[idx]
             step = step_min
             delta_prev = 0.0
+            n_points = 0
 
             while direction*(bound - log_value) > 0:
 
-                log_value = log_value + direction*step
-                if direction*(log_value - bound) > 0:
-                    log_value = bound
+                log_value_new = log_value + direction*step
+                if direction*(log_value_new - bound) > 0:
+                    log_value_new = bound
 
-                cost, x_prev = _lagFitFixed(path, time_data, length_data, x_prev, {idx: log_value}, \
+                cost, x_new = _lagFitFixed(path, time_data, length_data, x_prev, {idx: log_value_new}, \
                     lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
-                x_prev = list(x_prev)
+                delta_new = (cost - cost_best)/sigma2
+
+                # If the first steps already cross the 3 sigma level, the interval is narrower than the
+                #   step, so take smaller steps
+                if (delta_new > walk_threshold) and (n_points < 4) and (step > 1e-6):
+                    step /= 4.0
+                    continue
+
+                log_value = log_value_new
+                x_prev = list(x_new)
+                n_points += 1
 
                 values.append(log_value)
-                delta_chi2.append((cost - cost_best)/sigma2)
+                delta_chi2.append(delta_new)
+                x_values.append(x_prev)
 
-                if delta_chi2[-1] > walk_threshold:
+                if delta_new > walk_threshold:
                     break
 
                 # Take larger steps where the profile is flat and smaller ones where it is steep
-                rise = abs(delta_chi2[-1] - delta_prev)
-                delta_prev = delta_chi2[-1]
+                rise = abs(delta_new - delta_prev)
+                delta_prev = delta_new
                 if rise < 0.2:
                     step = min(1.5*step, step_max)
                 elif rise > 1.0:
-                    step = max(0.5*step, step_min)
+                    step = max(0.5*step, 1e-6)
 
         # Sort the profile by the value
         order = np.argsort(values)
         values = np.array(values)[order]
         delta_chi2 = np.array(delta_chi2)[order]
+        x_values = [x_values[i] for i in order]
 
-        # Find where the profile crosses the threshold on each side of the minimum, by linear
-        #   interpolation in the log space
+        # Find where the profile crosses the threshold on each side of the minimum
         i_min = np.argmin(delta_chi2)
         limits = []
         at_bound = []
@@ -2028,8 +2048,25 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
             crossing = None
             for j_prev, j in zip(indices[:-1], indices[1:]):
                 if delta_chi2[j] > threshold:
-                    frac = (threshold - delta_chi2[j_prev])/(delta_chi2[j] - delta_chi2[j_prev])
-                    crossing = values[j_prev] + frac*(values[j] - values[j_prev])
+
+                    # Narrow down the crossing by bisection, then interpolate linearly in the log space
+                    inner, outer = values[j_prev], values[j]
+                    delta_inner, delta_outer = delta_chi2[j_prev], delta_chi2[j]
+                    x_inner = x_values[j_prev]
+                    for _ in range(8):
+
+                        middle = 0.5*(inner + outer)
+                        cost, x_middle = _lagFitFixed(path, time_data, length_data, x_inner, \
+                            {idx: middle}, lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
+                        delta_middle = (cost - cost_best)/sigma2
+
+                        if delta_middle > threshold:
+                            outer, delta_outer = middle, delta_middle
+                        else:
+                            inner, delta_inner, x_inner = middle, delta_middle, list(x_middle)
+
+                    frac = (threshold - delta_inner)/(delta_outer - delta_inner)
+                    crossing = inner + frac*(outer - inner)
                     break
 
             # The profile reached the bound without crossing the threshold
@@ -6470,7 +6507,7 @@ if __name__ == "__main__":
 
         # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the uncertainties
         lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, beta, \
-            n_grid=(40 if cml_args.errors else 0))
+            v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
 
         # Model velocity at the observed points
         vel_model = alphaBetaVelocity(ht_data_rescaled, alpha, beta, v_init)

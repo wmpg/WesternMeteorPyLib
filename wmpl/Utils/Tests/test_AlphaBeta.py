@@ -767,6 +767,47 @@ def testProfileAlphaBetaLag():
 
 
 
+def testProfileAlphaBetaLagNarrowInterval():
+    """ An interval narrower than the first step of the profile should still be found, and agree with the
+        Wald interval on both sides of the best fit, within the asymmetry of the profile.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 2.0, 7)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=0)
+
+    for name, value in [('alpha', alpha), ('beta', beta)]:
+        _assertClose(value - profile[name + '_lower'], value - errors[name + '_ci_wald_lower'], 0.5, \
+            name + " lower half width")
+        _assertClose(profile[name + '_upper'] - value, errors[name + '_ci_wald_upper'] - value, 0.5, \
+            name + " upper half width")
+
+
+
+def testProfileAlphaBetaLagStartingVelocity():
+    """ The profiles should keep the bounds of the initial velocity of the fit, centered on its starting
+        point, and not find a better fit than the best one outside of them.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+
+    # Start the fit from an initial velocity which is far off, so the fitted one ends at its bound
+    v_init_start = 16000.0
+    v_init, alpha, beta, _ = fitAlphaBetaLag(time_data, length_data, ht_data, v_init_start)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, \
+        v_init_start=v_init_start, n_grid=0)
+
+    # With the bounds centered on the fitted velocity the profiles find fits about 200 lower in chi-squared,
+    #   with the right bounds only a slightly better local minimum than the fit from the far start
+    for name in ['alpha', 'beta']:
+        assert np.min(profile[name + '_profile'][1]) > -10.0
+
+
+
 def testProfileAlphaBetaLagUpperLimit():
     """ A meteor which loses almost no mass leaves beta without a lower limit, which the profile should
         report, while the Wald uncertainty of beta is meaningless.
