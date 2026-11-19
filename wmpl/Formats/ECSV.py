@@ -168,8 +168,9 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
                             + "(integrated pixel value 1), they have no magnitude").format(station_id, \
                             int(np.sum(no_photometry)), len(mag_data)))
 
+            # Without a magnitude column, the points have no magnitude
             else:
-                mag_data = np.zeros_like(azim_data) + 10.0
+                mag_data = np.zeros_like(azim_data) + np.nan
 
 
             # Convert time to JD

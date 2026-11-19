@@ -1,6 +1,6 @@
 """ Tests of reading the header and the rows of ECSV files with loadECSVs(): the metadata keys are matched
     exactly and their values may have colons, and the times may be written without fractional seconds or with
-    a final Z and keep their microseconds.
+    a final Z and keep their microseconds, and a file without magnitudes gives no magnitudes.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVLoader.py -v
@@ -115,10 +115,25 @@ def testRelativeTimesKeepTheMicroseconds():
 
 
 
+def testFileWithoutMagnitudesHasNoMagnitudes():
+    """ Check that a file without a magnitude column gives NaN magnitudes rather than made-up ones. """
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        path = os.path.join(tmp_dir, "a.ecsv")
+        writeECSV(path, STATION + [('camera_id', "'XX0001'")], COLUMNS, TIMES, with_mag=False)
+
+        _, meteor_list = loadECSVs([path], no_prepare=True)
+
+    assert np.all(np.isnan(np.array(meteor_list[0].mag_data, dtype=np.float64)))
+
+
+
 if __name__ == "__main__":
 
     testHeaderKeysAreMatchedExactlyAndValuesKeepColons()
     testTimesWithoutFractionsOrWithZ()
     testRelativeTimesKeepTheMicroseconds()
+    testFileWithoutMagnitudesHasNoMagnitudes()
 
     print("All tests passed.")
