@@ -1,5 +1,5 @@
 """ Tests that the MILIG input file and the Gural solver get the direction of every ECSV row at its time, and
-    that the ECSV files written by saveECSV are read back.
+    that the ECSV files written by saveECSV are read back and do not overwrite each other.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVOutputs.py -v
@@ -7,6 +7,7 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import os
 import sys
 import tempfile
@@ -197,11 +198,48 @@ def testSavedECSVIsReadBack():
 
 
 
+def testSavedECSVNamesAreUnique():
+    """ Check that two observations from the same station with the same reference time are saved into two
+        files, and that the name of a single observation keeps its form.
+    """
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        paths, _, _ = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
+        _, meteor_list = loadECSVs(paths)
+
+        # Add a second observation of the first station, 1 magnitude fainter
+        meteor_second = copy.deepcopy(meteor_list[0])
+        meteor_second.mag_data = meteor_second.mag_data + 1.0
+
+        out_dir = os.path.join(tmp_dir, "saved")
+        os.makedirs(out_dir)
+        saveECSV(out_dir, meteor_list + [meteor_second])
+
+        saved_names = sorted(os.listdir(out_dir))
+        assert len(saved_names) == len(STRAIGHT_STATIONS) + 1
+
+        # Check that only the second observation has a counter in the name
+        station_end = "_{:s}.ecsv".format(str(meteor_list[0].station_id))
+        first_name = [name for name in saved_names if name.endswith(station_end)]
+        second_name = [name for name in saved_names if name.endswith("_2.ecsv")]
+        assert len(first_name) == 1
+        assert second_name == [first_name[0].replace(".ecsv", "_2.ecsv")]
+
+        # Check that each file has the magnitudes of its observation
+        _, (first, second) = loadECSVs([os.path.join(out_dir, first_name[0]), \
+            os.path.join(out_dir, second_name[0])])
+
+    assert np.allclose(second.mag_data - first.mag_data, 1.0)
+
+
+
 if __name__ == "__main__":
 
     testPreparedAzimuthsAreThoseOfTheFile()
     testMiligFileHasTheAzimuthsOfTheRows()
     testGuralSolverGetsTheRaDecAtTheReferenceTime()
     testSavedECSVIsReadBack()
+    testSavedECSVNamesAreUnique()
 
     print("All tests passed.")
