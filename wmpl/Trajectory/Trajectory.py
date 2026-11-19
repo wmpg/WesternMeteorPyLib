@@ -4181,10 +4181,10 @@ class Trajectory(object):
                     self.stations_time_dict[str(obs.station_id)] = True
                     self.stations_time_dict_copy[str(obs.station_id)] = True
 
-            # If no fixed times are given, set the station with the longest track as the reference station
-            #   (time difference = 0)
+            # If no fixed times are given, set the used station with the longest track as the reference
+            #   station (time difference = 0)
             if len(self.fixed_time_offsets) == 0:
-                obs_points = [obs.kmeas for obs in observations]
+                obs_points = [0 if obs.ignore_station else obs.kmeas for obs in observations]
                 ref_index = obs_points.index(max(obs_points))
                 self.stations_time_dict[station_list[ref_index]] = 0
                 self.stations_time_dict_copy[station_list[ref_index]] = 0
@@ -4247,6 +4247,76 @@ class Trajectory(object):
                     print('Unsuccessful timing optimization with', opt_method)
 
             ### ###
+
+
+            # Ignore a station whose clock needs a larger time offset than allowed and estimate the timing
+            #   again without it, so that the other stations are not pulled towards it
+            if timing_mini.success and (numStationsNotIgnored(observations) > 2):
+
+                # Collect the time offsets of the used stations, estimated or given
+                used_obs = []
+                used_offsets = []
+                at_limit = False
+                stat_count = 0
+                for obs in observations:
+
+                    stat_status = self.stations_time_dict[str(obs.station_id)]
+
+                    if isinstance(stat_status, bool):
+                        t_diff = timing_mini.x[stat_count]
+                        stat_count += 1
+
+                        # Check if the estimated offset of a used station is at the limit
+                        if (not obs.ignore_station) and np.isclose(np.abs(t_diff), self.max_toffset):
+                            at_limit = True
+
+                    else:
+                        t_diff = stat_status
+
+                    if not obs.ignore_station:
+                        used_obs.append(obs)
+                        used_offsets.append(t_diff)
+
+
+                if at_limit:
+
+                    # Ignore the station whose clock is the farthest from the median clock of the used
+                    #   stations, which is the reference station when its own clock is off, but not one with a
+                    #   fixed offset
+                    offset_dists = np.abs(np.array(used_offsets) - np.median(used_offsets))
+                    offset_dists[[str(obs.station_id) in self.fixed_time_offsets for obs in used_obs]] = -1
+                    off_obs = used_obs[np.argmax(offset_dists)]
+
+                    # Keep the ignored stations and the timing dictionaries, to restore them if the timing
+                    #   cannot be estimated without the station
+                    ignore_flags = [(obs.ignore_station, obs.ignore_list) for obs in observations]
+                    stations_time_dict = self.stations_time_dict
+                    stations_time_dict_copy = self.stations_time_dict_copy
+
+                    off_obs.ignore_station = True
+                    off_obs.ignore_list = np.ones(len(off_obs.time_data), dtype=np.uint8)
+
+                    if self.verbose:
+                        print("Station {:s} ignored, its clock is off by more than {:.2f} s".format(\
+                            str(off_obs.station_id), self.max_toffset))
+
+                    timing_results = self.estimateTimingAndVelocity(observations, weights, \
+                        estimate_timing_vel=estimate_timing_vel)
+
+                    if timing_results[0]:
+                        return timing_results
+
+                    # Keep the station if the other stations cannot be timed without it
+                    for obs, (ignore_station, ignore_list) in zip(observations, ignore_flags):
+                        obs.ignore_station, obs.ignore_list = ignore_station, ignore_list
+
+                    self.stations_time_dict = stations_time_dict
+                    self.stations_time_dict_copy = stations_time_dict_copy
+
+                    if self.verbose:
+                        print("Station {:s} kept, the timing cannot be estimated without it".format(\
+                            str(off_obs.station_id)))
+
 
             if not timing_mini.success:
 
