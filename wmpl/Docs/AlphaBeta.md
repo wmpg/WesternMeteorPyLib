@@ -31,10 +31,10 @@ Also estimate the uncertainties, and save the plots next to the pickle instead o
 python -m wmpl.Utils.AlphaBeta /path/to/20200109_232639_trajectory.pickle --errors --saveplots --hideplots
 ```
 
-Two plots are saved: `<timestamp>_alpha_beta_summary.png` with all results in one figure (see [The summary
-plot and the final masses](#the-summary-plot-and-the-final-masses)), and `_alpha_beta_dyn_pressure.png` with the
-dynamic pressure along the path (with its 95% band with `--errors`). `--dens` and `--ga` set the bulk density and the product of the drag and
-the shape coefficients used for the masses (3500 kg/m^3 and 0.78 by default).
+Two plots are saved: `<timestamp>_alpha_beta_summary.png` with all results in one figure (see [The summary plot
+and the final masses](#the-summary-plot-and-the-final-masses)), and `_alpha_beta_dyn_pressure.png` with the
+dynamic pressure along the path (with its 95% band with `--errors`). `--dens` and `--ga` set the bulk density
+and the product of the drag and the shape coefficients used for the masses (3500 kg/m^3 and 0.78 by default).
 
 ---
 
@@ -54,9 +54,9 @@ model of the lag are needed.
   result, as the cost has local minima.
 
 The top row of the summary plot shows the velocities against the heights rescaled to the exponential atmosphere
-and against the observed heights, the lag, and the lag residuals. The points are colored by station with the colors of the
-trajectory plots, and the legend gives the RMS of the lag residuals of every station, so a station which does
-not agree with the others stands out.
+and against the observed heights, the lag, and the lag residuals. The points are colored by station with the
+colors of the trajectory plots, and the legend gives the RMS of the lag residuals of every station, so a station
+which does not agree with the others stands out.
 
 ---
 
@@ -123,20 +123,21 @@ beta = (1 - mu)*(ln(m0s/M) - 3*ln(alpha*sin(slope)))
 ```
 
 which is straight when beta is on a linear axis and alpha*sin(slope) on a logarithmic one. The classic survival
-diagram (`plotAlphaBetaSurvivalDiagram()`) has the same lines, but plotted against ln(beta) they curve. Beta is on a
-linear axis also because the final mass depends on it exponentially: below about 0.1 it barely changes the final
-mass, while every unit of beta divides it by e (for mu = 0). A logarithmic axis would spend most of its height
-on the small values of beta, where nothing changes. An upper limit of beta is a region which reaches beta = 0,
-no mass loss.
+diagram (`plotAlphaBetaSurvivalDiagram()`) has the same lines, but plotted against ln(beta) they curve. Beta is
+on a linear axis also because the final mass depends on it exponentially: below about 0.1 it barely changes the
+final mass, while every unit of beta divides it by e (for mu = 0). A logarithmic axis would spend most of its
+height on the small values of beta, where nothing changes. An upper limit of beta is a region which reaches beta
+= 0, no mass loss.
 
-The zones are colored by the final mass: red below 50 g, yellow between 50 and 100 g, and green above 100 g.
-As mu is not known, the class is found for both mu = 0 (no rotation, solid lines) and mu = 2/3 (fast rotation,
+The zones are colored by the final mass: red below 50 g, yellow between 50 and 100 g, and green above 100 g. As
+mu is not known, the class is found for both mu = 0 (no rotation, solid lines) and mu = 2/3 (fast rotation,
 dashed lines). Where the two classes agree the zone has their color, and where they differ it has the mix of the
 two colors, e.g. brown for above 100 g with mu = 0 but below 50 g with mu = 2/3. The legend gives the classes of
-both mu. The masses in the last panel use the full alpha-beta solution with the final velocity of the model, so they
-can differ by a few percent from the approximation of the lines. For a meteor which barely decelerates (beta at
-its upper bound), the approximation of a final velocity much smaller than the initial one does not hold, and the
-zone of the best fit can disagree with the masses in the last panel, which are then the ones to use.
+both mu. The masses in the last panel use the full alpha-beta solution with the final velocity of the model, so
+they can differ by a few percent from the approximation of the lines. For a meteor which barely decelerates
+(beta at its upper bound), the approximation of a final velocity much smaller than the initial one does not
+hold, and the zone of the best fit can disagree with the masses in the last panel, which are then the ones to
+use.
 
 If the fireball lost less than 10% of its velocity by the end of the fit (`MIN_VELOCITY_LOSS`), the dynamics do
 not constrain alpha, beta and the masses: in the GMN and UWO fireballs, only 1 of 61 such fits had alpha and beta
