@@ -764,7 +764,8 @@ class DragFit(object):
                 eci0 = gravityDropOrigin(traj.observations, self.state_vect, self.radiant_eci, \
                     traj.gravity_vel, t0)
                 drop_grid[dropped] = -gravityDropVectors(eci0, self.radiant_eci, \
-                    self.time_grid[dropped] - t0, traj.gravity_vel, t0, gravity_factor)
+                    self.time_grid[dropped] - t0, traj.gravity_vel, t0, gravity_factor, \
+                    air_rotation=getattr(traj, 'air_rotation', False))
 
         else:
             for i in np.where(dropped)[0]:

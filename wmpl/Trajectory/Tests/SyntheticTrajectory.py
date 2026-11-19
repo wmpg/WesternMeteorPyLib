@@ -166,10 +166,10 @@ class DragMeteor(object):
 
 class GravityDragMeteor(object):
     def __init__(self, v_init, azim, elev, mass, duration, ht_beg=90000.0, bulk_density=3500.0, gamma_a=0.8, \
-        sigma=0.01e-6):
+        sigma=0.01e-6, air_rotation=False):
         """ Integrate the motion of a meteoroid in ECI coordinates under the central gravity of the Earth, the
             drag along its velocity and the mass loss, so the path is bent by gravity and the drag slows the
-            bending. The air is at rest in ECI, with an exponential density above a spherical Earth.
+            bending. The air has an exponential density above a spherical Earth.
 
         Arguments:
             v_init: [float] Initial velocity (m/s).
@@ -184,9 +184,14 @@ class GravityDragMeteor(object):
             bulk_density: [float] Bulk density (kg/m^3). 3500 by default.
             gamma_a: [float] Product of the drag coefficient and the shape factor. 0.8 by default.
             sigma: [float] Ablation coefficient (kg/J). 0.01 s^2/km^2 by default.
+            air_rotation: [bool] The air rotates with the Earth, and the drag acts against the velocity
+                relative to it. If False, the air is at rest in ECI. False by default.
         """
 
         self.t_vis_beg = 0.0
+
+        # The solver takes the drag against the rotating air into account only if the air rotates
+        self.air_rotation = air_rotation
 
         lat, lon = np.radians(TOP_LAT), np.radians(TOP_LON)
         begin = np.array(geo2Cartesian(lat, lon, ht_beg, JDT_REF))
@@ -198,10 +203,14 @@ class GravityDragMeteor(object):
         def derivatives(t, state):
 
             pos, vel, m = state[:3], state[3:6], max(state[6], 1e-9)
-            r, v = vectMag(pos), vectMag(vel)
+
+            # Take the velocity relative to the air, which the drag acts against
+            vel_air = vel - earthRotationVelocity(pos) if air_rotation else vel
+
+            r, v = vectMag(pos), vectMag(vel_air)
             rho = 1.225*np.exp(-(r - EARTH.EQUATORIAL_RADIUS)/7100.0)
 
-            acc = -G*EARTH.MASS*pos/r**3 - k*m**(-1/3.0)*rho*v*vel
+            acc = -G*EARTH.MASS*pos/r**3 - k*m**(-1/3.0)*rho*v*vel_air
 
             return np.r_[vel, acc, -k*sigma*m**(2/3.0)*rho*v**3]
 
@@ -290,7 +299,8 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, stations=None, clock_off
         stations: [list] Stations in the form of STATIONS. None by default, in which case STATIONS is used.
         clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
             default, when all clocks are exact.
-        kwargs: Passed to the Trajectory object.
+        kwargs: Passed to the Trajectory object. The solver takes the drag against the rotating air into
+            account only for a meteor integrated with it.
 
     Return:
         traj: [Trajectory object] Trajectory object with the observations, not yet solved.
@@ -305,7 +315,8 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, stations=None, clock_off
         clock_offsets = {}
 
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
-        show_plots=False, save_results=False, verbose=False)
+        show_plots=False, save_results=False, verbose=False, \
+        air_rotation=getattr(meteor, 'air_rotation', False))
     traj_kwargs.update(kwargs)
     traj = Trajectory(JDT_REF, **traj_kwargs)
 
@@ -415,7 +426,8 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
         clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
             default, when all clocks are exact.
         **kwargs: [dict] Keyword arguments of the Trajectory object, which replace the defaults (no timing
-            offsets above 1 s, no gravity correction, no Monte Carlo, no plots and no saving).
+            offsets above 1 s, no gravity correction, no drag against the rotating air, no Monte Carlo, no
+            plots and no saving).
 
     Return:
         (traj, begin, radiant_eci):
@@ -434,7 +446,7 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
         elevation=elevation, gravity_drop=gravity_drop)
 
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
-        show_plots=False, save_results=False, verbose=False)
+        show_plots=False, save_results=False, verbose=False, air_rotation=False)
     traj_kwargs.update(kwargs)
     traj = Trajectory(STRAIGHT_JDT_REF, **traj_kwargs)
 

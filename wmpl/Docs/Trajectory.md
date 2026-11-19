@@ -145,6 +145,20 @@ without gravity along the path). The drop is the integral of `w` over time. Grav
 centre of the Earth at every point along the line, so it also turns with the curvature of the Earth along
 long, shallow paths (`gravityDropTable()` in `Trajectory.py`).
 
+The air rotates with the Earth, eastwards at up to 465 m/s at the equator, so the drag acts against the
+velocity of the meteor relative to the air, not against its velocity in ECI. The drag pulls the speed
+across the path towards the speed of the air across the path, so the equation is
+
+```
+dw/dt = g_across + a_drag/(v - u_along)*(u_across - w)
+```
+
+where `u = omega x r` is the velocity of the air at the points of the line. This moves a decelerating
+fireball across its line even without gravity. On a fireball which slows from 13 to 3.3 km/s at 45 deg N,
+integrated with the rotating air, the radiant is within 2.1 arcsec and the positions within 0.8 m, against
+525 arcsec and 284 m with the air at rest in the solver. `Trajectory(air_rotation=False)` keeps the air
+at rest in ECI.
+
 Before, every point was dropped by the free fall `g*t^2/2` along its own vertical. That is right for a
 short, fast meteor, but a decelerating fireball drops much less than a free fall, and the vertical is not
 the direction across the path. The figure shows the drop of two fireballs below the line of their beginning,

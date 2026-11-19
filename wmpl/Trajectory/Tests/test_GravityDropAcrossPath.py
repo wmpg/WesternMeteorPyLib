@@ -1,7 +1,8 @@
 """ Tests of the gravity drop across the path, slowed by the drag, in the trajectory solver.
 
 The meteoroids are integrated exactly in ECI coordinates, under the central gravity of the Earth, the drag
-and the mass loss (SyntheticTrajectory.GravityDragMeteor), and observed without noise from three stations.
+and the mass loss (SyntheticTrajectory.GravityDragMeteor), with the air at rest or rotating with the Earth,
+and observed without noise from three stations.
 The solver must recover their radiant and their positions.
 
 Run with pytest:
@@ -87,6 +88,22 @@ def testShallowFireball():
 
     assert radiant_error < 1.0
     assert position_error < 3.0
+
+
+
+def testDeceleratingFireballInRotatingAir():
+    """ Check the decelerating fireball in the air which rotates with the Earth. The drag acts against the
+        velocity relative to the air, so it pulls the fireball across its line. With the air at rest in the
+        solver, its radiant was off by 525 arcsec and its positions by 284 m.
+    """
+
+    meteor = GravityDragMeteor(13000.0, 210.0, 60.0, 50.0, 10.0, ht_beg=85000.0, air_rotation=True)
+    _, radiant_error, position_error = _solve(meteor)
+
+    print("Radiant error: {:.2f} arcsec, position error {:.2f} m".format(radiant_error, position_error))
+
+    assert radiant_error < 3.0
+    assert position_error < 1.5
 
 
 

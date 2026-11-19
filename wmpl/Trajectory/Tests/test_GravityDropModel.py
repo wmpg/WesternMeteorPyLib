@@ -105,10 +105,10 @@ def testAnIgnoredStationDoesNotSetTheBeginning():
     obs.elev_data[0] += np.radians(5.0)
     obs.ignore_station = True
 
-    # Solve the observations again with station C ignored
+    # Solve the observations again with station C ignored, with the air at rest as the meteor has no drag
     solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
         gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
-        save_results=False, verbose=False)
+        save_results=False, verbose=False, air_rotation=False)
 
     for obs in traj.observations:
         solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
@@ -136,10 +136,10 @@ def testAnIgnoredPickDoesNotSetTheBeginning():
     ignore_list = np.zeros(len(obs.time_data), dtype=np.uint8)
     ignore_list[0] = 1
 
-    # Solve the observations again with the pick ignored
+    # Solve the observations again with the pick ignored, with the air at rest as the meteor has no drag
     solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
         gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
-        save_results=False, verbose=False)
+        save_results=False, verbose=False, air_rotation=False)
 
     for obs, station_ignore_list in zip(traj.observations, [ignore_list, None, None]):
         solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
@@ -164,10 +164,11 @@ def testIgnoredLeadingPicksDoNotShiftTheDrop():
         elevation=30.0, gravity_drop=True, estimate_timing_vel=False, gravity_correction=True, \
         filter_picks=False, calc_orbit=False)
 
-    # Solve the observations again with the picks of the first 2 s ignored
+    # Solve the observations again with the picks of the first 2 s ignored, with the air at rest as the
+    #   meteor has no drag
     solved = Trajectory(traj.jdt_ref, meastype=2, max_toffset=1.0, estimate_timing_vel=False, \
         gravity_correction=True, filter_picks=False, monte_carlo=False, calc_orbit=False, show_plots=False, \
-        save_results=False, verbose=False)
+        save_results=False, verbose=False, air_rotation=False)
 
     for obs in traj.observations:
         solved.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
@@ -177,7 +178,8 @@ def testIgnoredLeadingPicksDoNotShiftTheDrop():
 
     # Compute the cost of the gravity pass at the true line
     cost = angleSumMeasurements2Line(solved.observations, begin, radiant_eci, gravity=True, \
-        v0z=solved.v0z, r0=solved.gravity_r0, gravity_vel=solved.gravity_vel)
+        v0z=solved.v0z, r0=solved.gravity_r0, gravity_vel=solved.gravity_vel, \
+        air_rotation=solved.air_rotation)
 
     assert 3600*np.degrees(cost) < 0.02
 

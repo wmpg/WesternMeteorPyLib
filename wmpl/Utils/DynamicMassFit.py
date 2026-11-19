@@ -247,7 +247,7 @@ def pointOnTrajectory(traj, length, t):
             eci0 = gravityDropOrigin(traj.observations, traj.state_vect_mini, traj.radiant_eci_mini, \
                 traj.gravity_vel, t0)
             P = P + gravityDropVectors(eci0, traj.radiant_eci_mini, [t - t0], traj.gravity_vel, t0, \
-                getattr(traj, 'gravity_factor', 1.0))[0]
+                getattr(traj, 'gravity_factor', 1.0), air_rotation=getattr(traj, 'air_rotation', False))[0]
 
         else:
 
