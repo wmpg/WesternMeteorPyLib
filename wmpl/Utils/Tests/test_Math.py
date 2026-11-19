@@ -8,7 +8,8 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
-from wmpl.Utils.Math import medianStddev, circPercentile, findClosestPoints, findClosestPoints_vect
+from wmpl.Utils.Math import medianStddev, circPercentile, findClosestPoints, findClosestPoints_vect, \
+    isGraphConnected
 
 
 
@@ -117,12 +118,31 @@ def testClosestPointsOfManyLinesAreThoseOfEachLine():
 
 
 
+def testGraphConnectivity():
+    """ A chain of nodes is connected, two groups of nodes are not, and edges to other nodes are not used. """
+
+    assert isGraphConnected([0, 1, 2, 3], [(0, 1), (1, 2), (2, 3)])
+    assert isGraphConnected(['A', 'B', 'C'], [('C', 'A'), ('B', 'C')])
+
+    # Two groups joined only through a node which is not in the graph
+    assert not isGraphConnected([0, 2, 3, 4], [(0, 2), (3, 4), (0, 1), (1, 3)])
+
+    # A node without edges
+    assert not isGraphConnected([0, 1, 2], [(0, 1)])
+
+    # One node or none
+    assert isGraphConnected([5], [])
+    assert isGraphConnected([], [])
+
+
+
 
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testMedianStddev, testCircPercentileOfAnglesFrom0To360, \
-        testCircPercentileOfAnglesFromMinus180To180, testClosestPointsOfManyLinesAreThoseOfEachLine]
+        testCircPercentileOfAnglesFromMinus180To180, testClosestPointsOfManyLinesAreThoseOfEachLine, \
+        testGraphConnectivity]
 
     for test in test_list:
         test()

@@ -51,7 +51,7 @@ from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.DragVelocity import fitDragVelocity
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, findClosestPoints_vect, \
     RMSD, angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, \
-    confidenceInterval, medianStddev
+    confidenceInterval, medianStddev, isGraphConnected
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
@@ -1255,6 +1255,54 @@ def checkWeights(observations, weights):
 
 
 
+def lengthOverlap(len1, len2):
+    """ Find the points of the second station within the range of lengths of the first station.
+
+    Arguments:
+        len1: [ndarray] Lengths of the first station (m).
+        len2: [ndarray] Lengths of the second station (m).
+
+    Return:
+        [ndarray] Indices of the points of the second station within the lengths of the first station, or
+            None if there are fewer than 4, which is too few to compare the timing of the stations.
+    """
+
+    common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))[0]
+
+    if len(common_pts) < 4:
+        return None
+
+    return common_pts
+
+
+
+def overlappingStationPairs(observations):
+    """ Find the pairs of used stations which overlap in length, as the timing residuals pair them.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+
+    Return:
+        [list] Pairs of indices of the stations which overlap.
+    """
+
+    overlap_pairs = []
+    for i, obs1 in enumerate(observations):
+        for j, obs2 in enumerate(observations):
+
+            if (j <= i) or obs1.ignore_station or obs2.ignore_station:
+                continue
+
+            if lengthOverlap(obs1.state_vect_dist[obs1.ignore_list == 0], \
+                obs2.state_vect_dist[obs2.ignore_list == 0]) is not None:
+
+                overlap_pairs.append((i, j))
+
+
+    return overlap_pairs
+
+
+
 def numOffsetsAtLimit(observations, time_dict, time_offsets, max_toffset):
     """ Count the used stations whose estimated time offset is at the maximum time offset.
 
@@ -1358,11 +1406,11 @@ def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=Fa
             len2 = len2[observations[j].ignore_list == 0]
 
             # Find common points in length between both stations
-            common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))
+            common_pts = lengthOverlap(len1, len2)
 
 
             # Continue without fitting the timing is there is no, or almost no overlap
-            if len(common_pts[0]) < 4:
+            if common_pts is None:
                 continue
 
 
@@ -4292,11 +4340,21 @@ class Trajectory(object):
                     best_index = None
                     best_timing_res = np.inf
 
+                    # Find the pairs of used stations which overlap in length
+                    overlap_pairs = overlappingStationPairs(observations)
+
                     # Estimate only the timing without each used station whose offset is not fixed, on a copy
                     #   of the observations
                     for i, obs in enumerate(observations):
 
                         if obs.ignore_station or (str(obs.station_id) in self.fixed_time_offsets):
+                            continue
+
+                        # Skip the station if without it the other used stations are not one group linked by
+                        #   overlaps, as the clocks of separate groups are not tied together
+                        other_indices = [j for j, other_obs in enumerate(observations) \
+                            if (j != i) and (not other_obs.ignore_station)]
+                        if not isGraphConnected(other_indices, overlap_pairs):
                             continue
 
                         trial_observations = copy.deepcopy(observations)
@@ -4310,13 +4368,9 @@ class Trajectory(object):
                         if not trial_results[0]:
                             continue
 
-                        # Skip the station if another station loses its overlap and is ignored too, or if an
-                        #   offset is still at the limit
-                        lost_overlap = numStationsNotIgnored(trial_observations) \
-                            < numStationsNotIgnored(observations) - 1
-                        at_limit = numOffsetsAtLimit(trial_observations, self.stations_time_dict, \
-                            trial_results[4], self.max_toffset)
-                        if lost_overlap or at_limit:
+                        # Skip the station if an offset is still at the limit
+                        if numOffsetsAtLimit(trial_observations, self.stations_time_dict, trial_results[4], \
+                            self.max_toffset):
                             continue
 
                         # Choose the station without which the timing residual is the lowest

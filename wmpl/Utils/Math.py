@@ -1088,6 +1088,41 @@ def checkContinuity(sequence):
     return False, 0, 0
 
 
+def isGraphConnected(nodes, edges):
+    """ Check if every node of an undirected graph can be reached from every other node.
+
+    Arguments:
+        nodes: [list] Nodes of the graph.
+        edges: [list] Pairs of nodes joined by an edge. Edges with a node not in the list are not used.
+
+    Return:
+        [bool] True if the graph is connected, also when it has one node or none.
+    """
+
+    nodes = set(nodes)
+    if len(nodes) < 2:
+        return True
+
+    # Collect the neighbours of every node
+    neighbours = {node: set() for node in nodes}
+    for node1, node2 in edges:
+        if (node1 in nodes) and (node2 in nodes):
+            neighbours[node1].add(node2)
+            neighbours[node2].add(node1)
+
+    # Walk the graph from one node
+    first_node = next(iter(nodes))
+    reached = {first_node}
+    to_visit = [first_node]
+    while to_visit:
+        for neighbour in neighbours[to_visit.pop()] - reached:
+            reached.add(neighbour)
+            to_visit.append(neighbour)
+
+
+    return reached == nodes
+
+
 def histogramEdgesEqualDataNumber(x, nbins):
     """Given the data, divide the histogram edges in such a way that every bin has the same number of
         data points.

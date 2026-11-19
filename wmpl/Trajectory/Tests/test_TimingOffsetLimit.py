@@ -26,6 +26,10 @@ SAME_STATIONS = [station[:4] + (0.0, 1.0) for station in STATIONS]
 BRIDGE_STATIONS = [('A', 45.6, 14.6, 200.0, 0.0, 0.2), ('B', 44.5, 15.3, 400.0, 0.0, 1.0), \
     ('C', 45.1, 15.9, 150.0, 0.0, 0.2), ('D', 45.3, 15.5, 300.0, 0.8, 1.0)]
 
+# The bridge stations and a fifth one, E, which sees the last 20% with D, so B is the only overlap between the
+#   group of A and C and the group of D and E
+TWO_GROUP_STATIONS = BRIDGE_STATIONS + [('E', 44.9, 14.9, 250.0, 0.8, 1.0)]
+
 
 
 def solveWithClockError(station_id, clock_error, stations=FOUR_STATIONS, max_toffset=MAX_TOFFSET):
@@ -133,12 +137,26 @@ def testHealthyStationIsNotIgnoredWithTheBridgeStation():
 
 
 
+def testBridgeBetweenTwoGroupsIsNotIgnored():
+    """ Station B, whose clock is 20 s ahead, is the only overlap between A and C at the beginning and D and E
+        at the end, whose clocks are 3 s ahead. Without B the clocks of the two groups are not tied together
+        and the 3 s would stay in the velocity fit, so B must not be ignored for its clock.
+    """
+
+    traj = observeMeteor(METEOR, noise=0.0, stations=TWO_GROUP_STATIONS, \
+        clock_offsets={'B': 20.0, 'D': 3.0, 'E': 3.0}, max_toffset=5.0)
+    traj.run()
+
+    assert 'B' not in ignoredStations(traj)
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testStationBeyondTheLimitIsIgnored, testReferenceStationBeyondTheLimitIsIgnored, \
         testStationWithinTheLimitIsKept, testStationOffTheOtherWayIsNotTakenForTheFaultyOne, \
-        testHealthyStationIsNotIgnoredWithTheBridgeStation]
+        testHealthyStationIsNotIgnoredWithTheBridgeStation, testBridgeBetweenTwoGroupsIsNotIgnored]
 
     for test in test_list:
         test()
