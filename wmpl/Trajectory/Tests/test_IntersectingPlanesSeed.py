@@ -1,5 +1,6 @@
-""" Tests that the intersecting planes solution fits the plane of a station in any orientation, and that the
-    ignored picks set neither the beginning nor the angular length of a track.
+""" Tests that the intersecting planes solution fits the plane of a station in any orientation, that the
+    ignored picks set neither the beginning, the angular length of a track nor the sign of the radiant, and
+    that an ignored pick before the beginning has a negative distance from the state vector.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_IntersectingPlanesSeed.py -v
@@ -12,9 +13,9 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import ObservedPoints, observedAngularLength
-from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
-    observeStraightMeteor, stationAzimAlt
+from wmpl.Trajectory.Trajectory import ObservedPoints, PlaneIntersection, observedAngularLength
+from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_DURATION, STRAIGHT_JDT_REF, \
+    STRAIGHT_STATIONS, STRAIGHT_V_INIT, observeStraightMeteor, stationAzimAlt
 from wmpl.Utils.Math import vectNorm
 
 
@@ -112,46 +113,90 @@ def testAngularLengthOfTheUsedPicks():
 
 
 
+def observeWithIgnoredFirstPick(up_dist=None, **kwargs):
+    """ Observe the straight meteor with the first pick of station A ignored, and pointed at a point on the
+        radiant line if asked.
+
+    Keyword arguments:
+        up_dist: [float] Distance of the point of the first pick of station A up the radiant line from the
+            beginning (m), negative for a point down the line. None by default, when the pick is not moved.
+        **kwargs: [dict] Keyword arguments of the Trajectory object.
+
+    Return:
+        (traj, begin, radiant_eci):
+            - traj: [Trajectory object] Trajectory object with the observations, not yet solved.
+            - begin: [ndarray] ECI coordinates of the beginning of the meteor (m).
+            - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
+    """
+
+    # Observe the straight meteor
+    traj, begin, radiant_eci = observeStraightMeteor(noise=np.radians(10.0/3600), seed=2, **kwargs)
+
+    obs = traj.observations[0]
+
+    if up_dist is not None:
+
+        # Point the first pick of station A at the point on the radiant line
+        _, s_lat, s_lon, ele = STRAIGHT_STATIONS[0]
+        azim, elev = stationAzimAlt(np.array([begin + up_dist*radiant_eci]), \
+            np.array([STRAIGHT_JDT_REF + obs.time_data[0]/86400.0]), s_lat, s_lon, ele)
+        obs.meas1 = np.array(obs.meas1, dtype=np.float64)
+        obs.meas2 = np.array(obs.meas2, dtype=np.float64)
+        obs.meas1[0], obs.meas2[0] = azim[0], elev[0]
+
+    # Ignore the first pick of station A
+    obs.ignore_list[0] = 1
+
+    # Add the observations again to recompute the lines of sight
+    obs_list = traj.observations
+    traj.observations = []
+    for obs in obs_list:
+        traj.infillWithObs(obs)
+
+    return traj, begin, radiant_eci
+
+
+
 def testIgnoredFirstPickDoesNotSetTheBeginning():
     """ Check that an ignored first pick which lies before the meteor does not move the state vector, the
         beginning of the trajectory on the radiant line.
     """
 
-    def solve(move_first):
-        """ Solve the meteor with the first pick of station A ignored, and moved up the line if asked. """
-
-        # Observe the straight meteor
-        traj, begin, radiant_eci = observeStraightMeteor(noise=np.radians(10.0/3600), seed=2, \
-            estimate_timing_vel=False, filter_picks=False)
-
-        obs = traj.observations[0]
-
-        if move_first:
-
-            # Point the first pick of station A at a point 5 km up the radiant line from the beginning
-            _, s_lat, s_lon, ele = STRAIGHT_STATIONS[0]
-            azim, elev = stationAzimAlt(np.array([begin + 5000.0*radiant_eci]), \
-                np.array([STRAIGHT_JDT_REF + obs.time_data[0]/86400.0]), s_lat, s_lon, ele)
-            obs.meas1 = np.array(obs.meas1, dtype=np.float64)
-            obs.meas2 = np.array(obs.meas2, dtype=np.float64)
-            obs.meas1[0], obs.meas2[0] = azim[0], elev[0]
-
-        # Ignore the first pick of station A
-        obs.ignore_list[0] = 1
-
-        # Add the observations again to recompute the lines of sight
-        obs_list = traj.observations
-        traj.observations = []
-        for obs in obs_list:
-            traj.infillWithObs(obs)
-
-        return traj.run()
-
-    # Solve with and without moving the ignored pick
-    moved = solve(True)
-    kept = solve(False)
+    # Solve with the ignored pick moved 5 km up the radiant line and kept in place
+    moved = observeWithIgnoredFirstPick(5000.0, estimate_timing_vel=False, filter_picks=False)[0].run()
+    kept = observeWithIgnoredFirstPick(estimate_timing_vel=False, filter_picks=False)[0].run()
 
     assert np.linalg.norm(moved.state_vect_mini - kept.state_vect_mini) < 1.0
+
+
+
+def testIgnoredFirstPickDoesNotFlipTheRadiant():
+    """ Check that an ignored first pick which lies past the end of the meteor does not flip the radiant of
+        the intersecting planes.
+    """
+
+    # Point the ignored first pick of station A 20 km down the radiant line from the end
+    traj, _, radiant_eci = observeWithIgnoredFirstPick(-(STRAIGHT_V_INIT*STRAIGHT_DURATION + 20000.0))
+
+    # Intersect the planes of stations A and B
+    plane_intersection = PlaneIntersection(traj.observations[0], traj.observations[1])
+
+    assert np.dot(plane_intersection.radiant_eci, radiant_eci) > 0.99
+
+
+
+def testIgnoredPickBeforeTheStateVectorHasANegativeDistance():
+    """ Check that an ignored first pick which lies before the meteor is placed before the state vector in
+        the distances from it and in the lag.
+    """
+
+    # Solve with the ignored pick moved 5 km up the radiant line
+    traj = observeWithIgnoredFirstPick(5000.0)[0].run()
+
+    # Check the distance and the lag of the ignored pick of station A
+    obs = traj.observations[0]
+    assert abs(obs.state_vect_dist[0] + 5000.0) < 50.0
+    assert obs.lag[0] < -4000.0
 
 
 
@@ -161,5 +206,7 @@ if __name__ == "__main__":
     testPlaneInAnyOrientation()
     testAngularLengthOfTheUsedPicks()
     testIgnoredFirstPickDoesNotSetTheBeginning()
+    testIgnoredFirstPickDoesNotFlipTheRadiant()
+    testIgnoredPickBeforeTheStateVectorHasANegativeDistance()
 
     print("All tests passed.")

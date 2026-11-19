@@ -377,8 +377,9 @@ class ObservedPoints(object):
             # Make sure the excluded time is within the observations
             if (excluded_time_min >= np.min(self.time_data)) and (excluded_time_max <= np.max(time_data)):
 
+                # Start from the first and the last used point, as the indices count only the used points
                 excluded_indx_min = 0
-                excluded_indx_max = len(self.time_data) - 1
+                excluded_indx_max = np.count_nonzero(self.ignore_list == 0) - 1
 
                 # Find indices of excluded times, taking the ignored points into account
                 for i, t in enumerate(self.time_data[self.ignore_list == 0]):
@@ -574,8 +575,13 @@ class PlaneIntersection(object):
         self.radiant_eci = np.cross(self.obs1.plane_N, self.obs2.plane_N)
         self.radiant_eci = vectNorm(self.radiant_eci)
 
+        # Take the used points of the first station, or all points if fewer than 2 are used
+        meas_eci1 = self.obs1.meas_eci[self.obs1.ignore_list == 0]
+        if len(meas_eci1) < 2:
+            meas_eci1 = self.obs1.meas_eci
+
         # If the last measurement is closer to the radiant than the first point, reverse signs
-        if np.dot(self.obs1.meas_eci[0], self.radiant_eci) < np.dot(self.obs1.meas_eci[-1], self.radiant_eci):
+        if np.dot(meas_eci1[0], self.radiant_eci) < np.dot(meas_eci1[-1], self.radiant_eci):
             self.radiant_eci = -self.radiant_eci
 
         # Calculate the radiant position in RA and Dec
@@ -3265,8 +3271,8 @@ class Trajectory(object):
                 the other vs. length). False by default.
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
             traj_id: [str] Trajectory solution identifier. None by default.
-            reject_n_sigma_outliers: [float] Reject angular outliers that are n sigma outside the fit.
-                This value is 3 (sigma) by default.
+            reject_n_sigma_outliers: [float] Reject angular outliers whose residual is above the mean plus n
+                times the RMS of the residuals of the used picks. This value is 3 (sigma) by default.
             mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel processing. None by default,
                 which means that all cores will be used.
             fixed_times: [dict] Dictionary of fixed times for each station. None by default, meaning that
@@ -3887,8 +3893,9 @@ class Trajectory(object):
                 
                     first_pt_distances.append(dist)
 
-                    # Distance from the state vector to the projected point on the radiant line
-                    state_vect_dist.append(vectMag(state_vect - rad_cpa))
+                    # Distance from the state vector to the projected point on the radiant line, negative for
+                    #   a point before the state vector
+                    state_vect_dist.append(np.dot(state_vect - rad_cpa, radiant_eci))
 
 
                 # Convert the distances (length along the trail) into a numpy array
@@ -6355,7 +6362,12 @@ class Trajectory(object):
         t_max = -np.inf
         t_min = np.inf
 
-        
+        # Take the axis limits from the used stations, or from all stations if all of them are ignored
+        obs_lim_list = [obs for obs in obs_ht_sorted if not obs.ignore_station]
+        if not obs_lim_list:
+            obs_lim_list = obs_ht_sorted
+
+
         first_ignored_plot = True
 
 
@@ -6387,12 +6399,18 @@ class Trajectory(object):
                 c=colors[i].reshape(1,-1), alpha=alpha, label='{:s}'.format(str(obs.station_id)), zorder=3)
 
 
+            # Skip the ignored stations in the axis limits
+            if obs not in obs_lim_list:
+                continue
+
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
             vel_max = max(np.max(obs.velocities[1:]/1000), vel_max)
             vel_min = min(np.min(obs.velocities[1:]/1000), vel_min)
 
-            ht_max = max(np.max(obs.meas_ht), ht_max)
-            ht_min = min(np.min(obs.meas_ht), ht_min)
+            # Skip the NaN heights of an ignored station whose clock is far off
+            if np.any(np.isfinite(obs.meas_ht)):
+                ht_max = max(np.nanmax(obs.meas_ht), ht_max)
+                ht_min = min(np.nanmin(obs.meas_ht), ht_min)
 
             t_max = max(np.max(obs.time_data), t_max)
             t_min = min(np.min(obs.time_data), t_min)
@@ -6481,8 +6499,8 @@ class Trajectory(object):
         if self.velocity_fit is not None:
 
             # Get time data range
-            t_min = min([np.min(obs.time_data) for obs in self.observations])
-            t_max = max([np.max(obs.time_data) for obs in self.observations])
+            t_min = min([np.min(obs.time_data) for obs in obs_lim_list])
+            t_max = max([np.max(obs.time_data) for obs in obs_lim_list])
 
             t_range = np.linspace(t_min, t_max, 100)
 
@@ -6536,8 +6554,8 @@ class Trajectory(object):
         ### Plot lat/lon of the meteor ###
         try:
             # Calculate mean latitude and longitude of all meteor points
-            met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
-            met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
+            met_lon_mean = meanAngle([x for obs in self.observations for x in obs.meas_lon])
+            met_lat_mean = meanAngle([x for obs in self.observations for x in obs.meas_lat])
 
 
             # Put coordinates of all sites and the meteor in the one list
@@ -6670,8 +6688,8 @@ class Trajectory(object):
                 from wmpl.Utils.PlotMap_OSM import OSMMap
 
                 # Calculate mean latitude and longitude of all meteor points
-                met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
-                met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
+                met_lon_mean = meanAngle([x for obs in self.observations for x in obs.meas_lon])
+                met_lat_mean = meanAngle([x for obs in self.observations for x in obs.meas_lat])
 
 
                 # Put coordinates of all sites and the meteor in the one list
@@ -7789,20 +7807,31 @@ class Trajectory(object):
                 # Remove all picks which deviate more than N sigma in angular residuals
                 for obs in self.observations:
 
-                    # Find the indices of picks which are within N sigma
-                    good_picks = obs.ang_res < (np.mean(obs.ang_res) \
-                        + self.reject_n_sigma_outliers*obs.ang_res_std)
+                    # Skip ignored stations
+                    if obs.ignore_station:
+                        continue
+
+                    # Skip stations with fewer than 4 used picks
+                    used = obs.ignore_list == 0
+                    if np.count_nonzero(used) < 4:
+                        continue
+
+                    # Find the used picks within N sigma of the used picks (the RMS of the residuals is
+                    #   computed from the used picks only)
+                    good_picks = used & (obs.ang_res < (np.mean(obs.ang_res[used]) \
+                        + self.reject_n_sigma_outliers*obs.ang_res_std))
 
                     # If the number of good picks is below 4, do not remove any picks
                     if np.count_nonzero(good_picks) < 4:
                         continue
 
-                    # Check if any picks were removed
-                    if np.count_nonzero(good_picks) < len(obs.ang_res):
-                        picks_rejected += len(obs.ang_res) - np.count_nonzero(good_picks)
+                    # Check if any used picks are rejected
+                    rejected = used & (~good_picks)
+                    if np.any(rejected):
+                        picks_rejected += np.count_nonzero(rejected)
 
                         # Ignore bad picks
-                        obs.ignore_list[~good_picks] = 1
+                        obs.ignore_list[rejected] = 1
 
 
                 # Run only if some picks were rejected
@@ -7831,7 +7860,7 @@ class Trajectory(object):
 
                 else:
                     if self.verbose:
-                        print("All picks are within 3 sigma...")
+                        print("All picks are within {:.1f} sigma...".format(self.reject_n_sigma_outliers))
 
 
             else:
