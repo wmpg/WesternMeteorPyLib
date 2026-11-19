@@ -6932,7 +6932,7 @@ class Trajectory(object):
                         good_picks = kept
 
                     # If the number of good picks is below 4, do not remove any picks
-                    if np.count_nonzero(good_picks & used) < 4:
+                    if np.count_nonzero(good_picks) < 4:
                         continue
 
                     # Check if any used picks are rejected
