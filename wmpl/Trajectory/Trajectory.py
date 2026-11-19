@@ -504,8 +504,9 @@ class ObservedPoints(object):
         if len(meas_eci) < 2:
             meas_eci = self.meas_eci
 
-        # Take the normal most perpendicular to the lines of sight
-        _, _, vh = np.linalg.svd(meas_eci)
+        # Take the normal most perpendicular to the lines of sight (the reduced SVD does not build the N x N
+        #   matrix of the left singular vectors, but it only gives the normal for 3 or more points)
+        _, _, vh = np.linalg.svd(meas_eci, full_matrices=(len(meas_eci) < 3))
         N = vh[-1]
 
         # Norm the normal vector to unit length
