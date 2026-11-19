@@ -173,20 +173,15 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
 
 
             # Convert time to JD
-            jd_data = []
-            for date in dt_data:
-                dt = parseECSVDatetime(date)
-                jd_data.append(datetime2JD(dt))
-
-
-            jd_data = np.array(jd_data)
+            dt_list = [parseECSVDatetime(date) for date in dt_data]
+            jd_data = np.array([datetime2JD(dt) for dt in dt_list])
 
             # Take the first time as reference time
             jdt_ref = jd_data[0]
 
 
-            # Compute relative time
-            time_data = (jd_data - jdt_ref)*86400
+            # Compute the relative times from the differences of the times, to the microsecond
+            time_data = np.array([(dt - dt_list[0]).total_seconds() for dt in dt_list])
 
 
             # Compute RA/Dec

@@ -1,6 +1,6 @@
 """ Tests of reading the header and the rows of ECSV files with loadECSVs(): the metadata keys are matched
     exactly and their values may have colons, and the times may be written without fractional seconds or with
-    a final Z.
+    a final Z and keep their microseconds.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVLoader.py -v
@@ -99,9 +99,26 @@ def testTimesWithoutFractionsOrWithZ():
 
 
 
+def testRelativeTimesKeepTheMicroseconds():
+    """ Check that the times relative to the first point are exact to the microsecond. """
+
+    times = ["2024-01-01T00:00:{:09.6f}".format(10 + 0.040013*i) for i in range(30)]
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        path = os.path.join(tmp_dir, "a.ecsv")
+        writeECSV(path, STATION + [('camera_id', "'XX0001'")], COLUMNS, times)
+
+        _, meteor_list = loadECSVs([path], no_prepare=True)
+
+    assert np.max(np.abs(meteor_list[0].time_data - 0.040013*np.arange(30))) < 1e-9
+
+
+
 if __name__ == "__main__":
 
     testHeaderKeysAreMatchedExactlyAndValuesKeepColons()
     testTimesWithoutFractionsOrWithZ()
+    testRelativeTimesKeepTheMicroseconds()
 
     print("All tests passed.")
