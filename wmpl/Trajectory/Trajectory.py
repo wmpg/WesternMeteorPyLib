@@ -574,8 +574,13 @@ class PlaneIntersection(object):
         self.radiant_eci = np.cross(self.obs1.plane_N, self.obs2.plane_N)
         self.radiant_eci = vectNorm(self.radiant_eci)
 
+        # Take the used points of the first station, or all points if fewer than 2 are used
+        meas_eci1 = self.obs1.meas_eci[self.obs1.ignore_list == 0]
+        if len(meas_eci1) < 2:
+            meas_eci1 = self.obs1.meas_eci
+
         # If the last measurement is closer to the radiant than the first point, reverse signs
-        if np.dot(self.obs1.meas_eci[0], self.radiant_eci) < np.dot(self.obs1.meas_eci[-1], self.radiant_eci):
+        if np.dot(meas_eci1[0], self.radiant_eci) < np.dot(meas_eci1[-1], self.radiant_eci):
             self.radiant_eci = -self.radiant_eci
 
         # Calculate the radiant position in RA and Dec
