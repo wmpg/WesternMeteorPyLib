@@ -133,8 +133,8 @@ def testDragFitDirectionInRotatingAir():
     air_turn = np.degrees(angleBetweenVectors(drag_fit.radiantAtLength(drag_fit.len_last)[0], \
         drag_fit._bentRadiant(np.array([theta]), drag_fit.eciAtLength(drag_fit.len_last))[0]))
 
-    print("Largest angle between the path and the radiant: {:.4f} deg, turn by the air at the end {:.2f} deg" \
-        .format(max_error, air_turn))
+    print("Largest angle between the path and the radiant: {:.4f} deg, turn by the air at the end " \
+        "{:.2f} deg".format(max_error, air_turn))
 
     assert max_error < 0.02
     assert air_turn > 0.5

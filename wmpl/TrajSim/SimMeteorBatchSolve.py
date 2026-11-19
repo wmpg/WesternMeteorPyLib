@@ -173,7 +173,8 @@ if __name__ == "__main__":
                     else:
                         save_results = False
 
-                    # Init the trajectory (LoS or intersecing planes), with the air at rest as in the simulation
+                    # Init the trajectory (LoS or intersecing planes), with the air at rest as in the
+                    #   simulation
                     traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
                         meastype=2, show_plots=False, save_results=save_results, monte_carlo=False, \
                         gravity_correction=gravity_correction, air_rotation=False, traj_id=unique_id)
