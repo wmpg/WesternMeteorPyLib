@@ -262,6 +262,9 @@ def saveECSV(dir_path, meteor_observations,
     
     """
 
+    # Names of the files saved so far
+    ecsv_names = []
+
     for meteor in meteor_observations:
         
         # Get the reference datetime
@@ -273,6 +276,15 @@ def saveECSV(dir_path, meteor_observations,
         # Construct the file name
         # E.g. 2025-06-24T07_55_23_RMS_CA003D.ecsv
         ecsv_name = f"{dt_ref.strftime(isodate_format_file)}_{network_name}_{meteor.station_id}.ecsv"
+
+        # Add a counter to a name taken by an earlier observation, e.g. 2025-06-24T07_55_23_RMS_CA003D_2.ecsv
+        ecsv_name_base, ecsv_ext = os.path.splitext(ecsv_name)
+        name_count = 1
+        while ecsv_name in ecsv_names:
+            name_count += 1
+            ecsv_name = "{:s}_{:d}{:s}".format(ecsv_name_base, name_count, ecsv_ext)
+
+        ecsv_names.append(ecsv_name)
         ecsv_path = os.path.join(dir_path, ecsv_name)
 
         
