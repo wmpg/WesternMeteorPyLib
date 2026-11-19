@@ -6397,8 +6397,8 @@ class Trajectory(object):
         ### Plot lat/lon of the meteor ###
         try:
             # Calculate mean latitude and longitude of all meteor points
-            met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
-            met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
+            met_lon_mean = meanAngle([x for obs in self.observations for x in obs.meas_lon])
+            met_lat_mean = meanAngle([x for obs in self.observations for x in obs.meas_lat])
 
 
             # Put coordinates of all sites and the meteor in the one list
@@ -6531,8 +6531,8 @@ class Trajectory(object):
                 from wmpl.Utils.PlotMap_OSM import OSMMap
 
                 # Calculate mean latitude and longitude of all meteor points
-                met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
-                met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
+                met_lon_mean = meanAngle([x for obs in self.observations for x in obs.meas_lon])
+                met_lat_mean = meanAngle([x for obs in self.observations for x in obs.meas_lat])
 
 
                 # Put coordinates of all sites and the meteor in the one list
