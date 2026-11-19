@@ -51,7 +51,7 @@ from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.DragVelocity import fitDragVelocity
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, findClosestPoints_vect, \
     RMSD, angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, \
-    confidenceInterval, medianStddev
+    confidenceInterval, medianStddev, isGraphConnected
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
@@ -1261,6 +1261,118 @@ def checkWeights(observations, weights):
 
 
 
+def pairTimingPoints(obs1, obs2, time1, time2):
+    """ Take the points of two stations whose times are compared in the timing residuals. The points of the
+        second station are compared to the times of the first station interpolated at their lengths.
+
+    Arguments:
+        obs1: [ObservedPoints object] First station.
+        obs2: [ObservedPoints object] Second station.
+        time1: [ndarray] Times of all points of the first station, with its time offset (s).
+        time2: [ndarray] Times of all points of the second station, with its time offset (s).
+
+    Return:
+        (time1, len1, time2, len2): [tuple] Times (s) and lengths (m) of the used points of the first station,
+            and of the points of the second station which are compared to them, or None if fewer than 4 points
+            of the second station are within the lengths of the first station.
+    """
+
+    # Exclude ignored points
+    len1 = obs1.state_vect_dist[obs1.ignore_list == 0]
+    time1 = time1[obs1.ignore_list == 0]
+    len2 = obs2.state_vect_dist[obs2.ignore_list == 0]
+    time2 = time2[obs2.ignore_list == 0]
+
+    # Find common points in length between both stations
+    common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))
+
+
+    # Do not compare the stations if there is no, or almost no overlap
+    if len(common_pts[0]) < 4:
+        return None
+
+
+    # Take only the common points
+    time2 = time2[common_pts]
+    len2 = len2[common_pts]
+
+
+    # If there are any excluded points in the reference observations, do not take their
+    # pairs from the other site into consideration
+    if obs1.excluded_indx_range:
+
+        # Extract excluded indices
+        excluded_indx_min, excluded_indx_max = obs1.excluded_indx_range
+
+        # Get the range of lengths inside the exclusion zone
+        len1_excluded_min = len1[excluded_indx_min]
+        len1_excluded_max = len1[excluded_indx_max]
+
+        # Select only those lengths in the other station which are outside the exclusion zone
+        temp_arr = np.c_[time2, len2]
+        temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
+            & (temp_arr[:, 1] <= len1_excluded_max))]
+
+        time2, len2 = temp_arr.T
+
+
+    return time1, len1, time2, len2
+
+
+
+def comparedStationPairs(observations, weights=None):
+    """ Find the pairs of used stations whose times are compared in the timing residuals, with at least one
+        point and a weight.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+
+    Keyword arguments:
+        weights: [list] A list of statistical weights for every station. None by default, in which case the
+            used stations have equal weights.
+
+    Return:
+        [list] Pairs of indices of the stations whose times are compared.
+    """
+
+    weights = checkWeights(observations, weights)
+
+    compared_pairs = []
+    for i, obs1 in enumerate(observations):
+        for j, obs2 in enumerate(observations):
+
+            if (j <= i) or obs1.ignore_station or obs2.ignore_station:
+                continue
+
+            pair_points = pairTimingPoints(obs1, obs2, obs1.time_data, obs2.time_data)
+
+            # Take the pair only if a point is compared and the pair has a weight in the residuals
+            if (pair_points is not None) and len(pair_points[2]) and (weights[i]*weights[j] > 0):
+                compared_pairs.append((i, j))
+
+
+    return compared_pairs
+
+
+
+def numOffsetsAtLimit(observations, time_dict, time_offsets, max_toffset):
+    """ Count the used stations whose estimated time offset is at the maximum time offset.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+        time_dict: [dict] Time offset status of every station, True if the offset is estimated.
+        time_offsets: [ndarray] Time offset of every station (s).
+        max_toffset: [float] Maximum time offset (s).
+
+    Return:
+        [int] Number of used stations whose estimated time offset is at the maximum time offset.
+    """
+
+    return len([obs for obs, t_diff in zip(observations, time_offsets) if (not obs.ignore_station) \
+        and isinstance(time_dict[str(obs.station_id)], bool) and np.isclose(np.abs(t_diff), max_toffset)])
+
+
+
 def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=False):
     """ Calculate the sum of absolute differences between timings of given stations using the length from
         respective stations.
@@ -1335,52 +1447,19 @@ def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=Fa
             if j <= i:
                 continue
 
-            # Extract times and lengths from both stations
-            time1, len1 = state_vect_distances[i]
-            time2, len2 = state_vect_distances[j]
-
-            # Exclude ignored points
-            time1 = time1[observations[i].ignore_list == 0]
-            len1 = len1[observations[i].ignore_list == 0]
-            time2 = time2[observations[j].ignore_list == 0]
-            len2 = len2[observations[j].ignore_list == 0]
-
-            # Find common points in length between both stations
-            common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))
-
-
-            # Continue without fitting the timing is there is no, or almost no overlap
-            if len(common_pts[0]) < 4:
+            # Take the points of both stations which are compared, skipping the pair if there is no, or almost
+            #   no overlap
+            pair_points = pairTimingPoints(observations[i], observations[j], state_vect_distances[i][0], \
+                state_vect_distances[j][0])
+            if pair_points is None:
                 continue
 
 
             # Keep track of stations with confirmed overlaps
             confirmed_overlaps.append(observations[i].station_id)
             confirmed_overlaps.append(observations[j].station_id)
-            
 
-            # Take only the common points
-            time2 = time2[common_pts]
-            len2 = len2[common_pts]
-
-
-            # If there are any excluded points in the reference observations, do not take their
-            # pairs from the other site into consideration
-            if observations[i].excluded_indx_range:
-
-                # Extract excluded indices
-                excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
-
-                # Get the range of lengths inside the exclusion zone
-                len1_excluded_min = len1[excluded_indx_min]
-                len1_excluded_max = len1[excluded_indx_max]
-
-                # Select only those lengths in the other station which are outside the exclusion zone
-                temp_arr = np.c_[time2, len2]
-                temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
-                    & (temp_arr[:, 1] <= len1_excluded_max))]
-
-                time2, len2 = temp_arr.T
+            time1, len1, time2, len2 = pair_points
 
 
             # Interpolate the first (i.e. reference length)
@@ -3167,7 +3246,7 @@ class Trajectory(object):
         Keyword arguments:
             output_dir: [str] Path to the output directory where the Trajectory report and 'pickled' object
                 will be stored.
-            max_toffset: [float] Maximum allowed time offset between cameras in seconds (default 1 second).
+            max_toffset: [float] Maximum allowed time offset between cameras in seconds (default 5 seconds).
             meastype: [float] Flag indicating the type of angle measurements the user is providing for meas1 
                 and meas2 below. The following are all in radians:
                         1 = Right Ascension for meas1, declination for meas2, NOTE: epoch of date, NOT J2000!
@@ -3238,7 +3317,7 @@ class Trajectory(object):
 
         # Maximum time offset between cameras
         if max_toffset is None:
-            max_toffset = 1.0
+            max_toffset = 5.0
         self.max_toffset = max_toffset
 
         # If verbose True, results and status messages will be printed out, otherwise they will be suppressed
@@ -4125,7 +4204,8 @@ class Trajectory(object):
 
 
 
-    def estimateTimingAndVelocity(self, observations, weights, estimate_timing_vel=True):
+    def estimateTimingAndVelocity(self, observations, weights, estimate_timing_vel=True, \
+        _timing_only=False, _max_toffset=None):
         """ Estimates time offsets between the stations by matching time vs. distance from state vector. 
             The initial velocity is calculated by ineratively fitting a line from the beginning to 20% of the 
             total trajectory, and up to the 80% of the total trajectory. The fit with the lowest standard
@@ -4139,6 +4219,12 @@ class Trajectory(object):
         Keyword arguments:
             estimate_timing_vel: [bool] If True (default), the time differences and the velocity will be 
                 estimated, otherwise the velocity will be estimated as the medial velocity.
+
+        Keyword arguments (internal flags, DO NOT SPECIFY MANUALLY!):
+            _timing_only: [bool] Internal flag. If True, only the time offsets are estimated, without ignoring
+                the stations whose offset is at the limit and without fitting the velocity. False by default.
+            _max_toffset: [float] Internal flag. Maximum time offset used instead of max_toffset (s). None by
+                default.
 
         Return:
             (fit_success, velocity_fit, v_init_mini, time_diffs, observations): [tuple]
@@ -4188,10 +4274,10 @@ class Trajectory(object):
                     self.stations_time_dict[str(obs.station_id)] = True
                     self.stations_time_dict_copy[str(obs.station_id)] = True
 
-            # If no fixed times are given, set the station with the longest track as the reference station
-            #   (time difference = 0)
+            # If no fixed times are given, set the used station with the longest track as the reference
+            #   station (time difference = 0)
             if len(self.fixed_time_offsets) == 0:
-                obs_points = [obs.kmeas for obs in observations]
+                obs_points = [0 if obs.ignore_station else obs.kmeas for obs in observations]
                 ref_index = obs_points.index(max(obs_points))
                 self.stations_time_dict[station_list[ref_index]] = 0
                 self.stations_time_dict_copy[station_list[ref_index]] = 0
@@ -4211,9 +4297,10 @@ class Trajectory(object):
                                                                       weights=weights))
 
             # Set bounds for timing to +/- given maximum time offset
+            max_toffset = self.max_toffset if _max_toffset is None else _max_toffset
             bounds = []
             for i in range(len(p0)):
-                bounds.append([-self.max_toffset, self.max_toffset])
+                bounds.append([-max_toffset, max_toffset])
 
 
             ### Try different methods of optimization until it is successful ##
@@ -4254,6 +4341,103 @@ class Trajectory(object):
                     print('Unsuccessful timing optimization with', opt_method)
 
             ### ###
+
+
+            # Ignore a station whose clock needs a larger time offset than allowed and estimate the timing
+            #   again without it, so that the other stations are not pulled towards it
+            if timing_mini.success and (not _timing_only) and (numStationsNotIgnored(observations) > 2):
+
+                # Take the estimated time offset of every station
+                time_offsets = np.zeros(len(observations))
+                estimated_indices = [i for i, obs in enumerate(observations) \
+                    if isinstance(self.stations_time_dict[str(obs.station_id)], bool)]
+                time_offsets[estimated_indices] = timing_mini.x[:len(estimated_indices)]
+
+                if numOffsetsAtLimit(observations, self.stations_time_dict, time_offsets, self.max_toffset):
+
+                    # Keep the timing state, which the estimations below overwrite
+                    stations_time_dict = self.stations_time_dict
+                    stations_time_dict_copy = self.stations_time_dict_copy
+                    timing_res = self.timing_res
+
+                    # Estimate only the timing with twice the maximum time offset, on a copy of the
+                    #   observations, to check if an offset at the limit really needs to be larger
+                    wide_observations = copy.deepcopy(observations)
+                    wide_results = self.estimateTimingAndVelocity(wide_observations, weights, \
+                        estimate_timing_vel=estimate_timing_vel, _timing_only=True, \
+                        _max_toffset=2*self.max_toffset)
+                    wide_offsets = [t_diff for obs, t_diff in zip(wide_observations, wide_results[4]) \
+                        if (not obs.ignore_station) \
+                        and isinstance(self.stations_time_dict[str(obs.station_id)], bool)]
+
+                    # Look for a station to ignore only if an offset is beyond the limit by more than 10%, as
+                    #   the lines of sight of a station whose clock is off bias its offset in the first pass
+                    search_indices = []
+                    if wide_results[0] and np.any(np.abs(wide_offsets) > 1.1*self.max_toffset):
+                        search_indices = [i for i, obs in enumerate(observations) \
+                            if (not obs.ignore_station) \
+                            and (str(obs.station_id) not in self.fixed_time_offsets)]
+
+                    best_index = None
+                    best_timing_res = np.inf
+
+                    # Find the pairs of used stations whose times are compared
+                    compared_pairs = comparedStationPairs(observations, weights=weights)
+
+                    # Estimate only the timing without each used station whose offset is not fixed, on a copy
+                    #   of the observations
+                    for i in search_indices:
+
+                        obs = observations[i]
+
+                        # Skip the station if without it the other used stations are not one group linked by
+                        #   compared times, as the clocks of separate groups are not tied together
+                        other_indices = [j for j, other_obs in enumerate(observations) \
+                            if (j != i) and (not other_obs.ignore_station)]
+                        if not isGraphConnected(other_indices, compared_pairs):
+                            continue
+
+                        trial_observations = copy.deepcopy(observations)
+                        trial_observations[i].ignore_station = True
+                        trial_observations[i].ignore_list = np.ones(len(obs.time_data), dtype=np.uint8)
+
+                        trial_results = self.estimateTimingAndVelocity(trial_observations, weights, \
+                            estimate_timing_vel=estimate_timing_vel, _timing_only=True)
+
+                        # Skip the station if the timing fails without it
+                        if not trial_results[0]:
+                            continue
+
+                        # Skip the station if an offset is still at the limit
+                        if numOffsetsAtLimit(trial_observations, self.stations_time_dict, trial_results[4], \
+                            self.max_toffset):
+                            continue
+
+                        # Choose the station without which the timing residual is the lowest
+                        if self.timing_res < best_timing_res:
+                            best_index = i
+                            best_timing_res = self.timing_res
+
+
+                    # Restore the timing state
+                    self.stations_time_dict = stations_time_dict
+                    self.stations_time_dict_copy = stations_time_dict_copy
+                    self.timing_res = timing_res
+
+                    # Ignore the chosen station and estimate the timing again without it
+                    if best_index is not None:
+
+                        off_obs = observations[best_index]
+                        off_obs.ignore_station = True
+                        off_obs.ignore_list = np.ones(len(off_obs.time_data), dtype=np.uint8)
+
+                        if self.verbose:
+                            print("Station {:s} ignored, its clock is off by more than {:.2f} s".format(\
+                                str(off_obs.station_id), self.max_toffset))
+
+                        return self.estimateTimingAndVelocity(observations, weights, \
+                            estimate_timing_vel=estimate_timing_vel)
+
 
             if not timing_mini.success:
 
@@ -4324,6 +4508,11 @@ class Trajectory(object):
                 if obs.excluded_time is not None:
                     obs.excluded_time = [ex_time + t_diff for ex_time in obs.excluded_time]
 
+
+            # Return only the time offsets if the velocity is not to be fitted
+            if _timing_only:
+                return timing_minimization_successful, np.zeros(2), v_init, vel_stddev, time_diffs, \
+                    observations
 
 
             # Add in time and distance points, excluding the ignored points
