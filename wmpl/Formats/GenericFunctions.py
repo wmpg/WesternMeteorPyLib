@@ -11,8 +11,8 @@ from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Config import config
 from wmpl.Utils.Earth import calcEquationOfEquinoxes
-from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST
-from wmpl.Utils.TrajConversions import altAz2RADec_vect
+from wmpl.Utils.TrajConversions import jd2Date, raDec2AltAz_vect, equatorialCoordJ2000ToDate_vect, jd2LST, \
+    altAz2RADec_vect
 
 
 

@@ -7,8 +7,8 @@ import os
 
 import numpy as np
 
-from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_DURATION, STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
-    stationAzimAlt, straightMeteorPoints
+from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_DURATION, STRAIGHT_JDT_REF, \
+    STRAIGHT_STATIONS, stationAzimAlt, straightMeteorPoints
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 
 
@@ -37,12 +37,13 @@ def writeStraightMeteorECSVs(dir_path, duration=STRAIGHT_DURATION):
         duration: [float] Duration of the meteor (s). STRAIGHT_DURATION by default.
 
     Return:
-        (paths, azim_alt):
+        (paths, azim_alt, radiant_eci):
             - paths: [list] Paths to the files.
             - azim_alt: [dict] Azimuths and altitudes of the rows of each station (rad).
+            - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
     """
 
-    times, points, _, _ = straightMeteorPoints(duration=duration)
+    times, points, _, radiant_eci = straightMeteorPoints(duration=duration)
 
     # Compute the times of the rows to the microsecond, as they are written, and their Julian dates
     dt_ref = jd2Date(STRAIGHT_JDT_REF, dt_obj=True)
@@ -71,4 +72,4 @@ def writeStraightMeteorECSVs(dir_path, duration=STRAIGHT_DURATION):
 
         paths.append(path)
 
-    return paths, azim_alt
+    return paths, azim_alt, radiant_eci

@@ -53,7 +53,7 @@ def testPreparedAzimuthsAreThoseOfTheFile():
     """
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        paths, azim_alt = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
+        paths, azim_alt, _ = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
         _, meteor_list = loadECSVs(paths)
 
     for meteor in meteor_list:
@@ -67,7 +67,7 @@ def testMiligFileHasTheAzimuthsOfTheRows():
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
-        paths, azim_alt = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
+        paths, azim_alt, _ = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
         jdt_ref, meteor_list = loadECSVs(paths)
 
         milig_path = os.path.join(tmp_dir, "milig.txt")
@@ -145,7 +145,7 @@ def testGuralSolverGetsTheRaDecAtTheReferenceTime():
 
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            paths, azim_alt = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
+            paths, azim_alt, _ = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
             jdt_ref, meteor_list = loadECSVs(paths)
             stub = solveTrajectoryGeneric(jdt_ref, meteor_list, tmp_dir, solver='gural')
 
@@ -171,7 +171,7 @@ def testSavedECSVIsReadBack():
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
-        paths, azim_alt = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
+        paths, azim_alt, _ = writeStraightMeteorECSVs(tmp_dir, duration=DURATION)
         _, meteor_list = loadECSVs(paths)
 
         # Save the loaded meteors into new files
