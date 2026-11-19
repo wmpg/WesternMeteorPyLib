@@ -19,15 +19,22 @@ MAX_TOFFSET = 10.0
 # The three stations of SyntheticTrajectory.py and a fourth one, D, which sees the whole visible part
 FOUR_STATIONS = STATIONS + [('D', 45.3, 15.5, 300.0, 0.0, 1.0)]
 
+# The three stations of SyntheticTrajectory.py, all seeing the whole visible part
+SAME_STATIONS = [station[:4] + (0.0, 1.0) for station in STATIONS]
 
 
-def solveWithClockError(station_id, clock_error):
-    """ Solve the trajectory of the synthetic meteor seen from four stations, with the clock of one of them
-        off.
+
+def solveWithClockError(station_id, clock_error, stations=FOUR_STATIONS, max_toffset=MAX_TOFFSET):
+    """ Solve the trajectory of the synthetic meteor seen from the given stations, with the clock of one of
+        them off.
 
     Arguments:
         station_id: [str] ID of the station whose clock is off.
         clock_error: [float] Seconds by which the clock of the station is ahead.
+
+    Keyword arguments:
+        stations: [list] Stations in the form of STATIONS. FOUR_STATIONS by default.
+        max_toffset: [float] Largest time offset of the solver (s). MAX_TOFFSET by default.
 
     Return:
         (traj, time_offsets):
@@ -35,8 +42,8 @@ def solveWithClockError(station_id, clock_error):
             - time_offsets: [dict] Final time offset of every station (s).
     """
 
-    traj = observeMeteor(METEOR, noise=0.0, stations=FOUR_STATIONS, clock_offsets={station_id: clock_error}, \
-        max_toffset=MAX_TOFFSET)
+    traj = observeMeteor(METEOR, noise=0.0, stations=stations, clock_offsets={station_id: clock_error}, \
+        max_toffset=max_toffset)
     traj.run()
 
     time_offsets = dict(zip([obs.station_id for obs in traj.observations], traj.time_diffs_final))
@@ -98,11 +105,24 @@ def testStationWithinTheLimitIsKept():
 
 
 
+def testStationOffTheOtherWayIsNotTakenForTheFaultyOne():
+    """ With three stations on the same part of the meteor and the clock of C 20 s behind, the minimizer
+        holds C at +5 s and pulls B to -5 s, so B and C are equally far from the median clock. C must be
+        ignored and B kept.
+    """
+
+    traj, time_offsets = solveWithClockError('C', -20.0, stations=SAME_STATIONS, max_toffset=5.0)
+
+    assert ignoredStations(traj) == ['C']
+    assert abs(time_offsets['B']) < 1e-3
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testStationBeyondTheLimitIsIgnored, testReferenceStationBeyondTheLimitIsIgnored, \
-        testStationWithinTheLimitIsKept]
+        testStationWithinTheLimitIsKept, testStationOffTheOtherWayIsNotTakenForTheFaultyOne]
 
     for test in test_list:
         test()

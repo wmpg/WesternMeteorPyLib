@@ -1255,6 +1255,24 @@ def checkWeights(observations, weights):
 
 
 
+def numOffsetsAtLimit(observations, time_dict, time_offsets, max_toffset):
+    """ Count the used stations whose estimated time offset is at the maximum time offset.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+        time_dict: [dict] Time offset status of every station, True if the offset is estimated.
+        time_offsets: [ndarray] Time offset of every station (s).
+        max_toffset: [float] Maximum time offset (s).
+
+    Return:
+        [int] Number of used stations whose estimated time offset is at the maximum time offset.
+    """
+
+    return len([obs for obs, t_diff in zip(observations, time_offsets) if (not obs.ignore_station) \
+        and isinstance(time_dict[str(obs.station_id)], bool) and np.isclose(np.abs(t_diff), max_toffset)])
+
+
+
 def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=False):
     """ Calculate the sum of absolute differences between timings of given stations using the length from
         respective stations.
@@ -4118,7 +4136,8 @@ class Trajectory(object):
 
 
 
-    def estimateTimingAndVelocity(self, observations, weights, estimate_timing_vel=True):
+    def estimateTimingAndVelocity(self, observations, weights, estimate_timing_vel=True, \
+        _timing_only=False):
         """ Estimates time offsets between the stations by matching time vs. distance from state vector. 
             The initial velocity is calculated by ineratively fitting a line from the beginning to 20% of the 
             total trajectory, and up to the 80% of the total trajectory. The fit with the lowest standard
@@ -4132,6 +4151,10 @@ class Trajectory(object):
         Keyword arguments:
             estimate_timing_vel: [bool] If True (default), the time differences and the velocity will be 
                 estimated, otherwise the velocity will be estimated as the medial velocity.
+
+        Keyword arguments (internal flags, DO NOT SPECIFY MANUALLY!):
+            _timing_only: [bool] Internal flag. If True, only the time offsets are estimated, without ignoring
+                the stations whose offset is at the limit and without fitting the velocity. False by default.
 
         Return:
             (fit_success, velocity_fit, v_init_mini, time_diffs, observations): [tuple]
@@ -4251,71 +4274,71 @@ class Trajectory(object):
 
             # Ignore a station whose clock needs a larger time offset than allowed and estimate the timing
             #   again without it, so that the other stations are not pulled towards it
-            if timing_mini.success and (numStationsNotIgnored(observations) > 2):
+            if timing_mini.success and (not _timing_only) and (numStationsNotIgnored(observations) > 2):
 
-                # Collect the time offsets of the used stations, estimated or given
-                used_obs = []
-                used_offsets = []
-                at_limit = False
-                stat_count = 0
-                for obs in observations:
+                # Take the estimated time offset of every station
+                time_offsets = np.zeros(len(observations))
+                estimated_indices = [i for i, obs in enumerate(observations) \
+                    if isinstance(self.stations_time_dict[str(obs.station_id)], bool)]
+                time_offsets[estimated_indices] = timing_mini.x[:len(estimated_indices)]
 
-                    stat_status = self.stations_time_dict[str(obs.station_id)]
+                if numOffsetsAtLimit(observations, self.stations_time_dict, time_offsets, self.max_toffset):
 
-                    if isinstance(stat_status, bool):
-                        t_diff = timing_mini.x[stat_count]
-                        stat_count += 1
-
-                        # Check if the estimated offset of a used station is at the limit
-                        if (not obs.ignore_station) and np.isclose(np.abs(t_diff), self.max_toffset):
-                            at_limit = True
-
-                    else:
-                        t_diff = stat_status
-
-                    if not obs.ignore_station:
-                        used_obs.append(obs)
-                        used_offsets.append(t_diff)
-
-
-                if at_limit:
-
-                    # Ignore the station whose clock is the farthest from the median clock of the used
-                    #   stations, which is the reference station when its own clock is off, but not one with a
-                    #   fixed offset
-                    offset_dists = np.abs(np.array(used_offsets) - np.median(used_offsets))
-                    offset_dists[[str(obs.station_id) in self.fixed_time_offsets for obs in used_obs]] = -1
-                    off_obs = used_obs[np.argmax(offset_dists)]
-
-                    # Keep the ignored stations and the timing dictionaries, to restore them if the timing
-                    #   cannot be estimated without the station
-                    ignore_flags = [(obs.ignore_station, obs.ignore_list) for obs in observations]
+                    # Keep the timing state, which the estimations without each station overwrite
                     stations_time_dict = self.stations_time_dict
                     stations_time_dict_copy = self.stations_time_dict_copy
+                    timing_res = self.timing_res
 
-                    off_obs.ignore_station = True
-                    off_obs.ignore_list = np.ones(len(off_obs.time_data), dtype=np.uint8)
+                    best_index = None
+                    best_timing_res = np.inf
 
-                    if self.verbose:
-                        print("Station {:s} ignored, its clock is off by more than {:.2f} s".format(\
-                            str(off_obs.station_id), self.max_toffset))
+                    # Estimate only the timing without each used station whose offset is not fixed, on a copy
+                    #   of the observations
+                    for i, obs in enumerate(observations):
 
-                    timing_results = self.estimateTimingAndVelocity(observations, weights, \
-                        estimate_timing_vel=estimate_timing_vel)
+                        if obs.ignore_station or (str(obs.station_id) in self.fixed_time_offsets):
+                            continue
 
-                    if timing_results[0]:
-                        return timing_results
+                        trial_observations = copy.deepcopy(observations)
+                        trial_observations[i].ignore_station = True
+                        trial_observations[i].ignore_list = np.ones(len(obs.time_data), dtype=np.uint8)
 
-                    # Keep the station if the other stations cannot be timed without it
-                    for obs, (ignore_station, ignore_list) in zip(observations, ignore_flags):
-                        obs.ignore_station, obs.ignore_list = ignore_station, ignore_list
+                        trial_results = self.estimateTimingAndVelocity(trial_observations, weights, \
+                            estimate_timing_vel=estimate_timing_vel, _timing_only=True)
 
+                        # Skip the station if the timing fails without it
+                        if not trial_results[0]:
+                            continue
+
+                        # Skip the station if an offset is still at the limit
+                        if numOffsetsAtLimit(trial_observations, self.stations_time_dict, trial_results[4], \
+                            self.max_toffset):
+                            continue
+
+                        # Choose the station without which the timing residual is the lowest
+                        if self.timing_res < best_timing_res:
+                            best_index = i
+                            best_timing_res = self.timing_res
+
+
+                    # Restore the timing state
                     self.stations_time_dict = stations_time_dict
                     self.stations_time_dict_copy = stations_time_dict_copy
+                    self.timing_res = timing_res
 
-                    if self.verbose:
-                        print("Station {:s} kept, the timing cannot be estimated without it".format(\
-                            str(off_obs.station_id)))
+                    # Ignore the chosen station and estimate the timing again without it
+                    if best_index is not None:
+
+                        off_obs = observations[best_index]
+                        off_obs.ignore_station = True
+                        off_obs.ignore_list = np.ones(len(off_obs.time_data), dtype=np.uint8)
+
+                        if self.verbose:
+                            print("Station {:s} ignored, its clock is off by more than {:.2f} s".format(\
+                                str(off_obs.station_id), self.max_toffset))
+
+                        return self.estimateTimingAndVelocity(observations, weights, \
+                            estimate_timing_vel=estimate_timing_vel)
 
 
             if not timing_mini.success:
@@ -4387,6 +4410,11 @@ class Trajectory(object):
                 if obs.excluded_time is not None:
                     obs.excluded_time = [ex_time + t_diff for ex_time in obs.excluded_time]
 
+
+            # Return only the time offsets if the velocity is not to be fitted
+            if _timing_only:
+                return timing_minimization_successful, np.zeros(2), v_init, vel_stddev, time_diffs, \
+                    observations
 
 
             # Add in time and distance points, excluding the ignored points
