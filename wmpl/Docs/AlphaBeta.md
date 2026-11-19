@@ -31,10 +31,9 @@ Also estimate the uncertainties, and save the plots next to the pickle instead o
 python -m wmpl.Utils.AlphaBeta /path/to/20200109_232639_trajectory.pickle --errors --saveplots --hideplots
 ```
 
-The plots are saved as `<timestamp>_alpha_beta_summary.png` (all results in one figure, see [The summary plot
-and the final masses](#the-summary-plot-and-the-final-masses)), `_alpha_beta_fit.png`,
-`_alpha_beta_survival.png`, `_alpha_beta_dyn_pressure.png`, `_alpha_beta_mag_vs_dyn_pressure.png` and, with
-`--errors`, `_alpha_beta_errors.png`. `--dens` and `--ga` set the bulk density and the product of the drag and
+Two plots are saved: `<timestamp>_alpha_beta_summary.png` with all results in one figure (see [The summary
+plot and the final masses](#the-summary-plot-and-the-final-masses)), and `_alpha_beta_dyn_pressure.png` with the
+dynamic pressure along the path (with its 95% band with `--errors`). `--dens` and `--ga` set the bulk density and the product of the drag and
 the shape coefficients used for the masses (3500 kg/m^3 and 0.55 by default).
 
 ---
@@ -54,12 +53,10 @@ model of the lag are needed.
 - The fit starts from a grid of alpha and beta and from the fit to the observed velocities, and keeps the best
   result, as the cost has local minima.
 
-The fit plot shows the velocities against the heights rescaled to the exponential atmosphere and against the
-observed heights, the lag, and the lag residuals. The points are colored by station with the colors of the
+The top row of the summary plot shows the velocities against the heights rescaled to the exponential atmosphere
+and against the observed heights, the lag, and the lag residuals. The points are colored by station with the colors of the
 trajectory plots, and the legend gives the RMS of the lag residuals of every station, so a station which does
 not agree with the others stands out.
-
-![Alpha-beta fit to the lag of the 2020-01-09 Croatia fireball](figures/AlphaBeta_fit.png)
 
 ---
 
@@ -78,7 +75,7 @@ printed:
 ```
 
 `--errors` also gives the Wald uncertainties from the covariance of the fit, which are propagated into the
-masses, and makes the plot of the uncertainties (`_alpha_beta_errors.png`):
+masses, and draws the uncertainties in the bottom left of the summary plot:
 
 - The main panel shows the likelihood on a grid of alpha and beta (with V_e fitted at every point) and its 1, 2
   and 3 sigma regions of two parameters. The Wald region of the same level is drawn in red for comparison.
@@ -86,7 +83,7 @@ masses, and makes the plot of the uncertainties (`_alpha_beta_errors.png`):
   95% interval shaded.
 
 The 1 sigma and the 95% regions are also drawn on the survival diagram, so the uncertainty of a fireball can be
-compared to the final mass lines directly. In the fit plot, the gray bands show the range of the models with
+compared to the final mass lines directly. In the top row, the gray bands show the range of the models with
 alpha and beta within the 95% region: their velocities, their lag, and their difference from the best fit in
 the panel of the residuals. A band which is narrow compared to the residuals means that the residuals come from
 the data and not from the uncertainty of the model.
@@ -126,7 +123,7 @@ beta = (1 - mu)*(ln(m0s/M) - 3*ln(alpha*sin(slope)))
 ```
 
 which is straight when beta is on a linear axis and alpha*sin(slope) on a logarithmic one. The classic survival
-diagram (`_alpha_beta_survival.png`) has the same lines, but plotted against ln(beta) they curve. Beta is on a
+diagram (`plotAlphaBetaSurvivalDiagram()`) has the same lines, but plotted against ln(beta) they curve. Beta is on a
 linear axis also because the final mass depends on it exponentially: below about 0.1 it barely changes the final
 mass, while every unit of beta divides it by e (for mu = 0). A logarithmic axis would spend most of its height
 on the small values of beta, where nothing changes. An upper limit of beta is a region which reaches beta = 0,
@@ -170,13 +167,9 @@ The fireball was observed by four Global Meteor Network cameras in Croatia from 
 | Dynamic mass at 25 km | 32 g (95%: 28 - 36 g) |
 | Peak dynamic pressure | 1.07 MPa at 31.8 km (95%: 1.06 - 1.08 MPa) |
 
-The lag residuals of the four stations are 98-185 m RMS (the fit plot above), and the band of the models within
-the 95% region is at most a few tens of meters wide. The profiles of both parameters are parabolas, and the 95%
-profile region matches the Wald region:
-
-![Uncertainties of alpha and beta of the Croatia fireball](figures/AlphaBeta_errors.png)
-
-In the summary plot the whole 95% region is above 100 g for mu = 0 and below 50 g for mu = 2/3 (the brown
+The lag residuals of the four stations are 98-185 m RMS, and the band of the models within the 95% region is at
+most a few tens of meters wide. The profiles of both parameters are parabolas, and the 95% profile region
+matches the Wald region. The whole 95% region is above 100 g for mu = 0 and below 50 g for mu = 2/3 (the brown
 zone), so whether a meteorite above 50 g fell depends on the rotation:
 
 ![Summary plot of the Croatia fireball](figures/AlphaBeta_summary.png)
@@ -213,7 +206,7 @@ pressure are usually still well constrained.
 
 - The intervals assume that the lag residuals are independent. A station with a timing or a geometric offset
   makes the residuals of all its points correlated, and the real intervals are then wider. Check the residuals of
-  every station in the fit plot.
+  every station in the summary plot.
 - The model is a single body with a constant shape and mu. Fragmentation shows as a trend in the lag residuals
   which the model cannot follow.
 - The masses depend on the assumed density and on the drag and shape coefficients, which are not part of the

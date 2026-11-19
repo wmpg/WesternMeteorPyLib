@@ -6810,7 +6810,7 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-s', '--saveplots', action="store_true", \
         help="Save the plots as PNGs to the trajectory pickle directory, named after the trajectory "
-        "timestamp (e.g. 20191023_091225_alpha_beta_fit.png).")
+        "timestamp: the summary (e.g. 20191023_091225_alpha_beta_summary.png) and the dynamic pressure.")
 
     # Add the atmosphere model options
     addAtmosphereArguments(arg_parser)
@@ -7488,48 +7488,6 @@ if __name__ == "__main__":
                 ncol=(1 if len(station_ids) <= 8 else 2))
 
 
-        fig, (ax_ab, ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=4, sharey=True, figsize=(14, 6))
-        _plotFit(ax_ab, ax_vel, ax_lag, ax_lag_res)
-
-        plt.tight_layout()
-
-        plt.subplots_adjust(wspace=0)
-
-        _finishPlot(fig, "alpha_beta_fit")
-
-
-        # Plot the uncertainties of alpha and beta
-        if cml_args.errors:
-            fig_err = plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, \
-                title="{:s}, alpha-beta fit to the lag".format(traj.file_name))
-
-            _finishPlot(fig_err, "alpha_beta_errors")
-
-
-
-        ### PLOT METEORITE DROPPING POSSIBILITY
-
-        # Boundary curves derived live from this run's own dens/gamma*shape_coeff (see
-        #   plotAlphaBetaSurvivalDiagram()'s docstring) instead of the hardcoded constants this
-        #   block used to have, which didn't track --dens/--ga at all
-        #   With --errors, fit_errors carries the (ln alpha, ln beta) covariance, so an
-        #   uncertainty ellipse is drawn around the point too (fit_errors is None otherwise)
-        #   The axes are passed in so that the function doesn't call plt.show() itself
-        # Widen the axis of ln(alpha*sin(slope)) to include the best fit
-        x_point = np.log(alpha*np.sin(slope))
-        survival_x_range = (min(0.0, x_point - 0.5), max(7.0, x_point + 0.5))
-
-        fig_surv, ax_surv = plt.subplots(figsize=(7.5, 6))
-        plotAlphaBetaSurvivalDiagram(alpha, beta, slope, \
-            mass_thresholds=(1.0, 0.05), dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-            errors=fit_errors, axes=ax_surv, profile=(lag_profile if cml_args.errors else None), \
-            x_range=survival_x_range)
-        fig_surv.tight_layout()
-
-        _finishPlot(fig_surv, "alpha_beta_survival")
-
-
-
         ### Summary plot of the fit, the uncertainties, the mass diagram and the masses ###
 
         fig_sum = plt.figure(figsize=(20, 13))
@@ -7679,12 +7637,14 @@ if __name__ == "__main__":
         # Peak dynamic pressures and their heights of the models within the 95% interval, with the density
         #   computed once as the dynamic pressure is proportional to the squared velocity
         interval_peaks = []
+        interval_pressures = []
         if interval_models:
             atm_dens = getAtmDensity_vect(lat_mean, lon_mean, ht_arr, traj.jdt_ref)
             ht_arr_rescaled = rescaleHeightToExponentialAtmosphere(np.full(len(ht_arr), lat_mean), \
                 np.full(len(ht_arr), lon_mean), ht_arr, traj.jdt_ref, method=cml_args.atmrescale)
             for a, b, v0 in interval_models:
                 dyn_pressure_model = atm_dens*alphaBetaVelocity(ht_arr_rescaled, a, b, v0)**2
+                interval_pressures.append(dyn_pressure_model)
                 interval_peaks.append([np.max(dyn_pressure_model)/1e6, \
                     ht_arr[np.argmax(dyn_pressure_model)]/1000])
         interval_peaks = np.array(interval_peaks).reshape(-1, 2)
@@ -7705,13 +7665,19 @@ if __name__ == "__main__":
         print("----------------------")
 
 
-        # Plot dyn pressure
+        # Plot dyn pressure, with the band of the models within the 95% interval
         fig_dyn = plt.figure()
+        if interval_pressures:
+            plt.fill_betweenx(ht_arr/1000, np.min(interval_pressures, axis=0)/1e6, \
+                np.max(interval_pressures, axis=0)/1e6, color='k', alpha=0.15, lw=0, label="95% interval")
         plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k', label='AlphaBeta')
 
         # Mark alpha-beta dyn pressure peak on the graph
-        plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', \
-            label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht))
+        peak_label = "Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht)
+        if len(interval_peaks):
+            peak_label += "\n95%: {:.2f} - {:.2f} MPa".format(np.min(interval_peaks[:, 0]), \
+                np.max(interval_peaks[:, 0]))
+        plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', label=peak_label)
 
         # Plot the dynamic pressure of the lag smoothing and mark its peak
         if cml_args.lagsmooth:
@@ -7725,6 +7691,7 @@ if __name__ == "__main__":
 
         plt.ylabel("Height (km)")
         plt.xlabel("Dynamic pressure (MPa)")
+        plt.title("{:s}, alpha-beta dynamic pressure".format(traj.file_name), fontsize=10)
 
         _finishPlot(fig_dyn, "alpha_beta_dyn_pressure")
 
@@ -7732,44 +7699,6 @@ if __name__ == "__main__":
         ### ###
 
 
-        ### Plot magnitude vs dynamic pressure ###
-
-        fig_mag = plt.figure()
-        mag_plotted = False
-        for obs in traj.observations:
-
-            if obs.absolute_magnitudes is not None:
-
-                # Don't show magnitudes fainter than mag +8
-                mag_filter = obs.absolute_magnitudes < 5
-
-                if np.any(mag_filter):
-
-                    # Get the model velocities at the observed heights
-                    vel_model_obs = modelVelocityAtRealHeights(obs.model_ht)
-
-                    # Compute the dynamic pressure
-                    dyn_pres_station = dynamicPressure(lat_mean, lon_mean, obs.model_ht, traj.jdt_ref, vel_model_obs)
-
-                    # Plot the magnitude
-                    plt.plot(dyn_pres_station[mag_filter]/1e6, obs.absolute_magnitudes[mag_filter], label=obs.station_id)
-                    mag_plotted = True
-
-
-
-        # Skip the plot if no station had magnitudes
-        if mag_plotted:
-
-            plt.xlabel("Dynamic pressure (MPa)")
-            plt.ylabel("Absolute magnitude")
-            plt.gca().invert_yaxis()
-
-            plt.legend()
-
-            _finishPlot(fig_mag, "alpha_beta_mag_vs_dyn_pressure")
-
-        else:
-            plt.close(fig_mag)
 
 
 
