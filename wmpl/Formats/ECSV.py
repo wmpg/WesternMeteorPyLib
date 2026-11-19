@@ -20,6 +20,34 @@ from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorial
 FPS = 15
 
 
+
+def parseECSVDatetime(date):
+    """ Parse a time of an ECSV file, in ISO format with or without fractional seconds and a final Z.
+
+    Arguments:
+        date: [str] Time, e.g. 2024-01-01T00:00:10.040000.
+
+    Return:
+        [datetime] The time.
+    """
+
+    # Remove the final Z of UTC times
+    date = date.strip()
+    if date.endswith('Z'):
+        date = date[:-1]
+
+    # Try the format with fractional seconds, then the one without
+    for time_format in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"]:
+        try:
+            return datetime.datetime.strptime(date, time_format)
+
+        except ValueError:
+            continue
+
+    raise ValueError("The time {:s} of the ECSV file is not in ISO format".format(date))
+
+
+
 def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
     """ Load meteor observations from ECSV files. 
     
@@ -147,7 +175,7 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
             # Convert time to JD
             jd_data = []
             for date in dt_data:
-                dt = datetime.datetime.strptime(date, "%Y-%m-%dT%H:%M:%S.%f")
+                dt = parseECSVDatetime(date)
                 jd_data.append(datetime2JD(dt))
 
 

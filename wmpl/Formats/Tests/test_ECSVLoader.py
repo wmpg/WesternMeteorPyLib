@@ -1,5 +1,6 @@
 """ Tests of reading the header and the rows of ECSV files with loadECSVs(): the metadata keys are matched
-    exactly and their values may have colons.
+    exactly and their values may have colons, and the times may be written without fractional seconds or with
+    a final Z.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVLoader.py -v
@@ -11,7 +12,9 @@ import json
 import os
 import tempfile
 
-from wmpl.Formats.ECSV import loadECSVs
+import numpy as np
+
+from wmpl.Formats.ECSV import loadECSVs, parseECSVDatetime
 
 
 # Columns, station metadata and times of the files
@@ -76,8 +79,29 @@ def testHeaderKeysAreMatchedExactlyAndValuesKeepColons():
 
 
 
+def testTimesWithoutFractionsOrWithZ():
+    """ Check that times without fractional seconds and with a final Z are read. """
+
+    # Parse the times alone
+    assert parseECSVDatetime("2024-01-01T00:00:10Z") == parseECSVDatetime("2024-01-01T00:00:10.000000")
+    assert parseECSVDatetime(" 2024-01-01T00:00:10.5Z ").microsecond == 500000
+
+    # Read a file with whole seconds and a final Z
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        path = os.path.join(tmp_dir, "a.ecsv")
+        times = ["2024-01-01T00:00:{:02d}Z".format(10 + i) for i in range(8)]
+        writeECSV(path, STATION + [('camera_id', "'XX0001'")], COLUMNS, times)
+
+        _, meteor_list = loadECSVs([path], no_prepare=True)
+
+    assert np.allclose(meteor_list[0].time_data, np.arange(8), rtol=0, atol=1e-4)
+
+
+
 if __name__ == "__main__":
 
     testHeaderKeysAreMatchedExactlyAndValuesKeepColons()
+    testTimesWithoutFractionsOrWithZ()
 
     print("All tests passed.")
