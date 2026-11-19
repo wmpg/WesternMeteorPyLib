@@ -6199,7 +6199,12 @@ class Trajectory(object):
         t_max = -np.inf
         t_min = np.inf
 
-        
+        # Take the axis limits from the used stations, or from all stations if all of them are ignored
+        obs_lim_list = [obs for obs in obs_ht_sorted if not obs.ignore_station]
+        if not obs_lim_list:
+            obs_lim_list = obs_ht_sorted
+
+
         first_ignored_plot = True
 
 
@@ -6230,6 +6235,10 @@ class Trajectory(object):
             ax1.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=vel_markers[i%len(vel_markers)], 
                 c=colors[i].reshape(1,-1), alpha=alpha, label='{:s}'.format(str(obs.station_id)), zorder=3)
 
+
+            # Skip the ignored stations in the axis limits
+            if obs not in obs_lim_list:
+                continue
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
             vel_max = max(np.max(obs.velocities[1:]/1000), vel_max)
@@ -6327,8 +6336,8 @@ class Trajectory(object):
         if self.velocity_fit is not None:
 
             # Get time data range
-            t_min = min([np.min(obs.time_data) for obs in self.observations])
-            t_max = max([np.max(obs.time_data) for obs in self.observations])
+            t_min = min([np.min(obs.time_data) for obs in obs_lim_list])
+            t_max = max([np.max(obs.time_data) for obs in obs_lim_list])
 
             t_range = np.linspace(t_min, t_max, 100)
 

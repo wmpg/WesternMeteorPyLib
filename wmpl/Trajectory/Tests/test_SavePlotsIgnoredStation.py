@@ -1,5 +1,6 @@
 """ Tests that the trajectory solver saves its plots when a station has NaN heights, as an ignored station
-    whose clock is far off can have with the gravity correction.
+    whose clock is far off can have with the gravity correction, and that such a station does not stretch the
+    axes of the plots.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_SavePlotsIgnoredStation.py -v
@@ -8,6 +9,7 @@ Run with pytest:
 from __future__ import print_function, division, absolute_import
 
 import os
+import pickle
 import tempfile
 
 import numpy as np
@@ -92,10 +94,47 @@ def testThePlotsAreSavedWithNaNHeights(tmp_path):
 
 
 
+def testTheAxisLimitsComeFromTheUsedStations(tmp_path):
+    """ Check that the time and height axes of the velocity and length plots, and the velocity axis, are
+        limited to the used stations when a station is ignored because its clock is far off.
+
+    Arguments:
+        tmp_path: [Path] Temporary directory of the test.
+    """
+
+    traj = makeTrajectory(str(tmp_path), clock_error=CLOCK_ERROR).run()
+
+    # Check that only station D is ignored
+    used = [obs for obs in traj.observations if not obs.ignore_station]
+    assert len(used) == 3
+
+    # Ranges of the times, heights and velocities of the used stations
+    t_max = max([np.max(obs.time_data) for obs in used])
+    ht_min = min([np.min(obs.meas_ht) for obs in used])/1000
+    vel_min = min([np.min(obs.velocities[1:]) for obs in used])/1000
+
+    # Make the plots
+    fig_pickle_dict = traj.savePlots(str(tmp_path), traj.file_name, show_plots=False, ret_figs=True)
+
+    for fig_name in ['velocities', 'lengths']:
+
+        ax_time, ax_ht = pickle.loads(fig_pickle_dict[fig_name]).axes
+
+        # Check the limits of the inverted time axis and the height axis
+        assert max(ax_time.get_ylim()) <= t_max + 1e-6
+        assert min(ax_ht.get_ylim()) >= ht_min - 1e-6
+
+        # Check the lower limit of the velocity axis, which has a margin of 3 km/s
+        if fig_name == 'velocities':
+            assert ax_time.get_xlim()[0] >= vel_min - 3 - 1e-6
+
+
+
 if __name__ == "__main__":
 
     # Run all tests, each in its own temporary directory
-    test_list = [testThePlotsAreSavedWithAStationWhoseClockIsFarOff, testThePlotsAreSavedWithNaNHeights]
+    test_list = [testThePlotsAreSavedWithAStationWhoseClockIsFarOff, testThePlotsAreSavedWithNaNHeights, \
+        testTheAxisLimitsComeFromTheUsedStations]
 
     for test in test_list:
         test(tempfile.mkdtemp())
