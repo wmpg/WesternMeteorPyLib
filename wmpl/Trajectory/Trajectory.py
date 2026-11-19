@@ -3826,8 +3826,9 @@ class Trajectory(object):
                 
                     first_pt_distances.append(dist)
 
-                    # Distance from the state vector to the projected point on the radiant line
-                    state_vect_dist.append(vectMag(state_vect - rad_cpa))
+                    # Distance from the state vector to the projected point on the radiant line, negative for
+                    #   a point before the state vector
+                    state_vect_dist.append(np.dot(state_vect - rad_cpa, radiant_eci))
 
 
                 # Convert the distances (length along the trail) into a numpy array

@@ -1,5 +1,6 @@
-""" Tests that the intersecting planes solution fits the plane of a station in any orientation, and that the
-    ignored picks set neither the beginning, the angular length of a track nor the sign of the radiant.
+""" Tests that the intersecting planes solution fits the plane of a station in any orientation, that the
+    ignored picks set neither the beginning, the angular length of a track nor the sign of the radiant, and
+    that an ignored pick before the beginning has a negative distance from the state vector.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_IntersectingPlanesSeed.py -v
@@ -184,6 +185,21 @@ def testIgnoredFirstPickDoesNotFlipTheRadiant():
 
 
 
+def testIgnoredPickBeforeTheStateVectorHasANegativeDistance():
+    """ Check that an ignored first pick which lies before the meteor is placed before the state vector in
+        the distances from it and in the lag.
+    """
+
+    # Solve with the ignored pick moved 5 km up the radiant line
+    traj = observeWithIgnoredFirstPick(5000.0)[0].run()
+
+    # Check the distance and the lag of the ignored pick of station A
+    obs = traj.observations[0]
+    assert abs(obs.state_vect_dist[0] + 5000.0) < 50.0
+    assert obs.lag[0] < -4000.0
+
+
+
 if __name__ == "__main__":
 
     testPlaneContainingTheZAxis()
@@ -191,5 +207,6 @@ if __name__ == "__main__":
     testAngularLengthOfTheUsedPicks()
     testIgnoredFirstPickDoesNotSetTheBeginning()
     testIgnoredFirstPickDoesNotFlipTheRadiant()
+    testIgnoredPickBeforeTheStateVectorHasANegativeDistance()
 
     print("All tests passed.")
