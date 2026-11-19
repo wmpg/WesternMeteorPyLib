@@ -42,7 +42,10 @@ uncertainty.
 Gravity bends the path of the meteor by the angle theta, dtheta/dt = g_perp/v, where g_perp is the component
 of gravity perpendicular to the path. Drag damps the velocity gained from gravity in the same way as the rest
 of the velocity, so the bending grows quickly as the meteor slows down. The model is only computed until the
-path has bent by a few degrees from the first point. Further on, a dark flight model has to be used.
+path has bent by a few degrees from the first point. Further on, a dark flight model has to be used. If the
+trajectory was solved with the drag against the rotating air, the drag also pulls the velocity of the meteor
+across the path towards that of the air, which turns the direction of the radiant and the path below the last
+point.
 
 If the trajectory was solved with the gravity correction, the positions in the observed part are dropped from
 the line in the same way as in the trajectory solver, and the heights and the air density are computed on the
@@ -65,11 +68,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
-from wmpl.Trajectory.Trajectory import applyGravityDrop, gravityDropOrigin, gravityDropVectors, \
-    solutionDropTimeOrigin
+from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MIN_VEL, applyGravityDrop, gravityDropOrigin, \
+    gravityDropVectors, solutionDropTimeOrigin
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
-from wmpl.Utils.Physics import ballisticCoeffMass, earthRotationSpeed
+from wmpl.Utils.Physics import ballisticCoeffMass, earthRotationSpeed, earthRotationVelocity
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
 
@@ -183,6 +186,7 @@ class DragFit(object):
         # Compute the line geometry and the atmosphere along it
         h_top = max(h_top, self._wgs84HeightEci(self._lineEci(self.len_first))[0] + 100e3)
         self.drop_grid = None
+        self.air_vel_grid = None
         self._initLine(h_top)
 
         # Set the ramps of the ballistic coefficient, uniformly spaced between the first and the last point
@@ -758,6 +762,10 @@ class DragFit(object):
         drop_grid = np.zeros_like(line_eci)
         dropped = np.isfinite(self.time_grid) & (self.time_grid > t0)
 
+        # Velocity across the path which the drag against the rotating air gives the meteor (ECI, m/s)
+        air_vel_grid = np.zeros_like(line_eci)
+        air_rotation = getattr(traj, 'air_rotation', False)
+
         # Drop across the path with the speeds of the solution, or vertically for solutions without them
         if getattr(traj, 'gravity_vel', None) is not None:
             if np.any(dropped):
@@ -765,7 +773,15 @@ class DragFit(object):
                     traj.gravity_vel, t0)
                 drop_grid[dropped] = -gravityDropVectors(eci0, self.radiant_eci, \
                     self.time_grid[dropped] - t0, traj.gravity_vel, t0, gravity_factor, \
-                    air_rotation=getattr(traj, 'air_rotation', False))
+                    air_rotation=air_rotation)
+
+                # Take the velocity of the drift with the air as the time derivative of the difference
+                #   between the drops with and without the rotating air
+                if air_rotation and (np.count_nonzero(dropped) > 1):
+                    drift = -drop_grid[dropped] - gravityDropVectors(eci0, self.radiant_eci, \
+                        self.time_grid[dropped] - t0, traj.gravity_vel, t0, gravity_factor, \
+                        air_rotation=False)
+                    air_vel_grid[dropped] = np.gradient(drift, self.time_grid[dropped], axis=0)
 
         else:
             for i in np.where(dropped)[0]:
@@ -775,12 +791,29 @@ class DragFit(object):
         # Below the last point, continue the path along the direction bent by gravity
         valid = np.where(np.isfinite(self.time_grid))[0]
         pos = line_eci[self.i_last] - drop_grid[self.i_last]
+        motion = -self.radiant_eci
         for i in range(self.i_last + 1, valid[-1] + 1):
 
             dlen = self.len_grid[i] - self.len_grid[i - 1]
             theta = 0.5*(self.bend_grid[i - 1] + self.bend_grid[i])
 
-            pos = pos - dlen*self._bentRadiant(np.array([theta]), pos[None, :])[0]
+            # Relax the velocity across the path towards that of the air, at the rate at which the drag
+            #   slows the meteor
+            if air_rotation:
+                air = earthRotationVelocity(pos)
+                air_along = np.dot(air, motion)
+                air_across = air - air_along*motion
+                dt = self.time_grid[i] - self.time_grid[i - 1]
+                vel = 0.5*(self.vel_grid[i - 1] + self.vel_grid[i])
+                decel = 0.5*(self.g_grid[i - 1] + self.g_grid[i]) \
+                    - (self.vel_grid[i] - self.vel_grid[i - 1])/dt
+                drag_rate = max(decel, 0.0)/max(vel - air_along, GRAVITY_DROP_MIN_VEL)
+                air_vel_grid[i] = air_across + (air_vel_grid[i - 1] - air_across)*np.exp(-drag_rate*dt)
+
+            direction = self._airRadiant(self._bentRadiant(np.array([theta]), pos[None, :]), \
+                np.array([self.vel_grid[i]]), 0.5*(air_vel_grid[i - 1] + air_vel_grid[i])[None, :])[0]
+
+            pos = pos - dlen*direction
             drop_grid[i] = line_eci[i] - pos
 
         # Keep the drop constant outside the modelled part, so the heights stay continuous
@@ -788,6 +821,7 @@ class DragFit(object):
         drop_grid[valid[-1] + 1:] = drop_grid[valid[-1]]
 
         self.drop_grid = drop_grid
+        self.air_vel_grid = air_vel_grid
 
         # Update the heights and the air density
         self.ht_grid = self._wgs84HeightEci(line_eci - drop_grid) + np.interp(self.len_grid, self.len_atm, \
@@ -856,10 +890,32 @@ class DragFit(object):
 
 
 
+    def _airRadiant(self, radiant_arr, vel_arr, air_vel_arr):
+        """ Turn the directions of the radiant by the velocity across the path which the drag against the
+            rotating air gives the meteor.
+
+        Arguments:
+            radiant_arr: [ndarray] Unit vectors towards the radiant in the ECI frame, one row per point.
+            vel_arr: [ndarray] Speeds of the meteor along the path (m/s).
+            air_vel_arr: [ndarray] Velocities across the path from the rotating air (ECI, m/s), one row per
+                point.
+
+        Return:
+            [ndarray] Unit vectors towards the radiant in the ECI frame, one row per point.
+        """
+
+        # The radiant is opposite to the velocity of the meteor
+        radiant_arr = vel_arr[:, None]*radiant_arr - air_vel_arr
+
+        return radiant_arr/np.linalg.norm(radiant_arr, axis=1)[:, None]
+
+
+
     def radiantAtLength(self, len_arr):
         """ Compute the directions of the radiant at the given lengths along the trajectory, opposite to the
             direction of motion. If the trajectory was solved with the gravity correction, the direction is
-            bent by gravity from the first point, by the angle theta, dtheta/dt = g_perp/v.
+            bent by gravity from the first point, by the angle theta, dtheta/dt = g_perp/v, and turned by the
+            velocity across the path which the drag against the rotating air gives the meteor.
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -874,8 +930,16 @@ class DragFit(object):
             return np.tile(self.radiant_eci, (len(len_arr), 1))
 
         theta = np.interp(len_arr, self.len_grid[self._valid], self.bend_grid[self._valid])
+        radiant_arr = self._bentRadiant(theta, self.eciAtLength(len_arr))
 
-        return self._bentRadiant(theta, self.eciAtLength(len_arr))
+        if self.air_vel_grid is None:
+            return radiant_arr
+
+        vel_arr = np.interp(len_arr, self.len_grid[self._valid], self.vel_grid[self._valid])
+        air_vel_arr = np.column_stack([np.interp(len_arr, self.len_grid[self._valid], \
+            self.air_vel_grid[self._valid, i]) for i in range(3)])
+
+        return self._airRadiant(radiant_arr, vel_arr, air_vel_arr)
 
 
 
