@@ -53,10 +53,10 @@ model of the lag are needed.
 - The fit starts from a grid of alpha and beta and from the fit to the observed velocities, and keeps the best
   result, as the cost has local minima.
 
-The top row of the summary plot shows the velocities against the heights rescaled to the exponential atmosphere
-and against the observed heights, the lag, and the lag residuals. The points are colored by station with the
-colors of the trajectory plots, and the legend gives the RMS of the lag residuals of every station, so a station
-which does not agree with the others stands out.
+The top row of the summary plot shows the velocities against the observed heights, with the model from above the
+first point down to below the last one, the lag, the lag residuals and the dynamic pressure. The points are
+colored by station with the colors of the trajectory plots, and the legend gives the RMS of the lag residuals of
+every station, so a station which does not agree with the others stands out.
 
 ---
 
@@ -106,9 +106,9 @@ from that point and a note is printed.
 
 ## The summary plot and the final masses
 
-`_alpha_beta_summary.png` shows all results of a run in one figure: the fit with the bands of the 95% region on
-top, and below it the uncertainties of alpha and beta, the survival diagram with the final mass on straight
-lines, and the final and the dynamic masses with their 95% intervals.
+`_alpha_beta_summary.png` shows all results of a run in one figure: the fit with the bands of the 95% region and
+the dynamic pressure along the path on top, and below it the uncertainties of alpha and beta, the survival
+diagram with the final mass on straight lines, and the final and the dynamic masses with their 95% intervals.
 
 The final mass of the alpha-beta model, for a final velocity much smaller than the initial one, is
 
