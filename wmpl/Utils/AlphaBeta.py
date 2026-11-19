@@ -6783,8 +6783,8 @@ if __name__ == "__main__":
         type=float, default=3500)
 
     arg_parser.add_argument('-g', '--ga', metavar='GAMMA_A', \
-        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
-        type=float, default=0.55)
+        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the alpha-beta masses and the dynamic mass. Default is 0.78.', \
+        type=float, default=0.78)
 
     arg_parser.add_argument('-e', '--errors', action="store_true", \
         help="Estimate and report alpha/beta and initial/final mass uncertainties, from the covariance "

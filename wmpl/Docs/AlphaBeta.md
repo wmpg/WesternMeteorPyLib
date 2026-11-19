@@ -34,7 +34,7 @@ python -m wmpl.Utils.AlphaBeta /path/to/20200109_232639_trajectory.pickle --erro
 Two plots are saved: `<timestamp>_alpha_beta_summary.png` with all results in one figure (see [The summary
 plot and the final masses](#the-summary-plot-and-the-final-masses)), and `_alpha_beta_dyn_pressure.png` with the
 dynamic pressure along the path (with its 95% band with `--errors`). `--dens` and `--ga` set the bulk density and the product of the drag and
-the shape coefficients used for the masses (3500 kg/m^3 and 0.55 by default).
+the shape coefficients used for the masses (3500 kg/m^3 and 0.78 by default).
 
 ---
 
@@ -152,7 +152,7 @@ underestimated 4-10 times).
 ## Example: the 2020-01-09 fireball over Croatia
 
 The fireball was observed by four Global Meteor Network cameras in Croatia from 84 to 25 km, and slowed from
-14.6 to 2.6 km/s. The fit to the 384 points of the lag gives:
+14.6 to 2.6 km/s. The fit to the 384 points of the lag gives (masses for 3500 kg/m^3 and Gamma*A = 0.78):
 
 | Quantity | Value |
 |---|---|
@@ -162,15 +162,15 @@ The fireball was observed by four Global Meteor Network cameras in Croatia from 
 | ln(alpha*sin(slope)) | 3.44 |
 | ln(beta) | -0.27 |
 | Lag residuals RMS | 129 m |
-| Final mass, mu = 0 | 142 g (95%: 138 - 146 g) |
-| Final mass, mu = 2/3 | 32 g (95%: 29 - 36 g) |
-| Dynamic mass at 25 km | 32 g (95%: 28 - 36 g) |
+| Final mass, mu = 0 | 406 g (95%: 394 - 417 g) |
+| Final mass, mu = 2/3 | 93 g (95%: 82 - 104 g) |
+| Dynamic mass at 25 km | 91 g (95%: 81 - 102 g) |
 | Peak dynamic pressure | 1.07 MPa at 31.8 km (95%: 1.06 - 1.08 MPa) |
 
 The lag residuals of the four stations are 98-185 m RMS, and the band of the models within the 95% region is at
 most a few tens of meters wide. The profiles of both parameters are parabolas, and the 95% profile region
-matches the Wald region. The whole 95% region is above 100 g for mu = 0 and below 50 g for mu = 2/3 (the brown
-zone), so whether a meteorite above 50 g fell depends on the rotation:
+matches the Wald region. With the default density of 3500 kg/m^3 and Gamma*A = 0.78, the whole 95% region is
+above 100 g for mu = 0 and around 100 g for mu = 2/3, so a meteorite of about 100 g or more most likely fell:
 
 ![Summary plot of the Croatia fireball](figures/AlphaBeta_summary.png)
 
