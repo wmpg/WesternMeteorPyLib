@@ -1,6 +1,7 @@
 """ Tests of reading the header and the rows of ECSV files with loadECSVs(): the metadata keys are matched
-    exactly and their values may have colons, and the times may be written without fractional seconds or with
-    a final Z and keep their microseconds, and a file without magnitudes gives no magnitudes.
+    exactly and their values may have colons, the times may be written without fractional seconds or with a
+    final Z and keep their microseconds, a file without magnitudes gives no magnitudes, and the reference time
+    of the observations loaded without preparing them is the earliest one.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSVLoader.py -v
@@ -15,6 +16,7 @@ import tempfile
 import numpy as np
 
 from wmpl.Formats.ECSV import loadECSVs, parseECSVDatetime
+from wmpl.Utils.TrajConversions import datetime2JD
 
 
 # Columns, station metadata and times of the files
@@ -129,11 +131,41 @@ def testFileWithoutMagnitudesHasNoMagnitudes():
 
 
 
+def testReferenceTimeIsTheEarliestWithoutPreparing():
+    """ Check that the reference time of observations loaded without preparing them is the earliest one, also
+        when the last file is skipped.
+    """
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        # A later file, read first
+        late = os.path.join(tmp_dir, "late.ecsv")
+        writeECSV(late, STATION + [('camera_id', "'XX0001'")], COLUMNS, TIMES)
+
+        # An earlier file
+        early = os.path.join(tmp_dir, "early.ecsv")
+        early_times = ["2024-01-01T00:00:{:09.6f}".format(9 + 0.04*i) for i in range(8)]
+        writeECSV(early, STATION + [('camera_id', "'XX0002'")], COLUMNS, early_times)
+
+        # A file with too few points, which is skipped
+        short = os.path.join(tmp_dir, "short.ecsv")
+        short_times = ["2024-01-01T00:00:{:09.6f}".format(12 + 0.04*i) for i in range(3)]
+        writeECSV(short, STATION + [('camera_id', "'XX0003'")], COLUMNS, short_times)
+
+        jdt_ref, meteor_list = loadECSVs([late, early, short], no_prepare=True)
+
+    assert len(meteor_list) == 2
+    assert jdt_ref == min(meteor.jdt_ref for meteor in meteor_list)
+    assert abs(jdt_ref - datetime2JD(parseECSVDatetime(early_times[0]))) < 1e-9
+
+
+
 if __name__ == "__main__":
 
     testHeaderKeysAreMatchedExactlyAndValuesKeepColons()
     testTimesWithoutFractionsOrWithZ()
     testRelativeTimesKeepTheMicroseconds()
     testFileWithoutMagnitudesHasNoMagnitudes()
+    testReferenceTimeIsTheEarliestWithoutPreparing()
 
     print("All tests passed.")

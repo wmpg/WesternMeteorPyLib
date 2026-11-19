@@ -221,6 +221,11 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
 
 
     if no_prepare:
+
+        # Take the earliest reference time of the loaded observations
+        if meteor_list:
+            jdt_ref = min([meteor.jdt_ref for meteor in meteor_list])
+
         return jdt_ref, meteor_list
 
     else:
