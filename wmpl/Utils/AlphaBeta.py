@@ -1597,8 +1597,10 @@ class AlphaBetaPath(object):
         Keyword arguments:
             t0: [float] Time at the first distance of the grid (s). It is a shift of the whole model in
                 time, so it is found directly from the observed distances (length_data) if not given, as
-                the median difference between the observed times and the model times at the observed
-                distances. None by default.
+                the mean difference between the observed times and the model times at the observed
+                distances, weighted by the squared model velocity. This minimizes the squared distance
+                residuals to first order, and changes smoothly with the parameters of the model, which the
+                fit and its profiles need. None by default.
             length_data: [ndarray] Observed distances at the times time_data (m), used if t0 is None. None
                 by default.
             fast: [bool] Passed to alphaBetaVelocityNormed(). True by default.
@@ -1611,9 +1613,13 @@ class AlphaBetaPath(object):
 
         time_grid = self.times(alpha, beta, v_init, fast=fast)
 
-        # Find the time of the first grid point from the observed distances
+        # Find the time of the first grid point from the observed distances, weighting the time differences
+        #   by the squared velocity as a time difference dt gives a distance residual of v*dt
         if t0 is None:
-            t0 = np.median(time_data - np.interp(length_data, self.length_grid, time_grid))
+            vel_weights = np.interp(length_data, self.length_grid, \
+                np.gradient(self.length_grid, time_grid))**2
+            t0 = np.sum(vel_weights*(time_data - np.interp(length_data, self.length_grid, time_grid))) \
+                /np.sum(vel_weights)
 
         time_rel = time_data - t0
         length_model = np.interp(time_rel, time_grid, self.length_grid)
@@ -1899,7 +1905,8 @@ def _lagFitFixed(path, time_data, length_data, x_start, fixed, lower_bounds, upp
 
 
 def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fit_v_init=True, \
-    v_init_start=None, v_init_range=0.1, ci=95.0, step_min=0.01, step_max=0.5, n_grid=40, fast=True):
+    v_init_start=None, v_init_range=0.1, ci=95.0, step_min=0.01, step_max=0.5, n_starts=5, n_grid=40, \
+    fast=True):
     """ Profile likelihood intervals of alpha and beta of the fit to the lag (fitAlphaBetaLag()), and the
         likelihood on a grid of alpha and beta.
 
@@ -1934,6 +1941,8 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
             profile is flat, and shrinks where it is steep or when the first steps already cross the 3 sigma
             level. 0.01 by default.
         step_max: [float] Largest step of the profiles in ln alpha and ln beta. 0.5 by default.
+        n_starts: [int] Number of additional starting values of the other parameter at every point of the
+            profiles, spread over its bounds. 5 by default.
         n_grid: [int] Number of grid points along each axis of the 2D grid. 40 by default. 0 skips the
             grid.
         fast: [bool] Passed to AlphaBetaPath.lengths(). True by default.
@@ -1951,6 +1960,7 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
                 chi-squared rise at them, sorted by the value.
             - grid_alpha, grid_beta: [ndarray] Values of the 2D grid along each axis.
             - grid_delta_chi2: [ndarray] Chi-squared rise on the 2D grid, rows along beta.
+            - grid_v_init: [ndarray] Fitted initial velocity on the 2D grid (m/s), rows along beta.
             - corr_log: [float] Correlation of ln alpha and ln beta, weighted by the likelihood on the 2D
                 grid. Biased if the likelihood is cut off by a bound of the fit.
     """
@@ -1987,6 +1997,9 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
         delta_chi2 = [0.0]
         x_values = [list(x_best)]
 
+        # Starting values of the other parameter, spread over its bounds
+        other_starts = np.linspace(lower_bounds[1 - idx], upper_bounds[1 - idx], n_starts + 2)[1:-1]
+
         # Walk from the best fit to each bound, starting every fit from the previous one
         for direction in [-1, 1]:
 
@@ -2003,8 +2016,21 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
                 if direction*(log_value_new - bound) > 0:
                     log_value_new = bound
 
-                cost, x_new = _lagFitFixed(path, time_data, length_data, x_prev, {idx: log_value_new}, \
-                    lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
+                # Start from the previous point, and from values of the other parameter across its bounds,
+                #   as the profile can follow a flat valley the previous point does not lead into
+                cost, x_new = np.inf, None
+                for log_other in [None] + list(other_starts):
+
+                    x_start = list(x_prev)
+                    if log_other is not None:
+                        x_start[1 - idx] = log_other
+
+                    cost_start, x_fit = _lagFitFixed(path, time_data, length_data, x_start, \
+                        {idx: log_value_new}, lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
+
+                    if cost_start < cost:
+                        cost, x_new = cost_start, x_fit
+
                 delta_new = (cost - cost_best)/sigma2
 
                 # If the first steps already cross the 3 sigma level, the interval is narrower than the
@@ -2088,6 +2114,7 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
     profile['grid_alpha'] = np.array([])
     profile['grid_beta'] = np.array([])
     profile['grid_delta_chi2'] = np.zeros((0, 0))
+    profile['grid_v_init'] = np.zeros((0, 0))
     profile['corr_log'] = np.nan
 
     if n_grid > 0:
@@ -2103,6 +2130,7 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
         log_alpha_grid, log_beta_grid = log_grids
 
         grid_delta_chi2 = np.zeros((n_grid, n_grid))
+        grid_v_init = np.full((n_grid, n_grid), v_init)
         for i, log_beta in enumerate(log_beta_grid):
 
             # Start every row from the best fit, and continue along the row from the previous point
@@ -2114,6 +2142,8 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
                 x_prev = list(x_prev)
 
                 grid_delta_chi2[i, j] = (cost - cost_best)/sigma2
+                if fit_v_init:
+                    grid_v_init[i, j] = x_prev[2]
 
         # Correlation of ln alpha and ln beta, weighted by the likelihood
         weights = np.exp(-0.5*(grid_delta_chi2 - np.min(grid_delta_chi2)))
@@ -2124,11 +2154,38 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
         profile['grid_alpha'] = np.exp(log_alpha_grid)
         profile['grid_beta'] = np.exp(log_beta_grid)
         profile['grid_delta_chi2'] = grid_delta_chi2
+        profile['grid_v_init'] = grid_v_init
         profile['corr_log'] = cov_log[0, 1]/np.sqrt(cov_log[0, 0]*cov_log[1, 1])
 
     ### ###
 
     return profile
+
+
+
+def profileRegionAlphaBetaLag(profile, ci=95.0):
+    """ Alpha, beta and the initial velocity at the points of the 2D grid of profileAlphaBetaLag() within the
+        region of two parameters at the given confidence level, e.g. to draw the band of the models which fit
+        the lag within that region.
+
+    Arguments:
+        profile: [dict] Result of profileAlphaBetaLag(), with the 2D grid.
+
+    Keyword arguments:
+        ci: [float] Confidence level of the region (percent). 95 by default.
+
+    Return:
+        (alpha, beta, v_init): [tuple of ndarrays] Parameters of the grid points within the region. Empty if
+            there is no grid.
+    """
+
+    if profile['grid_delta_chi2'].size == 0:
+        return np.array([]), np.array([]), np.array([])
+
+    inside = profile['grid_delta_chi2'] <= scipy.stats.chi2.ppf(ci/100.0, 2)
+    alpha_mesh, beta_mesh = np.meshgrid(profile['grid_alpha'], profile['grid_beta'])
+
+    return alpha_mesh[inside], beta_mesh[inside], profile['grid_v_init'][inside]
 
 
 
@@ -3573,9 +3630,13 @@ def profileIntervalText(profile, name, fmt="{:.3g}", notes=True):
 
 
 
-def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
-    """ Plot the uncertainties of alpha and beta of the fit to the lag: the likelihood on the 2D grid of
-        alpha and beta with its 1, 2 and 3 sigma regions, and the profiles of alpha and beta on the sides.
+def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, survival=False, slope=None, \
+    mass_thresholds=(1.0, 0.05), dens=3500, shape_coeff=0.55, gamma=1.0):
+    """ Plot the uncertainties of alpha and beta of the fit to the lag: the likelihood on the 2D grid of alpha
+        and beta with its 1, 2 and 3 sigma regions, and the profiles of alpha and beta on the sides. The axes
+        are alpha and beta, or with survival=True the axes of the meteorite survival diagram
+        (plotAlphaBetaSurvivalDiagram()), ln(alpha*sin(slope)) and ln(beta), with the final mass lines and
+        the fall zones behind the likelihood.
 
     Arguments:
         profile: [dict] Result of profileAlphaBetaLag().
@@ -3587,53 +3648,105 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
             Wald region of the same confidence level as the profile intervals is drawn for comparison.
             None by default.
         title: [str] Title of the plot. None by default.
+        survival: [bool] Plot in the space of the meteorite survival diagram. False by default.
+        slope: [float] Entry angle above the horizon (radians), needed if survival is True. None by default.
+        mass_thresholds: [tuple] Final masses of the lines of the survival diagram (kg). (1.0, 0.05) by
+            default.
+        dens: [float] Bulk density (kg/m^3), see alphaBetaMasses(). 3500 by default.
+        shape_coeff: [float] Shape coefficient, see alphaBetaMasses(). 0.55 by default.
+        gamma: [float] Drag parameter, see alphaBetaMasses(). 1.0 by default.
 
     Return:
         fig: [matplotlib figure] The figure.
     """
 
-    import matplotlib.ticker
     import matplotlib.pyplot as plt
 
-    fig = plt.figure(figsize=(9, 8.5))
-    grid_spec = fig.add_gridspec(2, 2, width_ratios=[3, 1], height_ratios=[1, 3], wspace=0.05, \
-        hspace=0.05, top=0.93, bottom=0.15)
+    if survival and (slope is None):
+        raise ValueError("The slope is needed to plot in the space of the survival diagram.")
+
+    def _axisValue(value, name):
+        """ Value of alpha or beta on its axis. """
+
+        value = np.asarray(value, dtype=np.float64)
+
+        if not survival:
+            return value
+
+        if name == 'alpha':
+            return np.log(value) + np.log(np.sin(slope))
+
+        return np.log(value)
+
+
+    fig = plt.figure(figsize=(10, 8.5))
+    grid_spec = fig.add_gridspec(2, 2, width_ratios=[3, 1.2], height_ratios=[1, 3])
     ax_main = fig.add_subplot(grid_spec[1, 0])
     ax_alpha = fig.add_subplot(grid_spec[0, 0], sharex=ax_main)
     ax_beta = fig.add_subplot(grid_spec[1, 1], sharey=ax_main)
-    ax_text = fig.add_subplot(grid_spec[0, 1])
-    ax_text.axis('off')
+    ax_legend = fig.add_subplot(grid_spec[0, 1])
+    ax_legend.axis('off')
 
     ci = profile['ci']
     threshold = profile['threshold']
 
-
-    ### Plot the likelihood on the 2D grid ###
-
-    grid_alpha = profile['grid_alpha']
-    grid_beta = profile['grid_beta']
+    grid_x = _axisValue(profile['grid_alpha'], 'alpha')
+    grid_y = _axisValue(profile['grid_beta'], 'beta')
     grid_delta_chi2 = profile['grid_delta_chi2']
 
-    # Mark the best fit
-    handles = [ax_main.scatter([alpha], [beta], color='k', marker='+', s=80, zorder=4)]
-    labels = ["Best fit"]
+    # Plot the extent of the grid in the log space of the survival diagram, the 3 sigma region with a margin
+    #   in the linear space, or the extent of the profiles without the grid
+    if grid_delta_chi2.size and survival:
+        x_range = (grid_x[0], grid_x[-1])
+        y_range = (grid_y[0], grid_y[-1])
+    elif grid_delta_chi2.size:
+        inside = grid_delta_chi2 <= scipy.stats.chi2.ppf(0.9973, 2)
+        x_mesh, y_mesh = np.meshgrid(grid_x, grid_y)
+        x_min, x_max = np.min(x_mesh[inside]), np.max(x_mesh[inside])
+        y_min, y_max = np.min(y_mesh[inside]), np.max(y_mesh[inside])
+        x_range = (x_min - 0.15*(x_max - x_min), x_max + 0.15*(x_max - x_min))
+        y_range = (max(y_min - 0.15*(y_max - y_min), 0.0), y_max + 0.15*(y_max - y_min))
+    else:
+        x_range = tuple(_axisValue(profile['alpha_profile'][0][[0, -1]], 'alpha'))
+        y_range = tuple(_axisValue(profile['beta_profile'][0][[0, -1]], 'beta'))
+
+
+    ### Plot the survival diagram or the best fit ###
+
+    if survival:
+
+        plotAlphaBetaSurvivalDiagram(alpha, beta, slope, mass_thresholds=mass_thresholds, dens=dens, \
+            shape_coeff=shape_coeff, gamma=gamma, x_range=x_range, y_range=y_range, axes=ax_main)
+
+        # Move the legend of the survival diagram to its own panel
+        handles, labels = ax_main.get_legend_handles_labels()
+        ax_main.get_legend().remove()
+
+        ax_main.set_xlabel(r"$\ln(\alpha \sin(\mathrm{slope}))$")
+        ax_main.set_ylabel(r"$\ln(\beta)$")
+
+    else:
+
+        handles = [ax_main.scatter([alpha], [beta], color='k', marker='+', s=80, zorder=4)]
+        labels = ["Best fit"]
+
+        ax_main.set_xlabel("Alpha")
+        ax_main.set_ylabel("Beta")
+
+
+    ### Plot the likelihood with the 1, 2 and 3 sigma regions of two parameters ###
 
     if grid_delta_chi2.size:
 
-        # Relative likelihood
         likelihood = np.exp(-0.5*(grid_delta_chi2 - np.min(grid_delta_chi2)))
-        mesh = ax_main.pcolormesh(grid_alpha, grid_beta, likelihood, cmap='Blues', vmin=0, vmax=1, \
-            shading='auto', zorder=1)
+        ax_main.contourf(grid_x, grid_y, likelihood, levels=np.linspace(0.05, 1.0, 11), cmap='Blues', \
+            alpha=0.7, zorder=1)
 
-        # The 1, 2 and 3 sigma regions of two parameters
         levels = [scipy.stats.chi2.ppf(p, 2) for p in [0.6827, 0.9545, 0.9973]]
-        contours = ax_main.contour(grid_alpha, grid_beta, grid_delta_chi2, levels=levels, colors='k', \
+        contours = ax_main.contour(grid_x, grid_y, grid_delta_chi2, levels=levels, colors='navy', \
             linestyles=['-', '--', ':'], linewidths=1.0, zorder=2)
         handles += list(contours.legend_elements()[0])
         labels += ["1 sigma (2 params)", "2 sigma (2 params)", "3 sigma (2 params)"]
-
-        cbar_ax = fig.add_axes([0.13, 0.06, 0.55, 0.012])
-        fig.colorbar(mesh, cax=cbar_ax, orientation='horizontal', label="Relative likelihood")
 
     # Draw the Wald region of the same confidence level for comparison
     if (errors is not None) and np.all(np.isfinite(errors['cov_log'])):
@@ -3646,26 +3759,16 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
 
         # Keep the region within the bounds of the fit, as it can be very large for a weak constraint
         log_bounds = _logAlphaBetaBounds()
-        ellipse = np.clip(ellipse, log_bounds[0][:, None], log_bounds[1][:, None])
+        ellipse = np.exp(np.clip(ellipse, log_bounds[0][:, None], log_bounds[1][:, None]))
 
-        handles += ax_main.plot(np.exp(ellipse[0]), np.exp(ellipse[1]), color='tab:red', lw=1.0, zorder=3)
+        handles += ax_main.plot(_axisValue(ellipse[0], 'alpha'), _axisValue(ellipse[1], 'beta'), \
+            color='tab:red', lw=1.0, zorder=3)
         labels.append("Wald {:.3g}% (2 params)".format(ci))
 
-    ax_main.legend(handles, labels, loc='best', fontsize=8)
+    ax_main.set_xlim(x_range)
+    ax_main.set_ylim(y_range)
 
-    ax_main.set_xscale('log')
-    ax_main.set_yscale('log')
-    if grid_delta_chi2.size:
-        ax_main.set_xlim(grid_alpha[0], grid_alpha[-1])
-        ax_main.set_ylim(grid_beta[0], grid_beta[-1])
-
-    # Label the ticks with plain numbers, also the minor ticks if the axis spans less than a decade
-    for axis, values in [(ax_main.xaxis, grid_alpha), (ax_main.yaxis, grid_beta)]:
-        axis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, _: "{:g}".format(x)))
-        if len(values) and (values[-1]/values[0] < 10):
-            axis.set_minor_formatter(matplotlib.ticker.FuncFormatter(lambda x, _: "{:g}".format(x)))
-    ax_main.set_xlabel("Alpha")
-    ax_main.set_ylabel("Beta")
+    ax_legend.legend(handles, labels, loc='center', fontsize=7)
 
 
     ### Plot the profiles ###
@@ -3673,7 +3776,9 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
     for name, ax, horizontal in [('alpha', ax_alpha, True), ('beta', ax_beta, False)]:
 
         values, delta_chi2 = profile[name + '_profile']
-        lower, upper = profile[name + '_lower'], profile[name + '_upper']
+        values = _axisValue(values, name)
+        lower = _axisValue(profile[name + '_lower'], name)
+        upper = _axisValue(profile[name + '_upper'], name)
 
         if horizontal:
             ax.plot(values, delta_chi2, color='k', lw=1.0)
@@ -3691,30 +3796,17 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
             ax.set_xlim(0, 1.5*threshold)
             ax.tick_params(axis='y', which='both', labelleft=False)
 
-        # Mark the profile interval on the 2D plot
-        for limit, at_bound in [(lower, profile[name + '_lower_at_bound']), \
-            (upper, profile[name + '_upper_at_bound'])]:
 
-            if at_bound:
-                continue
+    ### Print the values in the title ###
 
-            if horizontal:
-                ax_main.axvline(limit, color='tab:blue', lw=0.8, ls='-.', zorder=2)
-            else:
-                ax_main.axhline(limit, color='tab:blue', lw=0.8, ls='-.', zorder=2)
-
-
-    ### Print the values ###
-
-    text = "Alpha = {:.3g}\n  {:.3g}% profile: {:s}\nBeta = {:.3g}\n  {:.3g}% profile: {:s}".format(alpha, \
-        ci, profileIntervalText(profile, 'alpha'), beta, ci, profileIntervalText(profile, 'beta'))
+    text = "alpha = {:.3g} ({:s}), beta = {:.3g} ({:s}), {:.3g}% profile intervals".format(alpha, \
+        profileIntervalText(profile, 'alpha', notes=False), beta, profileIntervalText(profile, 'beta', \
+        notes=False), ci)
     if np.isfinite(profile['corr_log']):
-        text += "\ncorr(ln alpha, ln beta) = {:.2f}".format(profile['corr_log'])
-    text += "\n\nShaded: {:.3g}% profile interval\nDashed: chi2 threshold".format(ci)
-    ax_text.text(0.05, 0.95, text, transform=ax_text.transAxes, va='top', fontsize=8)
+        text += ", corr(ln alpha, ln beta) = {:.2f}".format(profile['corr_log'])
+    fig.suptitle(text if title is None else title + "\n" + text, fontsize=10)
 
-    if title is not None:
-        fig.suptitle(title)
+    fig.tight_layout()
 
     return fig
 
@@ -5068,7 +5160,8 @@ def plotAlphaBetaSurvivalDiagram(
         shade=True,
         x_range=(0, 7.0),
         y_range=(-4.0, 4.0),
-        axes=None):
+        axes=None,
+        profile=None):
     """ Plot the classic Gritsevich ln(alpha*sin(slope)) vs ln(beta) meteorite-survival diagram:
         where a given (alpha, beta, slope) falls relative to the minimum-recoverable-mass
         boundary curves for the two physical shape/spin extremes (mu_low = 0, no rotation;
@@ -5138,6 +5231,9 @@ def plotAlphaBetaSurvivalDiagram(
         x_range, y_range: [tuple of floats] Axis limits, (min, max). Defaults match the module's
             previous ad-hoc script.
         axes: [Axes] An existing matplotlib Axes to draw into, instead of creating a new figure.
+        profile: [dict] Result of profileAlphaBetaLag() with the 2D grid. If given, the 1 sigma and the ci%
+            regions of two parameters are drawn from its likelihood instead of the ellipses of errors, as
+            they also hold when alpha or beta is weakly constrained. None by default.
 
     Return:
         (fig, ax): [tuple] The Figure (ax.figure if `axes` was given, otherwise newly created) and
@@ -5253,7 +5349,19 @@ def plotAlphaBetaSurvivalDiagram(
     point_label = (r"$m_{{final}}(\mu={:.2g})={:.2e}$ kg".format(mu_low, m_final_mu_low) + "\n" +
         r"$m_{{final}}(\mu={:.2g})={:.2e}$ kg".format(mu_high, m_final_mu_high))
 
-    have_cov = (errors is not None) and np.all(np.isfinite(errors['cov_log']))
+    # Draw the regions of the profile likelihood if given
+    have_profile = (profile is not None) and (profile['grid_delta_chi2'].size > 0)
+    if have_profile:
+        grid_x = np.log(profile['grid_alpha']) + np.log(np.sin(slope))
+        grid_y = np.log(profile['grid_beta'])
+        for p, linestyle, level_label in [
+                (0.6827, '-', r"1$\sigma$"), (ci/100.0, '--', "{:.3g}%".format(ci))]:
+            ax.contour(grid_x, grid_y, profile['grid_delta_chi2'], levels=[scipy.stats.chi2.ppf(p, 2)], \
+                colors='tab:blue', linestyles=linestyle, linewidths=1.3)
+            ax.plot([], [], color='tab:blue', linestyle=linestyle, linewidth=1.3, \
+                label=r"{:s} ($\alpha$, $\beta$) profile likelihood".format(level_label))
+
+    have_cov = (not have_profile) and (errors is not None) and np.all(np.isfinite(errors['cov_log']))
 
     if have_cov:
 
@@ -5266,7 +5374,7 @@ def plotAlphaBetaSurvivalDiagram(
             ax.plot(ex, ey, color='tab:blue', linestyle=linestyle, linewidth=1.3, \
                 label=r"{:s} ($\alpha$, $\beta$) uncertainty".format(level_label))
 
-    elif errors is not None:
+    elif (errors is not None) and (not have_profile):
         ax.text(0.02, 0.02, "Uncertainty ellipse unavailable\n(cov_log is NaN)", \
             transform=ax.transAxes, ha='left', va='bottom', fontsize=8, color='0.4')
 
@@ -6347,8 +6455,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-e', '--errors', action="store_true", \
         help="Estimate and report alpha/beta and initial/final mass uncertainties, from the covariance "
-        "of the fit of the lag. Propagates the fitted (ln alpha, ln beta) covariance into the masses, and "
-        "draws an uncertainty ellipse on the survival diagram.")
+        "of the fit of the lag. Propagates the fitted (ln alpha, ln beta) covariance into the masses, plots "
+        "the profile likelihood of alpha and beta, also in the space of the survival diagram, draws its 1 "
+        "sigma and 95% regions on the survival diagram, and the band of the models within the 95% region "
+        "on the velocities and the lag.")
 
     arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
         help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
@@ -6709,52 +6819,18 @@ if __name__ == "__main__":
             v_init/1000, alpha, profileIntervalText(lag_profile, 'alpha', notes=False), beta, \
             profileIntervalText(lag_profile, 'beta', notes=False))
 
-        # If uncertainties are available (finite cov_log), draw a 1-sigma velocity band by
-        #   sampling the fitted (ln alpha, ln beta) covariance and propagating each draw through
-        #   the model velocity curve, with v_init drawn too if it was fitted
-        if cml_args.errors and np.all(np.isfinite(fit_errors['cov_log'])):
-            rng = np.random.RandomState(0)
+        # Models within the 95% region of alpha and beta of the profile, which give the bands of the
+        #   velocity and of the lag (only with --errors, which computes the 2D grid)
+        region_alpha, region_beta, region_v_init = profileRegionAlphaBetaLag(lag_profile)
+        have_band = len(region_alpha) > 0
+        band_label = "95% region of alpha and beta"
 
-            # Draw a fitted v_init together with alpha and beta
-            if 'cov_full' in fit_errors and np.all(np.isfinite(fit_errors['cov_full'])):
-                joint_draws = rng.multivariate_normal(np.r_[v_init, np.log([alpha, beta])], \
-                    fit_errors['cov_full'], size=500)
-                v0_draws, log_draws = joint_draws[:, 0], joint_draws[:, 1:]
-            else:
-                log_draws = rng.multivariate_normal(np.log([alpha, beta]), fit_errors['cov_log'], \
-                    size=500)
-                v0_draws = np.full(len(log_draws), v_init)
-            alpha_draws, beta_draws = np.exp(log_draws[:, 0]), np.exp(log_draws[:, 1])
-
-            # Exclude the draws outside ALPHA_BETA_BOUNDS, the same way plotAlphaBeta() does - a
-            #   large enough beta overflows Ei(beta) and the velocity inversion fails on the NaN
-            (a_lo, a_hi), (b_lo, b_hi) = ALPHA_BETA_BOUNDS
-            is_valid = ((alpha_draws >= a_lo) & (alpha_draws <= a_hi) &
-                (beta_draws >= b_lo) & (beta_draws <= b_hi))
-            n_rejected = len(log_draws) - int(np.sum(is_valid))
-            rejected_frac = n_rejected/len(log_draws)
-
-            if n_rejected > 0:
-                msg = "{:d}/{:d} sampled (alpha, beta) draws fell outside ALPHA_BETA_BOUNDS and " \
-                    "were excluded".format(n_rejected, len(log_draws))
-
-            # Too many draws out of bounds means the fit sits on a bound, where the Gaussian
-            #   approximation is not meaningful - skip the band rather than draw it from what remains
-            if rejected_frac > 0.05:
-                print()
-                print("WARNING: {:s} ({:.1%}) - the local Gaussian approximation is likely "
-                    "unreliable this close to a bound. Not drawing the 1-sigma velocity "
-                    "band.".format(msg, rejected_frac))
-
-            else:
-                if n_rejected > 0:
-                    print("{:s}.".format(msg))
-
-                vel_draws = np.array([alphaBetaVelocity(ht_arr, a, b, v0) \
-                    for v0, a, b in zip(v0_draws[is_valid], alpha_draws[is_valid], beta_draws[is_valid])])
-                vel_lo, vel_hi = np.percentile(vel_draws, [15.865, 84.135], axis=0)
-                ax_ab.fill_betweenx(ht_arr/1000, vel_lo/1000, vel_hi/1000, color='k', alpha=0.15, \
-                    zorder=1, label=r"1$\sigma$ ($v_0$, $\alpha$, $\beta$) band")
+        # Draw the band of the velocities of the models within the region
+        if have_band:
+            vel_band = np.array([alphaBetaVelocity(ht_arr, a, b, v0) \
+                for a, b, v0 in zip(region_alpha, region_beta, region_v_init)])
+            ax_ab.fill_betweenx(ht_arr/1000, np.min(vel_band, axis=0)/1000, np.max(vel_band, axis=0)/1000, \
+                color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
 
         ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
 
@@ -6774,8 +6850,13 @@ if __name__ == "__main__":
 
         ax_vel.set_title("Observed heights", fontsize=10)
 
-        # Plot the alpha-beta velocity at the observed heights
+        # Plot the alpha-beta velocity at the observed heights, with the band of the region
         ax_vel.plot(vel_model/1000, ht_data/1000, color='k', label="Alpha-beta fit")
+        if have_band:
+            vel_band = np.array([alphaBetaVelocity(ht_data_rescaled, a, b, v0) \
+                for a, b, v0 in zip(region_alpha, region_beta, region_v_init)])
+            ax_vel.fill_betweenx(ht_data/1000, np.min(vel_band, axis=0)/1000, \
+                np.max(vel_band, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
 
         # Plot the point where the dynamic mass is estimated
         ax_vel.scatter([vel_dyn/1000], [ht_dyn/1000], color='k', zorder=3, \
@@ -6850,6 +6931,18 @@ if __name__ == "__main__":
 
         ax_lag.plot((lag_data - lag_residuals)/1000, ht_data/1000, color='k', label="Alpha-beta fit")
 
+        # Band of the lag and of the residuals of the models within the region, as the difference of the
+        #   distances of every model from those of the best fit
+        if have_band:
+            length_best, _ = ab_path.lengths(time_data, alpha, beta, v_init, length_data=length_data)
+            length_band = np.array([ab_path.lengths(time_data, a, b, v0, length_data=length_data)[0] \
+                for a, b, v0 in zip(region_alpha, region_beta, region_v_init)]) - length_best
+            lag_band_lo = np.min(length_band, axis=0)
+            lag_band_hi = np.max(length_band, axis=0)
+            ax_lag.fill_betweenx(ht_data/1000, (lag_data - lag_residuals + lag_band_lo)/1000, \
+                (lag_data - lag_residuals + lag_band_hi)/1000, color='k', alpha=0.15, lw=0, zorder=1, \
+                label=band_label)
+
         # Plot the smooth model of the lag
         if cml_args.lagsmooth:
             ax_lag.plot(expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, color='r', \
@@ -6867,6 +6960,9 @@ if __name__ == "__main__":
                 station_id, np.sqrt(np.mean(lag_residuals[station_mask]**2))))
 
         ax_lag_res.axvline(0, color='0.5', lw=0.8, zorder=0)
+        if have_band:
+            ax_lag_res.fill_betweenx(ht_data/1000, lag_band_lo/1000, lag_band_hi/1000, color='k', \
+                alpha=0.15, lw=0, zorder=1, label=band_label)
         ax_lag_res.set_title("Alpha-beta fit residuals", fontsize=10)
 
         # Plot the residuals of the smooth model of the lag
@@ -6891,6 +6987,13 @@ if __name__ == "__main__":
 
             _finishPlot(fig_err, "alpha_beta_errors")
 
+            # The same in the space of the survival diagram
+            fig_err = plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, \
+                title="{:s}, alpha-beta fit to the lag".format(traj.file_name), survival=True, slope=slope, \
+                dens=cml_args.dens, shape_coeff=cml_args.ga)
+
+            _finishPlot(fig_err, "alpha_beta_errors_survival")
+
 
 
         ### PLOT METEORITE DROPPING POSSIBILITY
@@ -6904,7 +7007,7 @@ if __name__ == "__main__":
         fig_surv, ax_surv = plt.subplots(figsize=(7.5, 6))
         plotAlphaBetaSurvivalDiagram(alpha, beta, slope, \
             mass_thresholds=(1.0, 0.05), dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-            errors=fit_errors, axes=ax_surv)
+            errors=fit_errors, axes=ax_surv, profile=(lag_profile if cml_args.errors else None))
 
         _finishPlot(fig_surv, "alpha_beta_survival")
 
