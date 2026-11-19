@@ -5,6 +5,7 @@ from __future__ import absolute_import, print_function, division
 import os
 
 import numpy as np
+from matplotlib import cm
 from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
 
@@ -123,6 +124,41 @@ def set3DEqualAxes(ax):
     ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
     ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+
+
+
+
+def stationColors(n_stations):
+    """ Colors of the stations in the trajectory plots, so that every plot of the stations uses the same
+        ones. The stations are expected to be sorted by the height of their first point, as in
+        Trajectory.savePlots().
+
+    Arguments:
+        n_stations: [int] Number of stations.
+
+    Return:
+        (colors, alpha):
+            - colors: [ndarray] RGBA color of every station, one row per station.
+            - alpha: [float] Transparency of the markers, lower when there are many stations.
+    """
+
+    # Take the colors from the viridis colormap
+    colors = cm.viridis(np.linspace(0, 0.8, n_stations))
+
+    # Keep colors non-transparent if there are not a lot of stations
+    alpha = 1.0
+
+    # If there are more than 5 stations, interleave the colors with another colormap
+    if n_stations > 5:
+        colors_alt = cm.inferno(np.linspace(0, 0.8, n_stations))
+        for i in range(n_stations):
+            if i%2 == 1:
+                colors[i] = colors_alt[i]
+
+        # Add transparency for more stations
+        alpha = 0.75
+
+    return colors, alpha
 
 
 

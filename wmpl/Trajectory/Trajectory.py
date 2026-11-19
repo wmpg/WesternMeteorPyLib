@@ -55,7 +55,7 @@ from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, fin
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
-from wmpl.Utils.Plotting import savePlot
+from wmpl.Utils.Plotting import savePlot, stationColors
 from wmpl.Utils.PlotOrbits import plotOrbits
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import GroundMap
@@ -6286,27 +6286,14 @@ class Trajectory(object):
 
 
         # Generate a list of colors to use for markers
-        colors = cm.viridis(np.linspace(0, 0.8, len(self.observations)))
+        colors, alpha = stationColors(len(self.observations))
 
         # Only use one type of markers if there are not a lot of stations
         plot_markers = ['x']
 
-        # Keep colors non-transparent if there are not a lot of stations
-        alpha = 1.0
-
-
-        # If there are more than 5 stations, interleave the colors with another colormap and change up
-        #   markers
+        # If there are more than 5 stations, change up markers
         if len(self.observations) > 5:
-            colors_alt = cm.inferno(np.linspace(0, 0.8, len(self.observations)))
-            for i in range(len(self.observations)):
-                if i%2 == 1:
-                    colors[i] = colors_alt[i]
-
             plot_markers.append("+")
-
-            # Add transparency for more stations
-            alpha = 0.75
 
 
         # Sort observations by first height to preserve color linearity

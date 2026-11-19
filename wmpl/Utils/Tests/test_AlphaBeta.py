@@ -20,6 +20,7 @@ import time
 import numpy as np
 import scipy.integrate
 import scipy.special
+import scipy.stats
 
 import matplotlib
 matplotlib.use("Agg")  # headless - plotAlphaBeta() tests must not require a display or block
@@ -33,6 +34,7 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
     plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
     getDefaultInverseEiLUT, fitAlphaBetaLag, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+from wmpl.Utils.AlphaBeta import profileAlphaBetaLag, profileIntervalText, plotAlphaBetaLagProfile
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -598,14 +600,18 @@ def testFitAlphaBetaSmoothedVelocities():
 
 
 
-def _syntheticLag(v_init_true, noise_std, seed):
+def _syntheticLag(v_init_true, noise_std, seed, alpha_true=ALPHA_TRUE, beta_true=BETA_TRUE):
     """ Generate the distances along the path of a synthetic meteor at regular times, by integrating the
-        alpha-beta velocity of ALPHA_TRUE and BETA_TRUE in time, independently of AlphaBetaPath.
+        alpha-beta velocity of alpha_true and beta_true in time, independently of AlphaBetaPath.
 
     Arguments:
         v_init_true: [float] Initial velocity (m/s).
         noise_std: [float] Standard deviation of the Gaussian noise added to the distances (m).
         seed: [int] Seed of the random noise.
+
+    Keyword arguments:
+        alpha_true: [float] Alpha of the meteor. ALPHA_TRUE by default.
+        beta_true: [float] Beta of the meteor. BETA_TRUE by default.
 
     Return:
         (time_data, length_data, ht_data):
@@ -622,7 +628,7 @@ def _syntheticLag(v_init_true, noise_std, seed):
 
         ht_normed = (ht_begin - length*np.sin(SLOPE))/HT_NORM_CONST
 
-        return v_init_true*alphaBetaVelocityNormed(ht_normed, ALPHA_TRUE, BETA_TRUE)
+        return v_init_true*alphaBetaVelocityNormed(ht_normed, alpha_true, beta_true)
 
     # Integrate the distance at regular times, down to 40 km
     time_data = np.arange(0.0, 6.0, 0.02)
@@ -726,6 +732,67 @@ def testFitAlphaBetaLagErrors():
     _, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_const, ht_data, V_INIT_TRUE, \
         estimate_errors=True)
     assert (not np.isfinite(errors['beta_std_rel'])) or (errors['beta_std_rel'] > 1.0)
+
+
+
+def testProfileAlphaBetaLag():
+    """ The profile intervals of the fit of the lag should cover the true values and agree with the Wald
+        intervals when alpha and beta are well constrained.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=20)
+
+    for name, value, true_value in [('alpha', alpha, ALPHA_TRUE), ('beta', beta, BETA_TRUE)]:
+
+        # Both sides are constrained and the interval covers the fit and the true value
+        assert not (profile[name + '_lower_at_bound'] or profile[name + '_upper_at_bound'])
+        assert profile[name + '_lower'] < value < profile[name + '_upper']
+        assert profile[name + '_lower'] < true_value < profile[name + '_upper']
+
+        # The Wald interval is close to the profile interval for a well constrained parameter
+        _assertClose(profile[name + '_lower'], errors[name + '_ci_wald_lower'], 0.1, name + " lower")
+        _assertClose(profile[name + '_upper'], errors[name + '_ci_wald_upper'], 0.1, name + " upper")
+
+    # The minimum of the grid is within the 1 sigma region, and alpha and beta are anticorrelated
+    assert profile['grid_delta_chi2'].shape == (20, 20)
+    assert np.min(profile['grid_delta_chi2']) < scipy.stats.chi2.ppf(0.6827, 2)
+    assert profile['corr_log'] < 0
+
+    assert " - " in profileIntervalText(profile, 'beta')
+
+
+
+def testProfileAlphaBetaLagUpperLimit():
+    """ A meteor which loses almost no mass leaves beta without a lower limit, which the profile should
+        report, while the Wald uncertainty of beta is meaningless.
+    """
+
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 5, beta_true=0.001)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=8)
+
+    # Beta has only an upper limit, below the upper bound of the fit, and alpha is constrained
+    assert profile['beta_lower_at_bound'] and (not profile['beta_upper_at_bound'])
+    assert profile['beta_upper'] < ALPHA_BETA_BOUNDS[1][1]
+    assert not (profile['alpha_lower_at_bound'] or profile['alpha_upper_at_bound'])
+    assert profileIntervalText(profile, 'beta').startswith("<")
+    assert profileIntervalText(profile, 'beta', notes=False) == "< {:.3g}".format(profile['beta_upper'])
+
+    # The plot is drawn also when the Wald region is far larger than the bounds of the fit
+    fig = plotAlphaBetaLagProfile(profile, alpha, beta, errors=errors, title="Test")
+    plt.close(fig)
 
 
 

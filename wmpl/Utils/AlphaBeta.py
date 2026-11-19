@@ -14,11 +14,13 @@ import sys
 import numpy as np
 import scipy.special
 import scipy.optimize
+import scipy.stats
 import scipy.interpolate
 
 
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Physics import dynamicPressure, dynamicMass
+from wmpl.Utils.Plotting import stationColors
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere
 
 
@@ -1832,6 +1834,267 @@ def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None,
 
 
 
+def _lagFitFixed(path, time_data, length_data, x_start, fixed, lower_bounds, upper_bounds, v_init, \
+    fit_v_init, fast=True):
+    """ Fit the lag with some of the parameters (ln alpha, ln beta[, v_init]) of fitAlphaBetaLag() held
+        fixed, for the profiles in profileAlphaBetaLag().
+
+    Arguments:
+        path: [AlphaBetaPath object] Path of the meteor.
+        time_data: [ndarray] Time of every point (s).
+        length_data: [ndarray] Distance along the path of every point (m).
+        x_start: [list] Starting values of all parameters (ln alpha, ln beta[, v_init]).
+        fixed: [dict] Index of every fixed parameter and its value.
+        lower_bounds: [list] Lower bounds of all parameters.
+        upper_bounds: [list] Upper bounds of all parameters.
+        v_init: [float] Initial velocity (m/s), used if it is not fitted.
+        fit_v_init: [bool] The initial velocity is the third parameter.
+
+    Keyword arguments:
+        fast: [bool] Passed to AlphaBetaPath.lengths(). True by default.
+
+    Return:
+        (cost, x):
+            - cost: [float] Sum of the squared lag residuals (m^2).
+            - x: [ndarray] All parameters at the best fit.
+    """
+
+    x_all = np.array(x_start, dtype=np.float64)
+    for i, value in fixed.items():
+        x_all[i] = value
+
+    free_indices = [i for i in range(len(x_all)) if i not in fixed]
+
+    def _residuals(x_free):
+        """ Lag residuals for the free parameters. """
+
+        x = x_all.copy()
+        x[free_indices] = x_free
+
+        alpha, beta = np.exp(x[:2])
+        v_init_fit = x[2] if fit_v_init else v_init
+
+        length_model, _ = path.lengths(time_data, alpha, beta, v_init_fit, length_data=length_data, \
+            fast=fast)
+
+        return length_data - length_model
+
+
+    # Without free parameters only evaluate the cost
+    if not free_indices:
+        residuals = _residuals(np.array([]))
+        return np.sum(residuals**2), x_all
+
+    # Keep the starting point strictly inside the bounds
+    lower = np.array(lower_bounds)[free_indices]
+    upper = np.array(upper_bounds)[free_indices]
+    x0 = np.clip(x_all[free_indices], lower + 1e-6*(upper - lower), upper - 1e-6*(upper - lower))
+
+    res = scipy.optimize.least_squares(_residuals, x0, bounds=(lower, upper), x_scale='jac')
+
+    x_all[free_indices] = res.x
+
+    return 2*res.cost, x_all
+
+
+
+def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fit_v_init=True, \
+    v_init_range=0.1, ci=95.0, step_min=0.01, step_max=0.5, n_grid=40, fast=True):
+    """ Profile likelihood intervals of alpha and beta of the fit to the lag (fitAlphaBetaLag()), and the
+        likelihood on a grid of alpha and beta.
+
+        The Wald intervals of fitAlphaBetaLag(estimate_errors=True) assume that the cost is a parabola
+        around the minimum, which does not hold when a parameter is weakly constrained, e.g. a beta which
+        the lag only bounds from above. Here one parameter is fixed on a grid and the others (the other
+        one of alpha and beta, and the initial velocity if it is fitted) are fitted again at every point.
+        The cost rise, scaled by the variance of the residuals at the best fit, is compared to the
+        chi-squared threshold. The residuals are assumed to be independent, so the intervals are too
+        narrow if they are correlated, e.g. by a systematic offset of a station.
+
+        The 2D grid covers the region of the profiles within the 3 sigma level of two parameters, with only
+        the initial velocity fitted at every point.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s).
+        length_data: [ndarray] Distance along the path of every point (m), as given to fitAlphaBetaLag().
+        ht_data: [ndarray] Height of every point, rescaled to the exponential atmosphere (m).
+        v_init: [float] Initial velocity of the best fit (m/s).
+        alpha: [float] Alpha of the best fit.
+        beta: [float] Beta of the best fit.
+
+    Keyword arguments:
+        fit_v_init: [bool] The initial velocity was fitted. True by default.
+        v_init_range: [float] Range of the fitted initial velocity, relative to v_init. 0.1 by default.
+        ci: [float] Confidence level of the intervals (percent). 95 by default.
+        step_min: [float] Smallest step of the profiles in ln alpha and ln beta. The step grows where the
+            profile is flat. 0.01 by default.
+        step_max: [float] Largest step of the profiles in ln alpha and ln beta. 0.5 by default.
+        n_grid: [int] Number of grid points along each axis of the 2D grid. 40 by default. 0 skips the
+            grid.
+        fast: [bool] Passed to AlphaBetaPath.lengths(). True by default.
+
+    Return:
+        profile: [dict] With the keys:
+            - ci: [float] Confidence level (percent).
+            - threshold: [float] Chi-squared rise at the confidence level, for one parameter.
+            - sigma2: [float] Variance of the lag residuals at the best fit (m^2).
+            - alpha_lower, alpha_upper, beta_lower, beta_upper: [float] Profile intervals. A limit at a
+                bound of the fit (ALPHA_BETA_BOUNDS) means that the data do not constrain that side.
+            - alpha_lower_at_bound, alpha_upper_at_bound, beta_lower_at_bound, beta_upper_at_bound:
+                [bool] The interval reaches the bound of the fit.
+            - alpha_profile, beta_profile: [tuple of ndarrays] Values of the parameter and the
+                chi-squared rise at them, sorted by the value.
+            - grid_alpha, grid_beta: [ndarray] Values of the 2D grid along each axis.
+            - grid_delta_chi2: [ndarray] Chi-squared rise on the 2D grid, rows along beta.
+            - corr_log: [float] Correlation of ln alpha and ln beta, weighted by the likelihood on the 2D
+                grid. Biased if the likelihood is cut off by a bound of the fit.
+    """
+
+    path = AlphaBetaPath(length_data, ht_data)
+
+    # Bounds of the parameters, as in fitAlphaBetaLag()
+    log_bounds = _logAlphaBetaBounds()
+    lower_bounds = list(log_bounds[0])
+    upper_bounds = list(log_bounds[1])
+    x_best = [np.log(alpha), np.log(beta)]
+    if fit_v_init:
+        lower_bounds.append((1.0 - v_init_range)*v_init)
+        upper_bounds.append((1.0 + v_init_range)*v_init)
+        x_best.append(v_init)
+
+    # Cost and the variance of the residuals at the best fit
+    cost_best, _ = _lagFitFixed(path, time_data, length_data, x_best, {i: x for i, x in enumerate(x_best)}, \
+        lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
+    sigma2 = cost_best/max(len(time_data) - len(x_best), 1)
+
+    threshold = scipy.stats.chi2.ppf(ci/100.0, 1)
+
+    # Walk far enough to also show the 3 sigma level of two parameters
+    walk_threshold = max(threshold, scipy.stats.chi2.ppf(0.9973, 2))
+
+    profile = {'ci': ci, 'threshold': threshold, 'sigma2': sigma2}
+
+    for idx, name in enumerate(['alpha', 'beta']):
+
+        values = [x_best[idx]]
+        delta_chi2 = [0.0]
+
+        # Walk from the best fit to each bound, starting every fit from the previous one
+        for direction in [-1, 1]:
+
+            x_prev = list(x_best)
+            log_value = x_best[idx]
+            bound = lower_bounds[idx] if direction < 0 else upper_bounds[idx]
+            step = step_min
+            delta_prev = 0.0
+
+            while direction*(bound - log_value) > 0:
+
+                log_value = log_value + direction*step
+                if direction*(log_value - bound) > 0:
+                    log_value = bound
+
+                cost, x_prev = _lagFitFixed(path, time_data, length_data, x_prev, {idx: log_value}, \
+                    lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
+                x_prev = list(x_prev)
+
+                values.append(log_value)
+                delta_chi2.append((cost - cost_best)/sigma2)
+
+                if delta_chi2[-1] > walk_threshold:
+                    break
+
+                # Take larger steps where the profile is flat and smaller ones where it is steep
+                rise = abs(delta_chi2[-1] - delta_prev)
+                delta_prev = delta_chi2[-1]
+                if rise < 0.2:
+                    step = min(1.5*step, step_max)
+                elif rise > 1.0:
+                    step = max(0.5*step, step_min)
+
+        # Sort the profile by the value
+        order = np.argsort(values)
+        values = np.array(values)[order]
+        delta_chi2 = np.array(delta_chi2)[order]
+
+        # Find where the profile crosses the threshold on each side of the minimum, by linear
+        #   interpolation in the log space
+        i_min = np.argmin(delta_chi2)
+        limits = []
+        at_bound = []
+        for side in [-1, 1]:
+
+            indices = np.arange(i_min, -1, -1) if side < 0 else np.arange(i_min, len(values))
+            crossing = None
+            for j_prev, j in zip(indices[:-1], indices[1:]):
+                if delta_chi2[j] > threshold:
+                    frac = (threshold - delta_chi2[j_prev])/(delta_chi2[j] - delta_chi2[j_prev])
+                    crossing = values[j_prev] + frac*(values[j] - values[j_prev])
+                    break
+
+            # The profile reached the bound without crossing the threshold
+            if crossing is None:
+                crossing = values[indices[-1]]
+                at_bound.append(True)
+            else:
+                at_bound.append(False)
+
+            limits.append(np.exp(crossing))
+
+        profile[name + '_lower'], profile[name + '_upper'] = limits
+        profile[name + '_lower_at_bound'], profile[name + '_upper_at_bound'] = at_bound
+        profile[name + '_profile'] = (np.exp(values), delta_chi2)
+
+
+    ### Compute the chi-squared rise on a 2D grid of alpha and beta ###
+
+    profile['grid_alpha'] = np.array([])
+    profile['grid_beta'] = np.array([])
+    profile['grid_delta_chi2'] = np.zeros((0, 0))
+    profile['corr_log'] = np.nan
+
+    if n_grid > 0:
+
+        # Cover the extent of the profiles with a margin, within the bounds of the fit
+        log_grids = []
+        for idx, name in enumerate(['alpha', 'beta']):
+            log_lower, log_upper = np.log(profile[name + '_profile'][0][[0, -1]])
+            margin = 0.15*(log_upper - log_lower)
+            log_grids.append(np.linspace(max(log_lower - margin, lower_bounds[idx]), \
+                min(log_upper + margin, upper_bounds[idx]), n_grid))
+
+        log_alpha_grid, log_beta_grid = log_grids
+
+        grid_delta_chi2 = np.zeros((n_grid, n_grid))
+        for i, log_beta in enumerate(log_beta_grid):
+
+            # Start every row from the best fit, and continue along the row from the previous point
+            x_prev = list(x_best)
+            for j, log_alpha in enumerate(log_alpha_grid):
+
+                cost, x_prev = _lagFitFixed(path, time_data, length_data, x_prev, \
+                    {0: log_alpha, 1: log_beta}, lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
+                x_prev = list(x_prev)
+
+                grid_delta_chi2[i, j] = (cost - cost_best)/sigma2
+
+        # Correlation of ln alpha and ln beta, weighted by the likelihood
+        weights = np.exp(-0.5*(grid_delta_chi2 - np.min(grid_delta_chi2)))
+        log_alpha_mesh, log_beta_mesh = np.meshgrid(log_alpha_grid, log_beta_grid)
+        cov_log = np.cov(np.vstack([log_alpha_mesh.ravel(), log_beta_mesh.ravel()]), \
+            aweights=weights.ravel())
+
+        profile['grid_alpha'] = np.exp(log_alpha_grid)
+        profile['grid_beta'] = np.exp(log_beta_grid)
+        profile['grid_delta_chi2'] = grid_delta_chi2
+        profile['corr_log'] = cov_log[0, 1]/np.sqrt(cov_log[0, 0]*cov_log[1, 1])
+
+    ### ###
+
+    return profile
+
+
+
 def _profileCostAt(fixed_value, fixed_idx, free_log_guess, v_normed, ht_normed, sigma_v_normed,
         free_bounds, loss, f_scale, fast=False):
     """ Cost at a fixed alpha or beta value, re-optimizing the other (profiled-out) parameter -
@@ -3237,6 +3500,187 @@ def plotProfileAlphaBeta(v_data, ht_data, fit, profile, delta_cost=True, degener
         return fig, ax_map[param_names[0]][panel_types[0]]
 
     return fig, ax_map
+
+
+def profileIntervalText(profile, name, fmt="{:.3g}", notes=True):
+    """ Text of a profile interval from profileAlphaBetaLag(), which says if a side of it is not
+        constrained by the data.
+
+    Arguments:
+        profile: [dict] Result of profileAlphaBetaLag().
+        name: [str] 'alpha' or 'beta'.
+
+    Keyword arguments:
+        fmt: [str] Format of the limits. "{:.3g}" by default.
+        notes: [bool] Say which side of the interval is not constrained. True by default.
+
+    Return:
+        [str] The interval, e.g. "49.6 - 60.2", or "< 0.482 (no lower limit)".
+    """
+
+    lower = fmt.format(profile[name + '_lower'])
+    upper = fmt.format(profile[name + '_upper'])
+    lower_open = profile[name + '_lower_at_bound']
+    upper_open = profile[name + '_upper_at_bound']
+
+    if lower_open and upper_open:
+        return "not constrained"
+
+    if lower_open:
+        return "< {:s}{:s}".format(upper, " (no lower limit)" if notes else "")
+
+    if upper_open:
+        return "> {:s}{:s}".format(lower, " (no upper limit)" if notes else "")
+
+    return "{:s} - {:s}".format(lower, upper)
+
+
+
+def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
+    """ Plot the uncertainties of alpha and beta of the fit to the lag: the likelihood on the 2D grid of
+        alpha and beta with its 1, 2 and 3 sigma regions, and the profiles of alpha and beta on the sides.
+
+    Arguments:
+        profile: [dict] Result of profileAlphaBetaLag().
+        alpha: [float] Alpha of the best fit.
+        beta: [float] Beta of the best fit.
+
+    Keyword arguments:
+        errors: [dict] Uncertainties from fitAlphaBetaLag(estimate_errors=True). If given and finite, the
+            Wald region of the same confidence level as the profile intervals is drawn for comparison.
+            None by default.
+        title: [str] Title of the plot. None by default.
+
+    Return:
+        fig: [matplotlib figure] The figure.
+    """
+
+    import matplotlib.ticker
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(9, 8.5))
+    grid_spec = fig.add_gridspec(2, 2, width_ratios=[3, 1], height_ratios=[1, 3], wspace=0.05, \
+        hspace=0.05, top=0.93, bottom=0.15)
+    ax_main = fig.add_subplot(grid_spec[1, 0])
+    ax_alpha = fig.add_subplot(grid_spec[0, 0], sharex=ax_main)
+    ax_beta = fig.add_subplot(grid_spec[1, 1], sharey=ax_main)
+    ax_text = fig.add_subplot(grid_spec[0, 1])
+    ax_text.axis('off')
+
+    ci = profile['ci']
+    threshold = profile['threshold']
+
+
+    ### Plot the likelihood on the 2D grid ###
+
+    grid_alpha = profile['grid_alpha']
+    grid_beta = profile['grid_beta']
+    grid_delta_chi2 = profile['grid_delta_chi2']
+
+    # Mark the best fit
+    handles = [ax_main.scatter([alpha], [beta], color='k', marker='+', s=80, zorder=4)]
+    labels = ["Best fit"]
+
+    if grid_delta_chi2.size:
+
+        # Relative likelihood
+        likelihood = np.exp(-0.5*(grid_delta_chi2 - np.min(grid_delta_chi2)))
+        mesh = ax_main.pcolormesh(grid_alpha, grid_beta, likelihood, cmap='Blues', vmin=0, vmax=1, \
+            shading='auto', zorder=1)
+
+        # The 1, 2 and 3 sigma regions of two parameters
+        levels = [scipy.stats.chi2.ppf(p, 2) for p in [0.6827, 0.9545, 0.9973]]
+        contours = ax_main.contour(grid_alpha, grid_beta, grid_delta_chi2, levels=levels, colors='k', \
+            linestyles=['-', '--', ':'], linewidths=1.0, zorder=2)
+        handles += list(contours.legend_elements()[0])
+        labels += ["1 sigma (2 params)", "2 sigma (2 params)", "3 sigma (2 params)"]
+
+        cbar_ax = fig.add_axes([0.13, 0.06, 0.55, 0.012])
+        fig.colorbar(mesh, cax=cbar_ax, orientation='horizontal', label="Relative likelihood")
+
+    # Draw the Wald region of the same confidence level for comparison
+    if (errors is not None) and np.all(np.isfinite(errors['cov_log'])):
+
+        radius = np.sqrt(scipy.stats.chi2.ppf(ci/100.0, 2))
+        angles = np.linspace(0, 2*np.pi, 200)
+        chol = np.linalg.cholesky(errors['cov_log'])
+        ellipse = np.log([alpha, beta])[:, None] + radius*chol.dot(np.vstack([np.cos(angles), \
+            np.sin(angles)]))
+
+        # Keep the region within the bounds of the fit, as it can be very large for a weak constraint
+        log_bounds = _logAlphaBetaBounds()
+        ellipse = np.clip(ellipse, log_bounds[0][:, None], log_bounds[1][:, None])
+
+        handles += ax_main.plot(np.exp(ellipse[0]), np.exp(ellipse[1]), color='tab:red', lw=1.0, zorder=3)
+        labels.append("Wald {:.3g}% (2 params)".format(ci))
+
+    ax_main.legend(handles, labels, loc='best', fontsize=8)
+
+    ax_main.set_xscale('log')
+    ax_main.set_yscale('log')
+    if grid_delta_chi2.size:
+        ax_main.set_xlim(grid_alpha[0], grid_alpha[-1])
+        ax_main.set_ylim(grid_beta[0], grid_beta[-1])
+
+    # Label the ticks with plain numbers, also the minor ticks if the axis spans less than a decade
+    for axis, values in [(ax_main.xaxis, grid_alpha), (ax_main.yaxis, grid_beta)]:
+        axis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, _: "{:g}".format(x)))
+        if len(values) and (values[-1]/values[0] < 10):
+            axis.set_minor_formatter(matplotlib.ticker.FuncFormatter(lambda x, _: "{:g}".format(x)))
+    ax_main.set_xlabel("Alpha")
+    ax_main.set_ylabel("Beta")
+
+
+    ### Plot the profiles ###
+
+    for name, ax, horizontal in [('alpha', ax_alpha, True), ('beta', ax_beta, False)]:
+
+        values, delta_chi2 = profile[name + '_profile']
+        lower, upper = profile[name + '_lower'], profile[name + '_upper']
+
+        if horizontal:
+            ax.plot(values, delta_chi2, color='k', lw=1.0)
+            ax.axhline(threshold, color='0.5', lw=0.8, ls='--')
+            ax.axvspan(lower, upper, color='tab:blue', alpha=0.15, lw=0)
+            ax.set_ylabel("Delta chi2")
+            ax.set_ylim(0, 1.5*threshold)
+            ax.tick_params(axis='x', which='both', labelbottom=False)
+
+        else:
+            ax.plot(delta_chi2, values, color='k', lw=1.0)
+            ax.axvline(threshold, color='0.5', lw=0.8, ls='--')
+            ax.axhspan(lower, upper, color='tab:blue', alpha=0.15, lw=0)
+            ax.set_xlabel("Delta chi2")
+            ax.set_xlim(0, 1.5*threshold)
+            ax.tick_params(axis='y', which='both', labelleft=False)
+
+        # Mark the profile interval on the 2D plot
+        for limit, at_bound in [(lower, profile[name + '_lower_at_bound']), \
+            (upper, profile[name + '_upper_at_bound'])]:
+
+            if at_bound:
+                continue
+
+            if horizontal:
+                ax_main.axvline(limit, color='tab:blue', lw=0.8, ls='-.', zorder=2)
+            else:
+                ax_main.axhline(limit, color='tab:blue', lw=0.8, ls='-.', zorder=2)
+
+
+    ### Print the values ###
+
+    text = "Alpha = {:.3g}\n  {:.3g}% profile: {:s}\nBeta = {:.3g}\n  {:.3g}% profile: {:s}".format(alpha, \
+        ci, profileIntervalText(profile, 'alpha'), beta, ci, profileIntervalText(profile, 'beta'))
+    if np.isfinite(profile['corr_log']):
+        text += "\ncorr(ln alpha, ln beta) = {:.2f}".format(profile['corr_log'])
+    text += "\n\nShaded: {:.3g}% profile interval\nDashed: chi2 threshold".format(ci)
+    ax_text.text(0.05, 0.95, text, transform=ax_text.transAxes, va='top', fontsize=8)
+
+    if title is not None:
+        fig.suptitle(title)
+
+    return fig
+
 
 
 def _alphaBetaMassErrors(alpha, beta, slope, mu, dens, m_init, m_final, vel_init, vel_end,
@@ -5932,6 +6376,7 @@ if __name__ == "__main__":
         vel_data = []
         lag_data = []
         length_data = []
+        station_data = []
         for obs in traj.observations:
             
             if obs.ignore_station:
@@ -5949,6 +6394,8 @@ if __name__ == "__main__":
             # Distance along the path from the state vector, the same reference for all stations
             length_data += obs.state_vect_dist[filter_mask].tolist()
 
+            station_data += [str(obs.station_id)]*int(np.count_nonzero(filter_mask))
+
             # Store the data for each station
             ht_data_dict[obs.station_id] = [obs.time_data[filter_mask], obs.model_ht[filter_mask], 
                                             obs.velocities[filter_mask]]
@@ -5961,6 +6408,13 @@ if __name__ == "__main__":
         vel_data = np.array(vel_data)
         lag_data = np.array(lag_data)
         length_data = np.array(length_data)
+        station_data = np.array(station_data)
+
+        # Use the colors of the stations in the trajectory plots
+        obs_ht_sorted = sorted(traj.observations, key=lambda x: x.model_ht[0])
+        station_colors, station_alpha = stationColors(len(obs_ht_sorted))
+        station_colors = {str(obs.station_id): color for obs, color in zip(obs_ht_sorted, station_colors)}
+        station_ids = [str(obs.station_id) for obs in obs_ht_sorted if str(obs.station_id) in station_data]
 
 
         # Print time, height, velocity for each station
@@ -5981,6 +6435,7 @@ if __name__ == "__main__":
         lag_data  = lag_data[sorted_indices]
         length_data = length_data[sorted_indices]
         time_data = time_data[sorted_indices]
+        station_data = station_data[sorted_indices]
         lat_data = lat_data[sorted_indices]
         lon_data = lon_data[sorted_indices]
         ht_data  = ht_data[sorted_indices]
@@ -6012,6 +6467,10 @@ if __name__ == "__main__":
             v_init, alpha, beta, lag_residuals = fitAlphaBetaLag(time_data, length_data, ht_data_rescaled, \
                 traj.v_init, x0_alpha_beta=x0_alpha_beta)
             fit_errors = None
+
+        # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the uncertainties
+        lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, beta, \
+            n_grid=(40 if cml_args.errors else 0))
 
         # Model velocity at the observed points
         vel_model = alphaBetaVelocity(ht_data_rescaled, alpha, beta, v_init)
@@ -6091,15 +6550,22 @@ if __name__ == "__main__":
         print("-------------------")
         if cml_args.errors:
             print("Alpha = {:.3f} (+/-{:.1%})".format(alpha, fit_errors['alpha_std_rel']))
-            print("Beta  = {:.3f} (+/-{:.1%})".format(beta, fit_errors['beta_std_rel']))
+            print("Beta  = {:.4g} (+/-{:.1%})".format(beta, fit_errors['beta_std_rel']))
             print("corr(alpha, beta) = {:.3f}".format(fit_errors['corr']))
         else:
             print("Alpha = {:.3f}".format(alpha))
-            print("Beta  = {:.3f}".format(beta))
+            print("Beta  = {:.4g}".format(beta))
 
         # Warn if alpha or beta are at a bound of the fit, where the data did not constrain them
         for bound_warning in alphaBetaBoundWarnings(alpha, beta):
             print("WARNING: {:s}".format(bound_warning))
+
+        # Print the profile intervals, which hold also where the Wald errors above do not
+        print("{:.3g}% profile intervals (lag residuals assumed independent):".format(lag_profile['ci']))
+        print("  Alpha: {:s}".format(profileIntervalText(lag_profile, 'alpha')))
+        print("  Beta:  {:s}".format(profileIntervalText(lag_profile, 'beta')))
+        if lag_profile['beta_lower_at_bound'] and (not lag_profile['beta_upper_at_bound']):
+            print("NOTE: The lag only gives an upper limit of beta, so ln(beta) is not meaningful")
 
         print("-------------------")
         print("ln(beta)             = {:.2f}".format(np.log(beta)))
@@ -6188,22 +6654,23 @@ if __name__ == "__main__":
         ### Alpha-beta plot ###
         fig, (ax_ab, ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=4, sharey=True, figsize=(14, 6))
 
-        # Plot the data rescaled to an exponential atmosphere
-        ax_ab.scatter(vel_data/1000, ht_data_rescaled/1000, s=5, label="Rescaled height to exp. atm")
+        # Plot the data of every station rescaled to an exponential atmosphere
+        for station_id in station_ids:
+            station_mask = station_data == station_id
+            ax_ab.scatter(vel_data[station_mask]/1000, ht_data_rescaled[station_mask]/1000, s=5, \
+                color=station_colors[station_id], alpha=station_alpha)
+
+        ax_ab.set_title("Heights rescaled to exp. atm.", fontsize=10)
 
         # Plot the smoothed velocity
         if cml_args.lagsmooth:
             ax_ab.scatter(vel_data_smooth/1000, ht_data_rescaled/1000, color='r', s=1, \
                 label="Lag-based velocity smoothing")
 
-        # Plot the alpha-beta fit (annotate alpha/beta with their 1-sigma errors if --errors)
-        if cml_args.errors:
-            fit_label = ("$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f} $\\pm$ {:.1%}\n"
-                "$\\beta$ = {:.2f} $\\pm$ {:.1%}").format(v_init/1000, alpha, \
-                fit_errors['alpha_std_rel'], beta, fit_errors['beta_std_rel'])
-        else:
-            fit_label = "$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f}\n$\\beta$ = {:.2f}".format( \
-                v_init/1000, alpha, beta)
+        # Plot the alpha-beta fit, with the profile intervals of alpha and beta
+        fit_label = "$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.3g} ({:s})\n$\\beta$ = {:.3g} ({:s})".format( \
+            v_init/1000, alpha, profileIntervalText(lag_profile, 'alpha', notes=False), beta, \
+            profileIntervalText(lag_profile, 'beta', notes=False))
 
         # If uncertainties are available (finite cov_log), draw a 1-sigma velocity band by
         #   sampling the fitted (ln alpha, ln beta) covariance and propagating each draw through
@@ -6262,8 +6729,13 @@ if __name__ == "__main__":
 
         ### Plot the velocities at the observed heights ###
 
-        # Plot the original data
-        ax_vel.scatter(vel_data/1000, ht_data/1000, s=5, label="Observed heights")
+        # Plot the original data of every station
+        for station_id in station_ids:
+            station_mask = station_data == station_id
+            ax_vel.scatter(vel_data[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
+                color=station_colors[station_id], alpha=station_alpha)
+
+        ax_vel.set_title("Observed heights", fontsize=10)
 
         # Plot the alpha-beta velocity at the observed heights
         ax_vel.plot(vel_model/1000, ht_data/1000, color='k', label="Alpha-beta fit")
@@ -6332,8 +6804,13 @@ if __name__ == "__main__":
         ax_vel.legend(loc='upper left')
 
 
-        # Plot the lag and the alpha-beta model of it, which differs from the data by the residuals
-        ax_lag.scatter(lag_data/1000, ht_data/1000, s=5)
+        # Plot the lag of every station and the alpha-beta model of it, which differs from the data by the
+        #   residuals
+        for station_id in station_ids:
+            station_mask = station_data == station_id
+            ax_lag.scatter(lag_data[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
+                color=station_colors[station_id], alpha=station_alpha)
+
         ax_lag.plot((lag_data - lag_residuals)/1000, ht_data/1000, color='k', label="Alpha-beta fit")
 
         # Plot the smooth model of the lag
@@ -6345,8 +6822,15 @@ if __name__ == "__main__":
         ax_lag.legend(loc='lower left')
 
 
-        # Plot the residuals of the alpha-beta fit to the lag
-        ax_lag_res.scatter(lag_residuals/1000, ht_data/1000, s=5, color='k', label="Alpha-beta fit")
+        # Plot the residuals of the alpha-beta fit to the lag of every station
+        for station_id in station_ids:
+            station_mask = station_data == station_id
+            ax_lag_res.scatter(lag_residuals[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
+                color=station_colors[station_id], alpha=station_alpha, label="{:s}, RMS {:.0f} m".format( \
+                station_id, np.sqrt(np.mean(lag_residuals[station_mask]**2))))
+
+        ax_lag_res.axvline(0, color='0.5', lw=0.8, zorder=0)
+        ax_lag_res.set_title("Alpha-beta fit residuals", fontsize=10)
 
         # Plot the residuals of the smooth model of the lag
         if cml_args.lagsmooth:
@@ -6354,13 +6838,21 @@ if __name__ == "__main__":
                 ht_data/1000, s=5, color='r', label="Lag-based velocity smoothing")
 
         ax_lag_res.set_xlabel("Lag residuals (km)")
-        ax_lag_res.legend(loc='upper left')
+        ax_lag_res.legend(loc='upper left', fontsize=8)
 
         plt.tight_layout()
 
         plt.subplots_adjust(wspace=0)
 
         _finishPlot(fig, "alpha_beta_fit")
+
+
+        # Plot the uncertainties of alpha and beta
+        if cml_args.errors:
+            fig_err = plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, \
+                title="{:s}, alpha-beta fit to the lag".format(traj.file_name))
+
+            _finishPlot(fig_err, "alpha_beta_errors")
 
 
 
