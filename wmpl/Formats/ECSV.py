@@ -51,28 +51,38 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
 
             for line in f:
                 if line.startswith("#"):
-                    line = line.replace('\n', '').replace('\r', '').replace('{', '').replace('}', '')
-                    line = line.split(':')
-                    if len(line) > 1:
 
-                        if "obs_latitude" in line[0]:
-                            station_lat = float(line[1])
+                    # Split a metadata entry into its key and value at the first colon
+                    entry = line.lstrip('#').strip()
+                    if entry.startswith('-'):
+                        entry = entry[1:].strip()
 
-                        if "obs_longitude" in line[0]:
-                            station_lon = float(line[1])
+                    entry = entry.strip('{}').strip()
+                    if ':' not in entry:
+                        continue
 
-                        if "obs_elevation" in line[0]:
-                            station_ele = float(line[1])
+                    key, value = [part.strip() for part in entry.split(':', 1)]
+                    text = value.strip("'").strip('"')
 
-                        if 'image_file' in line[0]:
-                            image_file = line[1].strip().strip("'")
+                    # Take the station and the image file from their keys
+                    if key == 'obs_latitude':
+                        station_lat = float(value)
 
-                        if "camera_id" in line[0]:
-                            station_id = line[1].strip().strip("'")
+                    if key == 'obs_longitude':
+                        station_lon = float(value)
 
-                        if (station_id is None) and ("dfn_camera_codename" in line[0]):
-                            station_id = line[1].strip().strip("'")
-                            
+                    if key == 'obs_elevation':
+                        station_ele = float(value)
+
+                    if key == 'image_file':
+                        image_file = text
+
+                    if key == 'camera_id':
+                        station_id = text
+
+                    if (station_id is None) and (key == 'dfn_camera_codename'):
+                        station_id = text
+
 
             if (station_lat is None) or (station_lon is None) or (station_ele is None) \
                 or (station_id is None):
