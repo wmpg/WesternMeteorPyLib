@@ -10,6 +10,7 @@ diagram, and they give the initial and final masses, the dynamic mass at the end
 - [Quick start](#quick-start)
 - [The fit to the lag](#the-fit-to-the-lag)
 - [Uncertainties of alpha and beta](#uncertainties-of-alpha-and-beta)
+- [The summary plot and the final masses](#the-summary-plot-and-the-final-masses)
 - [Example: the 2020-01-09 fireball over Croatia](#example-the-2020-01-09-fireball-over-croatia)
 - [When beta only has an upper limit](#when-beta-only-has-an-upper-limit)
 - [Limits](#limits)
@@ -30,10 +31,11 @@ Also estimate the uncertainties, and save the plots next to the pickle instead o
 python -m wmpl.Utils.AlphaBeta /path/to/20200109_232639_trajectory.pickle --errors --saveplots --hideplots
 ```
 
-The plots are saved as `<timestamp>_alpha_beta_fit.png`, `_alpha_beta_survival.png`,
-`_alpha_beta_dyn_pressure.png`, `_alpha_beta_mag_vs_dyn_pressure.png` and, with `--errors`,
-`_alpha_beta_errors.png`. `--dens` and `--ga` set the bulk density and the product of the drag and the shape
-coefficients used for the masses (3500 kg/m^3 and 0.55 by default).
+The plots are saved as `<timestamp>_alpha_beta_summary.png` (all results in one figure, see [The summary plot
+and the final masses](#the-summary-plot-and-the-final-masses)), `_alpha_beta_fit.png`,
+`_alpha_beta_survival.png`, `_alpha_beta_dyn_pressure.png`, `_alpha_beta_mag_vs_dyn_pressure.png` and, with
+`--errors`, `_alpha_beta_errors.png`. `--dens` and `--ga` set the bulk density and the product of the drag and
+the shape coefficients used for the masses (3500 kg/m^3 and 0.55 by default).
 
 ---
 
@@ -93,6 +95,61 @@ Alpha and beta are strongly anticorrelated, as a larger mass loss can be traded 
 coefficient, so the region is a narrow tilted valley. When both parameters are well constrained, the profile and
 the Wald regions agree.
 
+With `--errors`, the final masses, the dynamic mass and the peak dynamic pressure also get 95% profile
+intervals: the range of their values over the models within the 95% interval of one parameter (the
+points of the grid and of the profiles below the threshold of 3.84). These hold also when beta only has an upper
+limit, where the Wald errors of the masses are not defined. They include only the uncertainty of the fit, while
+the Wald errors also include `--densunc` and `--slopeunc`. If the models within the interval stop decelerating at
+the end, the dynamic mass has no upper limit.
+
+If the profile finds a better fit than the fit itself, which then ended in a local minimum, the fit is repeated
+from that point and a note is printed.
+
+---
+
+## The summary plot and the final masses
+
+`_alpha_beta_summary.png` shows all results of a run in one figure: the fit with the bands of the 95% region on
+top, and below it the uncertainties of alpha and beta, the survival diagram with the final mass on straight
+lines, and the final and the dynamic masses with their 95% intervals.
+
+The final mass of the alpha-beta model, for a final velocity much smaller than the initial one, is
+
+```
+m_final = m0s/(alpha*sin(slope))^3*exp(-beta/(1 - mu)),    m0s = (Gamma*A*rho_0*h_0/dens^(2/3))^3
+```
+
+so the final mass is M on the line
+
+```
+beta = (1 - mu)*(ln(m0s/M) - 3*ln(alpha*sin(slope)))
+```
+
+which is straight when beta is on a linear axis and alpha*sin(slope) on a logarithmic one. The classic survival
+diagram (`_alpha_beta_survival.png`) has the same lines, but plotted against ln(beta) they curve. Beta is on a
+linear axis also because the final mass depends on it exponentially: below about 0.1 it barely changes the final
+mass, while every unit of beta divides it by e (for mu = 0). A logarithmic axis would spend most of its height
+on the small values of beta, where nothing changes. An upper limit of beta is a region which reaches beta = 0,
+no mass loss.
+
+The zones are colored by the final mass: red below 50 g, yellow between 50 and 100 g, and green above 100 g.
+As mu is not known, the class is found for both mu = 0 (no rotation, solid lines) and mu = 2/3 (fast rotation,
+dashed lines). Where the two classes agree the zone has their color, and where they differ it has the mix of the
+two colors, e.g. brown for above 100 g with mu = 0 but below 50 g with mu = 2/3. The legend gives the classes of
+both mu. The masses in the last panel use the full alpha-beta solution with the final velocity of the model, so they
+can differ by a few percent from the approximation of the lines. For a meteor which barely decelerates (beta at
+its upper bound), the approximation of a final velocity much smaller than the initial one does not hold, and the
+zone of the best fit can disagree with the masses in the last panel, which are then the ones to use.
+
+If the fireball lost less than 10% of its velocity by the end of the fit (`MIN_VELOCITY_LOSS`), the dynamics do
+not constrain alpha, beta and the masses: in the GMN and UWO fireballs, only 1 of 61 such fits had alpha and beta
+constrained, against 190 of 244 fits which lost more than half of the velocity. A note is printed, the masses in
+the summary plot are given as ~0, as a fireball which ends without decelerating usually ablates completely, and
+the survival diagram is marked as not constrained.
+
+The initial mass is not shown in the plots, as the dynamics alone do not constrain it well (it is usually
+underestimated 4-10 times).
+
 ---
 
 ## Example: the 2020-01-09 fireball over Croatia
@@ -108,9 +165,10 @@ The fireball was observed by four Global Meteor Network cameras in Croatia from 
 | ln(alpha*sin(slope)) | 3.44 |
 | ln(beta) | -0.27 |
 | Lag residuals RMS | 129 m |
-| Final mass, mu = 0 and 2/3 | 142 g and 32 g |
-| Dynamic mass at 25 km | 32 g |
-| Peak dynamic pressure | 1.07 MPa at 31.8 km |
+| Final mass, mu = 0 | 142 g (95%: 138 - 146 g) |
+| Final mass, mu = 2/3 | 32 g (95%: 29 - 36 g) |
+| Dynamic mass at 25 km | 32 g (95%: 28 - 36 g) |
+| Peak dynamic pressure | 1.07 MPa at 31.8 km (95%: 1.06 - 1.08 MPa) |
 
 The lag residuals of the four stations are 98-185 m RMS (the fit plot above), and the band of the models within
 the 95% region is at most a few tens of meters wide. The profiles of both parameters are parabolas, and the 95%
@@ -118,10 +176,10 @@ profile region matches the Wald region:
 
 ![Uncertainties of alpha and beta of the Croatia fireball](figures/AlphaBeta_errors.png)
 
-On the survival diagram the 95% region lies between the 50 g lines of mu = 0 and mu = 2/3, and it is small
-compared to the distance to the 1 kg lines:
+In the summary plot the whole 95% region is above 100 g for mu = 0 and below 50 g for mu = 2/3 (the brown
+zone), so whether a meteorite above 50 g fell depends on the rotation:
 
-![The Croatia fireball on the meteorite survival diagram](figures/AlphaBeta_survival.png)
+![Summary plot of the Croatia fireball](figures/AlphaBeta_summary.png)
 
 ---
 
@@ -140,8 +198,9 @@ NOTE: The lag only gives an upper limit of beta, so ln(beta) is not meaningful
 ```
 
 Report beta as an upper limit in that case. The 95% region on the survival diagram is then an open valley
-towards small ln(beta), and the Wald uncertainty of beta is meaningless (it can be thousands of percent). Alpha,
-the deceleration, the dynamic mass and the peak dynamic pressure are usually still well constrained.
+towards small ln(beta), and a region reaching beta = 0 in the summary plot, and the Wald uncertainty of beta is
+meaningless (it can be thousands of percent). Alpha, the deceleration, the dynamic mass and the peak dynamic
+pressure are usually still well constrained.
 
 ---
 

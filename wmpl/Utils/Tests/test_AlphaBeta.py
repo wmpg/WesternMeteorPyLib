@@ -35,7 +35,8 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
     getDefaultInverseEiLUT, fitAlphaBetaLag, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 from wmpl.Utils.AlphaBeta import profileAlphaBetaLag, profileIntervalText, plotAlphaBetaLagProfile, \
-    AlphaBetaPath, profileRegionAlphaBetaLag
+    AlphaBetaPath, profileRegionAlphaBetaLag, plotAlphaBetaMassDiagram, plotAlphaBetaMasses, _formatMass, \
+    _formatMu
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -760,6 +761,15 @@ def testProfileAlphaBetaLag():
         _assertClose(profile[name + '_lower'], errors[name + '_ci_wald_lower'], 0.1, name + " lower")
         _assertClose(profile[name + '_upper'], errors[name + '_ci_wald_upper'], 0.1, name + " upper")
 
+    # The fit is the lowest point found by the profiles and the grid
+    assert profile['min_delta_chi2'] > -0.1
+
+    # The models within the interval of one parameter reach the profile interval of alpha, so the interval of
+    #   a quantity derived from them, e.g. the initial mass, follows the interval of alpha
+    region_alpha, _, _ = profileRegionAlphaBetaLag(profile, n_params=1)
+    _assertClose(np.min(region_alpha), profile['alpha_lower'], 0.01, "lowest alpha of the region")
+    _assertClose(np.max(region_alpha), profile['alpha_upper'], 0.01, "highest alpha of the region")
+
     # The minimum of the grid is within the 1 sigma region, and alpha and beta are anticorrelated
     assert profile['grid_delta_chi2'].shape == (20, 20)
     assert np.min(profile['grid_delta_chi2']) < scipy.stats.chi2.ppf(0.6827, 2)
@@ -846,6 +856,30 @@ def testProfileAlphaBetaLagUpperLimit():
     fig, _ = plotAlphaBetaSurvivalDiagram(alpha, beta, SLOPE, errors=errors, profile=profile, \
         axes=plt.subplots()[1])
     plt.close(fig)
+
+    # The diagram with straight lines of the final mass covers the best fit, with beta from 0
+    fig, ax = plotAlphaBetaMassDiagram(alpha, beta, SLOPE, profile=profile)
+    assert ax.get_ylim()[0] == 0
+    assert ax.get_xlim()[0] < alpha*np.sin(SLOPE) < ax.get_xlim()[1]
+    plt.close(fig)
+
+    # The masses are drawn also without an interval, with no upper limit and when not defined
+    fig, ax = plotAlphaBetaMasses([("A", 0.07, 0.03, 0.08, 'k'), ("B", 0.2, 0.1, np.inf, 'k'), \
+        ("C", 0.5, None, None, 'k'), ("D", np.nan, None, None, 'k')])
+    assert len(ax.get_yticklabels()) == 4
+    plt.close(fig)
+
+
+
+def testFormatMassAndMu():
+    """ Masses are written with a readable unit and mu = 2/3 as a fraction. """
+
+    assert _formatMass(0.142) == "142 g"
+    assert _formatMass(2.3) == "2.3 kg"
+    assert _formatMass(5e-5) == "50 mg"
+    assert _formatMass(2500.0) == "2.5 t"
+    assert _formatMu(2/3) == "2/3"
+    assert _formatMu(0) == "0"
 
 
 

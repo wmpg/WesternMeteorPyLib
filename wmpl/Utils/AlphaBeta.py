@@ -37,6 +37,10 @@ R_EARTH = 6371008.7714
 # Largest z of the median residual of a height band before the residuals are flagged as a trend
 RESIDUAL_TREND_SIGMA = 2.0
 
+# Smallest fraction of the entry velocity lost by the end of the fit to the lag for the dynamics to constrain
+#   alpha, beta and the masses (only 1 of 61 such fits of GMN and UWO fireballs was constrained)
+MIN_VELOCITY_LOSS = 0.1
+
 # Bounds of a fitted initial velocity, as fractions of the median speed of the highest points
 V_INIT_FIT_BOUNDS = (0.8, 1.5)
 
@@ -1694,8 +1698,8 @@ def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None,
         v_init: [float] Initial velocity (m/s). The starting point of the fit if fit_v_init is True.
 
     Keyword arguments:
-        x0_alpha_beta: [list] Additional (alpha, beta) starting points, e.g. the results of fitAlphaBeta().
-            None by default.
+        x0_alpha_beta: [list] Additional (alpha, beta) starting points, e.g. the results of fitAlphaBeta(),
+            or (alpha, beta, v_init) to also start from another initial velocity. None by default.
         fit_v_init: [bool] Fit the initial velocity. True by default.
         v_init_range: [float] Range of the fitted initial velocity, relative to v_init. 0.1 by default.
         n_starts: [int] Number of the best grid points from which the fit is started. 5 by default.
@@ -1757,13 +1761,12 @@ def fitAlphaBetaLag(time_data, length_data, ht_data, v_init, x0_alpha_beta=None,
 
     # Run the fit from every starting point and keep the best one
     best_res = None
-    for alpha0, beta0 in starts:
+    for start in starts:
 
         # Keep the starting point strictly inside the bounds
-        x0 = list(np.log(np.clip([alpha0, beta0], np.exp(log_bounds[0] + 1e-6), \
-            np.exp(log_bounds[1] - 1e-6))))
+        x0 = list(np.log(np.clip(start[:2], np.exp(log_bounds[0] + 1e-6), np.exp(log_bounds[1] - 1e-6))))
         if fit_v_init:
-            x0.append(v_init)
+            x0.append(np.clip(start[2], lower_bounds[2], upper_bounds[2]) if len(start) > 2 else v_init)
 
         res = scipy.optimize.least_squares(_lengthResiduals, x0, args=(fast,), \
             bounds=(lower_bounds, upper_bounds), x_scale='jac')
@@ -1905,8 +1908,8 @@ def _lagFitFixed(path, time_data, length_data, x_start, fixed, lower_bounds, upp
 
 
 def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fit_v_init=True, \
-    v_init_start=None, v_init_range=0.1, ci=95.0, step_min=0.01, step_max=0.5, n_starts=5, n_grid=40, \
-    fast=True):
+    v_init_start=None, v_init_range=0.1, ci=95.0, step_min=0.01, step_max=0.5, n_starts=5, max_points=200, \
+    n_grid=40, fast=True):
     """ Profile likelihood intervals of alpha and beta of the fit to the lag (fitAlphaBetaLag()), and the
         likelihood on a grid of alpha and beta.
 
@@ -1943,6 +1946,8 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
         step_max: [float] Largest step of the profiles in ln alpha and ln beta. 0.5 by default.
         n_starts: [int] Number of additional starting values of the other parameter at every point of the
             profiles, spread over its bounds. 5 by default.
+        max_points: [int] Largest number of points of each side of a profile. A side which reaches it without
+            crossing the threshold is taken as not constrained. 200 by default.
         n_grid: [int] Number of grid points along each axis of the 2D grid. 40 by default. 0 skips the
             grid.
         fast: [bool] Passed to AlphaBetaPath.lengths(). True by default.
@@ -1958,11 +1963,18 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
                 [bool] The interval reaches the bound of the fit.
             - alpha_profile, beta_profile: [tuple of ndarrays] Values of the parameter and the
                 chi-squared rise at them, sorted by the value.
+            - alpha_profile_models, beta_profile_models: [ndarray] Alpha, beta and the initial velocity at
+                every point of the profiles, one row per point, in the same order.
+            - alpha_edge_models, beta_edge_models: [ndarray] Alpha, beta, the initial velocity and the
+                chi-squared rise at the points of the profiles next to the crossings of the threshold.
             - grid_alpha, grid_beta: [ndarray] Values of the 2D grid along each axis.
             - grid_delta_chi2: [ndarray] Chi-squared rise on the 2D grid, rows along beta.
             - grid_v_init: [ndarray] Fitted initial velocity on the 2D grid (m/s), rows along beta.
             - corr_log: [float] Correlation of ln alpha and ln beta, weighted by the likelihood on the 2D
                 grid. Biased if the likelihood is cut off by a bound of the fit.
+            - min_delta_chi2: [float] Lowest chi-squared rise found on the profiles and the grid. Negative if
+                they found a better fit than the given one, which then ended in a local minimum.
+            - min_model: [tuple] Alpha, beta and the initial velocity at that point.
     """
 
     path = AlphaBetaPath(length_data, ht_data)
@@ -2007,23 +2019,28 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
             log_value = x_best[idx]
             bound = lower_bounds[idx] if direction < 0 else upper_bounds[idx]
             step = step_min
+            step_floor = step_min
             delta_prev = 0.0
             n_points = 0
 
-            while direction*(bound - log_value) > 0:
+            while (direction*(bound - log_value) > 0) and (n_points < max_points):
 
                 log_value_new = log_value + direction*step
                 if direction*(log_value_new - bound) > 0:
                     log_value_new = bound
 
-                # Start from the previous point, and from values of the other parameter across its bounds,
-                #   as the profile can follow a flat valley the previous point does not lead into
-                cost, x_new = np.inf, None
-                for log_other in [None] + list(other_starts):
+                # Start from the previous point, from values of the other parameter across its bounds, as the
+                #   profile can follow a flat valley the previous point does not lead into, and from the
+                #   initial velocity of the best fit
+                x_starts = [list(x_prev)]
+                for log_other in other_starts:
+                    x_starts.append(list(x_prev))
+                    x_starts[-1][1 - idx] = log_other
+                if fit_v_init:
+                    x_starts.append(list(x_prev[:2]) + [x_best[2]])
 
-                    x_start = list(x_prev)
-                    if log_other is not None:
-                        x_start[1 - idx] = log_other
+                cost, x_new = np.inf, None
+                for x_start in x_starts:
 
                     cost_start, x_fit = _lagFitFixed(path, time_data, length_data, x_start, \
                         {idx: log_value_new}, lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
@@ -2037,6 +2054,7 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
                 #   step, so take smaller steps
                 if (delta_new > walk_threshold) and (n_points < 4) and (step > 1e-6):
                     step /= 4.0
+                    step_floor = min(step_floor, step)
                     continue
 
                 log_value = log_value_new
@@ -2056,7 +2074,7 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
                 if rise < 0.2:
                     step = min(1.5*step, step_max)
                 elif rise > 1.0:
-                    step = max(0.5*step, 1e-6)
+                    step = max(0.5*step, step_floor)
 
         # Sort the profile by the value
         order = np.argsort(values)
@@ -2068,6 +2086,7 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
         i_min = np.argmin(delta_chi2)
         limits = []
         at_bound = []
+        edge_models = []
         for side in [-1, 1]:
 
             indices = np.arange(i_min, -1, -1) if side < 0 else np.arange(i_min, len(values))
@@ -2093,6 +2112,10 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
 
                     frac = (threshold - delta_inner)/(delta_outer - delta_inner)
                     crossing = inner + frac*(outer - inner)
+
+                    # Keep the innermost point next to the crossing, for the intervals of derived quantities
+                    edge_models.append([np.exp(x_inner[0]), np.exp(x_inner[1]), \
+                        (x_inner[2] if fit_v_init else v_init), delta_inner])
                     break
 
             # The profile reached the bound without crossing the threshold
@@ -2107,6 +2130,13 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
         profile[name + '_lower'], profile[name + '_upper'] = limits
         profile[name + '_lower_at_bound'], profile[name + '_upper_at_bound'] = at_bound
         profile[name + '_profile'] = (np.exp(values), delta_chi2)
+
+        # Alpha, beta and the initial velocity of every point of the profile
+        profile[name + '_profile_models'] = np.array([[np.exp(x[0]), np.exp(x[1]), \
+            (x[2] if fit_v_init else v_init)] for x in x_values])
+
+        # Alpha, beta, the initial velocity and the chi-squared rise at the points next to the crossings
+        profile[name + '_edge_models'] = np.array(edge_models).reshape(-1, 4)
 
 
     ### Compute the chi-squared rise on a 2D grid of alpha and beta ###
@@ -2133,13 +2163,24 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
         grid_v_init = np.full((n_grid, n_grid), v_init)
         for i, log_beta in enumerate(log_beta_grid):
 
-            # Start every row from the best fit, and continue along the row from the previous point
+            # Start every row from the best fit, and every point from the previous point of the row and from
+            #   the same point of the previous row, as the initial velocity has local minima
             x_prev = list(x_best)
             for j, log_alpha in enumerate(log_alpha_grid):
 
-                cost, x_prev = _lagFitFixed(path, time_data, length_data, x_prev, \
-                    {0: log_alpha, 1: log_beta}, lower_bounds, upper_bounds, v_init, fit_v_init, fast=fast)
-                x_prev = list(x_prev)
+                starts = [x_prev]
+                if fit_v_init and (i > 0):
+                    starts.append(list(x_prev[:2]) + [grid_v_init[i - 1, j]])
+
+                cost = np.inf
+                for x_start in starts:
+                    cost_start, x_fit = _lagFitFixed(path, time_data, length_data, x_start, \
+                        {0: log_alpha, 1: log_beta}, lower_bounds, upper_bounds, v_init, fit_v_init, \
+                        fast=fast)
+                    if cost_start < cost:
+                        cost, x_new = cost_start, list(x_fit)
+
+                x_prev = x_new
 
                 grid_delta_chi2[i, j] = (cost - cost_best)/sigma2
                 if fit_v_init:
@@ -2157,35 +2198,80 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
         profile['grid_v_init'] = grid_v_init
         profile['corr_log'] = cov_log[0, 1]/np.sqrt(cov_log[0, 0]*cov_log[1, 1])
 
+        # Extend the intervals over the points of the grid within them, as the walk of a profile stops at the
+        #   first crossing of the threshold and the likelihood can have another valley beyond it
+        region_alpha, region_beta, _ = profileRegionAlphaBetaLag(profile, ci=ci, n_params=1)
+        for idx, name, values in [(0, 'alpha', region_alpha), (1, 'beta', region_beta)]:
+
+            if np.min(values) < profile[name + '_lower']:
+                profile[name + '_lower'] = np.min(values)
+                profile[name + '_lower_at_bound'] = np.log(np.min(values)) <= lower_bounds[idx] + 1e-6
+
+            if np.max(values) > profile[name + '_upper']:
+                profile[name + '_upper'] = np.max(values)
+                profile[name + '_upper_at_bound'] = np.log(np.max(values)) >= upper_bounds[idx] - 1e-6
+
     ### ###
+
+
+    # Find the lowest point of the profiles and the grid, which is below the given fit if it ended in a local
+    #   minimum
+    candidates = [(0.0, (alpha, beta, v_init))]
+    for name in ['alpha', 'beta']:
+        i_min = np.argmin(profile[name + '_profile'][1])
+        candidates.append((profile[name + '_profile'][1][i_min], \
+            tuple(profile[name + '_profile_models'][i_min])))
+
+    if profile['grid_delta_chi2'].size:
+        i_min, j_min = np.unravel_index(np.argmin(profile['grid_delta_chi2']), \
+            profile['grid_delta_chi2'].shape)
+        candidates.append((profile['grid_delta_chi2'][i_min, j_min], (profile['grid_alpha'][j_min], \
+            profile['grid_beta'][i_min], profile['grid_v_init'][i_min, j_min])))
+
+    candidates.sort(key=lambda candidate: candidate[0])
+    profile['min_delta_chi2'], profile['min_model'] = candidates[0]
 
     return profile
 
 
 
-def profileRegionAlphaBetaLag(profile, ci=95.0):
+def profileRegionAlphaBetaLag(profile, ci=95.0, n_params=2):
     """ Alpha, beta and the initial velocity at the points of the 2D grid of profileAlphaBetaLag() within the
-        region of two parameters at the given confidence level, e.g. to draw the band of the models which fit
-        the lag within that region.
+        region at the given confidence level, e.g. to draw the band of the models which fit the lag within the
+        region of alpha and beta, or to find the interval of a quantity derived from them, e.g. a mass, as the
+        range of its values within the region of one parameter.
 
     Arguments:
         profile: [dict] Result of profileAlphaBetaLag(), with the 2D grid.
 
     Keyword arguments:
         ci: [float] Confidence level of the region (percent). 95 by default.
+        n_params: [int] Number of parameters of the chi-squared threshold of the region: 2 for the joint
+            region of alpha and beta, 1 for the interval of a single quantity derived from them. 2 by default.
 
     Return:
-        (alpha, beta, v_init): [tuple of ndarrays] Parameters of the grid points within the region. Empty if
-            there is no grid.
+        (alpha, beta, v_init): [tuple of ndarrays] Parameters of the points of the grid and of the profiles
+            within the region. Empty if there is no grid.
     """
 
     if profile['grid_delta_chi2'].size == 0:
         return np.array([]), np.array([]), np.array([])
 
-    inside = profile['grid_delta_chi2'] <= scipy.stats.chi2.ppf(ci/100.0, 2)
-    alpha_mesh, beta_mesh = np.meshgrid(profile['grid_alpha'], profile['grid_beta'])
+    threshold = scipy.stats.chi2.ppf(ci/100.0, n_params)
 
-    return alpha_mesh[inside], beta_mesh[inside], profile['grid_v_init'][inside]
+    inside = profile['grid_delta_chi2'] <= threshold
+    alpha_mesh, beta_mesh = np.meshgrid(profile['grid_alpha'], profile['grid_beta'])
+    models = [np.column_stack([alpha_mesh[inside], beta_mesh[inside], profile['grid_v_init'][inside]])]
+
+    # Add the points of the profiles within the region, which reach its edges more closely than the grid
+    for name in ['alpha', 'beta']:
+        models.append(profile[name + '_profile_models'][profile[name + '_profile'][1] <= threshold])
+        edge_models = profile[name + '_edge_models']
+        models.append(edge_models[edge_models[:, 3] <= threshold, :3])
+
+    models = np.vstack(models)
+
+    return models[:, 0], models[:, 1], models[:, 2]
 
 
 
@@ -3630,7 +3716,7 @@ def profileIntervalText(profile, name, fmt="{:.3g}", notes=True):
 
 
 
-def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
+def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, fig=None, subplot_spec=None):
     """ Plot the uncertainties of alpha and beta of the fit to the lag: the likelihood on the 2D grid of alpha
         and beta with its 1, 2 and 3 sigma regions, and the profiles of alpha and beta on the sides.
 
@@ -3641,9 +3727,12 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
 
     Keyword arguments:
         errors: [dict] Uncertainties from fitAlphaBetaLag(estimate_errors=True). If given and finite, the
-            Wald region of the same confidence level as the profile intervals is drawn for comparison.
-            None by default.
+            Wald region of the same confidence level as the profile intervals is drawn for comparison, unless
+            it reaches the bounds of the fit, where it is not meaningful. None by default.
         title: [str] Title of the plot. None by default.
+        fig: [matplotlib figure] Figure to draw into, e.g. a figure with several plots. A new figure if None
+            (default).
+        subplot_spec: [SubplotSpec] Part of fig to draw into. The whole figure if None (default).
 
     Return:
         fig: [matplotlib figure] The figure.
@@ -3651,8 +3740,15 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
 
     import matplotlib.pyplot as plt
 
-    fig = plt.figure(figsize=(10, 8.5))
-    grid_spec = fig.add_gridspec(2, 2, width_ratios=[3, 1.2], height_ratios=[1, 3])
+    own_figure = fig is None
+    if own_figure:
+        fig = plt.figure(figsize=(10, 8.5))
+
+    if subplot_spec is None:
+        grid_spec = fig.add_gridspec(2, 2, width_ratios=[3, 1.2], height_ratios=[1, 3])
+    else:
+        grid_spec = subplot_spec.subgridspec(2, 2, width_ratios=[3, 1.2], height_ratios=[1, 3], wspace=0.05, \
+            hspace=0.05)
     ax_main = fig.add_subplot(grid_spec[1, 0])
     ax_alpha = fig.add_subplot(grid_spec[0, 0], sharex=ax_main)
     ax_beta = fig.add_subplot(grid_spec[1, 1], sharey=ax_main)
@@ -3709,12 +3805,16 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
         ellipse = np.log([alpha, beta])[:, None] + radius*chol.dot(np.vstack([np.cos(angles), \
             np.sin(angles)]))
 
-        # Keep the region within the bounds of the fit, as it can be very large for a weak constraint
+        # Draw the region only if it is within the bounds of the fit, as it is not meaningful for a weak
+        #   constraint
         log_bounds = _logAlphaBetaBounds()
-        ellipse = np.exp(np.clip(ellipse, log_bounds[0][:, None], log_bounds[1][:, None]))
-
-        handles += ax_main.plot(ellipse[0], ellipse[1], color='tab:red', lw=1.0, zorder=3)
-        labels.append("Wald {:.3g}% (2 params)".format(ci))
+        ellipse_alpha, ellipse_beta = np.exp(ellipse)
+        in_range = (np.min(ellipse_alpha) >= x_range[0]) and (np.max(ellipse_alpha) <= x_range[1]) \
+            and (np.min(ellipse_beta) >= y_range[0]) and (np.max(ellipse_beta) <= y_range[1])
+        if np.all(ellipse >= log_bounds[0][:, None]) and np.all(ellipse <= log_bounds[1][:, None]) \
+            and in_range:
+            handles += ax_main.plot(np.exp(ellipse[0]), np.exp(ellipse[1]), color='tab:red', lw=1.0, zorder=3)
+            labels.append("Wald {:.3g}% (2 params)".format(ci))
 
     ax_main.set_xlim(x_range)
     ax_main.set_ylim(y_range)
@@ -3749,14 +3849,20 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
 
     ### Print the values in the title ###
 
-    text = "alpha = {:.3g} ({:s}), beta = {:.3g} ({:s}), {:.3g}% profile intervals".format(alpha, \
-        profileIntervalText(profile, 'alpha', notes=False), beta, profileIntervalText(profile, 'beta', \
-        notes=False), ci)
+    lines = ["alpha = {:.3g} ({:s})".format(alpha, profileIntervalText(profile, 'alpha', notes=False)), \
+        "beta = {:.3g} ({:s})".format(beta, profileIntervalText(profile, 'beta', notes=False)), \
+        "{:.3g}% profile intervals".format(ci)]
     if np.isfinite(profile['corr_log']):
-        text += ", corr(ln alpha, ln beta) = {:.2f}".format(profile['corr_log'])
-    fig.suptitle(text if title is None else title + "\n" + text, fontsize=10)
+        lines.append("corr(ln alpha, ln beta) = {:.2f}".format(profile['corr_log']))
 
-    fig.tight_layout()
+    # One line in the title of the figure, several lines over the plot in a figure with several plots
+    if own_figure and (subplot_spec is None):
+        text = ", ".join(lines)
+        fig.suptitle(text if title is None else title + "\n" + text, fontsize=10)
+        fig.tight_layout()
+    else:
+        text = "\n".join(lines)
+        ax_alpha.set_title(text if title is None else title + "\n" + text, fontsize=8, loc='left')
 
     return fig
 
@@ -5276,15 +5382,15 @@ def plotAlphaBetaSurvivalDiagram(
             label="Likely fall ({:s})".format(_fmtMass(primary_threshold)))
 
     ax.plot(x_grid, ln_boundary_low, color='k', linestyle='-', linewidth=1.3, \
-        label=r"{:s}, $\mu$={:.2g}".format(_fmtMass(primary_threshold), mu_low))
+        label=r"{:s}, $\mu$={:s}".format(_fmtMass(primary_threshold), _formatMu(mu_low)))
     ax.plot(x_grid, ln_boundary_high, color='k', linestyle='--', linewidth=1.3, \
-        label=r"{:s}, $\mu$={:.2g}".format(_fmtMass(primary_threshold), mu_high))
+        label=r"{:s}, $\mu$={:s}".format(_fmtMass(primary_threshold), _formatMu(mu_high)))
 
     for mass_threshold in reference_thresholds:
         ax.plot(x_grid, _lnBetaBoundary(mu_low, mass_threshold), color='0.5', linestyle='-', \
-            linewidth=1.0, label=r"{:s}, $\mu$={:.2g}".format(_fmtMass(mass_threshold), mu_low))
+            linewidth=1.0, label=r"{:s}, $\mu$={:s}".format(_fmtMass(mass_threshold), _formatMu(mu_low)))
         ax.plot(x_grid, _lnBetaBoundary(mu_high, mass_threshold), color='0.5', linestyle='--', \
-            linewidth=1.0, label=r"{:s}, $\mu$={:.2g}".format(_fmtMass(mass_threshold), mu_high))
+            linewidth=1.0, label=r"{:s}, $\mu$={:s}".format(_fmtMass(mass_threshold), _formatMu(mu_high)))
 
     # Point estimate, annotated with m_final at both mu extremes for the primary threshold's own
     #   dens/gamma/shape_coeff (asymptotic approximation, matching the boundary curves above)
@@ -5296,8 +5402,8 @@ def plotAlphaBetaSurvivalDiagram(
     _, m_final_mu_high = alphaBetaMasses(alpha, beta, slope, mu=mu_high, dens=dens, \
         shape_coeff=shape_coeff, gamma=gamma)
 
-    point_label = (r"$m_{{final}}(\mu={:.2g})={:.2e}$ kg".format(mu_low, m_final_mu_low) + "\n" +
-        r"$m_{{final}}(\mu={:.2g})={:.2e}$ kg".format(mu_high, m_final_mu_high))
+    point_label = (r"$m_{{final}}(\mu={:s})={:.2e}$ kg".format(_formatMu(mu_low), m_final_mu_low) + "\n" +
+        r"$m_{{final}}(\mu={:s})={:.2e}$ kg".format(_formatMu(mu_high), m_final_mu_high))
 
     # Draw the regions of the profile likelihood if given
     have_profile = (profile is not None) and (profile['grid_delta_chi2'].size > 0)
@@ -5367,12 +5473,286 @@ def plotAlphaBetaSurvivalDiagram(
     ax.set_ylabel(r"$\ln(\beta)$")
     ax.legend(fontsize=7, loc='best')
 
-    fig.tight_layout()
+    if axes is None:
+        fig.tight_layout()
 
     if axes is None:
         plt.show()
 
     return fig, ax
+
+
+def _formatMu(mu):
+    """ Format the shape change coefficient, as a fraction for 2/3.
+
+    Arguments:
+        mu: [float] Shape change coefficient.
+
+    Return:
+        [str] The coefficient, e.g. "0" or "2/3".
+    """
+
+    if np.isclose(mu, 2/3.0):
+        return "2/3"
+
+    return "{:.2g}".format(mu)
+
+
+
+def _formatMass(mass):
+    """ Format a mass with a unit which keeps the number readable.
+
+    Arguments:
+        mass: [float] Mass (kg).
+
+    Return:
+        [str] The mass with the unit, e.g. "142 g" or "2.3 kg".
+    """
+
+    if not np.isfinite(mass):
+        return "inf" if mass > 0 else "-"
+
+    if mass < 1e-3:
+        return "{:.3g} mg".format(1e6*mass)
+
+    if mass < 1.0:
+        return "{:.3g} g".format(1e3*mass)
+
+    if mass < 1000.0:
+        return "{:.3g} kg".format(mass)
+
+    return "{:.3g} t".format(mass/1000.0)
+
+
+
+def plotAlphaBetaMassDiagram(alpha, beta, slope, profile=None, zone_masses=(0.05, 0.1), mu_zones=0.0, \
+    mu_other=2/3, dens=3500, shape_coeff=0.55, gamma=1.0, axes=None):
+    """ Plot the meteorite survival diagram with beta on a linear axis, where the lines of a constant final
+        mass are straight. With the final mass m_final = m0s/(alpha*sin(slope))^3*exp(-beta/(1 - mu)) (the
+        approximation of a final velocity much smaller than the initial one, as in
+        plotAlphaBetaSurvivalDiagram()), the final mass is M on the line
+        beta = (1 - mu)*(ln(m0s/M) - 3*ln(alpha*sin(slope))). It is the same diagram as
+        plotAlphaBetaSurvivalDiagram() with ln(beta) turned into beta, which straightens the lines. The zones
+        are colored by the final mass: below the first of zone_masses in red, between them in yellow, and
+        above the last one in green.
+
+    Arguments:
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+        slope: [float] Entry angle above the horizon (radians).
+
+    Keyword arguments:
+        profile: [dict] Result of profileAlphaBetaLag() with the 2D grid. If given, its 1 sigma and 95%
+            regions of two parameters are drawn. None by default.
+        zone_masses: [tuple] Final masses between the zones (kg), in increasing order. (0.05, 0.1) by default.
+        mu_zones: [float] Shape change coefficient of the zones and the solid lines. 0 (no rotation) by
+            default.
+        mu_other: [float] Shape change coefficient of the dashed lines of the same final masses. 2/3 (fast
+            rotation) by default.
+        dens: [float] Bulk density (kg/m^3), see alphaBetaMasses(). 3500 by default.
+        shape_coeff: [float] Shape coefficient, see alphaBetaMasses(). 0.55 by default.
+        gamma: [float] Drag parameter, see alphaBetaMasses(). 1.0 by default.
+        axes: [Axes] Axes to draw into. A new figure if None (default).
+
+    Return:
+        (fig, ax): [tuple] The figure and the axes.
+    """
+
+    import matplotlib.ticker
+    import matplotlib.pyplot as plt
+
+    if axes is None:
+        fig, ax = plt.subplots(figsize=(7.5, 6))
+    else:
+        fig, ax = axes.figure, axes
+
+    m0s = (gamma*shape_coeff*RHO_ATM_0*HT_NORM_CONST/(dens**(2/3.0)))**3
+
+    x_point = alpha*np.sin(slope)
+
+    # Extent of the plot, covering the best fit, the 95% region and the lines of the zones at beta = 0
+    have_region = (profile is not None) and (profile['grid_delta_chi2'].size > 0)
+    x_values = [x_point] + [(m0s/mass)**(1/3.0) for mass in zone_masses]
+    y_values = [beta, 1.0]
+    if have_region:
+        region_alpha, region_beta, _ = profileRegionAlphaBetaLag(profile, n_params=2)
+        x_values += list(region_alpha*np.sin(slope))
+        y_values += list(region_beta)
+
+    x_range = (0.5*np.min(x_values), 2*np.max(x_values))
+    y_range = (0.0, min(1.25*np.max(y_values), ALPHA_BETA_BOUNDS[1][1]))
+
+    x_grid = np.geomspace(*x_range, 400)
+
+    def _betaLine(mu, mass):
+        """ Beta at which the final mass is the given one, for every alpha*sin(slope) of the grid. """
+
+        return (1.0 - mu)*(np.log(m0s/mass) - 3*np.log(x_grid))
+
+    # Color the zones by the class of the final mass (red below the first zone mass, yellow between them,
+    #   green above) for both mu, as mu is not known. Where the classes of the two mu differ, the zone has
+    #   the mix of their colors. The final mass is smaller for the larger mu, so its class is never higher
+    zone_colors = np.array([[1.0, 0.0, 0.0], [1.0, 0.84, 0.0], [0.0, 0.6, 0.0]])
+    zone_names = ["< {:s}".format(_formatMass(zone_masses[0])), \
+        "{:s} - {:s}".format(_formatMass(zone_masses[0]), _formatMass(zone_masses[-1])), \
+        "> {:s}".format(_formatMass(zone_masses[-1]))]
+    mu_small, mu_large = min(mu_zones, mu_other), max(mu_zones, mu_other)
+    combinations = [(c_small, c_large) for c_small in range(3) for c_large in range(c_small + 1)]
+
+    y_grid = np.linspace(*y_range, 300)
+    x_mesh, y_mesh = np.meshgrid(x_grid, y_grid)
+
+    def _massClass(mu):
+        """ Class of the final mass on the grid of the plot, 0 below the first zone mass, 1 between them and
+            2 above.
+        """
+
+        log_mass = np.log(m0s) - 3*np.log(x_mesh) - y_mesh/(1.0 - mu)
+
+        return (log_mass >= np.log(zone_masses[0])).astype(int) \
+            + (log_mass >= np.log(zone_masses[-1])).astype(int)
+
+    class_small, class_large = _massClass(mu_small), _massClass(mu_large)
+    combination_index = np.zeros_like(class_small)
+    for i, (c_small, c_large) in enumerate(combinations):
+        combination_index[(class_small == c_small) & (class_large == c_large)] = i
+
+    combination_colors = [0.5*(zone_colors[c_small] + zone_colors[c_large]) \
+        for c_small, c_large in combinations]
+    ax.contourf(x_mesh, y_mesh, combination_index, levels=np.arange(len(combinations) + 1) - 0.5, \
+        colors=combination_colors, alpha=0.25, zorder=0)
+
+    # Legend entries of the combinations which are in the plot, as the final mass for the two mu
+    for i, (c_small, c_large) in enumerate(combinations):
+        if np.any(combination_index == i):
+            ax.fill_between([], [], [], color=combination_colors[i], alpha=0.25, lw=0, \
+                label="{:s} / {:s}".format(zone_names[c_small], zone_names[c_large]))
+
+    # Lines of the final masses between the zones
+    for mass, color in zip(zone_masses, ['k', '0.4']):
+        for mu, linestyle in [(mu_zones, '-'), (mu_other, '--')]:
+            ax.plot(x_grid, _betaLine(mu, mass), color=color, linestyle=linestyle, lw=1.2, \
+                label=r"$m_{{final}}$ = {:s}, $\mu$ = {:s}".format(_formatMass(mass), _formatMu(mu)))
+
+    # Regions of the profile likelihood
+    if have_region:
+        for p, linestyle, level_label in [(0.6827, '-', r"1$\sigma$"), (0.95, '--', "95%")]:
+            ax.contour(profile['grid_alpha']*np.sin(slope), profile['grid_beta'], \
+                profile['grid_delta_chi2'], levels=[scipy.stats.chi2.ppf(p, 2)], colors='tab:blue', \
+                linestyles=linestyle, linewidths=1.3)
+            ax.plot([], [], color='tab:blue', linestyle=linestyle, lw=1.3, \
+                label=r"{:s} ($\alpha$, $\beta$) region".format(level_label))
+
+    # Best fit
+    ax.scatter([x_point], [beta], color='blue', zorder=5, label="Best fit", clip_on=False)
+
+    ax.set_xscale('log')
+    ax.set_xlim(x_range)
+    ax.set_ylim(y_range)
+
+    # Label the ticks with plain numbers, also the minor ticks if the axis spans less than a decade
+    ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, _: "{:g}".format(x)))
+    if x_range[1]/x_range[0] < 30:
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.FuncFormatter(lambda x, _: "{:g}".format(x)))
+
+    ax.set_xlabel(r"$\alpha \sin(\mathrm{slope})$, dens = " + "{:d} kg/m$^3$, ".format(int(dens)) \
+        + r"$\Gamma A$ = " + "{:.2f}".format(gamma*shape_coeff))
+    ax.set_ylabel(r"$\beta$")
+    ax.legend(fontsize=6, loc='best', title_fontsize=6, framealpha=0.6, \
+        title="Final mass, $\\mu$ = {:s} / {:s}".format(_formatMu(min(mu_zones, mu_other)), \
+        _formatMu(max(mu_zones, mu_other))))
+
+    return fig, ax
+
+
+
+def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), title=None, note=None):
+    """ Plot masses with their 95% intervals as points with horizontal bars on a log axis, with the values
+        written next to them, over the zones of plotAlphaBetaMassDiagram(): red below the first mass
+        threshold, yellow between the thresholds and green above them.
+
+    Arguments:
+        masses: [list] One (label, mass, lower, upper, color) tuple per mass (kg). The lower and the upper
+            limit can be None if not known, and the upper one inf if there is no upper limit. A mass which is
+            not defined is NaN.
+
+    Keyword arguments:
+        axes: [Axes] Axes to draw into. A new figure if None (default).
+        mass_thresholds: [tuple] Masses between the zones (kg), in increasing order. (0.05, 0.1) by default.
+        title: [str] Title of the plot. None by default.
+        note: [str] Text written in the middle of the plot, e.g. why the masses are not constrained. None by
+            default.
+
+    Return:
+        (fig, ax): [tuple] The figure and the axes.
+    """
+
+    import matplotlib.pyplot as plt
+
+    if axes is None:
+        fig, ax = plt.subplots(figsize=(7.5, 4))
+    else:
+        fig, ax = axes.figure, axes
+
+    # Range of the axis, from all finite masses and limits
+    finite = [m for entry in masses for m in entry[1:4] if (m is not None) and np.isfinite(m) and (m > 0)]
+    finite += list(mass_thresholds)
+
+    # Keep the axis between 1 mg and 1000 t, as the masses of degenerate fits can be absurd
+    x_lo, x_hi = max(0.2*np.min(finite), 1e-6), min(5*np.max(finite), 1e6)
+
+    for i, (label, mass, lower, upper, color) in enumerate(masses):
+
+        y = len(masses) - i
+
+        if (lower is not None) and (upper is not None):
+
+            # Draw the interval within the axis, with an arrow if it goes beyond the axis
+            upper_drawn = min(upper, x_hi)
+            ax.plot([min(max(lower, x_lo), x_hi), upper_drawn], [y, y], color=color, lw=4, alpha=0.4, \
+                solid_capstyle='butt')
+            if upper > x_hi:
+                ax.annotate("", xy=(x_hi, y), xytext=(x_hi/3, y), \
+                    arrowprops=dict(arrowstyle='->', color=color, lw=1.5))
+
+            interval_text = "{:s} - {:s}".format(_formatMass(lower), _formatMass(upper)) \
+                if np.isfinite(upper) else "> {:s}".format(_formatMass(lower))
+        else:
+            interval_text = ""
+
+        if np.isfinite(mass) and (mass > 0):
+            if x_lo <= mass <= x_hi:
+                ax.scatter([mass], [y], color=color, s=40, zorder=3)
+            value_text = _formatMass(mass)
+        elif mass == 0:
+            value_text = "~0"
+        else:
+            value_text = "not defined"
+
+        # Write the value and the interval above the bar
+        ax.text(0.02, y + 0.22, "{:s}{:s}".format(value_text, "  (95%: {:s})".format(interval_text) \
+            if interval_text else ""), transform=ax.get_yaxis_transform(), va='center', fontsize=8)
+
+    # Color the zones of the final mass
+    ax.axvspan(x_lo, mass_thresholds[0], color='red', alpha=0.1, lw=0, zorder=0)
+    ax.axvspan(mass_thresholds[0], mass_thresholds[-1], color='gold', alpha=0.15, lw=0, zorder=0)
+    ax.axvspan(mass_thresholds[-1], x_hi, color='green', alpha=0.1, lw=0, zorder=0)
+
+    ax.set_xscale('log')
+    ax.set_xlim(x_lo, x_hi)
+    ax.set_ylim(0.4, len(masses) + 0.6)
+    ax.set_yticks(np.arange(len(masses), 0, -1))
+    ax.set_yticklabels([entry[0] for entry in masses], fontsize=8)
+    ax.set_xlabel("Mass (kg)")
+    if title is not None:
+        ax.set_title(title, fontsize=9)
+
+    if note is not None:
+        ax.text(0.5, 0.5, note, transform=ax.transAxes, ha='center', va='center', fontsize=10, \
+            bbox=dict(facecolor='white', alpha=0.8, edgecolor='0.5'))
+
+    return fig, ax
+
 
 
 ### JOINT DYNAMICS + LIGHT CURVE FIT (Gritsevich & Koschny 2011) ###
@@ -6509,8 +6889,14 @@ if __name__ == "__main__":
         # Use the colors of the stations in the trajectory plots
         obs_ht_sorted = sorted(traj.observations, key=lambda x: x.model_ht[0])
         station_colors, station_alpha = stationColors(len(obs_ht_sorted))
-        station_colors = {str(obs.station_id): color for obs, color in zip(obs_ht_sorted, station_colors)}
-        station_ids = [str(obs.station_id) for obs in obs_ht_sorted if str(obs.station_id) in station_data]
+        station_color_list = station_colors
+        station_colors = {}
+        station_ids = []
+        for obs, color in zip(obs_ht_sorted, station_color_list):
+            station_id = str(obs.station_id)
+            station_colors.setdefault(station_id, color)
+            if (station_id in station_data) and (station_id not in station_ids):
+                station_ids.append(station_id)
 
 
         # Print time, height, velocity for each station
@@ -6567,6 +6953,43 @@ if __name__ == "__main__":
         # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the uncertainties
         lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, beta, \
             v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
+
+        # If the profile found a better fit, the fit ended in a local minimum, so fit again from that point
+        for _ in range(2):
+
+            if lag_profile['min_delta_chi2'] > -0.1:
+                break
+
+            print("NOTE: The profile found a better fit (chi-squared lower by {:.1f}), fitting again from " \
+                "it".format(-lag_profile['min_delta_chi2']))
+
+            x0_alpha_beta.append(lag_profile['min_model'])
+            if cml_args.errors:
+                v_init, alpha, beta, lag_residuals, fit_errors = fitAlphaBetaLag(time_data, length_data, \
+                    ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta, estimate_errors=True)
+            else:
+                v_init, alpha, beta, lag_residuals = fitAlphaBetaLag(time_data, length_data, \
+                    ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta)
+
+            lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, beta, \
+                v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
+
+        # Models within the 95% interval of one parameter (with the best fit), whose range of the masses, the
+        #   dynamic mass and the peak dynamic pressure gives their 95% intervals (only with --errors, which
+        #   computes the 2D grid)
+        interval_models = list(zip(*profileRegionAlphaBetaLag(lag_profile, n_params=1)))
+        if interval_models:
+            interval_models.append((alpha, beta, v_init))
+
+        def _intervalText(values, fmt):
+            """ Text of the 95% interval of a derived quantity from its values for the models of the interval,
+                empty without them.
+            """
+
+            if not len(values):
+                return ""
+
+            return "  [95% profile: " + fmt.format(np.min(values)) + " - " + fmt.format(np.max(values)) + "]"
 
         # Model velocity at the observed points
         vel_model = alphaBetaVelocity(ht_data_rescaled, alpha, beta, v_init)
@@ -6667,12 +7090,21 @@ if __name__ == "__main__":
         print("ln(beta)             = {:.2f}".format(np.log(beta)))
         print("ln(alpha*sin(slope)) = {:.2f}".format(np.log(alpha*np.sin(slope))))
         print("-------------------")
-        print("Masses with dens = {:d} kg/m^3, sphere:".format(int(cml_args.dens)))
+        print("Masses with dens = {:d} kg/m^3, Gamma*A = {:.2f}:".format(int(cml_args.dens), cml_args.ga))
         print(" * - note that the initial masses are usually 4-10x underestimated!")
 
-        def _printMass(label, mass, mass_err, key):
+        # Masses of the models within the 95% interval, for each mu (initial and final)
+        interval_masses = {}
+        for mu in [0, 2/3]:
+            interval_masses[mu] = np.array([alphaBetaMasses(a, b, slope, mu=mu, dens=cml_args.dens, \
+                shape_coeff=cml_args.ga, gamma=1.0, vel_init=v0, \
+                vel_end=alphaBetaVelocity(ht_data_rescaled[0], a, b, v0)) for a, b, v0 in interval_models])
+            interval_masses[mu] = interval_masses[mu].reshape(-1, 2)
+
+        def _printMass(label, mass, mass_err, key, masses):
             """ Print a single mass line, annotated with its 1-sigma relative error and Wald CI
-                if --errors produced a (finite) estimate for it, plain otherwise.
+                if --errors produced a (finite) estimate for it, plain otherwise, and with the 95% profile
+                interval if the masses of the models within it are given.
             """
             if (mass_err is not None) and np.isfinite(mass_err[key + '_std_rel']):
                 print("    {:s} = {:.3e} kg (+/-{:.1%})  [{:.3g}% CI: {:.3e} - {:.3e}]".format(
@@ -6681,12 +7113,18 @@ if __name__ == "__main__":
             else:
                 print("    {:s} = {:.3e} kg".format(label, mass))
 
+            if len(masses):
+                print("      {:s}".format(_intervalText(masses, "{:.3e}").strip()))
+
         print("  mu = 0:")
-        _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init')
-        _printMass("Final  ", m_final_mu0, mass_err_mu0, 'm_final')
+        _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init', [])
+        _printMass("Final  ", m_final_mu0, mass_err_mu0, 'm_final', interval_masses[0][:, 1])
         print("  mu = 2/3:")
-        _printMass("Initial", m_init_mu23, mass_err_mu23, 'm_init')
-        _printMass("Final  ", m_final_mu23, mass_err_mu23, 'm_final')
+        _printMass("Initial", m_init_mu23, mass_err_mu23, 'm_init', [])
+        _printMass("Final  ", m_final_mu23, mass_err_mu23, 'm_final', interval_masses[2/3][:, 1])
+        if interval_models:
+            print("  The profile intervals include only the uncertainty of the fit, the Wald CIs also " \
+                "--densunc and --slopeunc")
 
         print("*********************************************")
 
@@ -6699,9 +7137,9 @@ if __name__ == "__main__":
         vel_dyn, decel_dyn = ab_path.velocityDeceleration(length_data[end_index], alpha, beta, v_init)
         ht_dyn = ht_data[end_index]
 
-        # Compute the dynamic mass
+        # Compute the dynamic mass, which is not defined if the model does not decelerate at the end
         dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
-            vel_dyn, decel_dyn, gamma=1.0, shape_factor=cml_args.ga)
+            vel_dyn, decel_dyn, gamma=1.0, shape_factor=cml_args.ga) if decel_dyn > 0 else np.nan
 
         print()
         print("Alpha-beta dynamic mass at the end:")
@@ -6711,13 +7149,49 @@ if __name__ == "__main__":
         print("Velocity     = {:5.2f} km/s".format(vel_dyn/1000))
         print("Deceleration = {:5.2f} km/s^2".format(decel_dyn/1000))
         print("Gamma*A      = {:5.2f}".format(cml_args.ga))
+        # Dynamic masses of the models within the 95% interval
+        # Dynamic masses of the models within the 95% interval, which has no upper limit if one of them does
+        #   not decelerate at the end
+        interval_dyn_masses = []
+        no_decel = False
+        for a, b, v0 in interval_models:
+            vel_model_end, decel_model_end = ab_path.velocityDeceleration(length_data[end_index], a, b, v0)
+            if decel_model_end <= 0:
+                no_decel = True
+                continue
+            interval_dyn_masses.append(dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, \
+                traj.jdt_ref, vel_model_end, decel_model_end, gamma=1.0, shape_factor=cml_args.ga))
+
+        # Print the dynamic masses in the scientific notation if they are large
+        dyn_values = np.array(interval_dyn_masses + ([dyn_mass] if np.isfinite(dyn_mass) else []))
+        dyn_fmt = "{:.3e}" if (len(dyn_values) and (np.max(np.abs(dyn_values)) >= 1e4)) else "{:.3f}"
+
+        dyn_interval_text = _intervalText(interval_dyn_masses, dyn_fmt)
+        if no_decel and interval_dyn_masses:
+            dyn_interval_text = "  [95% profile: > " + dyn_fmt.format(np.min(interval_dyn_masses)) \
+                + " (no upper limit)]"
+
         print()
-        print("Dynamic mass = {:5.3f} kg".format(dyn_mass))
+        if np.isfinite(dyn_mass):
+            print("Dynamic mass = " + dyn_fmt.format(dyn_mass) + " kg" + dyn_interval_text)
+        else:
+            print("Dynamic mass = not defined, the model does not decelerate at the end{:s}".format( \
+                dyn_interval_text))
 
         # The deceleration of a fit at a bound is not constrained by the data
         if alphaBetaBoundWarnings(alpha, beta):
             print("NOTE: alpha or beta are at a bound of the fit, so the deceleration and the dynamic mass "
                 "are not constrained by the data")
+
+        # A fireball which barely decelerates does not constrain alpha, beta and the masses, and it usually
+        #   ablates completely
+        velocity_loss = 1.0 - vel_dyn/v_init
+        little_deceleration = velocity_loss < MIN_VELOCITY_LOSS
+        if little_deceleration:
+            print("NOTE: The fireball lost only {:.1%} of its velocity by the end at {:.1f} km, so the " \
+                "dynamics do not constrain alpha, beta and the masses. A fireball which does not " \
+                "decelerate usually ablates completely, so the final mass is ~0.".format(velocity_loss, \
+                ht_dyn/1000))
 
         print("-----------------------------------")
 
@@ -6748,25 +7222,6 @@ if __name__ == "__main__":
 
 
         ### Alpha-beta plot ###
-        fig, (ax_ab, ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=4, sharey=True, figsize=(14, 6))
-
-        # Plot the data of every station rescaled to an exponential atmosphere
-        for station_id in station_ids:
-            station_mask = station_data == station_id
-            ax_ab.scatter(vel_data[station_mask]/1000, ht_data_rescaled[station_mask]/1000, s=5, \
-                color=station_colors[station_id], alpha=station_alpha)
-
-        ax_ab.set_title("Heights rescaled to exp. atm.", fontsize=10)
-
-        # Plot the smoothed velocity
-        if cml_args.lagsmooth:
-            ax_ab.scatter(vel_data_smooth/1000, ht_data_rescaled/1000, color='r', s=1, \
-                label="Lag-based velocity smoothing")
-
-        # Plot the alpha-beta fit, with the profile intervals of alpha and beta
-        fit_label = "$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.3g} ({:s})\n$\\beta$ = {:.3g} ({:s})".format( \
-            v_init/1000, alpha, profileIntervalText(lag_profile, 'alpha', notes=False), beta, \
-            profileIntervalText(lag_profile, 'beta', notes=False))
 
         # Models within the 95% region of alpha and beta of the profile, which give the bands of the
         #   velocity and of the lag (only with --errors, which computes the 2D grid)
@@ -6774,153 +7229,244 @@ if __name__ == "__main__":
         have_band = len(region_alpha) > 0
         band_label = "95% region of alpha and beta"
 
-        # Draw the band of the velocities of the models within the region
+        # Label of the alpha-beta fit, with the profile intervals of alpha and beta
+        fit_label = "$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.3g} ({:s})\n$\\beta$ = {:.3g} ({:s})".format( \
+            v_init/1000, alpha, profileIntervalText(lag_profile, 'alpha', notes=False), beta, \
+            profileIntervalText(lag_profile, 'beta', notes=False))
+
+        # Label of the dynamic mass
+        if little_deceleration:
+            dyn_label = "Dynamic mass not constrained\n(velocity loss {:.1%})".format(velocity_loss)
+        elif np.isfinite(dyn_mass):
+            dyn_label = "Dynamic mass = {:s}\ndecel = {:.2f} km/s$^2$, $\\Gamma A$ = {:.2f}".format( \
+                _formatMass(dyn_mass), decel_dyn/1000, cml_args.ga)
+        else:
+            dyn_label = "Dynamic mass not defined\n(no deceleration at the end)"
+
+        # Models on a dense grid of heights between the observed ones, rescaled to the exponential atmosphere
+        ht_dense = np.linspace(np.min(ht_data), np.max(ht_data), 400)
+        ht_dense_rescaled = np.interp(ht_dense, ht_data, ht_data_rescaled)
+        vel_model_dense = alphaBetaVelocity(ht_dense_rescaled, alpha, beta, v_init)
+
+        # Lag of the models on a dense grid of times. The lag is the distance minus a line in time, which is
+        #   the same for all stations, so the line is fitted to the differences of the distances and the lag,
+        #   and the lag is drawn against the height of the best model at every time, which keeps the curve
+        #   smooth also when the points of the stations are interleaved in height
+        lag_line = np.polyfit(time_data, length_data - lag_data, 1)
+
+        # Older solutions have a separate line for every station, then the model is drawn for every station
+        #   from its own points
+        lag_line_rms = np.sqrt(np.mean((length_data - lag_data - np.polyval(lag_line, time_data))**2))
+        common_lag_line = lag_line_rms < 1.0
+        time_dense = np.linspace(np.min(time_data), np.max(time_data), 400)
+        _, t0_best = ab_path.lengths(time_data, alpha, beta, v_init, length_data=length_data)
+        length_dense, _ = ab_path.lengths(time_dense, alpha, beta, v_init, t0=t0_best)
+        lag_dense = length_dense - np.polyval(lag_line, time_dense)
+        length_order = np.argsort(length_data)
+        ht_along = np.minimum.accumulate(ht_data[length_order])
+        ht_lag_dense = np.interp(length_dense, length_data[length_order], ht_along)
+
+        # Bands of the velocity and of the distance of the models within the region (each model is shifted in
+        #   time to fit the observed distances, as the best one)
         if have_band:
-            vel_band = np.array([alphaBetaVelocity(ht_arr, a, b, v0) \
-                for a, b, v0 in zip(region_alpha, region_beta, region_v_init)])
-            ax_ab.fill_betweenx(ht_arr/1000, np.min(vel_band, axis=0)/1000, np.max(vel_band, axis=0)/1000, \
-                color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
+            region_models = list(zip(region_alpha, region_beta, region_v_init))
+            vel_band_ab = np.array([alphaBetaVelocity(ht_arr, a, b, v0) for a, b, v0 in region_models])
+            vel_band_obs = np.array([alphaBetaVelocity(ht_dense_rescaled, a, b, v0) \
+                for a, b, v0 in region_models])
+            length_band = np.array([ab_path.lengths(time_dense, a, b, v0, \
+                t0=ab_path.lengths(time_data, a, b, v0, length_data=length_data)[1])[0] \
+                for a, b, v0 in region_models]) - length_dense
+            length_band_lo = np.min(length_band, axis=0)
+            length_band_hi = np.max(length_band, axis=0)
 
-        ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
+        # Limits of the velocity axes which are robust to single outliers of the point-to-point velocities
+        vel_axis_lo = min(0.0, max(np.percentile(vel_data, 1), -0.5*v_init))
+        vel_axis_hi = max(1.2*v_init, min(np.percentile(vel_data, 99), 3*v_init))
 
-        ax_ab.set_xlabel("Velocity (km/s)")
-        ax_ab.set_ylabel("Height (km)")
+        def _plotFit(ax_ab, ax_vel, ax_lag, ax_lag_res, print_results=True):
+            """ Plot the alpha-beta fit: the velocities against the rescaled and the observed heights, the lag
+                and the lag residuals, with the points of every station in its color.
 
-        ax_ab.legend(loc='upper left')
+            Arguments:
+                ax_ab: [Axes] Velocities against the heights rescaled to the exponential atmosphere.
+                ax_vel: [Axes] Velocities against the observed heights.
+                ax_lag: [Axes] Lag.
+                ax_lag_res: [Axes] Lag residuals.
 
+            Keyword arguments:
+                print_results: [bool] Print the dynamic mass of the lag smoothing. True by default.
+            """
 
-        ### Plot the velocities at the observed heights ###
+            ### Plot the velocities at the heights rescaled to the exponential atmosphere ###
 
-        # Plot the original data of every station
-        for station_id in station_ids:
-            station_mask = station_data == station_id
-            ax_vel.scatter(vel_data[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
-                color=station_colors[station_id], alpha=station_alpha)
+            for station_id in station_ids:
+                station_mask = station_data == station_id
+                ax_ab.scatter(vel_data[station_mask]/1000, ht_data_rescaled[station_mask]/1000, s=5, \
+                    color=station_colors[station_id], alpha=station_alpha)
 
-        ax_vel.set_title("Observed heights", fontsize=10)
+            ax_ab.set_title("Heights rescaled to exp. atm.", fontsize=10)
 
-        # Plot the alpha-beta velocity at the observed heights, with the band of the region
-        ax_vel.plot(vel_model/1000, ht_data/1000, color='k', label="Alpha-beta fit")
-        if have_band:
-            vel_band = np.array([alphaBetaVelocity(ht_data_rescaled, a, b, v0) \
-                for a, b, v0 in zip(region_alpha, region_beta, region_v_init)])
-            ax_vel.fill_betweenx(ht_data/1000, np.min(vel_band, axis=0)/1000, \
-                np.max(vel_band, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
+            # Plot the smoothed velocity
+            if cml_args.lagsmooth:
+                ax_ab.scatter(vel_data_smooth/1000, ht_data_rescaled/1000, color='r', s=1, \
+                    label="Lag-based velocity smoothing")
 
-        # Plot the point where the dynamic mass is estimated
-        ax_vel.scatter([vel_dyn/1000], [ht_dyn/1000], color='k', zorder=3, \
-            label="Dynamic mass = {:.3f} kg\ndecel = {:.2f} km/s$^2$".format(dyn_mass, decel_dyn/1000))
+            # Plot the alpha-beta fit and the band of the models within the region
+            if have_band:
+                ax_ab.fill_betweenx(ht_arr/1000, np.min(vel_band_ab, axis=0)/1000, \
+                    np.max(vel_band_ab, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
 
-        # Plot the smoothed velocity and its dynamic mass
-        if cml_args.lagsmooth:
+            ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
 
-            ax_vel.scatter(vel_data_smooth/1000, ht_data/1000, color='r', s=1, \
-                label="Lag-based velocity smoothing")
+            ax_ab.set_xlim(vel_axis_lo/1000, vel_axis_hi/1000)
+            ax_ab.set_xlabel("Velocity (km/s)")
+            ax_ab.set_ylabel("Height (km)")
 
-            # If the exponental to linear transition point was used by the fit, plot it
-            t0 = lag_fit_params[2]
-            decel = lag_fit_params[3]
-            if t0 < np.max(time_data):
-
-                # Find the height closest to t0
-                v_t0 = expLinearVelocity(t0, traj.v_init, *lag_fit_params)
-                t0_index = np.argmin(np.abs(vel_data_smooth - v_t0))
-                h_t0 = ht_data[t0_index]
-                h_rescaled_t0 = ht_data_rescaled[t0_index]
-
-                # Plot the t0 point
-                ax_ab.scatter([v_t0/1000], [h_rescaled_t0/1000], \
-                    label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)), color='r')
-                ax_vel.scatter([v_t0/1000], [h_t0/1000], \
-                    label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)), color='r')
+            ax_ab.legend(loc='upper left', fontsize=8)
 
 
-                ### Compute the dynamic mass at the end from the lag smoothing ###
+            ### Plot the velocities at the observed heights ###
 
-                # Compute the values at the point that is 1/4 before the end and t0 (sorted by increasing
-                #   height)
-                midpoint_index = int(round(t0_index*1/4))
-                ht_dyn_smooth = ht_data[midpoint_index]
-                t_dyn = time_data[midpoint_index]
-                v_dyn_smooth = expLinearVelocity(t_dyn, traj.v_init, *lag_fit_params)
+            for station_id in station_ids:
+                station_mask = station_data == station_id
+                ax_vel.scatter(vel_data[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
+                    color=station_colors[station_id], alpha=station_alpha)
 
-                # Compute the dynamic mass
-                dyn_mass_smooth = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn_smooth, \
-                    traj.jdt_ref, v_dyn_smooth, 1000*abs(decel), gamma=1.0, shape_factor=cml_args.ga)
+            ax_vel.set_title("Observed heights", fontsize=10)
 
-                # Plot the point where the dynamic mass is estimated
-                ax_vel.scatter([v_dyn_smooth/1000], [ht_dyn_smooth/1000], color='r', marker='s', \
-                    label='Lag smoothing dynamic mass = {:.3f} kg'.format(dyn_mass_smooth))
+            # Plot the alpha-beta velocity, with the band of the region
+            ax_vel.plot(vel_model_dense/1000, ht_dense/1000, color='k', label="Alpha-beta fit")
+            if have_band:
+                ax_vel.fill_betweenx(ht_dense/1000, np.min(vel_band_obs, axis=0)/1000, \
+                    np.max(vel_band_obs, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, \
+                    label=band_label)
 
-                print()
-                print("Lag smoothing dynamic mass:")
-                print("---------------------------")
-                print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
-                print("Height       = {:5.2f} km".format(ht_dyn_smooth/1000))
-                print("Velocity     = {:5.2f} km/s".format(v_dyn_smooth/1000))
-                print("Deceleration = {:5.2f} km/s^2".format(abs(decel)))
-                print("Gamma*A      = {:5.2f}".format(cml_args.ga))
-                print()
-                print("Dynamic mass = {:5.3f} kg".format(dyn_mass_smooth))
-                print("---------------------------")
+            # Plot the point where the dynamic mass is estimated
+            if np.isfinite(dyn_mass):
+                ax_vel.scatter([vel_dyn/1000], [ht_dyn/1000], color='k', zorder=3, label=dyn_label)
+            else:
+                ax_vel.plot([], [], ' ', label=dyn_label)
 
-                ### ###
+            # Plot the smoothed velocity and its dynamic mass
+            if cml_args.lagsmooth:
 
-        ax_vel.set_xlabel("Velocity (km/s)")
+                ax_vel.scatter(vel_data_smooth/1000, ht_data/1000, color='r', s=1, \
+                    label="Lag-based velocity smoothing")
 
-        ax_vel.legend(loc='upper left')
+                # If the exponental to linear transition point was used by the fit, plot it
+                t0 = lag_fit_params[2]
+                decel = lag_fit_params[3]
+                if t0 < np.max(time_data):
 
+                    # Find the height closest to t0
+                    v_t0 = expLinearVelocity(t0, traj.v_init, *lag_fit_params)
+                    t0_index = np.argmin(np.abs(vel_data_smooth - v_t0))
+                    h_t0 = ht_data[t0_index]
+                    h_rescaled_t0 = ht_data_rescaled[t0_index]
 
-        # Plot the lag of every station and the alpha-beta model of it, which differs from the data by the
-        #   residuals
-        for station_id in station_ids:
-            station_mask = station_data == station_id
-            ax_lag.scatter(lag_data[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
-                color=station_colors[station_id], alpha=station_alpha)
-
-        ax_lag.plot((lag_data - lag_residuals)/1000, ht_data/1000, color='k', label="Alpha-beta fit")
-
-        # Band of the lag and of the residuals of the models within the region, as the difference of the
-        #   distances of every model from those of the best fit
-        if have_band:
-            length_best, _ = ab_path.lengths(time_data, alpha, beta, v_init, length_data=length_data)
-            length_band = np.array([ab_path.lengths(time_data, a, b, v0, length_data=length_data)[0] \
-                for a, b, v0 in zip(region_alpha, region_beta, region_v_init)]) - length_best
-            lag_band_lo = np.min(length_band, axis=0)
-            lag_band_hi = np.max(length_band, axis=0)
-            ax_lag.fill_betweenx(ht_data/1000, (lag_data - lag_residuals + lag_band_lo)/1000, \
-                (lag_data - lag_residuals + lag_band_hi)/1000, color='k', alpha=0.15, lw=0, zorder=1, \
-                label=band_label)
-
-        # Plot the smooth model of the lag
-        if cml_args.lagsmooth:
-            ax_lag.plot(expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, color='r', \
-                label="Lag-based velocity smoothing")
-
-        ax_lag.set_xlabel("Lag (km)")
-        ax_lag.legend(loc='lower left')
+                    # Plot the t0 point
+                    ax_ab.scatter([v_t0/1000], [h_rescaled_t0/1000], \
+                        label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)), color='r')
+                    ax_vel.scatter([v_t0/1000], [h_t0/1000], \
+                        label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)), color='r')
 
 
-        # Plot the residuals of the alpha-beta fit to the lag of every station
-        for station_id in station_ids:
-            station_mask = station_data == station_id
-            ax_lag_res.scatter(lag_residuals[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
-                color=station_colors[station_id], alpha=station_alpha, label="{:s}, RMS {:.0f} m".format( \
-                station_id, np.sqrt(np.mean(lag_residuals[station_mask]**2))))
+                    ### Compute the dynamic mass at the end from the lag smoothing ###
 
-        ax_lag_res.axvline(0, color='0.5', lw=0.8, zorder=0)
-        if have_band:
-            ax_lag_res.fill_betweenx(ht_data/1000, lag_band_lo/1000, lag_band_hi/1000, color='k', \
-                alpha=0.15, lw=0, zorder=1, label=band_label)
-        ax_lag_res.set_title("Alpha-beta fit residuals", fontsize=10)
+                    # Compute the values at the point that is 1/4 before the end and t0 (sorted by increasing
+                    #   height)
+                    midpoint_index = int(round(t0_index*1/4))
+                    ht_dyn_smooth = ht_data[midpoint_index]
+                    t_dyn = time_data[midpoint_index]
+                    v_dyn_smooth = expLinearVelocity(t_dyn, traj.v_init, *lag_fit_params)
 
-        # Plot the residuals of the smooth model of the lag
-        if cml_args.lagsmooth:
-            ax_lag_res.scatter(lag_data/1000 - expLinearLag(time_data, *lag_fit_params)/1000, \
-                ht_data/1000, s=5, color='r', label="Lag-based velocity smoothing")
+                    # Compute the dynamic mass
+                    dyn_mass_smooth = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, \
+                        ht_dyn_smooth, traj.jdt_ref, v_dyn_smooth, 1000*abs(decel), gamma=1.0, \
+                        shape_factor=cml_args.ga)
 
-        ax_lag_res.set_xlabel("Lag residuals (km)")
-        ax_lag_res.legend(loc='upper left', fontsize=8)
+                    # Plot the point where the dynamic mass is estimated
+                    ax_vel.scatter([v_dyn_smooth/1000], [ht_dyn_smooth/1000], color='r', marker='s', \
+                        label='Lag smoothing dynamic mass = {:.3f} kg'.format(dyn_mass_smooth))
+
+                    if print_results:
+                        print()
+                        print("Lag smoothing dynamic mass:")
+                        print("---------------------------")
+                        print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
+                        print("Height       = {:5.2f} km".format(ht_dyn_smooth/1000))
+                        print("Velocity     = {:5.2f} km/s".format(v_dyn_smooth/1000))
+                        print("Deceleration = {:5.2f} km/s^2".format(abs(decel)))
+                        print("Gamma*A      = {:5.2f}".format(cml_args.ga))
+                        print()
+                        print("Dynamic mass = {:5.3f} kg".format(dyn_mass_smooth))
+                        print("---------------------------")
+
+                    ### ###
+
+            ax_vel.set_xlim(vel_axis_lo/1000, vel_axis_hi/1000)
+            ax_vel.set_xlabel("Velocity (km/s)")
+
+            ax_vel.legend(loc='upper left', fontsize=8)
+
+
+            ### Plot the lag of every station and the alpha-beta model of it ###
+
+            for station_id in station_ids:
+                station_mask = station_data == station_id
+                ax_lag.scatter(lag_data[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
+                    color=station_colors[station_id], alpha=station_alpha)
+
+            if common_lag_line:
+                ax_lag.plot(lag_dense/1000, ht_lag_dense/1000, color='k', label="Alpha-beta fit")
+            else:
+                for i, station_id in enumerate(station_ids):
+                    station_mask = station_data == station_id
+                    station_order = np.argsort(time_data[station_mask])
+                    ax_lag.plot((lag_data - lag_residuals)[station_mask][station_order]/1000, \
+                        ht_data[station_mask][station_order]/1000, color='k', \
+                        label=("Alpha-beta fit" if i == 0 else None))
+            if have_band and common_lag_line:
+                ax_lag.fill_betweenx(ht_lag_dense/1000, (lag_dense + length_band_lo)/1000, \
+                    (lag_dense + length_band_hi)/1000, color='k', alpha=0.15, lw=0, zorder=1, \
+                    label=band_label)
+
+            # Plot the smooth model of the lag
+            if cml_args.lagsmooth:
+                ax_lag.plot(expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, color='r', \
+                    label="Lag-based velocity smoothing")
+
+            ax_lag.set_xlabel("Lag (km)")
+            ax_lag.legend(loc='lower left', fontsize=8)
+
+
+            ### Plot the residuals of the alpha-beta fit to the lag of every station ###
+
+            for station_id in station_ids:
+                station_mask = station_data == station_id
+                ax_lag_res.scatter(lag_residuals[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
+                    color=station_colors[station_id], alpha=station_alpha, \
+                    label="{:s}, RMS {:.0f} m".format(station_id, \
+                    np.sqrt(np.mean(lag_residuals[station_mask]**2))))
+
+            ax_lag_res.axvline(0, color='0.5', lw=0.8, zorder=0)
+            if have_band:
+                ax_lag_res.fill_betweenx(ht_lag_dense/1000, length_band_lo/1000, length_band_hi/1000, \
+                    color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
+            ax_lag_res.set_title("Alpha-beta fit residuals", fontsize=10)
+
+            # Plot the residuals of the smooth model of the lag
+            if cml_args.lagsmooth:
+                ax_lag_res.scatter(lag_data/1000 - expLinearLag(time_data, *lag_fit_params)/1000, \
+                    ht_data/1000, s=5, color='r', label="Lag-based velocity smoothing")
+
+            ax_lag_res.set_xlabel("Lag residuals (km)")
+            ax_lag_res.legend(loc='upper left', fontsize=7 if len(station_ids) <= 8 else 5, \
+                ncol=(1 if len(station_ids) <= 8 else 2))
+
+
+        fig, (ax_ab, ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=4, sharey=True, figsize=(14, 6))
+        _plotFit(ax_ab, ax_vel, ax_lag, ax_lag_res)
 
         plt.tight_layout()
 
@@ -6946,12 +7492,91 @@ if __name__ == "__main__":
         #   With --errors, fit_errors carries the (ln alpha, ln beta) covariance, so an
         #   uncertainty ellipse is drawn around the point too (fit_errors is None otherwise)
         #   The axes are passed in so that the function doesn't call plt.show() itself
+        # Widen the axis of ln(alpha*sin(slope)) to include the best fit
+        x_point = np.log(alpha*np.sin(slope))
+        survival_x_range = (min(0.0, x_point - 0.5), max(7.0, x_point + 0.5))
+
         fig_surv, ax_surv = plt.subplots(figsize=(7.5, 6))
         plotAlphaBetaSurvivalDiagram(alpha, beta, slope, \
             mass_thresholds=(1.0, 0.05), dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-            errors=fit_errors, axes=ax_surv, profile=(lag_profile if cml_args.errors else None))
+            errors=fit_errors, axes=ax_surv, profile=(lag_profile if cml_args.errors else None), \
+            x_range=survival_x_range)
+        fig_surv.tight_layout()
 
         _finishPlot(fig_surv, "alpha_beta_survival")
+
+
+
+        ### Summary plot of the fit, the uncertainties, the mass diagram and the masses ###
+
+        fig_sum = plt.figure(figsize=(20, 13))
+        grid_sum = fig_sum.add_gridspec(2, 1, height_ratios=[1, 1.1], hspace=0.25, left=0.05, right=0.89, \
+            top=0.93, bottom=0.06)
+
+        # Plot the fit in the top row
+        grid_top = grid_sum[0].subgridspec(1, 4, wspace=0)
+        ax_sum_ab = fig_sum.add_subplot(grid_top[0])
+        sum_axes = [ax_sum_ab] + [fig_sum.add_subplot(grid_top[i], sharey=ax_sum_ab) for i in range(1, 4)]
+        _plotFit(*sum_axes, print_results=False)
+        for ax in sum_axes[1:]:
+            ax.tick_params(labelleft=False)
+
+        grid_bottom = grid_sum[1].subgridspec(1, 3, width_ratios=[1.3, 1, 1], wspace=0.3)
+
+        # Plot the uncertainties of alpha and beta
+        if cml_args.errors:
+            plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, fig=fig_sum, \
+                subplot_spec=grid_bottom[0])
+        else:
+            ax_note = fig_sum.add_subplot(grid_bottom[0])
+            ax_note.axis('off')
+            ax_note.text(0.5, 0.5, "Run with --errors for the uncertainties of alpha and beta", \
+                ha='center', va='center', transform=ax_note.transAxes)
+
+        # Plot the survival diagram in the space of the initial mass and beta
+        ax_mass_diagram = fig_sum.add_subplot(grid_bottom[1])
+        plotAlphaBetaMassDiagram(alpha, beta, slope, profile=(lag_profile if cml_args.errors else None), \
+            dens=cml_args.dens, shape_coeff=cml_args.ga, axes=ax_mass_diagram)
+        if little_deceleration:
+            ax_mass_diagram.text(0.5, 0.5, "Not constrained by the dynamics\n(velocity loss {:.1%})".format( \
+                velocity_loss), transform=ax_mass_diagram.transAxes, ha='center', va='center', fontsize=12, \
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor='0.5'))
+
+        # Plot the masses with their 95% intervals
+        def _massEntry(label, mass, interval_values, color, no_upper_limit=False):
+            """ One mass of the plot of the masses, with its interval from the values of the models within
+                the 95% interval.
+            """
+
+            if not len(interval_values):
+                return (label, mass, None, None, color)
+
+            upper = np.inf if no_upper_limit else np.max(interval_values)
+
+            return (label, mass, np.min(interval_values), upper, color)
+
+        # Without a significant deceleration the final masses are ~0
+        if little_deceleration:
+            masses = [("Final, $\\mu$ = 0", 0.0, None, None, 'tab:blue'), \
+                ("Final, $\\mu$ = 2/3", 0.0, None, None, 'tab:orange'), \
+                ("Dynamic, end", 0.0, None, None, 'k')]
+            masses_note = "Velocity loss of only {:.1%} by the end:\nthe dynamics do not constrain the " \
+                "masses, and the\nfireball most likely ablated completely".format(velocity_loss)
+        else:
+            masses = [
+                _massEntry("Final, $\\mu$ = 0", m_final_mu0, interval_masses[0][:, 1], 'tab:blue'),
+                _massEntry("Final, $\\mu$ = 2/3", m_final_mu23, interval_masses[2/3][:, 1], 'tab:orange'),
+                _massEntry("Dynamic, end", dyn_mass, interval_dyn_masses, 'k', no_upper_limit=no_decel),
+                ]
+            masses_note = None
+        ax_masses = fig_sum.add_subplot(grid_bottom[2])
+        plotAlphaBetaMasses(masses, axes=ax_masses, title="Masses with the 95% profile intervals, " \
+            "dens = {:d} kg/m$^3$, $\\Gamma A$ = {:.2f}".format(int(cml_args.dens), cml_args.ga), \
+            note=masses_note)
+
+        fig_sum.suptitle("{:s}, alpha-beta fit to the lag".format(traj.file_name))
+
+        _finishPlot(fig_sum, "alpha_beta_summary")
 
 
 
@@ -7028,11 +7653,28 @@ if __name__ == "__main__":
                 print("{:11.2f}  {:10.4f}  {:14.5f}".format(ht_data[i_rev]/1000, vel_data_smooth[i_rev]/1000, \
                     dyn_pressure_lag[i_rev]/1e6))
 
+        # Peak dynamic pressures and their heights of the models within the 95% interval, with the density
+        #   computed once as the dynamic pressure is proportional to the squared velocity
+        interval_peaks = []
+        if interval_models:
+            atm_dens = getAtmDensity_vect(lat_mean, lon_mean, ht_arr, traj.jdt_ref)
+            ht_arr_rescaled = rescaleHeightToExponentialAtmosphere(np.full(len(ht_arr), lat_mean), \
+                np.full(len(ht_arr), lon_mean), ht_arr, traj.jdt_ref, method=cml_args.atmrescale)
+            for a, b, v0 in interval_models:
+                dyn_pressure_model = atm_dens*alphaBetaVelocity(ht_arr_rescaled, a, b, v0)**2
+                interval_peaks.append([np.max(dyn_pressure_model)/1e6, \
+                    ht_arr[np.argmax(dyn_pressure_model)]/1000])
+        interval_peaks = np.array(interval_peaks).reshape(-1, 2)
+
         print()
         print("Peak dynamic pressure:")
         print("----------------------")
         print("AlphaBeta model = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
             peak_dyn_pressure, peak_dyn_pressure_ht, vel_arr_real[peak_dyn_pressure_index]/1000))
+        if len(interval_peaks):
+            print("  95% profile: {:.3f} - {:.3f} MPa, at {:.2f} - {:.2f} km".format( \
+                np.min(interval_peaks[:, 0]), np.max(interval_peaks[:, 0]), np.min(interval_peaks[:, 1]), \
+                np.max(interval_peaks[:, 1])))
         if cml_args.lagsmooth:
             print("Lag smoothing   = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
                 peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag,
