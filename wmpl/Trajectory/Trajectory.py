@@ -2671,7 +2671,7 @@ class Trajectory(object):
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
             traj_id: [str] Trajectory solution identifier. None by default.
             reject_n_sigma_outliers: [float] Reject angular outliers whose residual is above the mean plus n
-                times the RMS of the residuals of the kept picks. This value is 3 (sigma) by default.
+                times the RMS of the residuals of the used picks. This value is 3 (sigma) by default.
             mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel processing. None by default,
                 which means that all cores will be used.
             fixed_times: [dict] Dictionary of fixed times for each station. None by default, meaning that
@@ -6915,21 +6915,15 @@ class Trajectory(object):
                     if obs.ignore_station:
                         continue
 
-                    # Find the used picks within N sigma of the kept picks, until no more are rejected
+                    # Skip stations with fewer than 4 used picks
                     used = obs.ignore_list == 0
-                    good_picks = np.copy(used)
-                    for _ in range(len(obs.ang_res)):
+                    if np.count_nonzero(used) < 4:
+                        continue
 
-                        # Compute the limit from the kept picks
-                        ang_res_rms = np.sqrt(np.mean(obs.ang_res[good_picks]**2))
-                        kept = used & (obs.ang_res < (np.mean(obs.ang_res[good_picks]) \
-                            + self.reject_n_sigma_outliers*ang_res_rms))
-
-                        # Stop when no more picks are rejected
-                        if np.array_equal(kept, good_picks):
-                            break
-
-                        good_picks = kept
+                    # Find the used picks within N sigma of the used picks (the RMS of the residuals is
+                    #   computed from the used picks only)
+                    good_picks = used & (obs.ang_res < (np.mean(obs.ang_res[used]) \
+                        + self.reject_n_sigma_outliers*obs.ang_res_std))
 
                     # If the number of good picks is below 4, do not remove any picks
                     if np.count_nonzero(good_picks) < 4:
