@@ -7266,11 +7266,6 @@ if __name__ == "__main__":
         else:
             dyn_label = "Dynamic mass not defined\n(no deceleration at the end)"
 
-        # Models on a dense grid of heights between the observed ones, rescaled to the exponential atmosphere
-        ht_dense = np.linspace(np.min(ht_data), np.max(ht_data), 400)
-        ht_dense_rescaled = np.interp(ht_dense, ht_data, ht_data_rescaled)
-        vel_model_dense = alphaBetaVelocity(ht_dense_rescaled, alpha, beta, v_init)
-
         # Lag of the models on a dense grid of times. The lag is the distance minus a line in time, which is
         #   the same for all stations, so the line is fitted to the differences of the distances and the lag,
         #   and the lag is drawn against the height of the best model at every time, which keeps the curve
@@ -7289,13 +7284,10 @@ if __name__ == "__main__":
         ht_along = np.minimum.accumulate(ht_data[length_order])
         ht_lag_dense = np.interp(length_dense, length_data[length_order], ht_along)
 
-        # Bands of the velocity and of the distance of the models within the region (each model is shifted in
-        #   time to fit the observed distances, as the best one)
+        # Band of the distance of the models within the region (each model is shifted in time to fit the
+        #   observed distances, as the best one)
         if have_band:
             region_models = list(zip(region_alpha, region_beta, region_v_init))
-            vel_band_ab = np.array([alphaBetaVelocity(ht_arr, a, b, v0) for a, b, v0 in region_models])
-            vel_band_obs = np.array([alphaBetaVelocity(ht_dense_rescaled, a, b, v0) \
-                for a, b, v0 in region_models])
             length_band = np.array([ab_path.lengths(time_dense, a, b, v0, \
                 t0=ab_path.lengths(time_data, a, b, v0, length_data=length_data)[1])[0] \
                 for a, b, v0 in region_models]) - length_dense
@@ -7306,12 +7298,12 @@ if __name__ == "__main__":
         vel_axis_lo = min(0.0, max(np.percentile(vel_data, 1), -0.5*v_init))
         vel_axis_hi = max(1.2*v_init, min(np.percentile(vel_data, 99), 3*v_init))
 
-        def _plotFit(ax_ab, ax_vel, ax_lag, ax_lag_res, print_results=True):
-            """ Plot the alpha-beta fit: the velocities against the rescaled and the observed heights, the lag
-                and the lag residuals, with the points of every station in its color.
+        def _plotFit(ax_vel, ax_lag, ax_lag_res, print_results=True):
+            """ Plot the alpha-beta fit: the velocities against the observed heights, with the model from
+                above the first point down to below the last one, the lag and the lag residuals, with the
+                points of every station in its color.
 
             Arguments:
-                ax_ab: [Axes] Velocities against the heights rescaled to the exponential atmosphere.
                 ax_vel: [Axes] Velocities against the observed heights.
                 ax_lag: [Axes] Lag.
                 ax_lag_res: [Axes] Lag residuals.
@@ -7320,49 +7312,27 @@ if __name__ == "__main__":
                 print_results: [bool] Print the dynamic mass of the lag smoothing. True by default.
             """
 
-            ### Plot the velocities at the heights rescaled to the exponential atmosphere ###
-
-            for station_id in station_ids:
-                station_mask = station_data == station_id
-                ax_ab.scatter(vel_data[station_mask]/1000, ht_data_rescaled[station_mask]/1000, s=5, \
-                    color=station_colors[station_id], alpha=station_alpha)
-
-            ax_ab.set_title("Heights rescaled to exp. atm.", fontsize=10)
-
-            # Plot the smoothed velocity
-            if cml_args.lagsmooth:
-                ax_ab.scatter(vel_data_smooth/1000, ht_data_rescaled/1000, color='r', s=1, \
-                    label="Lag-based velocity smoothing")
-
-            # Plot the alpha-beta fit and the band of the models within the region
-            if have_band:
-                ax_ab.fill_betweenx(ht_arr/1000, np.min(vel_band_ab, axis=0)/1000, \
-                    np.max(vel_band_ab, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
-
-            ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
-
-            ax_ab.set_xlim(vel_axis_lo/1000, vel_axis_hi/1000)
-            ax_ab.set_xlabel("Velocity (km/s)")
-            ax_ab.set_ylabel("Height (km)")
-
-            ax_ab.legend(loc='upper left', fontsize=8)
-
-
-            ### Plot the velocities at the observed heights ###
+            ### Plot the velocities against the observed heights ###
 
             for station_id in station_ids:
                 station_mask = station_data == station_id
                 ax_vel.scatter(vel_data[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
                     color=station_colors[station_id], alpha=station_alpha)
 
-            ax_vel.set_title("Observed heights", fontsize=10)
+            ax_vel.set_title("Velocity", fontsize=10)
 
-            # Plot the alpha-beta velocity, with the band of the region
-            ax_vel.plot(vel_model_dense/1000, ht_dense/1000, color='k', label="Alpha-beta fit")
+            # Plot the alpha-beta velocity from above the first point down to below the last one, at the
+            #   heights rescaled to the exponential atmosphere at the mean position, as the dynamic pressure,
+            #   with the band of the models within the region
             if have_band:
-                ax_vel.fill_betweenx(ht_dense/1000, np.min(vel_band_obs, axis=0)/1000, \
-                    np.max(vel_band_obs, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, \
-                    label=band_label)
+                ht_arr_rescaled_mean = rescaleHeightToExponentialAtmosphere(np.full(len(ht_arr), lat_mean), \
+                    np.full(len(ht_arr), lon_mean), ht_arr, traj.jdt_ref, method=cml_args.atmrescale)
+                vel_band = np.array([alphaBetaVelocity(ht_arr_rescaled_mean, a, b, v0) \
+                    for a, b, v0 in region_models])
+                ax_vel.fill_betweenx(ht_arr/1000, np.min(vel_band, axis=0)/1000, \
+                    np.max(vel_band, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
+
+            ax_vel.plot(vel_arr_real/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
 
             # Plot the point where the dynamic mass is estimated
             if np.isfinite(dyn_mass):
@@ -7385,11 +7355,8 @@ if __name__ == "__main__":
                     v_t0 = expLinearVelocity(t0, traj.v_init, *lag_fit_params)
                     t0_index = np.argmin(np.abs(vel_data_smooth - v_t0))
                     h_t0 = ht_data[t0_index]
-                    h_rescaled_t0 = ht_data_rescaled[t0_index]
 
                     # Plot the t0 point
-                    ax_ab.scatter([v_t0/1000], [h_rescaled_t0/1000], \
-                        label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)), color='r')
                     ax_vel.scatter([v_t0/1000], [h_t0/1000], \
                         label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)), color='r')
 
@@ -7429,8 +7396,9 @@ if __name__ == "__main__":
 
             ax_vel.set_xlim(vel_axis_lo/1000, vel_axis_hi/1000)
             ax_vel.set_xlabel("Velocity (km/s)")
+            ax_vel.set_ylabel("Height (km)")
 
-            ax_vel.legend(loc='upper left', fontsize=8)
+            ax_vel.legend(loc='upper left', fontsize=7)
 
 
             ### Plot the lag of every station and the alpha-beta model of it ###
@@ -7459,6 +7427,7 @@ if __name__ == "__main__":
                 ax_lag.plot(expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, color='r', \
                     label="Lag-based velocity smoothing")
 
+            ax_lag.set_title("Lag", fontsize=10)
             ax_lag.set_xlabel("Lag (km)")
             ax_lag.legend(loc='lower left', fontsize=8)
 
@@ -7643,12 +7612,12 @@ if __name__ == "__main__":
             top=0.93, bottom=0.06)
 
         # Plot the fit and the dynamic pressure in the top row
-        grid_top = grid_sum[0].subgridspec(1, 5, wspace=0)
-        ax_sum_ab = fig_sum.add_subplot(grid_top[0])
-        sum_axes = [ax_sum_ab] + [fig_sum.add_subplot(grid_top[i], sharey=ax_sum_ab) for i in range(1, 5)]
-        _plotFit(*sum_axes[:4], print_results=False)
-        _plotDynPressure(sum_axes[4])
-        sum_axes[4].set_title("Dynamic pressure", fontsize=10)
+        grid_top = grid_sum[0].subgridspec(1, 4, wspace=0)
+        ax_sum_vel = fig_sum.add_subplot(grid_top[0])
+        sum_axes = [ax_sum_vel] + [fig_sum.add_subplot(grid_top[i], sharey=ax_sum_vel) for i in range(1, 4)]
+        _plotFit(*sum_axes[:3], print_results=False)
+        _plotDynPressure(sum_axes[3])
+        sum_axes[3].set_title("Dynamic pressure", fontsize=10)
         for ax in sum_axes[1:]:
             ax.tick_params(labelleft=False)
 
