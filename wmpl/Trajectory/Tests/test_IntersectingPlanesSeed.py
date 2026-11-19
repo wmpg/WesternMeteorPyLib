@@ -51,6 +51,7 @@ def makeArc(axis_a, axis_b, n_points=40, arc=np.radians(15.0)):
         [ndarray] Unit vectors, one row per point.
     """
 
+    # Space the points evenly along the arc, from an arbitrary start
     phi = 0.3 + np.linspace(0, arc, n_points)
 
     return np.outer(np.cos(phi), axis_a) + np.outer(np.sin(phi), axis_b)
@@ -60,10 +61,12 @@ def makeArc(axis_a, axis_b, n_points=40, arc=np.radians(15.0)):
 def testPlaneContainingTheZAxis():
     """ Check that the plane of a track along a great circle through the celestial pole is found. """
 
+    # Take a plane which contains the Z axis
     axis_a = vectNorm(np.array([0.6, 0.8, 0.0]))
     axis_z = np.array([0.0, 0.0, 1.0])
     true_normal = np.cross(axis_a, axis_z)
 
+    # Fit the plane to an arc in it
     normal = ObservedPoints.planeFit(FakeLines(makeArc(axis_a, axis_z)))
 
     assert abs(abs(np.dot(normal, true_normal)) - 1.0) < 1e-12
@@ -77,10 +80,12 @@ def testPlaneInAnyOrientation():
 
     for _ in range(50):
 
+        # Take a plane in a random orientation
         axis_a = vectNorm(rng.normal(size=3))
         axis_b = vectNorm(np.cross(axis_a, rng.normal(size=3)))
         true_normal = np.cross(axis_a, axis_b)
 
+        # Fit the plane to an arc in it
         normal = ObservedPoints.planeFit(FakeLines(makeArc(axis_a, axis_b)))
 
         assert abs(abs(np.dot(normal, true_normal)) - 1.0) < 1e-12
@@ -92,6 +97,7 @@ def testAngularLengthOfTheUsedPicks():
         rather than NaN for a single direction.
     """
 
+    # Take 11 picks 1 deg apart
     meas_eci = makeArc(np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]), n_points=11, \
         arc=np.radians(10.0))
 
@@ -114,6 +120,7 @@ def testIgnoredFirstPickDoesNotSetTheBeginning():
     def solve(move_first):
         """ Solve the meteor with the first pick of station A ignored, and moved up the line if asked. """
 
+        # Observe the straight meteor
         traj, begin, radiant_eci = observeStraightMeteor(noise=np.radians(10.0/3600), seed=2, \
             estimate_timing_vel=False, filter_picks=False)
 
@@ -129,6 +136,7 @@ def testIgnoredFirstPickDoesNotSetTheBeginning():
             obs.meas2 = np.array(obs.meas2, dtype=np.float64)
             obs.meas1[0], obs.meas2[0] = azim[0], elev[0]
 
+        # Ignore the first pick of station A
         obs.ignore_list[0] = 1
 
         # Add the observations again to recompute the lines of sight
@@ -139,6 +147,7 @@ def testIgnoredFirstPickDoesNotSetTheBeginning():
 
         return traj.run()
 
+    # Solve with and without moving the ignored pick
     moved = solve(True)
     kept = solve(False)
 
