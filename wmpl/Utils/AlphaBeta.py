@@ -7488,76 +7488,6 @@ if __name__ == "__main__":
                 ncol=(1 if len(station_ids) <= 8 else 2))
 
 
-        ### Summary plot of the fit, the uncertainties, the mass diagram and the masses ###
-
-        fig_sum = plt.figure(figsize=(20, 13))
-        grid_sum = fig_sum.add_gridspec(2, 1, height_ratios=[1, 1.1], hspace=0.25, left=0.05, right=0.89, \
-            top=0.93, bottom=0.06)
-
-        # Plot the fit in the top row
-        grid_top = grid_sum[0].subgridspec(1, 4, wspace=0)
-        ax_sum_ab = fig_sum.add_subplot(grid_top[0])
-        sum_axes = [ax_sum_ab] + [fig_sum.add_subplot(grid_top[i], sharey=ax_sum_ab) for i in range(1, 4)]
-        _plotFit(*sum_axes, print_results=False)
-        for ax in sum_axes[1:]:
-            ax.tick_params(labelleft=False)
-
-        grid_bottom = grid_sum[1].subgridspec(1, 3, width_ratios=[1.3, 1, 1], wspace=0.3)
-
-        # Plot the uncertainties of alpha and beta
-        if cml_args.errors:
-            plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, fig=fig_sum, \
-                subplot_spec=grid_bottom[0])
-        else:
-            ax_note = fig_sum.add_subplot(grid_bottom[0])
-            ax_note.axis('off')
-            ax_note.text(0.5, 0.5, "Run with --errors for the uncertainties of alpha and beta", \
-                ha='center', va='center', transform=ax_note.transAxes)
-
-        # Plot the survival diagram in the space of the initial mass and beta
-        ax_mass_diagram = fig_sum.add_subplot(grid_bottom[1])
-        plotAlphaBetaMassDiagram(alpha, beta, slope, profile=(lag_profile if cml_args.errors else None), \
-            dens=cml_args.dens, shape_coeff=cml_args.ga, axes=ax_mass_diagram)
-        if little_deceleration:
-            ax_mass_diagram.text(0.5, 0.5, "Not constrained by the dynamics\n(velocity loss {:.1%})".format( \
-                velocity_loss), transform=ax_mass_diagram.transAxes, ha='center', va='center', fontsize=12, \
-                bbox=dict(facecolor='white', alpha=0.8, edgecolor='0.5'))
-
-        # Plot the masses with their 95% intervals
-        def _massEntry(label, mass, interval_values, color, no_upper_limit=False):
-            """ One mass of the plot of the masses, with its interval from the values of the models within
-                the 95% interval.
-            """
-
-            if not len(interval_values):
-                return (label, mass, None, None, color)
-
-            upper = np.inf if no_upper_limit else np.max(interval_values)
-
-            return (label, mass, np.min(interval_values), upper, color)
-
-        # Without a significant deceleration the final masses are ~0
-        if little_deceleration:
-            masses = [("Final, $\\mu$ = 0", 0.0, None, None, 'tab:blue'), \
-                ("Final, $\\mu$ = 2/3", 0.0, None, None, 'tab:orange'), \
-                ("Dynamic, end", 0.0, None, None, 'k')]
-            masses_note = "Velocity loss of only {:.1%} by the end:\nthe dynamics do not constrain the " \
-                "masses, and the\nfireball most likely ablated completely".format(velocity_loss)
-        else:
-            masses = [
-                _massEntry("Final, $\\mu$ = 0", m_final_mu0, interval_masses[0][:, 1], 'tab:blue'),
-                _massEntry("Final, $\\mu$ = 2/3", m_final_mu23, interval_masses[2/3][:, 1], 'tab:orange'),
-                _massEntry("Dynamic, end", dyn_mass, interval_dyn_masses, 'k', no_upper_limit=no_decel),
-                ]
-            masses_note = None
-        ax_masses = fig_sum.add_subplot(grid_bottom[2])
-        plotAlphaBetaMasses(masses, axes=ax_masses, title="Masses with the 95% profile intervals, " \
-            "dens = {:d} kg/m$^3$, $\\Gamma A$ = {:.2f}".format(int(cml_args.dens), cml_args.ga), \
-            note=masses_note)
-
-        fig_sum.suptitle("{:s}, alpha-beta fit to the lag".format(traj.file_name))
-
-        _finishPlot(fig_sum, "alpha_beta_summary")
 
 
 
@@ -7665,35 +7595,122 @@ if __name__ == "__main__":
         print("----------------------")
 
 
+        def _plotDynPressure(ax):
+            """ Plot the dynamic pressure of the alpha-beta model along the path, with the band of the models
+                within the 95% interval and the peak.
+
+            Arguments:
+                ax: [Axes] Axes to draw into.
+            """
+
+            if interval_pressures:
+                ax.fill_betweenx(ht_arr/1000, np.min(interval_pressures, axis=0)/1e6, \
+                    np.max(interval_pressures, axis=0)/1e6, color='k', alpha=0.15, lw=0, label="95% interval")
+            ax.plot(dyn_pressure/1e6, ht_arr/1000, color='k', label='AlphaBeta')
+
+            # Mark alpha-beta dyn pressure peak on the graph
+            peak_label = "Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht)
+            if len(interval_peaks):
+                peak_label += "\n95%: {:.2f} - {:.2f} MPa".format(np.min(interval_peaks[:, 0]), \
+                    np.max(interval_peaks[:, 0]))
+            ax.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', label=peak_label)
+
+            # Plot the dynamic pressure of the lag smoothing and mark its peak
+            if cml_args.lagsmooth:
+                ax.plot(dyn_pressure_lag/1e6, ht_data/1000, color='r', label='Lag smoothing')
+                ax.scatter(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, c='r', \
+                    label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure_lag, \
+                    peak_dyn_pressure_ht_lag))
+
+            ax.legend(fontsize=8)
+            ax.set_xlabel("Dynamic pressure (MPa)")
+
+
         # Plot dyn pressure, with the band of the models within the 95% interval
-        fig_dyn = plt.figure()
-        if interval_pressures:
-            plt.fill_betweenx(ht_arr/1000, np.min(interval_pressures, axis=0)/1e6, \
-                np.max(interval_pressures, axis=0)/1e6, color='k', alpha=0.15, lw=0, label="95% interval")
-        plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k', label='AlphaBeta')
-
-        # Mark alpha-beta dyn pressure peak on the graph
-        peak_label = "Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht)
-        if len(interval_peaks):
-            peak_label += "\n95%: {:.2f} - {:.2f} MPa".format(np.min(interval_peaks[:, 0]), \
-                np.max(interval_peaks[:, 0]))
-        plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', label=peak_label)
-
-        # Plot the dynamic pressure of the lag smoothing and mark its peak
-        if cml_args.lagsmooth:
-            plt.plot(dyn_pressure_lag/1e6, ht_data/1000, color='r', label='Lag smoothing')
-            plt.scatter(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, c='r', \
-                label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure_lag, \
-                peak_dyn_pressure_ht_lag))
-
-
-        plt.legend()
-
-        plt.ylabel("Height (km)")
-        plt.xlabel("Dynamic pressure (MPa)")
-        plt.title("{:s}, alpha-beta dynamic pressure".format(traj.file_name), fontsize=10)
+        fig_dyn, ax_dyn = plt.subplots()
+        _plotDynPressure(ax_dyn)
+        ax_dyn.set_ylabel("Height (km)")
+        ax_dyn.set_title("{:s}, alpha-beta dynamic pressure".format(traj.file_name), fontsize=10)
 
         _finishPlot(fig_dyn, "alpha_beta_dyn_pressure")
+
+
+
+        ### Summary plot of the fit, the pressure, the uncertainties, the mass diagram and the masses ###
+
+        fig_sum = plt.figure(figsize=(22, 13))
+        grid_sum = fig_sum.add_gridspec(2, 1, height_ratios=[1, 1.1], hspace=0.25, left=0.05, right=0.89, \
+            top=0.93, bottom=0.06)
+
+        # Plot the fit and the dynamic pressure in the top row
+        grid_top = grid_sum[0].subgridspec(1, 5, wspace=0)
+        ax_sum_ab = fig_sum.add_subplot(grid_top[0])
+        sum_axes = [ax_sum_ab] + [fig_sum.add_subplot(grid_top[i], sharey=ax_sum_ab) for i in range(1, 5)]
+        _plotFit(*sum_axes[:4], print_results=False)
+        _plotDynPressure(sum_axes[4])
+        sum_axes[4].set_title("Dynamic pressure", fontsize=10)
+        for ax in sum_axes[1:]:
+            ax.tick_params(labelleft=False)
+
+        grid_bottom = grid_sum[1].subgridspec(1, 3, width_ratios=[1.3, 1, 1], wspace=0.3)
+
+        # Plot the uncertainties of alpha and beta
+        if cml_args.errors:
+            plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, fig=fig_sum, \
+                subplot_spec=grid_bottom[0])
+        else:
+            ax_note = fig_sum.add_subplot(grid_bottom[0])
+            ax_note.axis('off')
+            ax_note.text(0.5, 0.5, "Run with --errors for the uncertainties of alpha and beta", \
+                ha='center', va='center', transform=ax_note.transAxes)
+
+        # Plot the survival diagram in the space of the initial mass and beta
+        ax_mass_diagram = fig_sum.add_subplot(grid_bottom[1])
+        plotAlphaBetaMassDiagram(alpha, beta, slope, profile=(lag_profile if cml_args.errors else None), \
+            dens=cml_args.dens, shape_coeff=cml_args.ga, axes=ax_mass_diagram)
+        if little_deceleration:
+            ax_mass_diagram.text(0.5, 0.5, "Not constrained by the dynamics\n(velocity loss {:.1%})".format( \
+                velocity_loss), transform=ax_mass_diagram.transAxes, ha='center', va='center', fontsize=12, \
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor='0.5'))
+
+        # Plot the masses with their 95% intervals
+        def _massEntry(label, mass, interval_values, color, no_upper_limit=False):
+            """ One mass of the plot of the masses, with its interval from the values of the models within
+                the 95% interval.
+            """
+
+            if not len(interval_values):
+                return (label, mass, None, None, color)
+
+            upper = np.inf if no_upper_limit else np.max(interval_values)
+
+            return (label, mass, np.min(interval_values), upper, color)
+
+        # Without a significant deceleration the final masses are ~0
+        if little_deceleration:
+            masses = [("Final, $\\mu$ = 0", 0.0, None, None, 'tab:blue'), \
+                ("Final, $\\mu$ = 2/3", 0.0, None, None, 'tab:orange'), \
+                ("Dynamic, end", 0.0, None, None, 'k')]
+            masses_note = "Velocity loss of only {:.1%} by the end:\nthe dynamics do not constrain the " \
+                "masses, and the\nfireball most likely ablated completely".format(velocity_loss)
+        else:
+            masses = [
+                _massEntry("Final, $\\mu$ = 0", m_final_mu0, interval_masses[0][:, 1], 'tab:blue'),
+                _massEntry("Final, $\\mu$ = 2/3", m_final_mu23, interval_masses[2/3][:, 1], 'tab:orange'),
+                _massEntry("Dynamic, end", dyn_mass, interval_dyn_masses, 'k', no_upper_limit=no_decel),
+                ]
+            masses_note = None
+        ax_masses = fig_sum.add_subplot(grid_bottom[2])
+        plotAlphaBetaMasses(masses, axes=ax_masses, title="Masses with the 95% profile intervals, " \
+            "dens = {:d} kg/m$^3$, $\\Gamma A$ = {:.2f}".format(int(cml_args.dens), cml_args.ga), \
+            note=masses_note)
+
+        fig_sum.suptitle("{:s}, alpha-beta fit to the lag".format(traj.file_name))
+
+        _finishPlot(fig_sum, "alpha_beta_summary")
+
+
+
 
 
         ### ###

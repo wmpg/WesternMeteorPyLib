@@ -106,9 +106,9 @@ from that point and a note is printed.
 
 ## The summary plot and the final masses
 
-`_alpha_beta_summary.png` shows all results of a run in one figure: the fit with the bands of the 95% region on
-top, and below it the uncertainties of alpha and beta, the survival diagram with the final mass on straight
-lines, and the final and the dynamic masses with their 95% intervals.
+`_alpha_beta_summary.png` shows all results of a run in one figure: the fit with the bands of the 95% region and
+the dynamic pressure along the path on top, and below it the uncertainties of alpha and beta, the survival
+diagram with the final mass on straight lines, and the final and the dynamic masses with their 95% intervals.
 
 The final mass of the alpha-beta model, for a final velocity much smaller than the initial one, is
 
