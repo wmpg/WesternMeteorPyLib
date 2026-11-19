@@ -3161,7 +3161,7 @@ class Trajectory(object):
         Keyword arguments:
             output_dir: [str] Path to the output directory where the Trajectory report and 'pickled' object
                 will be stored.
-            max_toffset: [float] Maximum allowed time offset between cameras in seconds (default 1 second).
+            max_toffset: [float] Maximum allowed time offset between cameras in seconds (default 5 seconds).
             meastype: [float] Flag indicating the type of angle measurements the user is providing for meas1 
                 and meas2 below. The following are all in radians:
                         1 = Right Ascension for meas1, declination for meas2, NOTE: epoch of date, NOT J2000!
@@ -3232,7 +3232,7 @@ class Trajectory(object):
 
         # Maximum time offset between cameras
         if max_toffset is None:
-            max_toffset = 1.0
+            max_toffset = 5.0
         self.max_toffset = max_toffset
 
         # If verbose True, results and status messages will be printed out, otherwise they will be suppressed

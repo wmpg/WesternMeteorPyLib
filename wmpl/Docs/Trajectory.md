@@ -36,7 +36,7 @@ Run any of them with `--help` for the full list of options. The ones that matter
 | `-s`, `--solver` | Which solver to use. `original` (default) is the Monte Carlo solver; `gural0`–`gural3` are the Gural multi-parameter fits with constant, linear, quadratic and exponential deceleration. |
 | `-r`, `--mcruns` | Number of Monte Carlo runs used to estimate the uncertainties. |
 | `-d`, `--disablemc` | Only compute the geometric solution, skipping the Monte Carlo step. Fast, but gives no uncertainties. |
-| `-t`, `--maxtoffset` | Maximum timing offset allowed between stations, in seconds. |
+| `-t`, `--maxtoffset` | Maximum timing offset allowed between stations, in seconds, 5 s by default. With 3 or more stations, a station whose clock needs a larger offset is ignored. |
 | `-v`, `--vinitht` | Estimate the initial velocity as the average above this height, in km. |
 | `-l`, `--plotallspatial` | Save the full set of diagnostic plots. |
 
