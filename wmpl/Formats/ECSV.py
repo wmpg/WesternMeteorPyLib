@@ -20,6 +20,34 @@ from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorial
 FPS = 15
 
 
+
+def parseECSVDatetime(date):
+    """ Parse a time of an ECSV file, in ISO format with or without fractional seconds and a final Z.
+
+    Arguments:
+        date: [str] Time, e.g. 2024-01-01T00:00:10.040000.
+
+    Return:
+        [datetime] The time.
+    """
+
+    # Remove the final Z of UTC times
+    date = date.strip()
+    if date.endswith('Z'):
+        date = date[:-1]
+
+    # Try the format with fractional seconds, then the one without
+    for time_format in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"]:
+        try:
+            return datetime.datetime.strptime(date, time_format)
+
+        except ValueError:
+            continue
+
+    raise ValueError("The time {:s} of the ECSV file is not in ISO format".format(date))
+
+
+
 def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
     """ Load meteor observations from ECSV files. 
     
@@ -51,28 +79,38 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
 
             for line in f:
                 if line.startswith("#"):
-                    line = line.replace('\n', '').replace('\r', '').replace('{', '').replace('}', '')
-                    line = line.split(':')
-                    if len(line) > 1:
 
-                        if "obs_latitude" in line[0]:
-                            station_lat = float(line[1])
+                    # Split a metadata entry into its key and value at the first colon
+                    entry = line.lstrip('#').strip()
+                    if entry.startswith('-'):
+                        entry = entry[1:].strip()
 
-                        if "obs_longitude" in line[0]:
-                            station_lon = float(line[1])
+                    entry = entry.strip('{}').strip()
+                    if ':' not in entry:
+                        continue
 
-                        if "obs_elevation" in line[0]:
-                            station_ele = float(line[1])
+                    key, value = [part.strip() for part in entry.split(':', 1)]
+                    text = value.strip("'").strip('"')
 
-                        if 'image_file' in line[0]:
-                            image_file = line[1].strip().strip("'")
+                    # Take the station and the image file from their keys
+                    if key == 'obs_latitude':
+                        station_lat = float(value)
 
-                        if "camera_id" in line[0]:
-                            station_id = line[1].strip().strip("'")
+                    if key == 'obs_longitude':
+                        station_lon = float(value)
 
-                        if (station_id is None) and ("dfn_camera_codename" in line[0]):
-                            station_id = line[1].strip().strip("'")
-                            
+                    if key == 'obs_elevation':
+                        station_ele = float(value)
+
+                    if key == 'image_file':
+                        image_file = text
+
+                    if key == 'camera_id':
+                        station_id = text
+
+                    if (station_id is None) and (key == 'dfn_camera_codename'):
+                        station_id = text
+
 
             if (station_lat is None) or (station_lon is None) or (station_ele is None) \
                 or (station_id is None):
@@ -130,25 +168,21 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
                             + "(integrated pixel value 1), they have no magnitude").format(station_id, \
                             int(np.sum(no_photometry)), len(mag_data)))
 
+            # Without a magnitude column, the points have no magnitude
             else:
-                mag_data = np.zeros_like(azim_data) + 10.0
+                mag_data = np.zeros_like(azim_data) + np.nan
 
 
             # Convert time to JD
-            jd_data = []
-            for date in dt_data:
-                dt = datetime.datetime.strptime(date, "%Y-%m-%dT%H:%M:%S.%f")
-                jd_data.append(datetime2JD(dt))
-
-
-            jd_data = np.array(jd_data)
+            dt_list = [parseECSVDatetime(date) for date in dt_data]
+            jd_data = np.array([datetime2JD(dt) for dt in dt_list])
 
             # Take the first time as reference time
             jdt_ref = jd_data[0]
 
 
-            # Compute relative time
-            time_data = (jd_data - jdt_ref)*86400
+            # Compute the relative times from the differences of the times, to the microsecond
+            time_data = np.array([(dt - dt_list[0]).total_seconds() for dt in dt_list])
 
 
             # Compute RA/Dec
@@ -187,6 +221,11 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
 
 
     if no_prepare:
+
+        # Take the earliest reference time of the loaded observations
+        if meteor_list:
+            jdt_ref = min([meteor.jdt_ref for meteor in meteor_list])
+
         return jdt_ref, meteor_list
 
     else:

@@ -377,8 +377,9 @@ class ObservedPoints(object):
             # Make sure the excluded time is within the observations
             if (excluded_time_min >= np.min(self.time_data)) and (excluded_time_max <= np.max(time_data)):
 
+                # Start from the first and the last used point, as the indices count only the used points
                 excluded_indx_min = 0
-                excluded_indx_max = len(self.time_data) - 1
+                excluded_indx_max = np.count_nonzero(self.ignore_list == 0) - 1
 
                 # Find indices of excluded times, taking the ignored points into account
                 for i, t in enumerate(self.time_data[self.ignore_list == 0]):
@@ -3204,8 +3205,8 @@ class Trajectory(object):
                 the other vs. length). False by default.
             plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
             traj_id: [str] Trajectory solution identifier. None by default.
-            reject_n_sigma_outliers: [float] Reject angular outliers that are n sigma outside the fit.
-                This value is 3 (sigma) by default.
+            reject_n_sigma_outliers: [float] Reject angular outliers whose residual is above the mean plus n
+                times the RMS of the residuals of the used picks. This value is 3 (sigma) by default.
             mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel processing. None by default,
                 which means that all cores will be used.
             fixed_times: [dict] Dictionary of fixed times for each station. None by default, meaning that
@@ -7650,20 +7651,31 @@ class Trajectory(object):
                 # Remove all picks which deviate more than N sigma in angular residuals
                 for obs in self.observations:
 
-                    # Find the indices of picks which are within N sigma
-                    good_picks = obs.ang_res < (np.mean(obs.ang_res) \
-                        + self.reject_n_sigma_outliers*obs.ang_res_std)
+                    # Skip ignored stations
+                    if obs.ignore_station:
+                        continue
+
+                    # Skip stations with fewer than 4 used picks
+                    used = obs.ignore_list == 0
+                    if np.count_nonzero(used) < 4:
+                        continue
+
+                    # Find the used picks within N sigma of the used picks (the RMS of the residuals is
+                    #   computed from the used picks only)
+                    good_picks = used & (obs.ang_res < (np.mean(obs.ang_res[used]) \
+                        + self.reject_n_sigma_outliers*obs.ang_res_std))
 
                     # If the number of good picks is below 4, do not remove any picks
                     if np.count_nonzero(good_picks) < 4:
                         continue
 
-                    # Check if any picks were removed
-                    if np.count_nonzero(good_picks) < len(obs.ang_res):
-                        picks_rejected += len(obs.ang_res) - np.count_nonzero(good_picks)
+                    # Check if any used picks are rejected
+                    rejected = used & (~good_picks)
+                    if np.any(rejected):
+                        picks_rejected += np.count_nonzero(rejected)
 
                         # Ignore bad picks
-                        obs.ignore_list[~good_picks] = 1
+                        obs.ignore_list[rejected] = 1
 
 
                 # Run only if some picks were rejected
@@ -7692,7 +7704,7 @@ class Trajectory(object):
 
                 else:
                     if self.verbose:
-                        print("All picks are within 3 sigma...")
+                        print("All picks are within {:.1f} sigma...".format(self.reject_n_sigma_outliers))
 
 
             else:
