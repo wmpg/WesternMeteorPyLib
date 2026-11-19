@@ -32,8 +32,8 @@ python -m wmpl.Utils.AlphaBeta /path/to/20200109_232639_trajectory.pickle --erro
 
 The plots are saved as `<timestamp>_alpha_beta_fit.png`, `_alpha_beta_survival.png`,
 `_alpha_beta_dyn_pressure.png`, `_alpha_beta_mag_vs_dyn_pressure.png` and, with `--errors`,
-`_alpha_beta_errors.png` and `_alpha_beta_errors_survival.png`. `--dens` and `--ga` set the bulk density and
-the product of the drag and the shape coefficients used for the masses (3500 kg/m^3 and 0.55 by default).
+`_alpha_beta_errors.png`. `--dens` and `--ga` set the bulk density and the product of the drag and the shape
+coefficients used for the masses (3500 kg/m^3 and 0.55 by default).
 
 ---
 
@@ -76,9 +76,7 @@ printed:
 ```
 
 `--errors` also gives the Wald uncertainties from the covariance of the fit, which are propagated into the
-masses, and makes two plots of the uncertainties, one in alpha and beta (`_alpha_beta_errors.png`) and one in
-the space of the survival diagram, ln(alpha*sin(slope)) and ln(beta), with the final mass lines and the fall
-zones behind the likelihood (`_alpha_beta_errors_survival.png`):
+masses, and makes the plot of the uncertainties (`_alpha_beta_errors.png`):
 
 - The main panel shows the likelihood on a grid of alpha and beta (with V_e fitted at every point) and its 1, 2
   and 3 sigma regions of two parameters. The Wald region of the same level is drawn in red for comparison.
@@ -120,12 +118,8 @@ profile region matches the Wald region:
 
 ![Uncertainties of alpha and beta of the Croatia fireball](figures/AlphaBeta_errors.png)
 
-In the space of the survival diagram, the region lies below the 50 g line of mu = 0 and above the 50 g line of
-mu = 2/3:
-
-![Uncertainties of alpha and beta of the Croatia fireball on the survival diagram](figures/AlphaBeta_errors_survival.png)
-
-On the whole survival diagram the 95% region is small compared to the distance to the 1 kg lines:
+On the survival diagram the 95% region lies between the 50 g lines of mu = 0 and mu = 2/3, and it is small
+compared to the distance to the 1 kg lines:
 
 ![The Croatia fireball on the meteorite survival diagram](figures/AlphaBeta_survival.png)
 

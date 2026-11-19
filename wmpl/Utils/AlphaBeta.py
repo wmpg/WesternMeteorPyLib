@@ -3630,13 +3630,9 @@ def profileIntervalText(profile, name, fmt="{:.3g}", notes=True):
 
 
 
-def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, survival=False, slope=None, \
-    mass_thresholds=(1.0, 0.05), dens=3500, shape_coeff=0.55, gamma=1.0):
+def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None):
     """ Plot the uncertainties of alpha and beta of the fit to the lag: the likelihood on the 2D grid of alpha
-        and beta with its 1, 2 and 3 sigma regions, and the profiles of alpha and beta on the sides. The axes
-        are alpha and beta, or with survival=True the axes of the meteorite survival diagram
-        (plotAlphaBetaSurvivalDiagram()), ln(alpha*sin(slope)) and ln(beta), with the final mass lines and
-        the fall zones behind the likelihood.
+        and beta with its 1, 2 and 3 sigma regions, and the profiles of alpha and beta on the sides.
 
     Arguments:
         profile: [dict] Result of profileAlphaBetaLag().
@@ -3648,36 +3644,12 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, survi
             Wald region of the same confidence level as the profile intervals is drawn for comparison.
             None by default.
         title: [str] Title of the plot. None by default.
-        survival: [bool] Plot in the space of the meteorite survival diagram. False by default.
-        slope: [float] Entry angle above the horizon (radians), needed if survival is True. None by default.
-        mass_thresholds: [tuple] Final masses of the lines of the survival diagram (kg). (1.0, 0.05) by
-            default.
-        dens: [float] Bulk density (kg/m^3), see alphaBetaMasses(). 3500 by default.
-        shape_coeff: [float] Shape coefficient, see alphaBetaMasses(). 0.55 by default.
-        gamma: [float] Drag parameter, see alphaBetaMasses(). 1.0 by default.
 
     Return:
         fig: [matplotlib figure] The figure.
     """
 
     import matplotlib.pyplot as plt
-
-    if survival and (slope is None):
-        raise ValueError("The slope is needed to plot in the space of the survival diagram.")
-
-    def _axisValue(value, name):
-        """ Value of alpha or beta on its axis. """
-
-        value = np.asarray(value, dtype=np.float64)
-
-        if not survival:
-            return value
-
-        if name == 'alpha':
-            return np.log(value) + np.log(np.sin(slope))
-
-        return np.log(value)
-
 
     fig = plt.figure(figsize=(10, 8.5))
     grid_spec = fig.add_gridspec(2, 2, width_ratios=[3, 1.2], height_ratios=[1, 3])
@@ -3690,16 +3662,12 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, survi
     ci = profile['ci']
     threshold = profile['threshold']
 
-    grid_x = _axisValue(profile['grid_alpha'], 'alpha')
-    grid_y = _axisValue(profile['grid_beta'], 'beta')
+    grid_x = profile['grid_alpha']
+    grid_y = profile['grid_beta']
     grid_delta_chi2 = profile['grid_delta_chi2']
 
-    # Plot the extent of the grid in the log space of the survival diagram, the 3 sigma region with a margin
-    #   in the linear space, or the extent of the profiles without the grid
-    if grid_delta_chi2.size and survival:
-        x_range = (grid_x[0], grid_x[-1])
-        y_range = (grid_y[0], grid_y[-1])
-    elif grid_delta_chi2.size:
+    # Plot the 3 sigma region with a margin, or the extent of the profiles without the grid
+    if grid_delta_chi2.size:
         inside = grid_delta_chi2 <= scipy.stats.chi2.ppf(0.9973, 2)
         x_mesh, y_mesh = np.meshgrid(grid_x, grid_y)
         x_min, x_max = np.min(x_mesh[inside]), np.max(x_mesh[inside])
@@ -3707,31 +3675,15 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, survi
         x_range = (x_min - 0.15*(x_max - x_min), x_max + 0.15*(x_max - x_min))
         y_range = (max(y_min - 0.15*(y_max - y_min), 0.0), y_max + 0.15*(y_max - y_min))
     else:
-        x_range = tuple(_axisValue(profile['alpha_profile'][0][[0, -1]], 'alpha'))
-        y_range = tuple(_axisValue(profile['beta_profile'][0][[0, -1]], 'beta'))
+        x_range = tuple(profile['alpha_profile'][0][[0, -1]])
+        y_range = tuple(profile['beta_profile'][0][[0, -1]])
 
+    # Mark the best fit
+    handles = [ax_main.scatter([alpha], [beta], color='k', marker='+', s=80, zorder=4)]
+    labels = ["Best fit"]
 
-    ### Plot the survival diagram or the best fit ###
-
-    if survival:
-
-        plotAlphaBetaSurvivalDiagram(alpha, beta, slope, mass_thresholds=mass_thresholds, dens=dens, \
-            shape_coeff=shape_coeff, gamma=gamma, x_range=x_range, y_range=y_range, axes=ax_main)
-
-        # Move the legend of the survival diagram to its own panel
-        handles, labels = ax_main.get_legend_handles_labels()
-        ax_main.get_legend().remove()
-
-        ax_main.set_xlabel(r"$\ln(\alpha \sin(\mathrm{slope}))$")
-        ax_main.set_ylabel(r"$\ln(\beta)$")
-
-    else:
-
-        handles = [ax_main.scatter([alpha], [beta], color='k', marker='+', s=80, zorder=4)]
-        labels = ["Best fit"]
-
-        ax_main.set_xlabel("Alpha")
-        ax_main.set_ylabel("Beta")
+    ax_main.set_xlabel("Alpha")
+    ax_main.set_ylabel("Beta")
 
 
     ### Plot the likelihood with the 1, 2 and 3 sigma regions of two parameters ###
@@ -3761,8 +3713,7 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, survi
         log_bounds = _logAlphaBetaBounds()
         ellipse = np.exp(np.clip(ellipse, log_bounds[0][:, None], log_bounds[1][:, None]))
 
-        handles += ax_main.plot(_axisValue(ellipse[0], 'alpha'), _axisValue(ellipse[1], 'beta'), \
-            color='tab:red', lw=1.0, zorder=3)
+        handles += ax_main.plot(ellipse[0], ellipse[1], color='tab:red', lw=1.0, zorder=3)
         labels.append("Wald {:.3g}% (2 params)".format(ci))
 
     ax_main.set_xlim(x_range)
@@ -3776,9 +3727,8 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, survi
     for name, ax, horizontal in [('alpha', ax_alpha, True), ('beta', ax_beta, False)]:
 
         values, delta_chi2 = profile[name + '_profile']
-        values = _axisValue(values, name)
-        lower = _axisValue(profile[name + '_lower'], name)
-        upper = _axisValue(profile[name + '_upper'], name)
+        lower = profile[name + '_lower']
+        upper = profile[name + '_upper']
 
         if horizontal:
             ax.plot(values, delta_chi2, color='k', lw=1.0)
@@ -6456,9 +6406,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('-e', '--errors', action="store_true", \
         help="Estimate and report alpha/beta and initial/final mass uncertainties, from the covariance "
         "of the fit of the lag. Propagates the fitted (ln alpha, ln beta) covariance into the masses, plots "
-        "the profile likelihood of alpha and beta, also in the space of the survival diagram, draws its 1 "
-        "sigma and 95% regions on the survival diagram, and the band of the models within the 95% region "
-        "on the velocities and the lag.")
+        "the profile likelihood of alpha and beta, draws its 1 sigma and 95% regions on the survival diagram, "
+        "and the band of the models within the 95% region on the velocities and the lag.")
 
     arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
         help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
@@ -6986,13 +6935,6 @@ if __name__ == "__main__":
                 title="{:s}, alpha-beta fit to the lag".format(traj.file_name))
 
             _finishPlot(fig_err, "alpha_beta_errors")
-
-            # The same in the space of the survival diagram
-            fig_err = plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, \
-                title="{:s}, alpha-beta fit to the lag".format(traj.file_name), survival=True, slope=slope, \
-                dens=cml_args.dens, shape_coeff=cml_args.ga)
-
-            _finishPlot(fig_err, "alpha_beta_errors_survival")
 
 
 

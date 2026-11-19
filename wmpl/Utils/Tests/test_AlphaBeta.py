@@ -836,8 +836,6 @@ def testProfileAlphaBetaLagUpperLimit():
     # The plot is drawn also when the Wald region is far larger than the bounds of the fit
     fig = plotAlphaBetaLagProfile(profile, alpha, beta, errors=errors, title="Test")
     plt.close(fig)
-    fig = plotAlphaBetaLagProfile(profile, alpha, beta, errors=errors, survival=True, slope=SLOPE)
-    plt.close(fig)
 
     # The models within the 95% region include the best fit
     region_alpha, region_beta, region_v_init = profileRegionAlphaBetaLag(profile)
