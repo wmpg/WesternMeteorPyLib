@@ -206,6 +206,11 @@ pressure are usually still well constrained.
 
 ## Limits
 
+- The slope of the alpha-beta model is the apparent elevation of the radiant. If it is negative, the direction of
+  the trajectory solution is likely reversed (check its timing), and the local slope of the observed path along
+  the direction of the motion is used instead. A meteor which climbs along the observed path, e.g. an
+  Earth-grazer, cannot be fitted by the model, and AlphaBeta stops with an error.
+
 - The intervals assume that the lag residuals are independent. A station with a timing or a geometric offset
   makes the residuals of all its points correlated, and the real intervals are then wider. Check the residuals of
   every station in the fit plot.

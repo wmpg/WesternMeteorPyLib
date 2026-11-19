@@ -3762,17 +3762,20 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, fig=N
     grid_y = profile['grid_beta']
     grid_delta_chi2 = profile['grid_delta_chi2']
 
-    # Plot the 3 sigma region with a margin, or the extent of the profiles without the grid
+    # Plot the 3 sigma region of the grid with a margin, or the extent of the profiles if the grid has fewer
+    #   than two points in it along an axis (or no grid)
+    x_range = tuple(profile['alpha_profile'][0][[0, -1]])
+    y_range = tuple(profile['beta_profile'][0][[0, -1]])
     if grid_delta_chi2.size:
         inside = grid_delta_chi2 <= scipy.stats.chi2.ppf(0.9973, 2)
         x_mesh, y_mesh = np.meshgrid(grid_x, grid_y)
-        x_min, x_max = np.min(x_mesh[inside]), np.max(x_mesh[inside])
-        y_min, y_max = np.min(y_mesh[inside]), np.max(y_mesh[inside])
-        x_range = (x_min - 0.15*(x_max - x_min), x_max + 0.15*(x_max - x_min))
-        y_range = (max(y_min - 0.15*(y_max - y_min), 0.0), y_max + 0.15*(y_max - y_min))
-    else:
-        x_range = tuple(profile['alpha_profile'][0][[0, -1]])
-        y_range = tuple(profile['beta_profile'][0][[0, -1]])
+        if np.any(inside):
+            x_min, x_max = np.min(x_mesh[inside]), np.max(x_mesh[inside])
+            y_min, y_max = np.min(y_mesh[inside]), np.max(y_mesh[inside])
+            if x_max > x_min:
+                x_range = (x_min - 0.15*(x_max - x_min), x_max + 0.15*(x_max - x_min))
+            if y_max > y_min:
+                y_range = (max(y_min - 0.15*(y_max - y_min), 0.0), y_max + 0.15*(y_max - y_min))
 
     # Mark the best fit
     handles = [ax_main.scatter([alpha], [beta], color='k', marker='+', s=80, zorder=4)]
@@ -7003,6 +7006,26 @@ if __name__ == "__main__":
         vel_end = alphaBetaVelocity(ht_data_rescaled[0], alpha, beta, v_init)
 
         slope = traj.orbit.elevation_apparent_norot
+
+        # The apparent elevation of the radiant is negative if the direction of the solution is reversed, or
+        #   if the meteor climbs, e.g. an Earth-grazer. Then the local slope of the observed path along the
+        #   direction of the motion is used, and if the meteor climbs, the alpha-beta model does not apply
+        if slope <= 0:
+
+            motion_sign = np.sign(np.polyfit(time_data, length_data, 1)[0])
+            slope = np.arcsin(np.clip(-motion_sign*np.polyfit(length_data, ht_data, 1)[0], -1.0, 1.0))
+
+            if slope <= 0:
+                print()
+                print("ERROR: The meteor climbs along the observed path (slope {:.1f} deg), e.g. an " \
+                    "Earth-grazer or a solution with a wrong timing, and the alpha-beta model needs a " \
+                    "descending meteor".format(np.degrees(slope)))
+                sys.exit(1)
+
+            print("NOTE: The apparent elevation of the radiant is {:.1f} deg, so the direction of the " \
+                "trajectory solution is likely reversed, check its timing. The local slope of the observed " \
+                "path, {:.1f} deg, is used instead".format(np.degrees(traj.orbit.elevation_apparent_norot), \
+                np.degrees(slope)))
 
         # Optional independent slope/density uncertainties (only used with --errors). Velocities
         #   are deliberately left exact: vel_end above is DERIVED from the fitted alpha/beta, so

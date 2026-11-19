@@ -871,6 +871,25 @@ def testProfileAlphaBetaLagUpperLimit():
 
 
 
+def testPlotAlphaBetaLagProfileCoarseGrid():
+    """ The plot of the uncertainties should be drawn also when the grid is too coarse to have points within
+        the 3 sigma region, from the extent of the profiles.
+    """
+
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+    v_init, alpha, beta, _ = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=2)
+
+    fig = plotAlphaBetaLagProfile(profile, alpha, beta)
+    plt.close(fig)
+
+
+
 def testFormatMassAndMu():
     """ Masses are written with a readable unit and mu = 2/3 as a fraction. """
 
