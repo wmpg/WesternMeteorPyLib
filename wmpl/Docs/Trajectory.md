@@ -38,6 +38,7 @@ Run any of them with `--help` for the full list of options. The ones that matter
 | `-d`, `--disablemc` | Only compute the geometric solution, skipping the Monte Carlo step. Fast, but gives no uncertainties. |
 | `-t`, `--maxtoffset` | Maximum timing offset allowed between stations, in seconds, 5 s by default. With 3 or more stations, a station whose clock needs a larger offset is ignored. |
 | `-v`, `--vinitht` | Estimate the initial velocity as the average above this height, in km. |
+| `--disableairrot` | Keep the air at rest when computing the drop across the path (see [The drop](#the-drop)). |
 | `-l`, `--plotallspatial` | Save the full set of diagnostic plots. |
 
 To see the solver working on a synthetic example without any data of your own:
@@ -145,6 +146,36 @@ without gravity along the path). The drop is the integral of `w` over time. Grav
 centre of the Earth at every point along the line, so it also turns with the curvature of the Earth along
 long, shallow paths (`gravityDropTable()` in `Trajectory.py`).
 
+The air rotates with the Earth, eastwards at up to 465 m/s at the equator, so the drag acts against the
+velocity of the meteor relative to the air, not against its velocity in ECI. The drag pulls the speed
+across the path towards the speed of the air across the path, so the equation is
+
+```
+dw/dt = g_across + a_drag/(v - u_along)*(u_across - w)
+```
+
+where `u = omega x r` is the velocity of the air at the points of the line. This moves a decelerating
+fireball across its line even without gravity. On a fireball which slows from 13 to 3.3 km/s at 45 deg N,
+integrated with the rotating air, the radiant is within 2.1 arcsec and the positions within 0.8 m, against
+525 arcsec and 284 m with the air at rest in the solver. The rotating air is used by default.
+`Trajectory(air_rotation=False)`, or `--disableairrot` on the command line, keeps the air at rest in ECI.
+
+340 fireballs of the GMN and UWO databases were solved without the Monte Carlo, with and without the
+rotating air. The radiants moved by 161 arcsec (median) and by 916 arcsec at the 90th percentile,
+depending on how much the fireball slows:
+
+| Speed lost (1 - v_avg/v_init) | Events | Radiant moved (median) | Change of the angular residuals (median) |
+| :--- | ---: | ---: | ---: |
+| below 5 % | 100 | 17 arcsec | 0 % |
+| 5 - 15 % | 120 | 247 arcsec | -1.6 % |
+| 15 - 30 % | 79 | 374 arcsec | -2.9 % |
+| above 30 % | 11 | 1747 arcsec | -30 % |
+
+The residuals of all 11 fireballs which lost more than 30 % of their speed went down. In some events the
+residuals of single stations at the slow end went up, mostly of uncalibrated casual videos whose picks
+could have been adjusted to the old solution. Solving takes 12 % more CPU time, as the minimisation
+needs more steps.
+
 Before, every point was dropped by the free fall `g*t^2/2` along its own vertical. That is right for a
 short, fast meteor, but a decelerating fireball drops much less than a free fall, and the vertical is not
 the direction across the path. The figure shows the drop of two fireballs below the line of their beginning,
@@ -201,6 +232,9 @@ line is weakly constrained, and events where the minimisation stopped early befo
 Pickles solved before the speeds were added have no `traj.gravity_vel`. DragFit and DynamicMassFit drop
 their points vertically, as the solver did when it solved them, so they stay consistent with their line.
 Solve them again to use the new drop.
+
+Pickles solved before the rotating air was added are solved again with it, so their radiants move as in the
+table above. Use `--disableairrot` to solve them again with the air at rest.
 
 ### Limits
 

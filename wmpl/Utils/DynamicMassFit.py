@@ -217,7 +217,7 @@ def interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False):
 
 
 
-def pointOnTrajectory(traj, length, t):
+def pointOnTrajectory(traj, length, t, air_rotation=None):
     """ Compute the ECI coordinates of a point on the fitted trajectory, including the gravity drop.
 
         The point lies at the given length from the state vector along the radiant, displaced by the gravity
@@ -230,9 +230,16 @@ def pointOnTrajectory(traj, length, t):
         length: [float] Length from the state vector along the trajectory (m), positive towards the end.
         t: [float] Time of the point relative to the trajectory reference time (s).
 
+    Keyword arguments:
+        air_rotation: [bool] Take the drag against the rotating air into account in the drop. None by default,
+            in which case the setting of the solution is used.
+
     Return:
         [ndarray] ECI coordinates of the point (m).
     """
+
+    if air_rotation is None:
+        air_rotation = getattr(traj, 'air_rotation', False)
 
     P = traj.state_vect_mini - length*traj.radiant_eci_mini
 
@@ -247,7 +254,7 @@ def pointOnTrajectory(traj, length, t):
             eci0 = gravityDropOrigin(traj.observations, traj.state_vect_mini, traj.radiant_eci_mini, \
                 traj.gravity_vel, t0)
             P = P + gravityDropVectors(eci0, traj.radiant_eci_mini, [t - t0], traj.gravity_vel, t0, \
-                getattr(traj, 'gravity_factor', 1.0))[0]
+                getattr(traj, 'gravity_factor', 1.0), air_rotation=air_rotation)[0]
 
         else:
 
@@ -349,10 +356,16 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, atm_table
         - earthRotationVelocity(pointOnTrajectory(traj, meas_len, meas_time))
     direction_ground /= vectMag(direction_ground)
 
+    # Add the gravity drop from the evaluation time to the final time without the rotating air, as the
+    #   rotation of the ground below already carries the point with the air
+    drop_eci = pointOnTrajectory(traj, meas_len, meas_time) \
+        + pointOnTrajectory(traj, meas_len, total_time, air_rotation=False) \
+        - pointOnTrajectory(traj, meas_len, meas_time, air_rotation=False)
+
     # Move the simulated length along it with the gravity drop at the final time, and rotate the point with
     #   the ground to the final time
-    final_eci = rotateVector(pointOnTrajectory(traj, meas_len, total_time) \
-        + sr.frag_main.length*direction_ground, np.array([0.0, 0.0, 1.0]), EARTH_ROTATION_RATE*final_time)
+    final_eci = rotateVector(drop_eci + sr.frag_main.length*direction_ground, np.array([0.0, 0.0, 1.0]), \
+        EARTH_ROTATION_RATE*final_time)
 
     t_obs = np.concatenate([obs.time_data for obs in traj.observations])
 

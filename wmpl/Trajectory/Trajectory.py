@@ -54,6 +54,7 @@ from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, fin
     confidenceInterval, medianStddev, isGraphConnected
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
+from wmpl.Utils.Physics import earthRotationVelocity
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot, stationColors
 from wmpl.Utils.PlotOrbits import plotOrbits
@@ -882,7 +883,8 @@ def gravityDropReference(observations, state_vect, radiant_eci, v_init=None):
 
 
 def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
-                              gravity_factor=1.0, v0z=None, r0=None, gravity_vel=None, smoothing=0.0):
+                              gravity_factor=1.0, v0z=None, r0=None, gravity_vel=None, air_rotation=True, \
+                              smoothing=0.0):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -905,6 +907,8 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
         gravity_vel: [tuple] Speeds of the meteor against time (see Trajectory.gravity_vel), with which the
             drop is computed across the path and slowed by the drag (see gravityDropTable). If None, the
             meteor is dropped vertically with applyGravityDrop, using v0z and r0.
+        air_rotation: [bool] Take the drag against the air which rotates with the Earth into account in the
+            drop across the path (see gravityDropTable). True by default.
         smoothing: [float] Smoothing of the angles near zero (rad). Each angle is replaced by
             sqrt(angle**2 + smoothing**2) - smoothing, which is smooth at zero, as the sum of the angles has
             a kink where an angle is zero, at which the Nelder-Mead minimization can stop (see
@@ -963,7 +967,8 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
         if len(time_rel):
 
             drops = gravityDropVectors(gravityDropOrigin(observations, state_vect, radiant_eci, \
-                gravity_vel, t0), radiant_eci, time_rel, gravity_vel, t0, gravity_factor)
+                gravity_vel, t0), radiant_eci, time_rel, gravity_vel, t0, gravity_factor, \
+                air_rotation=air_rotation)
 
             _, rad_cpa, _ = findClosestPoints_vect(stat_eci, meas_eci, rad_cpa + drops, radiant_eci)
 
@@ -1015,13 +1020,14 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
-    r0=None, gravity_vel=None, smoothing=0.0):
+    r0=None, gravity_vel=None, air_rotation=True, smoothing=0.0):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
     
     return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity,\
-        gravity_factor=gravity_factor, v0z=v0z, r0=r0, gravity_vel=gravity_vel, smoothing=smoothing)
+        gravity_factor=gravity_factor, v0z=v0z, r0=r0, gravity_vel=gravity_vel, air_rotation=air_rotation, \
+        smoothing=smoothing)
 
 
 
@@ -3064,12 +3070,14 @@ def gravityDropVelocity(time_table, vel, t0, t_drop):
 
 
 
-def gravityDropTable(state_vect, radiant_eci, time_rel, vel, gravity_factor):
+def gravityDropTable(state_vect, radiant_eci, time_rel, vel, gravity_factor, air_rotation=True):
     """ Compute the drop of the meteor below the fitted line by gravity at the given times. Only gravity
         across the path drops the meteor below the line, as gravity along the path changes the speed, which
         the lengths along the line already have. The drag slows the speed of the drop as it slows the meteor,
         so the speed across the path follows dw/dt = g_across - (a_drag/v)*w, with the speed and the line
-        tangent to the path at the origin.
+        tangent to the path at the origin. The air rotates with the Earth, so the drag also pulls the meteor
+        towards the velocity u of the air across the path, as
+        dw/dt = g_across + a_drag/(v - u_along)*(u_across - w).
 
     Arguments:
         state_vect: [ndarray] ECI coordinates of the point on the line at the origin of the drop (m).
@@ -3077,6 +3085,10 @@ def gravityDropTable(state_vect, radiant_eci, time_rel, vel, gravity_factor):
         time_rel: [ndarray] Times from the origin of the drop (s), increasing, with one of them 0.
         vel: [ndarray] Speeds of the meteor at those times (m/s).
         gravity_factor: [float] Factor by which gravity is multiplied.
+
+    Keyword arguments:
+        air_rotation: [bool] Take the drag against the air which rotates with the Earth into account. If
+            False, the air is at rest in ECI. True by default.
 
     Return:
         drop: [ndarray] ECI vectors of the drop at the given times (m), one row per time.
@@ -3106,12 +3118,19 @@ def gravityDropTable(state_vect, radiant_eci, time_rel, vel, gravity_factor):
     g_along = np.dot(g, motion)
     g_across = g - np.outer(g_along, motion)
 
-    # The drag decelerates the meteor by the change of the speed, without the gravity along the path
-    drag_rate = np.maximum(g_along - np.gradient(vel, time_rel), 0.0)/vel
+    # Take the velocity of the air, which rotates with the Earth, at the points along the line
+    air = earthRotationVelocity(points) if air_rotation else np.zeros_like(points)
+    air_along = np.dot(air, motion)
+    air_across = air - np.outer(air_along, motion)
+
+    # The drag decelerates the meteor by the change of the speed, without the gravity along the path, against
+    #   the speed relative to the air
+    drag_rate = np.maximum(g_along - np.gradient(vel, time_rel), 0.0)/np.maximum(vel - air_along, \
+        GRAVITY_DROP_MIN_VEL)
 
     # Integrate the speed of the drop with the factor by which the drag damps it, and then the drop
     damping = np.exp(-cumulative(drag_rate))
-    w = damping[:, None]*cumulative(g_across/damping[:, None])
+    w = damping[:, None]*cumulative((g_across + drag_rate[:, None]*air_across)/damping[:, None])
     drop = cumulative(w)
 
     return drop
@@ -3140,7 +3159,7 @@ def gravityDropOrigin(observations, state_vect, radiant_eci, gravity_vel, t0):
 
 
 
-def gravityDropVectors(state_vect, radiant_eci, t_drop, gravity_vel, t0, gravity_factor):
+def gravityDropVectors(state_vect, radiant_eci, t_drop, gravity_vel, t0, gravity_factor, air_rotation=True):
     """ Compute the drop of the meteor below the fitted line by gravity at the given times, from a table of
         its speeds (see gravityDropTable).
 
@@ -3151,6 +3170,10 @@ def gravityDropVectors(state_vect, radiant_eci, t_drop, gravity_vel, t0, gravity
         gravity_vel: [tuple] Times (s) and speeds (m/s) of the meteor, see Trajectory.gravity_vel.
         t0: [float] Time of the origin of the drop, as the times of the observations (s).
         gravity_factor: [float] Factor by which gravity is multiplied.
+
+    Keyword arguments:
+        air_rotation: [bool] Take the drag against the air which rotates with the Earth into account (see
+            gravityDropTable). True by default.
 
     Return:
         drop: [ndarray] ECI vectors of the drop at the given times (m), one row per time.
@@ -3166,7 +3189,8 @@ def gravityDropVectors(state_vect, radiant_eci, t_drop, gravity_vel, t0, gravity
     time_grid = np.union1d(np.linspace(min(np.min(t_drop), 0.0), max(np.max(t_drop), 0.0), \
         GRAVITY_DROP_POINTS), [0.0])
     vel = gravityDropVelocity(*gravity_vel, t0, time_grid)
-    drop_grid = gravityDropTable(state_vect, radiant_eci, time_grid, vel, gravity_factor)
+    drop_grid = gravityDropTable(state_vect, radiant_eci, time_grid, vel, gravity_factor, \
+        air_rotation=air_rotation)
 
     return np.column_stack([np.interp(t_drop, time_grid, drop_grid[:, i]) for i in range(3)])
 
@@ -3232,7 +3256,7 @@ class Trajectory(object):
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
-        save_kml=False, kml_measured=False):
+        save_kml=False, kml_measured=False, air_rotation=True):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -3303,6 +3327,9 @@ class Trajectory(object):
                 trajectory of the drag fit, see Utils.TrajectoryKML.trajectoryToKML(). False by default.
             kml_measured: [bool] Add the projected points, lines of sight and residuals of the measurements to
                 the 3D KML. False by default.
+            air_rotation: [bool] Take the drag against the air, which rotates with the Earth, into account in
+                the gravity drop across the path (see gravityDropTable). True by default. If False, the air
+                is at rest in ECI.
 
         """
 
@@ -3415,6 +3442,9 @@ class Trajectory(object):
 
         # Apply the correction for gravity when estimating the trajectory
         self.gravity_correction = gravity_correction
+
+        # Take the drag against the rotating air into account in the gravity drop
+        self.air_rotation = air_rotation
 
         # Gravity correction factor, limit to 0 - 1
         self.gravity_factor = gravity_factor
@@ -4718,7 +4748,8 @@ class Trajectory(object):
             return None
 
         return gravityDropVectors(gravityDropOrigin(observations, state_vect, radiant_eci, self.gravity_vel, \
-            t0), radiant_eci, obs.time_data - t0, self.gravity_vel, t0, self.gravity_factor)
+            t0), radiant_eci, obs.time_data - t0, self.gravity_vel, t0, self.gravity_factor, \
+            air_rotation=getattr(self, 'air_rotation', False))
 
 
 
@@ -7255,6 +7286,10 @@ class Trajectory(object):
         if not hasattr(self, 'gravity_vel'):
             self.gravity_vel = None
 
+        # Trajectories pickled before the rotation of the air was added are solved with it
+        if not hasattr(self, 'air_rotation'):
+            self.air_rotation = True
+
 
         ### Recompute the reference JD and all times so that the first time starts at 0 ###
 
@@ -7423,7 +7458,7 @@ class Trajectory(object):
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
              self.best_conv_inter.radiant_eci, weights=weights, \
              gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, \
-             v0z=self.v0z, r0=self.gravity_r0, gravity_vel=self.gravity_vel
+             v0z=self.v0z, r0=self.gravity_r0, gravity_vel=self.gravity_vel, air_rotation=self.air_rotation
              )
 
         if self.verbose:
@@ -7436,7 +7471,7 @@ class Trajectory(object):
         # Perform the minimization of angle deviations. The gravity will only be compensated for in the second
         #   pass, which has the vertical velocity from the first
         minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), \
-            self.gravity_factor, self.v0z, self.gravity_r0, self.gravity_vel)
+            self.gravity_factor, self.v0z, self.gravity_r0, self.gravity_vel, self.air_rotation)
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
             method=nelderMeadLine)
 
@@ -7509,7 +7544,7 @@ class Trajectory(object):
             print('p0:', p0)
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
                 weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z, \
-                self.gravity_r0, self.gravity_vel), bounds=bounds, method='SLSQP')
+                self.gravity_r0, self.gravity_vel, self.air_rotation), bounds=bounds, method='SLSQP')
 
             # Keep the unbounded solution if it converged and the bounded one did not converge or is worse
             if unbounded_solution.success and ((not minimize_solution.success) or \

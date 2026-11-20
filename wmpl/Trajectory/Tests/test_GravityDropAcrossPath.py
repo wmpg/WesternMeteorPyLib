@@ -1,7 +1,8 @@
 """ Tests of the gravity drop across the path, slowed by the drag, in the trajectory solver.
 
 The meteoroids are integrated exactly in ECI coordinates, under the central gravity of the Earth, the drag
-and the mass loss (SyntheticTrajectory.GravityDragMeteor), and observed without noise from three stations.
+and the mass loss (SyntheticTrajectory.GravityDragMeteor), with the air at rest or rotating with the Earth,
+and observed without noise from three stations.
 The solver must recover their radiant and their positions.
 
 Run with pytest:
@@ -21,6 +22,7 @@ matplotlib.use('Agg')
 from wmpl.Trajectory.Trajectory import applyGravityDrop, gravityDropVectors, solutionDropTimeOrigin
 from wmpl.Trajectory.Tests.SyntheticTrajectory import GravityDragMeteor, observeMeteor, observeStraightMeteor, \
     JDT_REF
+from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory
 from wmpl.Utils.Math import angleBetweenVectors, vectMag
 
@@ -87,6 +89,55 @@ def testShallowFireball():
 
     assert radiant_error < 1.0
     assert position_error < 3.0
+
+
+
+def testDeceleratingFireballInRotatingAir():
+    """ Check the decelerating fireball in the air which rotates with the Earth. The drag acts against the
+        velocity relative to the air, so it pulls the fireball across its line. With the air at rest in the
+        solver, its radiant was off by 525 arcsec and its positions by 284 m.
+    """
+
+    meteor = GravityDragMeteor(13000.0, 210.0, 60.0, 50.0, 10.0, ht_beg=85000.0, air_rotation=True)
+    _, radiant_error, position_error = _solve(meteor)
+
+    print("Radiant error: {:.2f} arcsec, position error {:.2f} m".format(radiant_error, position_error))
+
+    assert radiant_error < 3.0
+    assert position_error < 1.5
+
+
+
+def testDragFitDirectionInRotatingAir():
+    """ Check that the directions of the radiant of the drag fit follow its path in the air which rotates with
+        the Earth, which turns the direction of motion of a decelerating fireball by several degrees at the
+        end.
+    """
+
+    meteor = GravityDragMeteor(13000.0, 210.0, 60.0, 50.0, 10.0, ht_beg=85000.0, air_rotation=True)
+    traj, _, _ = _solve(meteor)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        drag_fit = DragFit(traj)
+
+    # Compare the tangent of the path with the direction of the radiant along the observed part
+    max_error = 0.0
+    for length in np.linspace(drag_fit.len_first + 1000.0, drag_fit.len_last - 1000.0, 10):
+
+        tangent = drag_fit.eciAtLength(length - 10.0)[0] - drag_fit.eciAtLength(length + 10.0)[0]
+        max_error = max(max_error, np.degrees(angleBetweenVectors(tangent, \
+            drag_fit.radiantAtLength(length)[0])))
+
+    # Take the turn by the air at the last point, from the direction bent by gravity only
+    theta = np.interp(drag_fit.len_last, drag_fit.len_grid, drag_fit.bend_grid)
+    air_turn = np.degrees(angleBetweenVectors(drag_fit.radiantAtLength(drag_fit.len_last)[0], \
+        drag_fit._bentRadiant(np.array([theta]), drag_fit.eciAtLength(drag_fit.len_last))[0]))
+
+    print("Largest angle between the path and the radiant: {:.4f} deg, turn by the air at the end " \
+        "{:.2f} deg".format(max_error, air_turn))
+
+    assert max_error < 0.02
+    assert air_turn > 0.5
 
 
 
