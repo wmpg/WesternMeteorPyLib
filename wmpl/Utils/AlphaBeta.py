@@ -2330,7 +2330,8 @@ class AlphaBetaSlantColumn(object):
         """ Air column traversed by a meteor along its path, the slant column, as the height coordinate of the
             alpha-beta model. In this coordinate the model holds in any atmosphere and on a path whose slope
             changes, e.g. with the curvature of the Earth. The column is accumulated along the path from the
-            column above its first point, taken at a constant slope, and its normalized height
+            column above its first point, taken at a constant slope, integrating the density over every
+            interval between the points of the path as an exponential, and its normalized height
 
                 y = -ln(eta*sin(slope_ref)/(RHO_ATM_0*HT_NORM_CONST))
 
@@ -2372,9 +2373,14 @@ class AlphaBetaSlantColumn(object):
         ht_vertical_tab = exponentialAtmosphereHeights(self.ht_tab, self.profile_hts, self.profile_dens)
         column_vertical_top = RHO_ATM_0*HT_NORM_CONST*np.exp(-ht_vertical_tab[0]/HT_NORM_CONST)
 
-        # Accumulate the slant column along the path with the trapezoidal rule
-        column = column_vertical_top/sin_slope_top + np.concatenate([[0.0], \
-            np.cumsum(0.5*(dens_tab[1:] + dens_tab[:-1])*np.diff(self.length_tab))])
+        # Accumulate the slant column along the path, integrating every interval as an exponential, which is
+        #   exact where the density falls exponentially along the path
+        length_steps = np.diff(self.length_tab)
+        log_ratio = np.log(dens_tab[:-1]/dens_tab[1:])
+        equal_dens = np.abs(log_ratio) < 1e-12
+        column_steps = np.where(equal_dens, length_steps*dens_tab[:-1], \
+            length_steps*(dens_tab[:-1] - dens_tab[1:])/np.where(equal_dens, 1.0, log_ratio))
+        column = column_vertical_top/sin_slope_top + np.concatenate([[0.0], np.cumsum(column_steps)])
 
         # Normalized height of the column and the length of the path per unit of it
         self.ht_normed_tab = -np.log(column*sin_slope_ref/(RHO_ATM_0*HT_NORM_CONST))

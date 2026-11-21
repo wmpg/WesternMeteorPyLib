@@ -103,6 +103,7 @@ def _syntheticMeteor():
     ht_data = ht_begin - length_data*np.sin(SLOPE)
 
     _SYNTHETIC['data'] = (time_data, length_data, ht_data, station_data)
+    _SYNTHETIC['truth'] = (time_grid, length_true)
 
     return _SYNTHETIC['data']
 
@@ -182,13 +183,14 @@ def testSlantColumnOfAStraightPathInTheExponentialAtmosphere():
     ht_path = 100000.0 - length_path*np.sin(SLOPE)
     slant_column = AlphaBetaSlantColumn(length_path, ht_path, profile_hts, profile_dens, np.sin(SLOPE))
 
-    assert np.allclose(slant_column.htNormed(length_path), ht_path/HT_NORM_CONST, atol=1e-5)
+    # The intervals are integrated as exponentials, so the column is exact
+    assert np.allclose(slant_column.htNormed(length_path), ht_path/HT_NORM_CONST, atol=1e-9)
     assert np.allclose(slant_column.lengthScale(ht_path/HT_NORM_CONST), HT_NORM_CONST/np.sin(SLOPE), \
-        rtol=1e-4)
+        rtol=1e-9)
 
     # The column at given heights continues at the slope of the path beyond its ends
     ht_test = np.array([20000.0, 50000.0, 110000.0])
-    assert np.allclose(slant_column.htNormedAtHeights(ht_test), ht_test/HT_NORM_CONST, atol=1e-4)
+    assert np.allclose(slant_column.htNormedAtHeights(ht_test), ht_test/HT_NORM_CONST, atol=1e-9)
 
     # A different reference slope only shifts the column height, which changes the unit of alpha
     slant_column_ref = AlphaBetaSlantColumn(length_path, ht_path, profile_hts, profile_dens, 1.0, \
@@ -218,8 +220,8 @@ def testSlantColumnFollowsTheAirAlongThePath():
 
     assert np.allclose(length_air, length_air_true, atol=1e-6)
 
-    # The column is accumulated with the trapezoidal rule over the points, which are 400 m apart
-    assert np.allclose(slant_column.htNormed(length_air), ht_data/HT_NORM_CONST, atol=3e-4)
+    # The column is exact also with points 400 m apart
+    assert np.allclose(slant_column.htNormed(length_air), ht_data/HT_NORM_CONST, atol=1e-9)
 
 
 
@@ -264,19 +266,25 @@ def testGravityLengthAlongLine():
 
 
 def testStationLengthNoise():
-    """ The noise of every station is recovered from the second differences of its distances, and a station
-        with too few points takes the median of the others.
+    """ The noise of every station is recovered from the second differences of its distances without bias, and
+        a station with too few points takes the median of the others.
     """
 
     time_data, length_data, _, station_data = _syntheticMeteor()
 
     sigma_length = stationLengthNoise(time_data, length_data, station_data)
 
-    # The second differences also contain the part of the deceleration which the quartic misses, most for the
-    #   station with the least noise and the sparsest points
+    # A single realization scatters by 9 to 13 percent (1 sigma) for the 117 to 234 points of the stations
     for station_id, noise, _, _ in STATIONS:
-        rtol = 0.25 if (station_id == 'S3') else 0.1
-        assert np.isclose(sigma_length[station_data == station_id][0], noise, rtol=rtol), station_id
+        assert np.isclose(sigma_length[station_data == station_id][0], noise, rtol=0.3), station_id
+
+    # Over many realizations the estimate is unbiased, also for the station with the sparsest points
+    time_grid, length_true = _SYNTHETIC['truth']
+    indices = np.arange(2, len(time_grid), 4)
+    rng = np.random.RandomState(2)
+    ratios = [stationLengthNoise(time_grid[indices], length_true[indices] \
+        + rng.normal(0, 10.0, len(indices)), np.full(len(indices), 'S3'))[0]/10.0 for _ in range(200)]
+    assert abs(np.median(ratios) - 1.0) < 0.04
 
     # Add a station with five points
     time_few = np.concatenate([time_data, np.linspace(1.0, 1.2, 5)])
