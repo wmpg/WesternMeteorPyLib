@@ -924,6 +924,46 @@ def medianStddev(stddev_list, n_samples=100000):
 
 
 
+def integratedAutocorrTime(data, max_lag=None):
+    """ Compute the integrated autocorrelation time of a series, 1 plus twice the sum of its
+        autocorrelations at the lags 1, 2, ... up to the first one which is not positive. It is about 1 for
+        independent values. For values correlated in time it is the factor by which the variance of their
+        mean, and of a parameter fitted to them with a smooth model, exceeds that of independent values.
+
+    Arguments:
+        data: [ndarray] Values of the series, in time order.
+
+    Keyword arguments:
+        max_lag: [int] The sum runs over the lags below max_lag. A third of the number of values by default.
+
+    Return:
+        [float] Integrated autocorrelation time, NaN if all values are the same.
+    """
+
+    data = np.asarray(data, dtype=np.float64)
+    data = data - np.mean(data)
+    variance = np.sum(data**2)
+
+    if variance <= 0:
+        return np.nan
+
+    if max_lag is None:
+        max_lag = len(data)//3
+
+    # Add the autocorrelations until the first one which is not positive
+    tau = 1.0
+    for lag in range(1, max_lag):
+
+        rho = np.sum(data[lag:]*data[:-lag])/variance
+        if rho <= 0:
+            break
+
+        tau += 2*rho
+
+    return tau
+
+
+
 def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method="avg"):
     """Finds if points have similar sample values on the independent axis x (if they are within delta) and
         averages all y values.

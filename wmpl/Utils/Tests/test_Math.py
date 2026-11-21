@@ -9,7 +9,7 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 
 from wmpl.Utils.Math import medianStddev, circPercentile, findClosestPoints, findClosestPoints_vect, \
-    isGraphConnected
+    isGraphConnected, integratedAutocorrTime
 
 
 
@@ -136,13 +136,33 @@ def testGraphConnectivity():
 
 
 
+def testIntegratedAutocorrTime():
+    """ The autocorrelation time is about 1 for independent values and large for correlated ones. """
+
+    rng = np.random.RandomState(0)
+
+    # Independent values
+    white_noise = rng.normal(0, 1, 2000)
+    assert 1.0 <= integratedAutocorrTime(white_noise) < 1.2
+
+    # An autoregressive series with the coefficient 0.8, whose autocorrelation time is (1 + 0.8)/(1 - 0.8) = 9
+    correlated = np.zeros(20000)
+    for i in range(1, len(correlated)):
+        correlated[i] = 0.8*correlated[i - 1] + rng.normal()
+    assert 6.0 < integratedAutocorrTime(correlated) < 10.0
+
+    # A constant series has no autocorrelation
+    assert np.isnan(integratedAutocorrTime(np.ones(10)))
+
+
+
 
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testMedianStddev, testCircPercentileOfAnglesFrom0To360, \
         testCircPercentileOfAnglesFromMinus180To180, testClosestPointsOfManyLinesAreThoseOfEachLine, \
-        testGraphConnectivity]
+        testGraphConnectivity, testIntegratedAutocorrTime]
 
     for test in test_list:
         test()
