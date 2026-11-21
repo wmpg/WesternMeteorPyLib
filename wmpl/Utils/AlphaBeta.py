@@ -18,10 +18,11 @@ import scipy.stats
 import scipy.interpolate
 
 
-from wmpl.Utils.Math import meanAngle
-from wmpl.Utils.Physics import dynamicPressure, dynamicMass
+from wmpl.Utils.Math import meanAngle, vectNorm, integratedAutocorrTime
+from wmpl.Utils.Physics import dynamicPressure, dynamicMass, earthRotationVelocity
 from wmpl.Utils.Plotting import stationColors
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere
+from wmpl.Utils.TrajConversions import EARTH, G
 
 
 # Scale height
@@ -239,6 +240,41 @@ def exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method
 
 
 
+def airDensityProfile(lat, lon, ht_data, jd, ht_min=None):
+    """ Compute the air density profile of a meteor at the mean location of its points, from below its lowest
+        point up to RESCALE_COLUMN_TOP, for exponentialAtmosphereHeights() and AlphaBetaSlantColumn.
+
+    Arguments:
+        lat: [ndarray] Latitude of the points in radians.
+        lon: [ndarray] Longitude of the points in radians.
+        ht_data: [ndarray] Height of the points in meters.
+        jd: [float] Julian date.
+
+    Keyword arguments:
+        ht_min: [float] Lowest height of the profile (m), e.g. to evaluate the model below the last point. One
+            step of the profile below the lowest point by default.
+
+    Return:
+        (profile_hts, profile_dens):
+            - profile_hts: [ndarray] Increasing heights of the profile (m).
+            - profile_dens: [ndarray] Air density at the heights of the profile (kg/m^3).
+    """
+
+    # Take the density profile at the mean location of the points
+    lat_mean = np.arctan2(np.mean(np.sin(lat)), np.mean(np.cos(lat)))
+    lon_mean = meanAngle(np.atleast_1d(lon))
+
+    if ht_min is None:
+        ht_min = np.min(ht_data) - RESCALE_STEP_FINE
+
+    profile_hts = np.concatenate([np.arange(ht_min, RESCALE_FINE_TOP, RESCALE_STEP_FINE), \
+        np.arange(RESCALE_FINE_TOP, RESCALE_COLUMN_TOP + 1, RESCALE_STEP_COARSE)])
+    profile_dens = getAtmDensity_vect(lat_mean, lon_mean, profile_hts, jd)
+
+    return profile_hts, profile_dens
+
+
+
 def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method='column', return_density_ratio=False):
     """ Given observed heights, rescale them from the real MSIS atmosphere to the simplified exponential
         atmosphere model used by the Alpha-Beta procedure (see exponentialAtmosphereHeights()).
@@ -272,12 +308,7 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method='column',
         return (ht_rescaled, np.ones_like(ht_rescaled)) if return_density_ratio else ht_rescaled
 
     # Take the density profile at the mean location of the points
-    lat_mean = np.arctan2(np.mean(np.sin(lat)), np.mean(np.cos(lat)))
-    lon_mean = meanAngle(np.atleast_1d(lon))
-
-    profile_hts = np.concatenate([np.arange(np.min(ht_data) - RESCALE_STEP_FINE, RESCALE_FINE_TOP, \
-        RESCALE_STEP_FINE), np.arange(RESCALE_FINE_TOP, RESCALE_COLUMN_TOP + 1, RESCALE_STEP_COARSE)])
-    profile_dens = getAtmDensity_vect(lat_mean, lon_mean, profile_hts, jd)
+    profile_hts, profile_dens = airDensityProfile(lat, lon, ht_data, jd)
 
     # Map the heights by the air column above them
     ht_rescaled = exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method=method)
@@ -2272,6 +2303,960 @@ def profileRegionAlphaBetaLag(profile, ci=95.0, n_params=2):
     models = np.vstack(models)
 
     return models[:, 0], models[:, 1], models[:, 2]
+
+
+
+### Fit of the entry lag in slant-column coordinates ###
+
+# Power-law nodes of the normalized velocity from 0.02, of which those below 0.9 are nodes of the entry lag
+ENTRY_LAG_POWER_NODES = 0.02 + (1.0 - 1e-13 - 0.02)*np.linspace(0.0, 1.0, 1200)**1.5
+
+# Nodes of the normalized velocity at which the entry lag is integrated. Near entry the lag falls
+#   exponentially with the column height and the first observed points lie at 1 - v = 1e-4 to 1e-2, so
+#   there the nodes are spaced uniformly in ln(1 - v), down to 1 - v = 1e-13
+ENTRY_LAG_V_NODES = np.unique(np.concatenate([ENTRY_LAG_POWER_NODES[ENTRY_LAG_POWER_NODES < 0.9], \
+    1.0 - np.logspace(-1, -13, 1000)]))
+
+# Top of the path along which the slant air column is accumulated (m)
+SLANT_COLUMN_TOP = 120e3
+
+# Smallest number of points of a station for its own estimate of the noise and of the autocorrelation time
+ENTRY_LAG_MIN_STATION_POINTS = 10
+
+
+
+class AlphaBetaSlantColumn(object):
+    def __init__(self, length_path, ht_path, profile_hts, profile_dens, sin_slope_ref, sin_slope_top=None):
+        """ Air column traversed by a meteor along its path, the slant column, as the height coordinate of the
+            alpha-beta model. In this coordinate the model holds in any atmosphere and on a path whose slope
+            changes, e.g. with the curvature of the Earth. The column is accumulated along the path from the
+            column above its first point, taken at a constant slope, and its normalized height
+
+                y = -ln(eta*sin(slope_ref)/(RHO_ATM_0*HT_NORM_CONST))
+
+            is the usual h/HT_NORM_CONST on a straight path of the reference slope in the exponential
+            atmosphere of the model.
+
+        Arguments:
+            length_path: [ndarray] Distance flown through the air along the path (m), increasing along the
+                motion.
+            ht_path: [ndarray] Height of the path at these distances (m).
+            profile_hts: [ndarray] Increasing heights of the density profile (m), from below the lowest of
+                ht_path up to RESCALE_COLUMN_TOP, see airDensityProfile().
+            profile_dens: [ndarray] Air density at profile_hts (kg/m^3).
+            sin_slope_ref: [float] Sine of the reference slope. It only sets the unit of alpha, as
+                alpha*sin(slope_ref) does not depend on it, so the masses from alphaBetaMasses() must be
+                computed with the same slope.
+
+        Keyword arguments:
+            sin_slope_top: [float] Sine of the slope of the path above its first point. sin_slope_ref by
+                default.
+        """
+
+        if sin_slope_top is None:
+            sin_slope_top = sin_slope_ref
+
+        self.sin_slope_ref = sin_slope_ref
+        self.profile_hts = np.asarray(profile_hts, dtype=np.float64)
+        self.profile_dens = np.asarray(profile_dens, dtype=np.float64)
+
+        # Sort the path by the distance
+        sort_indices = np.argsort(length_path)
+        self.length_tab = np.asarray(length_path, dtype=np.float64)[sort_indices]
+        self.ht_tab = np.asarray(ht_path, dtype=np.float64)[sort_indices]
+
+        # Air density along the path, interpolated in log space
+        dens_tab = np.exp(np.interp(self.ht_tab, self.profile_hts, np.log(self.profile_dens)))
+
+        # Vertical column above every point of the path, from its height in the exponential atmosphere
+        ht_vertical_tab = exponentialAtmosphereHeights(self.ht_tab, self.profile_hts, self.profile_dens)
+        column_vertical_top = RHO_ATM_0*HT_NORM_CONST*np.exp(-ht_vertical_tab[0]/HT_NORM_CONST)
+
+        # Accumulate the slant column along the path with the trapezoidal rule
+        column = column_vertical_top/sin_slope_top + np.concatenate([[0.0], \
+            np.cumsum(0.5*(dens_tab[1:] + dens_tab[:-1])*np.diff(self.length_tab))])
+
+        # Normalized height of the column and the length of the path per unit of it
+        self.ht_normed_tab = -np.log(column*sin_slope_ref/(RHO_ATM_0*HT_NORM_CONST))
+        self.length_scale_tab = column/dens_tab
+
+        # Difference from the normalized height of the vertical column, for the column beyond the ends of the
+        #   path
+        self.offset_tab = self.ht_normed_tab - ht_vertical_tab/HT_NORM_CONST
+
+
+
+    def htNormed(self, length_data):
+        """ Normalized column height at the given distances along the path.
+
+        Arguments:
+            length_data: [ndarray] Distance flown through the air (m), on the scale of the path.
+
+        Return:
+            [ndarray] Normalized column height.
+        """
+
+        return np.interp(length_data, self.length_tab, self.ht_normed_tab)
+
+
+
+    def lengthScale(self, ht_normed):
+        """ Length of the path per unit of the normalized column height, eta/rho, at the given normalized
+            heights, for alphaBetaEntryLag(). Beyond the ends of the path it is that of the ends.
+
+        Arguments:
+            ht_normed: [ndarray] Normalized column height.
+
+        Return:
+            [ndarray] Length of the path per unit of the normalized column height (m).
+        """
+
+        # The normalized height decreases along the path
+        return np.interp(ht_normed, self.ht_normed_tab[::-1], self.length_scale_tab[::-1])
+
+
+
+    def htNormedAtHeights(self, ht_data):
+        """ Normalized column height at the given heights of the path, e.g. to draw the model against the
+            height. Beyond the ends of the path the column is the vertical one times its ratio at the end.
+
+        Arguments:
+            ht_data: [ndarray] Height (m).
+
+        Return:
+            [ndarray] Normalized column height.
+        """
+
+        # Add the difference from the vertical column at the same height, which is constant beyond the ends
+        ht_vertical = exponentialAtmosphereHeights(np.atleast_1d(ht_data), self.profile_hts, \
+            self.profile_dens)/HT_NORM_CONST
+
+        return ht_vertical + np.interp(ht_data, self.ht_tab[::-1], self.offset_tab[::-1])
+
+
+
+def slantColumnFromPoints(time_data, length_data, ht_data, profile_hts, profile_dens, sin_slope_ref, \
+    air_speed=0.0):
+    """ Compute the slant air column along the path of a meteor from the points of a trajectory solution.
+
+        The heights of the points are smoothed by fitting them with
+
+            h = p0 + p1*l + p2*l^2 + p3*t^2 + p4*t^3,
+
+        where l is the distance flown through the air, the quadratic term in l is the curvature of the Earth
+        below the straight line of the solution and the terms in the time t are the gravity drop. Above the
+        first point the path follows the quadratic in l up to SLANT_COLUMN_TOP. The distances along the line
+        of a solution in an inertial frame exceed those flown through the air, which turns with the Earth, by
+        air_speed*(t - t1), where t1 is the time of the first point along the path.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s).
+        length_data: [ndarray] Distance along the path of every point (m), e.g.
+            ObservedPoints.state_vect_dist.
+        ht_data: [ndarray] Height of every point (m), e.g. ObservedPoints.model_ht.
+        profile_hts: [ndarray] Increasing heights of the density profile (m), see airDensityProfile().
+        profile_dens: [ndarray] Air density at profile_hts (kg/m^3).
+        sin_slope_ref: [float] Sine of the reference slope, which sets the unit of alpha, see
+            AlphaBetaSlantColumn.
+
+    Keyword arguments:
+        air_speed: [float] Speed of the air along the path (m/s), see airSpeedAlongPath(). 0 by default, for
+            distances which are already relative to the air.
+
+    Return:
+        (slant_column, length_air):
+            - slant_column: [AlphaBetaSlantColumn object] Slant column along the path.
+            - length_air: [ndarray] Distance flown through the air of every point (m), at which the column is
+                read, e.g. slant_column.htNormed(length_air).
+    """
+
+    time_data = np.asarray(time_data, dtype=np.float64)
+    length_data = np.asarray(length_data, dtype=np.float64)
+    ht_data = np.asarray(ht_data, dtype=np.float64)
+
+    # Distances flown through the air
+    first_index = np.argmin(length_data)
+    length_air = length_data - air_speed*(time_data - time_data[first_index])
+
+    # Fit the heights with the curvature of the Earth and the gravity drop
+    design = np.column_stack([np.ones_like(length_air), length_air, length_air**2, time_data**2, \
+        time_data**3])
+    path_coeffs = np.linalg.lstsq(design, ht_data, rcond=None)[0]
+
+    # Slope of the path at the first point
+    length_first = length_air[first_index]
+    sin_slope_first = -(path_coeffs[1] + 2*path_coeffs[2]*length_first)
+    if sin_slope_first <= 0:
+        raise ValueError("The path does not descend at its first point, sin(slope) = {:.3f}".format( \
+            sin_slope_first))
+
+    # Extend the path above the first point up to the top of the column
+    length_top = np.linspace(length_first - (SLANT_COLUMN_TOP - np.max(ht_data))/sin_slope_first, \
+        length_first, 400)[:-1]
+    ht_top = path_coeffs[0] + path_coeffs[1]*length_top + path_coeffs[2]*length_top**2
+
+    slant_column = AlphaBetaSlantColumn(np.concatenate([length_top, length_air]), \
+        np.concatenate([ht_top, design.dot(path_coeffs)]), profile_hts, profile_dens, sin_slope_ref, \
+        sin_slope_top=sin_slope_first)
+
+    return slant_column, length_air
+
+
+
+def airSpeedAlongPath(state_vect, radiant_eci):
+    """ Compute the speed of the air along the path of a meteor, from the rotation of the Earth, by which the
+        distances along the line of a trajectory solution in an inertial frame exceed those flown through the
+        air. It is the same along the whole straight line.
+
+    Arguments:
+        state_vect: [ndarray] ECI position of a point of the line (m), e.g. Trajectory.state_vect_mini.
+        radiant_eci: [ndarray] ECI direction of the radiant, e.g. Trajectory.radiant_eci_mini.
+
+    Return:
+        [float] Speed of the air along the direction of the motion (m/s).
+    """
+
+    # The meteor moves away from the radiant
+    motion = -vectNorm(np.asarray(radiant_eci, dtype=np.float64))
+
+    return float(np.dot(earthRotationVelocity(state_vect), motion))
+
+
+
+def gravityLengthAlongLine(time_data, length_data, state_vect, radiant_eci, gravity_factor=1.0, \
+    time_ref=None):
+    """ Compute the distance added by gravity along the line of a trajectory solution, relative to a companion
+        of the meteor which falls freely from the reference time, with gravity and without drag. The entry lag
+        is referred to that companion. The acceleration along the line changes with the slope of the line to
+        the local horizontal, so it is computed at every point, fitted with a quadratic in time and integrated
+        twice,
+
+            d(t) = int int g*sin(slope) dt dt,   d(t_ref) = d'(t_ref) = 0.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s).
+        length_data: [ndarray] Distance of every point along the line from the state vector (m), e.g.
+            ObservedPoints.state_vect_dist.
+        state_vect: [ndarray] ECI position of the state vector (m), e.g. Trajectory.state_vect_mini.
+        radiant_eci: [ndarray] ECI direction of the radiant, e.g. Trajectory.radiant_eci_mini.
+
+    Keyword arguments:
+        gravity_factor: [float] Factor of the gravity, e.g. Trajectory.gravity_factor. 1.0 by default.
+        time_ref: [float] Reference time (s). The time of the first point by default.
+
+    Return:
+        [ndarray] Distance added by gravity along the line at every point (m).
+    """
+
+    time_data = np.asarray(time_data, dtype=np.float64)
+    length_data = np.asarray(length_data, dtype=np.float64)
+
+    # Position of every point on the line, as the meteor moves away from the radiant
+    motion = -vectNorm(np.asarray(radiant_eci, dtype=np.float64))
+    eci_pos = np.asarray(state_vect, dtype=np.float64)[None, :] + length_data[:, None]*motion[None, :]
+
+    # Acceleration of gravity along the motion at every point
+    r_mag = np.linalg.norm(eci_pos, axis=1)
+    accel_along = -gravity_factor*G*EARTH.MASS*eci_pos.dot(motion)/r_mag**3
+
+    # Fit the acceleration with a quadratic in time and integrate it twice from the reference time
+    if time_ref is None:
+        time_ref = np.min(time_data)
+
+    time_rel = time_data - time_ref
+    accel_coeffs = np.polyfit(time_rel, accel_along, 2)
+
+    return accel_coeffs[0]*time_rel**4/12 + accel_coeffs[1]*time_rel**3/6 + accel_coeffs[2]*time_rel**2/2
+
+
+
+def stationLengthNoise(time_data, length_data, station_data, n_min=ENTRY_LAG_MIN_STATION_POINTS):
+    """ Estimate the noise of the distances along the path of every station, from the second differences of
+        the residuals r of its distances about a quartic in time,
+
+            sigma = 1.4826*MAD(r[j+1] - 2*r[j] + r[j-1])/sqrt(6),
+
+        where MAD is the median absolute deviation. The estimate also contains the effect of the timing
+        errors on the distances. A station with fewer than n_min points takes the median of the estimates of
+        the other stations, and if no station has n_min points, the second differences of all stations are
+        pooled.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s).
+        length_data: [ndarray] Distance along the path of every point (m).
+        station_data: [ndarray] Station of every point.
+
+    Keyword arguments:
+        n_min: [int] Smallest number of points of a station with its own estimate.
+            ENTRY_LAG_MIN_STATION_POINTS by default.
+
+    Return:
+        [ndarray] Noise of the distance of every point (m).
+    """
+
+    time_data = np.asarray(time_data, dtype=np.float64)
+    length_data = np.asarray(length_data, dtype=np.float64)
+    station_data = np.asarray(station_data)
+
+    def _robustSigma(second_diffs):
+        """ Standard deviation of the noise from its second differences, with the MAD. """
+
+        return 1.4826*np.median(np.abs(second_diffs - np.median(second_diffs)))/np.sqrt(6)
+
+
+    station_sigma = {}
+    pooled_diffs = []
+    for station_id in np.unique(station_data):
+
+        # Points of the station in time order
+        indices = np.where(station_data == station_id)[0]
+        indices = indices[np.argsort(time_data[indices])]
+        station_lengths = length_data[indices]
+
+        if len(indices) >= n_min:
+
+            # Second differences of the residuals about a quartic in time
+            time_rel = time_data[indices] - np.mean(time_data[indices])
+            residuals = station_lengths - np.polyval(np.polyfit(time_rel, station_lengths, 4), time_rel)
+            station_sigma[station_id] = _robustSigma(residuals[2:] - 2*residuals[1:-1] + residuals[:-2])
+
+        elif len(indices) >= 3:
+
+            # Keep the second differences of the distances to pool them
+            second_diffs = station_lengths[2:] - 2*station_lengths[1:-1] + station_lengths[:-2]
+            pooled_diffs.append(second_diffs - np.median(second_diffs))
+
+    # The noise of the stations with too few points
+    if station_sigma:
+        sigma_fill = np.median(list(station_sigma.values()))
+    elif pooled_diffs:
+        sigma_fill = _robustSigma(np.concatenate(pooled_diffs))
+    else:
+        sigma_fill = np.nan
+
+    return np.array([station_sigma.get(station_id, sigma_fill) for station_id in station_data])
+
+
+
+def alphaBetaEntryLag(alpha, beta, length_scale):
+    """ Compute the entry lag of the alpha-beta model, the distance by which the meteor trails a companion
+        which keeps moving at the entry velocity, as a function of the normalized column height y:
+
+            l(y) = int_y^inf H(y') (1/v(y') - 1) dy',
+
+        where H is the length of the path per unit of the normalized column height, at the height of the
+        model. Near entry l = H*(1 - v). The integral is computed with the trapezoidal rule over the nodes
+        ENTRY_LAG_V_NODES of the normalized velocity, at which the height of the model follows from
+        alphaBetaHeightNormed(), so the model never has to be inverted, with dy/dv = exp(y - beta*(1 - v^2))/
+        (alpha*v).
+
+    Arguments:
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+        length_scale: [function or float] Length of the path per unit of the normalized column height (m) at
+            the given normalized heights, e.g. AlphaBetaSlantColumn.lengthScale, or a constant, e.g.
+            HT_NORM_CONST/sin(slope) for a straight path in the exponential atmosphere.
+
+    Return:
+        (ht_normed, lag, v_normed):
+            - ht_normed: [ndarray] Normalized column height of the model at the nodes, increasing.
+            - lag: [ndarray] Entry lag at the nodes (m).
+            - v_normed: [ndarray] Normalized velocity at the nodes.
+    """
+
+    v_nodes = ENTRY_LAG_V_NODES
+
+    # Height of the model at the nodes and its derivative by the velocity
+    ht_normed = alphaBetaHeightNormed(v_nodes, alpha, beta)
+    dy_dv = np.exp(ht_normed - beta*(1.0 - v_nodes**2))/(alpha*v_nodes)
+
+    # Length of the path per unit of the column height at the height of the model
+    if callable(length_scale):
+        length_scale_nodes = length_scale(ht_normed)
+    else:
+        length_scale_nodes = np.full_like(ht_normed, length_scale)
+
+    # Integrate the lag from entry down to every node
+    integrand = length_scale_nodes*(1.0/v_nodes - 1.0)*dy_dv
+    cumulative = np.concatenate([[0.0], np.cumsum(0.5*(integrand[1:] + integrand[:-1])*np.diff(v_nodes))])
+    lag = cumulative[-1] - cumulative
+
+    # Sort by the height
+    order = np.argsort(ht_normed)
+
+    return ht_normed[order], lag[order], v_nodes[order]
+
+
+
+def _entryLagModel(alpha, beta, ht_normed, length_scale):
+    """ Model lag of the fit of the entry lag, the negative entry lag, at the column heights of the points.
+
+    Arguments:
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+        ht_normed: [ndarray] Normalized column height of every point.
+        length_scale: [function or float] See alphaBetaEntryLag().
+
+    Return:
+        (lag_model, v_model, outside):
+            - lag_model: [ndarray] Model lag at every point (m).
+            - v_model: [ndarray] Normalized velocity of the model at every point.
+            - outside: [float] Fraction of the points outside the heights reached by the model.
+    """
+
+    ht_nodes, lag_nodes, v_nodes = alphaBetaEntryLag(alpha, beta, length_scale)
+
+    outside = np.mean((ht_normed < ht_nodes[0]) | (ht_normed > ht_nodes[-1]))
+
+    return -np.interp(ht_normed, ht_nodes, lag_nodes), np.interp(ht_normed, ht_nodes, v_nodes), outside
+
+
+
+def _entryLagLinear(lag_diff, time_data, weights, station_index, n_stations):
+    """ Fit the correction to the slope of the reference line and the offsets of the stations of the fit of
+        the entry lag in closed form, by weighted least squares.
+
+    Arguments:
+        lag_diff: [ndarray] Observed lag minus the model lag at every point (m).
+        time_data: [ndarray] Time of every point (s).
+        weights: [ndarray] Weight of every point (1/m^2).
+        station_index: [ndarray] Index of the station of every point.
+        n_stations: [int] Number of stations.
+
+    Return:
+        (dv, offsets, residuals):
+            - dv: [float] Correction to the slope of the reference line (m/s).
+            - offsets: [ndarray] Offset of every station (m).
+            - residuals: [ndarray] Residual of every point (m).
+    """
+
+    # Weighted means of the time and of the lag of every station
+    weight_sums = np.bincount(station_index, weights, n_stations)
+    time_means = np.bincount(station_index, weights*time_data, n_stations)/weight_sums
+    lag_means = np.bincount(station_index, weights*lag_diff, n_stations)/weight_sums
+
+    # Fit the slope to the deviations from the means of the stations
+    time_dev = time_data - time_means[station_index]
+    lag_dev = lag_diff - lag_means[station_index]
+    dv = np.sum(weights*time_dev*lag_dev)/np.sum(weights*time_dev**2)
+
+    return dv, lag_means - dv*time_means, lag_dev - dv*time_dev
+
+
+
+def _entryLagTauInt(time_data, residuals_normed, station_index, n_stations, \
+    min_points=ENTRY_LAG_MIN_STATION_POINTS):
+    """ Integrated autocorrelation time of the normalized residuals of the fit of the entry lag, from the
+        residuals of every station with at least min_points points in time order, averaged over the stations
+        with the numbers of their points as weights. It is about 1 for independent errors and at least 1, and
+        1 if no station has min_points points.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s).
+        residuals_normed: [ndarray] Residuals times the square roots of their weights.
+        station_index: [ndarray] Index of the station of every point.
+        n_stations: [int] Number of stations.
+
+    Keyword arguments:
+        min_points: [int] Smallest number of points of a station which is used.
+            ENTRY_LAG_MIN_STATION_POINTS by default.
+
+    Return:
+        [float] Integrated autocorrelation time.
+    """
+
+    tau_sum = 0.0
+    n_sum = 0
+    for i in range(n_stations):
+
+        station_mask = station_index == i
+        n_points = np.count_nonzero(station_mask)
+        if n_points < min_points:
+            continue
+
+        # Autocorrelation time of the residuals of the station in time order
+        tau = integratedAutocorrTime(residuals_normed[station_mask][np.argsort(time_data[station_mask])])
+        if not np.isfinite(tau):
+            continue
+
+        tau_sum += n_points*tau
+        n_sum += n_points
+
+    if n_sum == 0:
+        return 1.0
+
+    return max(tau_sum/n_sum, 1.0)
+
+
+
+def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, sigma_length, v_ref, \
+    n_pass=2, x0_alpha_beta=None, estimate_errors=False, ci=95.0):
+    """ Fit the alpha-beta model to the entry lag in slant-column coordinates, with an offset and a noise
+        level for every station (the full fit of the lag).
+
+        The lag of a point relative to a reference line in time is the negative entry lag of the model at its
+        column height (alphaBetaEntryLag()) plus a straight line in time,
+
+            lag_i = -l(y_i; alpha, beta) + dv*t_i + K_S(i) + r_i,
+
+        where dv is the entry velocity minus the slope of the reference line, which is too low if the meteor
+        already decelerates where the line is fitted, and K_S is an offset of the station S of the point,
+        which absorbs a constant offset of its clock. For given alpha and beta, dv and the offsets follow in
+        closed form by weighted least squares, so only ln alpha and ln beta are fitted, and the velocities
+        are not needed. A point is weighted by 1/(sigma_S/v_i)^2, with sigma_S the noise of its station and
+        v_i the normalized velocity of the model at it, which is 1 in the first fit and that of the previous
+        fit in the next ones, so the weights are fixed during a fit. The first fit starts from the best point
+        of a grid in ln alpha and ln beta, and alpha and beta are bound by ALPHA_BETA_BOUNDS.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s).
+        lag_data: [ndarray] Lag of every point (m): its distance along the path minus v_ref times its time,
+            the same line for all stations, without the distance added by gravity along the path, see
+            gravityLengthAlongLine().
+        ht_normed: [ndarray] Normalized slant column height of every point, see
+            AlphaBetaSlantColumn.htNormed().
+        station_data: [ndarray] Station of every point.
+        length_scale: [function or float] Length of the path per unit of the normalized column height (m),
+            e.g. AlphaBetaSlantColumn.lengthScale.
+        sigma_length: [ndarray] Noise of the distance of every point (m), see stationLengthNoise().
+        v_ref: [float] Slope of the reference line of the lag (m/s), e.g. Trajectory.v_init.
+
+    Keyword arguments:
+        n_pass: [int] Number of fits. 2 by default.
+        x0_alpha_beta: [list] Additional (alpha, beta) starting points of the first fit, e.g. the results of
+            fitAlphaBeta(). None by default.
+        estimate_errors: [bool] Also return the Wald uncertainties of the fit, in the format of
+            fitAlphaBetaLag(estimate_errors=True), so they can be passed to alphaBetaMasses(), with the
+            covariance scaled by the reduced chi-squared and the integrated autocorrelation time of the
+            residuals. NaN if alpha or beta end at a bound of the fit. False by default.
+        ci: [float] Confidence level of the Wald intervals (percent). 95 by default.
+
+    Return:
+        (v_init, alpha, beta, lag_residuals, entry_fit), or (v_init, alpha, beta, lag_residuals, entry_fit,
+            errors) if estimate_errors is True:
+            - v_init: [float] Entry velocity, v_ref + dv (m/s).
+            - alpha: [float] Ballistic coefficient.
+            - beta: [float] Mass loss parameter.
+            - lag_residuals: [ndarray] Residual of the lag of every point (m).
+            - entry_fit: [dict] The fit, for profileAlphaBetaEntryLag(), with the keys 'v_ref', 'dv',
+                'offsets' (offset of every station, m), 'sigma_station' (noise of every station, m),
+                'weights', 'cost' (weighted sum of the squared residuals), 'dof' (degrees of freedom),
+                'chi2_nu' (reduced chi-squared), 'tau_int' (integrated autocorrelation time of the
+                normalized residuals), 'scale' (chi2_nu*tau_int, the variance factor of the uncertainties)
+                and 'jac' (Jacobian of the weighted residuals by ln alpha and ln beta).
+            - errors: [dict] See estimate_errors.
+    """
+
+    time_data = np.asarray(time_data, dtype=np.float64)
+    lag_data = np.asarray(lag_data, dtype=np.float64)
+    ht_normed = np.asarray(ht_normed, dtype=np.float64)
+    sigma_length = np.asarray(sigma_length, dtype=np.float64)
+
+    # Index of the station of every point
+    station_ids, station_index = np.unique(np.asarray(station_data), return_inverse=True)
+    n_stations = len(station_ids)
+
+    log_bounds = _logAlphaBetaBounds()
+
+    v_model = np.ones_like(time_data)
+    x_best = None
+    for _ in range(n_pass):
+
+        # Weights of the fit, from the velocity of the model of the previous fit
+        weights = (v_model/sigma_length)**2
+
+        def _residuals(x, weights=weights):
+            """ Weighted residuals of the lag for (ln alpha, ln beta), with dv and the offsets fitted. """
+
+            alpha, beta = np.exp(x)
+            lag_model, _, outside = _entryLagModel(alpha, beta, ht_normed, length_scale)
+
+            # Reject models which do not reach the column heights of most points
+            if outside > 0.25:
+                return np.full(len(time_data), 1e4)
+
+            _, _, residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
+                n_stations)
+
+            return np.sqrt(weights)*residuals
+
+
+        # Start the first fit from the best point of a grid and of the given starting points
+        if x_best is None:
+
+            starts = [(alpha, beta) for alpha in np.geomspace(1e-2, 1e3, 21) \
+                for beta in np.geomspace(1e-3, 40.0, 21)]
+            if x0_alpha_beta is not None:
+                starts += [tuple(x0[:2]) for x0 in x0_alpha_beta]
+
+            log_starts = [np.clip(np.log(start), log_bounds[0], log_bounds[1]) for start in starts]
+            costs = [np.sum(_residuals(log_start)**2) for log_start in log_starts]
+            x_best = log_starts[int(np.argmin(costs))]
+
+        res = scipy.optimize.least_squares(_residuals, x_best, bounds=log_bounds, x_scale='jac', max_nfev=300)
+        x_best = res.x
+
+        # Velocity of the model at the points, for the weights of the next fit
+        alpha, beta = np.exp(x_best)
+        lag_model, v_model, _ = _entryLagModel(alpha, beta, ht_normed, length_scale)
+        v_model = np.clip(v_model, 0.02, 1.0)
+
+    # Entry velocity, offsets and residuals of the last fit
+    dv, offsets, lag_residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
+        n_stations)
+    v_init = v_ref + dv
+
+    # Reduced chi-squared and the autocorrelation time of the normalized residuals
+    cost = np.sum(weights*lag_residuals**2)
+    dof = max(len(time_data) - 3 - n_stations, 1)
+    chi2_nu = cost/dof
+    tau_int = _entryLagTauInt(time_data, np.sqrt(weights)*lag_residuals, station_index, n_stations)
+
+    entry_fit = {
+        'v_ref': v_ref,
+        'dv': dv,
+        'offsets': dict(zip(station_ids, offsets)),
+        'sigma_station': {station_id: sigma_length[station_index == i][0] \
+            for i, station_id in enumerate(station_ids)},
+        'weights': weights,
+        'cost': cost,
+        'dof': dof,
+        'chi2_nu': chi2_nu,
+        'tau_int': tau_int,
+        'scale': chi2_nu*tau_int,
+        'jac': res.jac
+        }
+
+    if not estimate_errors:
+        return v_init, alpha, beta, lag_residuals, entry_fit
+
+
+    ### Estimate the uncertainties from the linearized fit ###
+
+    errors = {'alpha': alpha, 'beta': beta, 'v_init': v_init, 'ci': ci, 'v_init_std': np.nan, \
+        'cov_log': np.full((2, 2), np.nan), 'cov': np.full((2, 2), np.nan), \
+        'cov_full': np.full((3, 3), np.nan)}
+    for key in ['alpha_std_rel', 'beta_std_rel', 'alpha_std', 'beta_std', 'corr_log', 'corr', \
+            'alpha_ci_wald_lower', 'alpha_ci_wald_upper', 'beta_ci_wald_lower', 'beta_ci_wald_upper']:
+        errors[key] = np.nan
+
+    # The Gaussian approximation is not valid at a bound, nor without more points than parameters
+    if alphaBetaBoundWarnings(alpha, beta) or (len(time_data) <= 3 + n_stations):
+        return v_init, alpha, beta, lag_residuals, entry_fit, errors
+
+    # Derivatives of the model lag by ln alpha and ln beta, by central differences
+    log_step = 1e-4
+    lag_derivs = []
+    for log_factors in [(log_step, 0.0), (0.0, log_step)]:
+
+        lag_plus, _, _ = _entryLagModel(alpha*np.exp(log_factors[0]), beta*np.exp(log_factors[1]), \
+            ht_normed, length_scale)
+        lag_minus, _, _ = _entryLagModel(alpha*np.exp(-log_factors[0]), beta*np.exp(-log_factors[1]), \
+            ht_normed, length_scale)
+        lag_derivs.append((lag_plus - lag_minus)/(2*log_step))
+
+    # Covariance of ln alpha, ln beta, dv and the offsets of the stations
+    design = np.column_stack(lag_derivs + [time_data, np.eye(n_stations)[station_index]])
+    design_weighted = design*np.sqrt(weights)[:, None]
+    try:
+        cov_params = entry_fit['scale']*np.linalg.inv(design_weighted.T.dot(design_weighted))
+    except np.linalg.LinAlgError:
+        return v_init, alpha, beta, lag_residuals, entry_fit, errors
+
+    cov_log = cov_params[:2, :2]
+    if (not np.all(np.isfinite(cov_log))) or np.any(np.diag(cov_log) <= 0):
+        return v_init, alpha, beta, lag_residuals, entry_fit, errors
+
+    alpha_std_rel, beta_std_rel = np.sqrt(np.diag(cov_log))
+
+    # Linear (alpha, beta) space, via the delta method
+    param_scale = np.array([alpha, beta])
+    cov = np.outer(param_scale, param_scale)*cov_log
+
+    # Log-normal Wald intervals
+    z = scipy.special.ndtri(0.5 + ci/200.0)
+
+    errors.update({
+        'alpha_std_rel': alpha_std_rel,
+        'beta_std_rel': beta_std_rel,
+        'alpha_std': alpha*alpha_std_rel,
+        'beta_std': beta*beta_std_rel,
+        'cov_log': cov_log,
+        'corr_log': cov_log[0, 1]/(alpha_std_rel*beta_std_rel),
+        'cov': cov,
+        'corr': cov[0, 1]/np.sqrt(cov[0, 0]*cov[1, 1]),
+        'alpha_ci_wald_lower': alpha*np.exp(-z*alpha_std_rel),
+        'alpha_ci_wald_upper': alpha*np.exp(z*alpha_std_rel),
+        'beta_ci_wald_lower': beta*np.exp(-z*beta_std_rel),
+        'beta_ci_wald_upper': beta*np.exp(z*beta_std_rel),
+        'v_init_std': np.sqrt(cov_params[2, 2]),
+        'cov_full': cov_params[np.ix_([2, 0, 1], [2, 0, 1])]
+        })
+
+    return v_init, alpha, beta, lag_residuals, entry_fit, errors
+
+
+
+def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, alpha, beta, \
+    entry_fit, ci=95.0, n_grid=40):
+    """ Profile likelihood intervals of alpha and beta of the fit of the entry lag (fitAlphaBetaEntryLag()),
+        and the likelihood on a grid of alpha and beta, in the format of profileAlphaBetaLag().
+
+        The cost is the weighted sum of the squared residuals with the weights of the fit, minimized over dv
+        and the offsets of the stations in closed form. One of ln alpha and ln beta is fixed at a time and
+        the cost is minimized over the other one: over ln alpha within a bracket which follows the floor of
+        the valley of the cost, and over ln beta from a grid refined by a bounded minimization, as the cost
+        is nearly flat along the valley at a fixed alpha. The rise of the cost is divided by the reduced
+        chi-squared of the fit times the integrated autocorrelation time of its residuals, which is about 1
+        for independent errors and widens the intervals if the errors are correlated in time, and compared
+        with the chi-squared threshold of one parameter. Each profile starts with steps of half the Wald
+        error and the crossings of the threshold are refined with Brent's method. A side which reaches a
+        bound of the fit gives only a limit.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s), as given to fitAlphaBetaEntryLag().
+        lag_data: [ndarray] Lag of every point (m), as given to fitAlphaBetaEntryLag().
+        ht_normed: [ndarray] Normalized slant column height of every point.
+        station_data: [ndarray] Station of every point.
+        length_scale: [function or float] Length of the path per unit of the normalized column height (m).
+        alpha: [float] Alpha of the fit.
+        beta: [float] Beta of the fit.
+        entry_fit: [dict] The fit, from fitAlphaBetaEntryLag().
+
+    Keyword arguments:
+        ci: [float] Confidence level of the intervals (percent). 95 by default.
+        n_grid: [int] Number of points of the 2D grid along each axis, which covers the profiles. 40 by
+            default. 0 skips the grid.
+
+    Return:
+        profile: [dict] With the keys of profileAlphaBetaLag(), where the entry velocity takes the place of
+            the fitted initial velocity and 'sigma2' is the variance factor of the rise of the cost
+            (entry_fit['scale']), and also 'chi2_nu' and 'tau_int' of the fit.
+    """
+
+    time_data = np.asarray(time_data, dtype=np.float64)
+    lag_data = np.asarray(lag_data, dtype=np.float64)
+    ht_normed = np.asarray(ht_normed, dtype=np.float64)
+
+    # Index of the station of every point, as in the fit
+    station_index = np.unique(np.asarray(station_data), return_inverse=True)[1]
+    n_stations = int(np.max(station_index)) + 1
+
+    weights = entry_fit['weights']
+    cost_best = entry_fit['cost']
+    scale = entry_fit['scale']
+    lower_bounds, upper_bounds = _logAlphaBetaBounds()
+
+    def _cost(log_alpha, log_beta):
+        """ Cost and the entry velocity of a model, with dv and the offsets of the stations fitted. """
+
+        lag_model, _, outside = _entryLagModel(np.exp(log_alpha), np.exp(log_beta), ht_normed, length_scale)
+        if outside > 0.25:
+            return np.inf, np.nan
+
+        dv, _, residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
+            n_stations)
+
+        return np.sum(weights*residuals**2), entry_fit['v_ref'] + dv
+
+
+    threshold = scipy.stats.chi2.ppf(ci/100.0, 1)
+
+    # Walk far enough to also show the 3 sigma level of two parameters
+    walk_threshold = max(threshold, scipy.stats.chi2.ppf(0.9973, 2))
+
+    profile = {'ci': ci, 'threshold': threshold, 'sigma2': scale, 'chi2_nu': entry_fit['chi2_nu'], \
+        'tau_int': entry_fit['tau_int']}
+
+    # Steps of half the Wald errors of ln alpha and ln beta
+    try:
+        wald_std = np.sqrt(np.diag(np.linalg.inv(entry_fit['jac'].T.dot(entry_fit['jac'])))*scale)
+    except np.linalg.LinAlgError:
+        wald_std = np.full(2, np.nan)
+
+    steps = [float(np.clip(0.5*std, 1e-3, 0.5)) if (np.isfinite(std) and (std > 0)) else 0.1 \
+        for std in wald_std]
+
+    x_best = [np.log(alpha), np.log(beta)]
+    v_init_best = entry_fit['v_ref'] + entry_fit['dv']
+
+    # The profile of ln beta follows the floor of the valley in ln alpha from the best fit
+    valley = {'log_alpha': x_best[0]}
+
+    def _profilePoint(idx, log_value):
+        """ Minimize the cost over the other parameter with ln alpha (idx 0) or ln beta (idx 1) fixed, and
+            return the cost, ln alpha, ln beta and the entry velocity there.
+        """
+
+        if idx == 1:
+
+            # Minimize over ln alpha within a bracket around the previous point of the valley
+            res = scipy.optimize.minimize_scalar(lambda log_alpha: _cost(log_alpha, log_value)[0], \
+                bracket=(valley['log_alpha'] - 0.05, valley['log_alpha'] + 0.05), tol=1e-6)
+            valley['log_alpha'] = res.x
+            log_alpha, log_beta = res.x, log_value
+
+        else:
+
+            # Minimize over ln beta from a grid, refined between the neighbours of its best point
+            log_beta_grid = np.linspace(lower_bounds[1], upper_bounds[1], 25)
+            grid_costs = np.array([_cost(log_value, log_beta)[0] for log_beta in log_beta_grid])
+            k = int(np.argmin(grid_costs))
+            res = scipy.optimize.minimize_scalar(lambda log_beta: _cost(log_value, log_beta)[0], \
+                method='bounded', bounds=(log_beta_grid[max(k - 1, 0)], \
+                log_beta_grid[min(k + 1, len(log_beta_grid) - 1)]), options={'xatol': 1e-4})
+            log_alpha = log_value
+            log_beta = res.x if (res.fun < grid_costs[k]) else log_beta_grid[k]
+
+        cost, v_init = _cost(log_alpha, log_beta)
+
+        return cost, log_alpha, log_beta, v_init
+
+
+    for idx, name in enumerate(['alpha', 'beta']):
+
+        points = [(cost_best, x_best[0], x_best[1], v_init_best)]
+        limits = []
+        at_bound = []
+        edge_models = []
+
+        # Walk from the best fit to each side, until the rise passes walk_threshold or the bound is reached
+        for direction in [-1, 1]:
+
+            valley['log_alpha'] = x_best[0]
+            bound = lower_bounds[idx] if direction < 0 else upper_bounds[idx]
+
+            side_values = [x_best[idx]]
+            side_points = [points[0]]
+            while ((side_points[-1][0] - cost_best)/scale < walk_threshold) \
+                and (direction*(bound - side_values[-1]) > 0):
+
+                log_value = float(np.clip(side_values[-1] + direction*steps[idx], lower_bounds[idx], \
+                    upper_bounds[idx]))
+                side_values.append(log_value)
+                side_points.append(_profilePoint(idx, log_value))
+
+            points += side_points[1:]
+
+            # The profile reached the bound without crossing the threshold
+            delta_chi2 = (np.array([point[0] for point in side_points]) - cost_best)/scale
+            above = np.where(delta_chi2 > threshold)[0]
+            if len(above) == 0:
+                limits.append(np.exp(side_values[-1]))
+                at_bound.append(True)
+                continue
+
+            # Refine the crossing of the threshold with Brent's method
+            k = above[0]
+            valley['log_alpha'] = x_best[0]
+            try:
+                crossing = scipy.optimize.brentq(lambda log_value: (_profilePoint(idx, log_value)[0] \
+                    - cost_best)/scale - threshold, min(side_values[k - 1], side_values[k]), \
+                    max(side_values[k - 1], side_values[k]), xtol=1e-5)
+
+            except ValueError:
+                crossing = side_values[k - 1] + (threshold - delta_chi2[k - 1])*(side_values[k] \
+                    - side_values[k - 1])/(delta_chi2[k] - delta_chi2[k - 1])
+
+            limits.append(np.exp(crossing))
+            at_bound.append(False)
+
+            # Keep the inner point next to the crossing, for the intervals of derived quantities
+            inner = side_points[k - 1]
+            edge_models.append([np.exp(inner[1]), np.exp(inner[2]), inner[3], delta_chi2[k - 1]])
+
+        # Sort the points of the profile by the value of the parameter
+        points.sort(key=lambda point: point[idx + 1])
+
+        profile[name + '_lower'], profile[name + '_upper'] = limits
+        profile[name + '_lower_at_bound'], profile[name + '_upper_at_bound'] = at_bound
+        profile[name + '_profile'] = (np.exp([point[idx + 1] for point in points]), \
+            (np.array([point[0] for point in points]) - cost_best)/scale)
+
+        # Alpha, beta and the entry velocity of every point of the profile
+        profile[name + '_profile_models'] = np.array([[np.exp(point[1]), np.exp(point[2]), point[3]] \
+            for point in points])
+
+        # Alpha, beta, the entry velocity and the chi-squared rise at the points next to the crossings
+        profile[name + '_edge_models'] = np.array(edge_models).reshape(-1, 4)
+
+
+    ### Compute the chi-squared rise on a 2D grid of alpha and beta ###
+
+    profile['grid_alpha'] = np.array([])
+    profile['grid_beta'] = np.array([])
+    profile['grid_delta_chi2'] = np.zeros((0, 0))
+    profile['grid_v_init'] = np.zeros((0, 0))
+    profile['corr_log'] = np.nan
+
+    if n_grid > 0:
+
+        # Cover the extent of the profiles with a margin, within the bounds of the fit
+        log_grids = []
+        for idx, name in enumerate(['alpha', 'beta']):
+            log_lower, log_upper = np.log(profile[name + '_profile'][0][[0, -1]])
+            margin = 0.15*(log_upper - log_lower)
+            log_grids.append(np.linspace(max(log_lower - margin, lower_bounds[idx]), \
+                min(log_upper + margin, upper_bounds[idx]), n_grid))
+
+        log_alpha_grid, log_beta_grid = log_grids
+
+        # The offsets and dv are fitted in closed form, so every point is a single evaluation
+        grid_delta_chi2 = np.zeros((n_grid, n_grid))
+        grid_v_init = np.zeros((n_grid, n_grid))
+        for i, log_beta in enumerate(log_beta_grid):
+            for j, log_alpha in enumerate(log_alpha_grid):
+
+                cost, v_init = _cost(log_alpha, log_beta)
+                grid_delta_chi2[i, j] = (cost - cost_best)/scale
+                grid_v_init[i, j] = v_init
+
+        # Correlation of ln alpha and ln beta, weighted by the likelihood
+        weights_grid = np.exp(-0.5*(grid_delta_chi2 - np.min(grid_delta_chi2)))
+        log_alpha_mesh, log_beta_mesh = np.meshgrid(log_alpha_grid, log_beta_grid)
+        cov_log = np.cov(np.vstack([log_alpha_mesh.ravel(), log_beta_mesh.ravel()]), \
+            aweights=weights_grid.ravel())
+
+        profile['grid_alpha'] = np.exp(log_alpha_grid)
+        profile['grid_beta'] = np.exp(log_beta_grid)
+        profile['grid_delta_chi2'] = grid_delta_chi2
+        profile['grid_v_init'] = grid_v_init
+        profile['corr_log'] = cov_log[0, 1]/np.sqrt(cov_log[0, 0]*cov_log[1, 1])
+
+        # Extend the intervals over the points of the grid within them, as the walk of a profile stops at the
+        #   first crossing of the threshold and the likelihood can have another valley beyond it
+        region_alpha, region_beta, _ = profileRegionAlphaBetaLag(profile, ci=ci, n_params=1)
+        for idx, name, values in [(0, 'alpha', region_alpha), (1, 'beta', region_beta)]:
+
+            if np.min(values) < profile[name + '_lower']:
+                profile[name + '_lower'] = np.min(values)
+                profile[name + '_lower_at_bound'] = np.log(np.min(values)) <= lower_bounds[idx] + 1e-6
+
+            if np.max(values) > profile[name + '_upper']:
+                profile[name + '_upper'] = np.max(values)
+                profile[name + '_upper_at_bound'] = np.log(np.max(values)) >= upper_bounds[idx] - 1e-6
+
+    ### ###
+
+
+    # Find the lowest point of the profiles and the grid, which is below the given fit if it ended in a local
+    #   minimum
+    candidates = [(0.0, (alpha, beta, v_init_best))]
+    for name in ['alpha', 'beta']:
+        i_min = np.argmin(profile[name + '_profile'][1])
+        candidates.append((profile[name + '_profile'][1][i_min], \
+            tuple(profile[name + '_profile_models'][i_min])))
+
+    if profile['grid_delta_chi2'].size:
+        i_min, j_min = np.unravel_index(np.argmin(profile['grid_delta_chi2']), \
+            profile['grid_delta_chi2'].shape)
+        candidates.append((profile['grid_delta_chi2'][i_min, j_min], (profile['grid_alpha'][j_min], \
+            profile['grid_beta'][i_min], profile['grid_v_init'][i_min, j_min])))
+
+    candidates.sort(key=lambda candidate: candidate[0])
+    profile['min_delta_chi2'], profile['min_model'] = candidates[0]
+
+    return profile
 
 
 
@@ -6800,10 +7785,18 @@ if __name__ == "__main__":
         help="1-sigma uncertainty on the bulk density, in kg/m^3, folded into the mass error "
         "estimate when --errors is set. Default: the density is treated as exactly known.")
 
+    arg_parser.add_argument('--lagfit', choices=['full', 'simple'], default='full', \
+        help="Fit of the lag. 'full' (default) fits the entry lag against the slant air column traversed " \
+        "along the path, with an offset and a noise level for every station, which gives the entry " \
+        "velocity and is unaffected by constant clock offsets between the stations (fitAlphaBetaEntryLag). " \
+        "'simple' fits the distances along the path with one offset and one noise level for all stations, " \
+        "with the heights mapped by --atmrescale (fitAlphaBetaLag).")
+
     arg_parser.add_argument('--atmrescale', choices=['column', 'density'], default='column', \
-        help="How the heights are mapped to the exponential atmosphere of the alpha-beta model. 'column' " \
-        "(default) maps them to the height with the same air column above, and 'density' to the height " \
-        "with the same local density, which biases alpha and beta where the scale height is not 7.16 km.")
+        help="How the heights are mapped to the exponential atmosphere of the alpha-beta model by the " \
+        "simple fit of the lag. 'column' (default) maps them to the height with the same air column above, " \
+        "and 'density' to the height with the same local density, which biases alpha and beta where the " \
+        "scale height is not 7.16 km.")
 
     arg_parser.add_argument('-x', '--hideplots', action="store_true", \
         help="Don't show the plots on the screen. Combine with --saveplots to only write them to disk.")
@@ -6926,9 +7919,31 @@ if __name__ == "__main__":
         ht_data  = ht_data[sorted_indices]
 
 
-        # Rescale the heights to the exponential atmosphere used by alpha-beta
-        ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, traj.jdt_ref, \
-            method=cml_args.atmrescale)
+        # Slope of the trajectory for the masses, which also sets the unit of alpha of the full fit
+        slope = traj.orbit.elevation_apparent_norot
+
+        # The apparent elevation of the radiant is negative if the direction of the solution is reversed, or
+        #   if the meteor climbs, e.g. an Earth-grazer. Then the local slope of the observed path along the
+        #   direction of the motion is used, and if the meteor climbs, the alpha-beta model does not apply
+        if slope <= 0:
+
+            motion_sign = np.sign(np.polyfit(time_data, length_data, 1)[0])
+            slope = np.arcsin(np.clip(-motion_sign*np.polyfit(length_data, ht_data, 1)[0], -1.0, 1.0))
+
+            if slope <= 0:
+                print()
+                print("ERROR: The meteor climbs along the observed path (slope {:.1f} deg), e.g. an " \
+                    "Earth-grazer or a solution with a wrong timing, and the alpha-beta model needs a " \
+                    "descending meteor".format(np.degrees(slope)))
+                sys.exit(1)
+
+            print("NOTE: The apparent elevation of the radiant is {:.1f} deg, so the direction of the " \
+                "trajectory solution is likely reversed, check its timing. The local slope of the observed " \
+                "path, {:.1f} deg, is used instead".format(np.degrees(traj.orbit.elevation_apparent_norot), \
+                np.degrees(slope)))
+
+        # Keep the distances on the line of the solution, from which the full fit forms its lags
+        length_data_line = np.copy(length_data)
 
         # Take out the distance and the speed gained from gravity along the path, as the solver does for the
         #   lag, because the alpha-beta model has no gravity
@@ -6941,41 +7956,113 @@ if __name__ == "__main__":
             print("NOTE: The trajectory has no gravity information, the gravity along the path is ignored")
             vel_data_nograv = vel_data
 
-        # Fit alpha-beta and the initial velocity directly to the lag, starting also from the Q4 fit of the
-        #   observed velocities
+        if cml_args.lagfit == 'full':
+
+            # Normalized heights of the slant air column along the path flown through the air, with the
+            #   density profile of the event down to the lowest height of the plots, and alpha in the unit of
+            #   the slope of the masses
+            profile_hts, profile_dens = airDensityProfile(lat_data, lon_data, ht_data, traj.jdt_ref, \
+                ht_min=min(10000.0, np.min(ht_data) - RESCALE_STEP_FINE))
+            air_speed = airSpeedAlongPath(traj.state_vect_mini, traj.radiant_eci_mini)
+            slant_column, length_air = slantColumnFromPoints(time_data, length_data_line, ht_data, \
+                profile_hts, profile_dens, np.sin(slope), air_speed=air_speed)
+            ht_normed_data = slant_column.htNormed(length_air)
+            ht_data_rescaled = HT_NORM_CONST*ht_normed_data
+
+            # Lags of all stations relative to the initial velocity of the solution, without the distance
+            #   added by gravity along the line, which is computed at every point
+            if getattr(traj, 'gravity_correction', False):
+                gravity_length = gravityLengthAlongLine(time_data, length_data_line, traj.state_vect_mini, \
+                    traj.radiant_eci_mini, gravity_factor=getattr(traj, 'gravity_factor', 1.0))
+            else:
+                gravity_length = np.zeros_like(time_data)
+
+            entry_lag_data = length_data_line - traj.v_init*time_data - gravity_length
+
+            # Noise of the distances of every station
+            sigma_length = stationLengthNoise(time_data, length_data_line, station_data)
+
+        else:
+
+            # Rescale the heights to the exponential atmosphere used by alpha-beta
+            ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, \
+                traj.jdt_ref, method=cml_args.atmrescale)
+
+        # Fit alpha-beta directly to the lag, starting also from the Q4 fit of the observed velocities
         print("Fitting alpha-beta to the lag...")
         x0_alpha_beta = [fitAlphaBeta(vel_data_nograv, ht_data_rescaled, v_init=traj.v_init)[1:]]
-        if cml_args.errors:
-            v_init, alpha, beta, lag_residuals, fit_errors = fitAlphaBetaLag(time_data, length_data, \
-                ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta, estimate_errors=True)
+
+        if cml_args.lagfit == 'full':
+
+            def _fitEntryLag(x0_alpha_beta):
+                """ Fit the entry lag and compute the profile intervals of alpha and beta. """
+
+                fit_result = fitAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, station_data, \
+                    slant_column.lengthScale, sigma_length, traj.v_init, x0_alpha_beta=x0_alpha_beta, \
+                    estimate_errors=cml_args.errors)
+
+                # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the
+                #   uncertainties
+                profile = profileAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, station_data, \
+                    slant_column.lengthScale, fit_result[1], fit_result[2], fit_result[4], \
+                    n_grid=(40 if cml_args.errors else 0))
+
+                return fit_result, profile
+
+
+            fit_result, lag_profile = _fitEntryLag(x0_alpha_beta)
+
+            # If the profile found a better fit, the fit ended in a local minimum, so fit again from that
+            #   point
+            for _ in range(2):
+
+                if lag_profile['min_delta_chi2'] > -0.1:
+                    break
+
+                print("NOTE: The profile found a better fit (chi-squared lower by {:.1f}), fitting again " \
+                    "from it".format(-lag_profile['min_delta_chi2']))
+
+                x0_alpha_beta.append(lag_profile['min_model'][:2])
+                fit_result, lag_profile = _fitEntryLag(x0_alpha_beta)
+
+            v_init, alpha, beta, lag_residuals, entry_fit = fit_result[:5]
+            fit_errors = fit_result[5] if cml_args.errors else None
+
         else:
-            v_init, alpha, beta, lag_residuals = fitAlphaBetaLag(time_data, length_data, ht_data_rescaled, \
-                traj.v_init, x0_alpha_beta=x0_alpha_beta)
-            fit_errors = None
 
-        # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the uncertainties
-        lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, beta, \
-            v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
-
-        # If the profile found a better fit, the fit ended in a local minimum, so fit again from that point
-        for _ in range(2):
-
-            if lag_profile['min_delta_chi2'] > -0.1:
-                break
-
-            print("NOTE: The profile found a better fit (chi-squared lower by {:.1f}), fitting again from " \
-                "it".format(-lag_profile['min_delta_chi2']))
-
-            x0_alpha_beta.append(lag_profile['min_model'])
             if cml_args.errors:
                 v_init, alpha, beta, lag_residuals, fit_errors = fitAlphaBetaLag(time_data, length_data, \
                     ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta, estimate_errors=True)
             else:
                 v_init, alpha, beta, lag_residuals = fitAlphaBetaLag(time_data, length_data, \
                     ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta)
+                fit_errors = None
 
+            # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the
+            #   uncertainties
             lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, beta, \
                 v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
+
+            # If the profile found a better fit, the fit ended in a local minimum, so fit again from that
+            #   point
+            for _ in range(2):
+
+                if lag_profile['min_delta_chi2'] > -0.1:
+                    break
+
+                print("NOTE: The profile found a better fit (chi-squared lower by {:.1f}), fitting again " \
+                    "from it".format(-lag_profile['min_delta_chi2']))
+
+                x0_alpha_beta.append(lag_profile['min_model'])
+                if cml_args.errors:
+                    v_init, alpha, beta, lag_residuals, fit_errors = fitAlphaBetaLag(time_data, length_data, \
+                        ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta, estimate_errors=True)
+                else:
+                    v_init, alpha, beta, lag_residuals = fitAlphaBetaLag(time_data, length_data, \
+                        ht_data_rescaled, traj.v_init, x0_alpha_beta=x0_alpha_beta)
+
+                lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, \
+                    beta, v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
 
         # Models within the 95% interval of one parameter (with the best fit), whose range of the masses, the
         #   dynamic mass and the peak dynamic pressure gives their 95% intervals (only with --errors, which
@@ -7004,28 +8091,6 @@ if __name__ == "__main__":
 
         # Estimate the final velocity from the fitted alpha-beta solution
         vel_end = alphaBetaVelocity(ht_data_rescaled[0], alpha, beta, v_init)
-
-        slope = traj.orbit.elevation_apparent_norot
-
-        # The apparent elevation of the radiant is negative if the direction of the solution is reversed, or
-        #   if the meteor climbs, e.g. an Earth-grazer. Then the local slope of the observed path along the
-        #   direction of the motion is used, and if the meteor climbs, the alpha-beta model does not apply
-        if slope <= 0:
-
-            motion_sign = np.sign(np.polyfit(time_data, length_data, 1)[0])
-            slope = np.arcsin(np.clip(-motion_sign*np.polyfit(length_data, ht_data, 1)[0], -1.0, 1.0))
-
-            if slope <= 0:
-                print()
-                print("ERROR: The meteor climbs along the observed path (slope {:.1f} deg), e.g. an " \
-                    "Earth-grazer or a solution with a wrong timing, and the alpha-beta model needs a " \
-                    "descending meteor".format(np.degrees(slope)))
-                sys.exit(1)
-
-            print("NOTE: The apparent elevation of the radiant is {:.1f} deg, so the direction of the " \
-                "trajectory solution is likely reversed, check its timing. The local slope of the observed " \
-                "path, {:.1f} deg, is used instead".format(np.degrees(traj.orbit.elevation_apparent_norot), \
-                np.degrees(slope)))
 
         # Optional independent slope/density uncertainties (only used with --errors). Velocities
         #   are deliberately left exact: vel_end above is DERIVED from the fitted alpha/beta, so
@@ -7065,7 +8130,18 @@ if __name__ == "__main__":
 
         print("Alpha-beta fit to the lag of {:d} points, {:.1f} to {:.1f} km".format(len(ht_data), \
             ht_first/1000, np.min(ht_data)/1000))
-        if cml_args.atmrescale == 'column':
+        if cml_args.lagfit == 'full':
+            print("  Full fit of the entry lag against the slant air column along the path (--lagfit " \
+                "full), with an offset and a noise level for every station")
+            print("  Speed of the air along the path from the rotation of the Earth = {:.1f} m/s".format( \
+                air_speed))
+            print("  Reduced chi-squared = {:.2f}, integrated autocorrelation time of the residuals = " \
+                "{:.2f}".format(entry_fit['chi2_nu'], entry_fit['tau_int']))
+            print("  Station      Noise (m)   Offset (m)")
+            for station_id in station_ids:
+                print("  {:10s} {:9.1f} {:12.1f}".format(station_id, entry_fit['sigma_station'][station_id], \
+                    entry_fit['offsets'][station_id]))
+        elif cml_args.atmrescale == 'column':
             print("  Heights mapped to the model's exponential atmosphere by the air column above them " \
                 "(--atmrescale column)")
         else:
@@ -7103,7 +8179,11 @@ if __name__ == "__main__":
             print("WARNING: {:s}".format(bound_warning))
 
         # Print the profile intervals, which hold also where the Wald errors above do not
-        print("{:.3g}% profile intervals (lag residuals assumed independent):".format(lag_profile['ci']))
+        if cml_args.lagfit == 'full':
+            print("{:.3g}% profile intervals (threshold scaled by the autocorrelation time of the " \
+                "residuals):".format(lag_profile['ci']))
+        else:
+            print("{:.3g}% profile intervals (lag residuals assumed independent):".format(lag_profile['ci']))
         print("  Alpha: {:s}".format(profileIntervalText(lag_profile, 'alpha')))
         print("  Beta:  {:s}".format(profileIntervalText(lag_profile, 'beta')))
         if lag_profile['beta_lower_at_bound'] and (not lag_profile['beta_upper_at_bound']):
@@ -7154,10 +8234,12 @@ if __name__ == "__main__":
 
         ### Compute the dynamic mass at the end from the alpha-beta fit ###
 
-        # Velocity and deceleration of the alpha-beta model at the last point along the path
-        ab_path = AlphaBetaPath(length_data, ht_data_rescaled)
-        end_index = np.argmax(length_data)
-        vel_dyn, decel_dyn = ab_path.velocityDeceleration(length_data[end_index], alpha, beta, v_init)
+        # Velocity and deceleration of the alpha-beta model at the last point along the path, which is the
+        #   path flown through the air with the full fit
+        length_path = length_air if (cml_args.lagfit == 'full') else length_data
+        ab_path = AlphaBetaPath(length_path, ht_data_rescaled)
+        end_index = np.argmax(length_path)
+        vel_dyn, decel_dyn = ab_path.velocityDeceleration(length_path[end_index], alpha, beta, v_init)
         ht_dyn = ht_data[end_index]
 
         # Compute the dynamic mass, which is not defined if the model does not decelerate at the end
@@ -7178,7 +8260,7 @@ if __name__ == "__main__":
         interval_dyn_masses = []
         no_decel = False
         for a, b, v0 in interval_models:
-            vel_model_end, decel_model_end = ab_path.velocityDeceleration(length_data[end_index], a, b, v0)
+            vel_model_end, decel_model_end = ab_path.velocityDeceleration(length_path[end_index], a, b, v0)
             if decel_model_end <= 0:
                 no_decel = True
                 continue
@@ -7266,33 +8348,61 @@ if __name__ == "__main__":
         else:
             dyn_label = "Dynamic mass not defined\n(no deceleration at the end)"
 
-        # Lag of the models on a dense grid of times. The lag is the distance minus a line in time, which is
-        #   the same for all stations, so the line is fitted to the differences of the distances and the lag,
-        #   and the lag is drawn against the height of the best model at every time, which keeps the curve
-        #   smooth also when the points of the stations are interleaved in height
-        lag_line = np.polyfit(time_data, length_data - lag_data, 1)
+        if cml_args.lagfit == 'full':
 
-        # Older solutions have a separate line for every station, then the model is drawn for every station
-        #   from its own points
-        lag_line_rms = np.sqrt(np.mean((length_data - lag_data - np.polyval(lag_line, time_data))**2))
-        common_lag_line = lag_line_rms < 1.0
-        time_dense = np.linspace(np.min(time_data), np.max(time_data), 400)
-        _, t0_best = ab_path.lengths(time_data, alpha, beta, v_init, length_data=length_data)
-        length_dense, _ = ab_path.lengths(time_dense, alpha, beta, v_init, t0=t0_best)
-        lag_dense = length_dense - np.polyval(lag_line, time_dense)
-        length_order = np.argsort(length_data)
-        ht_along = np.minimum.accumulate(ht_data[length_order])
-        ht_lag_dense = np.interp(length_dense, length_data[length_order], ht_along)
+            # The full fit has an offset for every station, so the model is drawn for every station from its
+            #   own points
+            common_lag_line = False
 
-        # Band of the distance of the models within the region (each model is shifted in time to fit the
-        #   observed distances, as the best one)
-        if have_band:
-            region_models = list(zip(region_alpha, region_beta, region_v_init))
-            length_band = np.array([ab_path.lengths(time_dense, a, b, v0, \
-                t0=ab_path.lengths(time_data, a, b, v0, length_data=length_data)[1])[0] \
-                for a, b, v0 in region_models]) - length_dense
-            length_band_lo = np.min(length_band, axis=0)
-            length_band_hi = np.max(length_band, axis=0)
+            # Band of the lag of the models within the region at the observed points, relative to the best
+            #   model, with dv and the offsets of the stations fitted for every model
+            if have_band:
+                region_models = list(zip(region_alpha, region_beta, region_v_init))
+                station_index_fit = np.unique(station_data, return_inverse=True)[1]
+                n_stations_fit = int(np.max(station_index_fit)) + 1
+                lag_fit_best = entry_lag_data - lag_residuals
+                length_band = []
+                for a, b, _ in region_models:
+                    lag_model_region, _, _ = _entryLagModel(a, b, ht_normed_data, slant_column.lengthScale)
+                    _, _, residuals_region = _entryLagLinear(entry_lag_data - lag_model_region, time_data, \
+                        entry_fit['weights'], station_index_fit, n_stations_fit)
+                    length_band.append(entry_lag_data - residuals_region - lag_fit_best)
+
+                # Sort the band by the height of the points
+                ht_order = np.argsort(ht_data)
+                ht_lag_dense = ht_data[ht_order]
+                length_band_lo = np.min(length_band, axis=0)[ht_order]
+                length_band_hi = np.max(length_band, axis=0)[ht_order]
+
+        else:
+
+            # Lag of the models on a dense grid of times. The lag is the distance minus a line in time,
+            #   which is the same for all stations, so the line is fitted to the differences of the distances
+            #   and the lag, and the lag is drawn against the height of the best model at every time, which
+            #   keeps the curve smooth also when the points of the stations are interleaved in height
+            lag_line = np.polyfit(time_data, length_data - lag_data, 1)
+
+            # Older solutions have a separate line for every station, then the model is drawn for every
+            #   station from its own points
+            lag_line_rms = np.sqrt(np.mean((length_data - lag_data - np.polyval(lag_line, time_data))**2))
+            common_lag_line = lag_line_rms < 1.0
+            time_dense = np.linspace(np.min(time_data), np.max(time_data), 400)
+            _, t0_best = ab_path.lengths(time_data, alpha, beta, v_init, length_data=length_data)
+            length_dense, _ = ab_path.lengths(time_dense, alpha, beta, v_init, t0=t0_best)
+            lag_dense = length_dense - np.polyval(lag_line, time_dense)
+            length_order = np.argsort(length_data)
+            ht_along = np.minimum.accumulate(ht_data[length_order])
+            ht_lag_dense = np.interp(length_dense, length_data[length_order], ht_along)
+
+            # Band of the distance of the models within the region (each model is shifted in time to fit the
+            #   observed distances, as the best one)
+            if have_band:
+                region_models = list(zip(region_alpha, region_beta, region_v_init))
+                length_band = np.array([ab_path.lengths(time_dense, a, b, v0, \
+                    t0=ab_path.lengths(time_data, a, b, v0, length_data=length_data)[1])[0] \
+                    for a, b, v0 in region_models]) - length_dense
+                length_band_lo = np.min(length_band, axis=0)
+                length_band_hi = np.max(length_band, axis=0)
 
         # Limits of the velocity axes which are robust to single outliers of the point-to-point velocities
         vel_axis_lo = min(0.0, max(np.percentile(vel_data, 1), -0.5*v_init))
@@ -7325,8 +8435,7 @@ if __name__ == "__main__":
             #   heights rescaled to the exponential atmosphere at the mean position, as the dynamic pressure,
             #   with the band of the models within the region
             if have_band:
-                ht_arr_rescaled_mean = rescaleHeightToExponentialAtmosphere(np.full(len(ht_arr), lat_mean), \
-                    np.full(len(ht_arr), lon_mean), ht_arr, traj.jdt_ref, method=cml_args.atmrescale)
+                ht_arr_rescaled_mean = rescaleRealHeights(ht_arr)
                 vel_band = np.array([alphaBetaVelocity(ht_arr_rescaled_mean, a, b, v0) \
                     for a, b, v0 in region_models])
                 ax_vel.fill_betweenx(ht_arr/1000, np.min(vel_band, axis=0)/1000, \
@@ -7466,13 +8575,24 @@ if __name__ == "__main__":
         lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
         lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
 
-        def modelVelocityAtRealHeights(ht_real):
-            """ Compute the alpha-beta velocity at real heights, rescaled to the model atmosphere. """
+        def rescaleRealHeights(ht_real):
+            """ Map real heights to the heights of the model, by the slant column of the full fit, or as the
+                simple fit maps them at the mean position of the meteor.
+            """
+
+            if cml_args.lagfit == 'full':
+                return HT_NORM_CONST*slant_column.htNormedAtHeights(ht_real)
 
             n = len(ht_real)
 
-            return alphaBetaVelocity(rescaleHeightToExponentialAtmosphere(np.full(n, lat_mean), \
-                np.full(n, lon_mean), ht_real, traj.jdt_ref, method=cml_args.atmrescale), alpha, beta, v_init)
+            return rescaleHeightToExponentialAtmosphere(np.full(n, lat_mean), np.full(n, lon_mean), ht_real, \
+                traj.jdt_ref, method=cml_args.atmrescale)
+
+
+        def modelVelocityAtRealHeights(ht_real):
+            """ Compute the alpha-beta velocity at real heights, rescaled to the model atmosphere. """
+
+            return alphaBetaVelocity(rescaleRealHeights(ht_real), alpha, beta, v_init)
 
         # Compute the dynamic pressure using alpha and beta, with the real density at real heights, and the
         #   model velocity at those heights rescaled to its atmosphere
@@ -7539,8 +8659,7 @@ if __name__ == "__main__":
         interval_pressures = []
         if interval_models:
             atm_dens = getAtmDensity_vect(lat_mean, lon_mean, ht_arr, traj.jdt_ref)
-            ht_arr_rescaled = rescaleHeightToExponentialAtmosphere(np.full(len(ht_arr), lat_mean), \
-                np.full(len(ht_arr), lon_mean), ht_arr, traj.jdt_ref, method=cml_args.atmrescale)
+            ht_arr_rescaled = rescaleRealHeights(ht_arr)
             for a, b, v0 in interval_models:
                 dyn_pressure_model = atm_dens*alphaBetaVelocity(ht_arr_rescaled, a, b, v0)**2
                 interval_pressures.append(dyn_pressure_model)
@@ -7674,7 +8793,11 @@ if __name__ == "__main__":
             "dens = {:d} kg/m$^3$, $\\Gamma A$ = {:.2f}".format(int(cml_args.dens), cml_args.ga), \
             note=masses_note)
 
-        fig_sum.suptitle("{:s}, alpha-beta fit to the lag".format(traj.file_name))
+        if cml_args.lagfit == 'full':
+            fig_sum.suptitle("{:s}, alpha-beta full fit of the entry lag in slant-column " \
+                "coordinates".format(traj.file_name))
+        else:
+            fig_sum.suptitle("{:s}, alpha-beta fit to the lag".format(traj.file_name))
 
         _finishPlot(fig_sum, "alpha_beta_summary")
 
