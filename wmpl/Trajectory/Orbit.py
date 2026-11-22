@@ -202,7 +202,7 @@ class Orbit(object):
 
         # Check if the orbit was calculated
         if self.ra_g is not None:
-            out_str += "  JD dynamic   = {:20.12f} \n".format(self.jd_dyn)
+            out_str += "  JD dynamic   = {:20.12f} (TT of the reference point)\n".format(self.jd_dyn)
             out_str += "  LST apparent = {:.10f} deg\n".format(np.degrees(self.lst_ref))
 
 
@@ -294,7 +294,7 @@ class Orbit(object):
                 uncertainties, 'v_h_y'))
             out_str += "  Vh_z   = {:s} km/s\n".format(valueFormat("{:>9.5f}", self.v_h_z, '{:.5f}', \
                 uncertainties, 'v_h_z'))
-            out_str += "Orbit:\n"
+            out_str += "Orbit (heliocentric osculating elements at JD dynamic, ecliptic and equinox J2000):\n"
             out_str += "  La Sun = {:s} deg\n".format(valueFormat("{:>10.6f}", self.la_sun, '{:.6f}', \
                 uncertainties, 'la_sun', deg=True))
             out_str += "  a      = {:s} AU\n".format(valueFormat("{:>10.6f}", self.a, '{:.6f}', \

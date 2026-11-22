@@ -1692,6 +1692,7 @@ class TrajectoryCorrelator(object):
                         # Offset all times by t0
                         for i in range(len(traj.observations)):
                             traj.observations[i].time_data -= t0
+                            traj.observations[i].jdt_ref += t0/86400.0
 
 
                         # Recompute the reference JD to corresponds with t0
