@@ -16,9 +16,7 @@ except ImportError:
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 
-# Product of the drag coefficient Gamma and the shape factor A assumed for the masses of fireballs by default,
-#   the value of the literature, to be refined on fireballs with recovered meteorites. Faint meteors use
-#   Gamma = 1 and A = 1.21 (sphere)
+# Product of the drag coefficient Gamma and the shape factor A assumed for the masses of fireballs by default
 GAMMA_A = 0.78
 
 # Mapping of luminous efficiency model names to the integer lum_eff_type codes used by
