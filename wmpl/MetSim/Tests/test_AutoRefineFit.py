@@ -65,7 +65,7 @@ def testLengthResidualIsAveragedOverThePointsUsed():
     obs_faint = _observation(30, 10.0, 1000.0)
     traj = SimpleNamespace(rbeg_ele=100e3, observations=[obs_bright, obs_faint])
 
-    mag_res, len_res, cost = costFunc(traj, None, _simulation(), 1.0, 1.0)
+    mag_res, len_res, cost, _ = costFunc(traj, None, _simulation(), 1.0, 1.0, fit_time_offset=False)
 
     assert np.isclose(mag_res, 0.0)
     assert np.isclose(len_res, 10.0)
@@ -79,9 +79,25 @@ def testLengthResidualWithoutFaintPoints():
     traj = SimpleNamespace(rbeg_ele=100e3, observations=[_observation(10, 0.0, 10.0), \
         _observation(30, 2.0, -50.0)])
 
-    _, len_res, _ = costFunc(traj, None, _simulation(), 1.0, 1.0)
+    _, len_res, _, _ = costFunc(traj, None, _simulation(), 1.0, 1.0, fit_time_offset=False)
 
     assert np.isclose(len_res, (10*10.0 + 30*50.0)/40)
+
+
+
+def testTimeOffsetTakesUpLengthOffset():
+    """ Check that the fitted time offset takes up a length offset common to most points, with the absolute
+        residuals of the cost function, so a minority of points with another offset do not move it.
+    """
+
+    traj = SimpleNamespace(rbeg_ele=100e3, observations=[_observation(30, 0.0, 40.0), \
+        _observation(10, 2.0, -50.0)])
+
+    _, len_res, _, time_offset = costFunc(traj, None, _simulation(), 1.0, 1.0)
+
+    # The simulation passes the first point 2 ms earlier, and only the 10 other points have a residual
+    assert np.isclose(time_offset, -40.0/SIM_VEL, rtol=1e-3)
+    assert np.isclose(len_res, 10*90.0/40, rtol=1e-3)
 
 
 
@@ -89,7 +105,8 @@ def testLengthResidualWithoutFaintPoints():
 if __name__ == "__main__":
 
     # Run all tests
-    test_list = [testLengthResidualIsAveragedOverThePointsUsed, testLengthResidualWithoutFaintPoints]
+    test_list = [testLengthResidualIsAveragedOverThePointsUsed, testLengthResidualWithoutFaintPoints, \
+        testTimeOffsetTakesUpLengthOffset]
 
     for test in test_list:
         test()
