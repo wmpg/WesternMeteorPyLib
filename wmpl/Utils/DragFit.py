@@ -72,7 +72,7 @@ from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MIN_VEL, applyGravityDrop, g
     gravityDropVectors, solutionDropTimeOrigin
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
-from wmpl.Utils.Physics import ballisticCoeffMass, earthRotationSpeed, earthRotationVelocity
+from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationSpeed, earthRotationVelocity
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
 
@@ -80,9 +80,7 @@ from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
 # Gravitational acceleration at the surface of the Earth (m/s^2)
 G_SURFACE = 9.80665
 
-# Product of the drag coefficient and the shape factor, and the bulk density (kg/m^3), assumed for the
-#   dynamic mass by default
-GAMMA_A = 0.78
+# Bulk density (kg/m^3) assumed for the dynamic mass by default, with Gamma*A = GAMMA_A
 BULK_DENSITY = 3500.0
 
 # Iterations of the scale of the drag for the speed relative to the air: the most, the number after which

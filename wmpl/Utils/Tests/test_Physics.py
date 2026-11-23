@@ -6,12 +6,15 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import inspect
+import os
 import warnings
 
 import numpy as np
 
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
-from wmpl.Utils.Physics import ballisticCoeffMass, dynamicMass, calcMass, calcRadiatedEnergy, LUM_EFF_MODELS
+from wmpl.Utils.Physics import ballisticCoeffMass, dynamicMass, calcMass, calcRadiatedEnergy, LUM_EFF_MODELS, \
+    GAMMA_A
 
 
 # A synthetic light curve: a 2 s meteor peaking at -2 mag, decelerating from 20 to 15 km/s
@@ -172,6 +175,34 @@ def testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy():
 
 
 
+def testAllMassesUseTheSameGammaA():
+    """ Check that the dynamic and the alpha-beta masses and their command lines use the same Gamma*A by
+        default.
+    """
+
+    from wmpl.Utils.AlphaBeta import alphaBetaMasses, fitAlphaBetaMass, plotAlphaBetaMassDiagram, \
+        plotAlphaBetaSurvivalDiagram, alphaBetaLuminousEfficiency
+    from wmpl.Utils.DragFit import DragFit
+
+    assert GAMMA_A == 0.78
+
+    # Defaults of the functions
+    assert inspect.signature(dynamicMass).parameters['gamma'].default == 1.0
+    assert inspect.signature(dynamicMass).parameters['shape_factor'].default == GAMMA_A
+    for func in [alphaBetaMasses, fitAlphaBetaMass, plotAlphaBetaMassDiagram, plotAlphaBetaSurvivalDiagram, \
+        alphaBetaLuminousEfficiency]:
+        assert inspect.signature(func).parameters['shape_coeff'].default == GAMMA_A, func.__name__
+
+    assert inspect.signature(DragFit.dynamicMassAtLength).parameters['gamma_a'].default == GAMMA_A
+
+    # Defaults of the command lines
+    for module in ['AlphaBeta', 'DynamicMassFit', 'DragFit']:
+        with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), module + '.py')) as f:
+            source = f.read()
+
+        assert "default=GAMMA_A" in source, module
+
+
 
 if __name__ == "__main__":
 
@@ -179,7 +210,7 @@ if __name__ == "__main__":
     test_list = [testBallisticCoeffMass, testCalcMassTakesNumpyIntegersAsModelCodes, \
         testCalcMassWarnsAboutP0mForThe1500WModels, testCalcMassAtZeroLumEffMassIsTheSmallMassLimit, \
         testCalcMassConstantCodeIsAlways0p7Percent, \
-        testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy]
+        testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy, testAllMassesUseTheSameGammaA]
 
     for test in test_list:
         test()

@@ -9,7 +9,7 @@ from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, set
 from wmpl.Utils.AtmosphereDensity import loadAtmosphereProfile, atmDensTable, msisModelName
 from wmpl.Utils.Math import lineFunc, vectMag, rotateVector
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
-from wmpl.Utils.Physics import dynamicMass, groundSpeed, earthRotationVelocity, EARTH_ROTATION_RATE
+from wmpl.Utils.Physics import GAMMA_A, dynamicMass, groundSpeed, earthRotationVelocity, EARTH_ROTATION_RATE
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
@@ -557,8 +557,8 @@ if __name__ == "__main__":
         type=float, default=3500)
 
     arg_parser.add_argument('-g', '--ga', metavar='GAMMA_A', \
-        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
-        type=float, default=0.55)
+        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is {:.2f}.'.format(GAMMA_A), \
+        type=float, default=GAMMA_A)
 
     arg_parser.add_argument('-e', '--eval', metavar='EVAL_PT', \
         help='Point where to evaluate the dynamic mass (0 = ht_min, 1 = ht_max). Default is 0.5.', \
