@@ -79,7 +79,9 @@ The top row of the summary plot shows the velocities against the observed height
 first point down to below the last one, the lag, the lag residuals and the dynamic pressure. The points are
 colored by station with the colors of the trajectory plots, and the legend gives the RMS of the lag residuals of
 every station, so a station which does not agree with the others stands out. With the full fit, the residuals are
-those left after the offset of every station, so a constant offset of a station does not show in them.
+those left after the offset of every station, so a constant offset of a station does not show in them. They are
+given as distances along the path at the observed times (the lag residual times the normalized velocity of the
+model), as a residual in the lag grows as 1/v where the meteor is slow.
 
 ---
 
