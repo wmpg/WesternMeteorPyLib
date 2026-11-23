@@ -140,6 +140,31 @@ def testSimulationStoppingAboveTheFirstPointIsRejected():
 
 
 
+def testLagNoiseIgnoresTheLinearTrend():
+    """ Check that the noise estimated from the lag does not count its linear trend, which comes from the
+        velocity the lag is computed with, for a meteor at a constant speed and a decelerating one.
+    """
+
+    rng = np.random.RandomState(0)
+    time_lag = np.linspace(0, 5, 251)
+    noise = rng.normal(0, 1.0, len(time_lag))
+
+    def fitLagNoise(lag):
+        """ Estimate the noise of the given lag. """
+
+        return DynestyMetSim.ObservationData.fitLagNoise(SimpleNamespace(lag=lag, time_lag=time_lag))
+
+    # A lag computed with a velocity 100 m/s higher than the initial one has the noise of the lag without
+    #   the trend
+    deceleration = -50.0*np.clip(time_lag - 3.0, 0, None)**2
+    for lag in [noise, deceleration + noise]:
+        assert np.isclose(fitLagNoise(lag - 100.0*time_lag), fitLagNoise(lag), rtol=0.02)
+
+    # At a constant speed the noise is recovered
+    assert 0.8 < fitLagNoise(noise - 100.0*time_lag) < 1.2
+
+
+
 def testExampleObservationsAndSavedTimeOffset():
     """ Check the likelihood of the shipped CAMO example with and without the offset, and that the saved
         constants keep the fitted offset.
@@ -185,7 +210,8 @@ if __name__ == "__main__":
     # Run all tests
     test_list = [testTimeOffsetTakesUpFirstPointError, \
         testWithoutTimeOffsetTheSimulationPassesTheFirstPoint, \
-        testSimulationStoppingAboveTheFirstPointIsRejected, testExampleObservationsAndSavedTimeOffset]
+        testSimulationStoppingAboveTheFirstPointIsRejected, testLagNoiseIgnoresTheLinearTrend, \
+        testExampleObservationsAndSavedTimeOffset]
 
     for test in test_list:
         test()

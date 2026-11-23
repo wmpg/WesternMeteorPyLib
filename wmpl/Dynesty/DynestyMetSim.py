@@ -4256,12 +4256,22 @@ class ObservationData:
 
             return lag_funct
         
+        def lagPolyResiduals(params, t_time, l_data):
+            """ Residuals of the lag after the fitted deceleration and a straight line are taken out. The
+                line is free because the lag is computed with a velocity which differs from the initial one,
+                so its linear trend is not noise.
+            """
+
+            res = l_data - lagPoly(t_time, *params)
+
+            return res - np.polyval(np.polyfit(t_time, res, 1), t_time)
+
         def lagPolyRes(params, t_time, l_data):
             """
             Residual function for the optimization.
             """
 
-            return np.sum((l_data - lagPoly(t_time, *params))**2)
+            return np.sum(lagPolyResiduals(params, t_time, l_data)**2)
 
         # initial guess of deceleration decel equal to linear fit of velocity
         p0 = [np.mean(self.lag), 0, 0, np.mean(self.time_lag)]
@@ -4269,9 +4279,7 @@ class ObservationData:
         opt_res = minimize(lagPolyRes, p0, args=(np.array(self.time_lag), np.array(self.lag)), method='Nelder-Mead')
 
         # sample the fit for the velocity and acceleration
-        a_t0, b_t0, c_t0, t0 = opt_res.x
-        fitted_lag_t0 = lagPoly(self.time_lag, a_t0, b_t0, c_t0, t0)
-        residuals_t0 = self.lag - fitted_lag_t0
+        residuals_t0 = lagPolyResiduals(opt_res.x, np.array(self.time_lag), np.array(self.lag))
         # avg_residual = np.mean(abs(residuals))
         rmsd_lag_polyn = np.sqrt(np.mean(residuals_t0**2))
 

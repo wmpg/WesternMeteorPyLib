@@ -2655,37 +2655,24 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
     # Compute magnitude residuals from the .met file
     if met_obs is not None:
 
-        # If 2 and 4 are the sites, rename them to 1 and 2
+        # If 2 and 4 are the sites, rename them to 1 and 2 in the plot, without changing the observations
+        #   which are used again for the fit
+        site_names = {}
         if camo and ("2" in met_obs.sites) and ("4" in met_obs.sites):
+            site_names = {"2": "1", "4": "2"}
 
-            # Rename the list entries to 1 and 2
-            temp_sites = []
-            for site in met_obs.sites:
-                if site == "2":
-                    temp_sites.append("1")
-                elif site == "4":
-                    temp_sites.append("2")
-                else:
-                    temp_sites.append(site)
-            
-            # Replace the sites list
-            met_obs.sites = temp_sites
-
-            # Swap keys in height_data and abs_mag_data
-            temp_height_data = met_obs.height_data["2"]
-            temp_abs_mag_data = met_obs.abs_mag_data["2"]
-            met_obs.height_data["2"] = met_obs.height_data["4"]
-            met_obs.abs_mag_data["2"] = met_obs.abs_mag_data["4"]
-            met_obs.height_data["1"] = temp_height_data
-            met_obs.abs_mag_data["1"] = temp_abs_mag_data
+        met_sites = [site_names.get(site, site) for site in met_obs.sites]
+        met_height_data = {site_names.get(site, site): met_obs.height_data[site] for site in met_obs.sites}
+        met_abs_mag_data = {site_names.get(site, site): met_obs.abs_mag_data[site] for site in met_obs.sites}
+        met_time_data = {site_names.get(site, site): met_obs.time_data[site] for site in met_obs.sites}
 
 
         # Plot magnitudes for all sites
-        for site in met_obs.sites:
+        for site in met_sites:
 
             # Extract data (filter out inf values)
-            height_data = met_obs.height_data[site][~np.isinf(met_obs.abs_mag_data[site])]
-            abs_mag_data = met_obs.abs_mag_data[site][~np.isinf(met_obs.abs_mag_data[site])]
+            height_data = met_height_data[site][~np.isinf(met_abs_mag_data[site])]
+            abs_mag_data = met_abs_mag_data[site][~np.isinf(met_abs_mag_data[site])]
 
             # # Sample the simulated magnitude at the observation heights
             # sim_mag_sampled = sim_mag_interp(height_data)
@@ -2716,8 +2703,8 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
             mag_obs_brightest = min(mag_obs_brightest, np.min(abs_mag_data))
 
             # Keep track of the observed time range
-            time_obs_max = max(time_obs_max, np.max(met_obs.time_data[site]))
-            time_obs_min = min(time_obs_min, np.min(met_obs.time_data[site]))
+            time_obs_max = max(time_obs_max, np.max(met_time_data[site]))
+            time_obs_min = min(time_obs_min, np.min(met_time_data[site]))
 
 
     # Plot additional observations from the light curve CSV file (if available)
@@ -6156,10 +6143,10 @@ class MetSimGUI(QMainWindow):
             # Plot additional magnitudes for all sites
             for site in self.met_obs.sites:
 
-                # Extract data
+                # Extract data, without the times if the site has none
                 height_data = self.met_obs.height_data[site]
                 abs_mag_data = self.met_obs.abs_mag_data[site]
-                time_data = self.met_obs.time_data[site]
+                time_data = self.met_obs.time_data.get(site, np.zeros_like(height_data) + np.nan)
 
 
                 # Add dummy length data
