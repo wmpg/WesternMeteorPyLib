@@ -1373,6 +1373,9 @@ def runSimulation(const, compute_wake=False):
             # Reset output parameters for every fragmentation entry
             frag_entry.resetOutputParameters()
 
+            # Perform every fragmentation again, as the entries keep their status from the previous run
+            frag_entry.done = False
+
 
     fragments = []
 

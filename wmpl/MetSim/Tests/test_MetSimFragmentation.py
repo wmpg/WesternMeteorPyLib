@@ -7,6 +7,7 @@ The tests check that:
     - "EF" and "D" entries without a mass index take 2.0,
     - the count of active fragments stays right through a disruption,
     - the mass of an entry is limited to 100 %,
+    - the fragmentations are performed again in every run with the same constants,
     - the constants can be saved after a run with the wake.
 
 Run with pytest:
@@ -209,6 +210,28 @@ def testNewFragmentsTakeTheDefaultMassIndex():
 
 
 
+def testFragmentationsRunAgainInEveryRun():
+    """ Check that a second run with the same constants performs the fragmentations again, as the automated
+        fits run the simulation many times with copies of the constants of the last run.
+    """
+
+    const = erodingConstants(1e-3)
+    const.fragmentation_on = True
+    const.fragmentation_entries = [FragmentationEntry("EF", 95000.0, 2, 30.0, None, None, 0.3e-6, 1e-10, \
+        5e-10, None)]
+
+    _, results_first, _ = MetSimErosion.runSimulation(const)
+    time_first = const.fragmentation_entries[0].time
+
+    _, results_second, _ = MetSimErosion.runSimulation(const)
+
+    assert time_first is not None
+    assert const.fragmentation_entries[0].time == time_first
+    assert np.allclose(np.array(results_first, dtype=np.float64), np.array(results_second, dtype=np.float64), \
+        equal_nan=True)
+
+
+
 def testActiveCountThroughDisruption():
     """ Check that the count of active fragments is the number of active fragments after a disruption, which
         counted the disrupted fragment twice.
@@ -259,6 +282,7 @@ if __name__ == "__main__":
     testTotalMassIncludesTheMassBins()
     testMainEntryKeepsTheErosionCoefficient()
     testNewFragmentsTakeTheDefaultMassIndex()
+    testFragmentationsRunAgainInEveryRun()
     testActiveCountThroughDisruption()
     testEntryMassIsLimitedTo100Percent()
     testConstantsCanBeSavedAfterTheWake()
