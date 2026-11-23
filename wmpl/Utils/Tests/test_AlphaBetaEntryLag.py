@@ -193,6 +193,22 @@ def _syntheticFit(v_ref_offset=-60.0, estimate_errors=False):
 
 
 
+def _fastArcFit():
+    """ Fit the entry lag of a fast meteor with a large alpha and beta, which barely decelerates, observed
+        above 0.9 of its entry velocity.
+
+    Return:
+        (inputs, result): See _fitSyntheticMeteor().
+    """
+
+    v_entry = 60000.0
+    observed = _observeSyntheticMeteor(3000.0, 20.0, v_entry, time_step=0.004, ht_min=10000.0, v_min=0.9, \
+        noise_factor=3.0, seed=2)
+
+    return _fitSyntheticMeteor(*observed[:4], v_entry - 60.0)
+
+
+
 def testEntryLagMatchesDirectIntegration():
     """ The entry lag of the nodes matches a direct quadrature over the velocity, and near entry it is the
         length scale times the velocity deficit.
@@ -443,10 +459,7 @@ def testFitAlphaBetaEntryLagReachesAllPoints():
         the points below the lowest height which a model reaches are weighted as at entry speed.
     """
 
-    v_entry = 60000.0
-    observed = _observeSyntheticMeteor(3000.0, 20.0, v_entry, time_step=0.004, ht_min=10000.0, v_min=0.9, \
-        noise_factor=3.0, seed=2)
-    inputs, result = _fitSyntheticMeteor(*observed[:4], v_entry - 60.0)
+    inputs, result = _fastArcFit()
     ht_normed, slant_column = inputs[2], inputs[4]
     alpha, beta = result[1], result[2]
 
@@ -464,6 +477,21 @@ def testFitAlphaBetaEntryLagReachesAllPoints():
     assert lag_below[2] < lag_below[1] < lag_below[0]
     assert np.all(v_below[1:] == 1.0)
     assert np.isclose(outside_below, 2/3)
+
+
+
+def testProfileAlphaBetaEntryLagOfAFastArc():
+    """ The profile of beta of a fast meteor which barely decelerates finds a model which reaches the points
+        at every beta, also where the models around the previous point of the profile do not reach them.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column, _), result = _fastArcFit()
+    _, alpha, beta, _, entry_fit = result
+
+    profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, alpha, beta, entry_fit, n_grid=0)
+
+    assert np.all(np.isfinite(profile['beta_profile'][1]))
 
 
 
@@ -618,7 +646,8 @@ if __name__ == "__main__":
         testAirSpeedAlongPath, testGravityLengthAlongLine, testStationLengthNoise, testFitAlphaBetaEntryLag, \
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
         testFitAlphaBetaEntryLagConverges, testFitAlphaBetaEntryLagReachesAllPoints, \
-        testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
+        testProfileAlphaBetaEntryLagOfAFastArc, testProfileAlphaBetaEntryLag, \
+        testStationLengthNoiseNeedsEnoughPoints, \
         testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, \
         testStationJackknifeFindsABiasedStation, testProfileAlphaBetaEntryLagKeepsAlphaInBounds]
 

@@ -3236,10 +3236,19 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
 
         if idx == 1:
 
-            # Minimize over ln alpha within a bracket around the previous point of the valley
-            res = scipy.optimize.minimize_scalar(lambda log_alpha: _cost(log_alpha, log_value)[0], \
-                bracket=(valley['log_alpha'] - 0.05, valley['log_alpha'] + 0.05), tol=1e-6)
-            log_alpha = res.x
+            def _costAlpha(log_alpha):
+                """ Cost of the model with the fixed ln beta at the given ln alpha. """
+
+                return _cost(log_alpha, log_value)[0]
+
+
+            # Minimize over ln alpha within a bracket around the previous point of the valley, which fails if
+            #   no model around it reaches the points
+            try:
+                log_alpha = scipy.optimize.minimize_scalar(_costAlpha, bracket=(valley['log_alpha'] - 0.05, \
+                    valley['log_alpha'] + 0.05), tol=1e-6).x
+            except (ValueError, RuntimeError):
+                log_alpha = np.nan
 
             # If the valley leaves the bounds of alpha of the fit, minimize between the previous point and
             #   the bound which it crosses
@@ -3250,10 +3259,30 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
                 log_alpha = edge
 
                 if inner != edge:
-                    res = scipy.optimize.minimize_scalar(lambda log_alpha: _cost(log_alpha, log_value)[0], \
-                        method='bounded', bounds=(min(inner, edge), max(inner, edge)), \
-                        options={'xatol': 1e-6})
+                    res = scipy.optimize.minimize_scalar(_costAlpha, method='bounded', \
+                        bounds=(min(inner, edge), max(inner, edge)), options={'xatol': 1e-6})
                     log_alpha = res.x
+
+            # If the minimization did not find a model which reaches the points, search for one over the
+            #   bounds of alpha and refine the best one between its neighbours
+            if (not np.isfinite(log_alpha)) or (not np.isfinite(_costAlpha(log_alpha))):
+
+                log_alpha_grid = np.linspace(lower_bounds[0], upper_bounds[0], 61)
+                grid_costs = np.array([_costAlpha(log_alpha_grid_point) for log_alpha_grid_point \
+                    in log_alpha_grid])
+
+                if np.any(np.isfinite(grid_costs)):
+
+                    k = int(np.argmin(grid_costs))
+                    res = scipy.optimize.minimize_scalar(_costAlpha, method='bounded', \
+                        bounds=(log_alpha_grid[max(k - 1, 0)], log_alpha_grid[min(k + 1, \
+                        len(log_alpha_grid) - 1)]), options={'xatol': 1e-6})
+                    log_alpha = res.x if (res.fun < grid_costs[k]) else log_alpha_grid[k]
+
+                else:
+
+                    # No alpha gives a model which reaches the points, so the cost stays infinite
+                    log_alpha = valley['log_alpha']
 
             valley['log_alpha'] = log_alpha
             log_beta = log_value
