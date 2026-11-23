@@ -480,6 +480,23 @@ def testFitAlphaBetaEntryLagReachesAllPoints():
 
 
 
+def testFitAlphaBetaEntryLagWithPreciseDistances():
+    """ With distances so precise that the starting models cost more than the models which do not reach the
+        points and are rejected, the fit still starts from and ends at a model which reaches them.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column), _ = _syntheticFit()
+
+    result = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, slant_column.lengthScale, \
+        np.full(len(time_data), 0.02), V_ENTRY_TRUE - 60.0)
+
+    assert _entryLagModel(result[1], result[2], ht_normed, slant_column.lengthScale)[2] \
+        <= ENTRY_LAG_MAX_OUTSIDE
+    assert np.isclose(result[1], ALPHA_TRUE, rtol=0.02), result[1]
+    assert np.isclose(result[2], BETA_TRUE, rtol=0.05), result[2]
+
+
+
 def testProfileAlphaBetaEntryLagOfAFastArc():
     """ The profile of beta of a fast meteor which barely decelerates finds a model which reaches the points
         at every beta, also where the models around the previous point of the profile do not reach them.
@@ -646,8 +663,8 @@ if __name__ == "__main__":
         testAirSpeedAlongPath, testGravityLengthAlongLine, testStationLengthNoise, testFitAlphaBetaEntryLag, \
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
         testFitAlphaBetaEntryLagConverges, testFitAlphaBetaEntryLagReachesAllPoints, \
-        testProfileAlphaBetaEntryLagOfAFastArc, testProfileAlphaBetaEntryLag, \
-        testStationLengthNoiseNeedsEnoughPoints, \
+        testFitAlphaBetaEntryLagWithPreciseDistances, testProfileAlphaBetaEntryLagOfAFastArc, \
+        testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
         testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, \
         testStationJackknifeFindsABiasedStation, testProfileAlphaBetaEntryLagKeepsAlphaInBounds]
 

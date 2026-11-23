@@ -2868,7 +2868,8 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         from the best of a grid in ln alpha and ln beta, the given starting points and the previous fit, with
         its weights. A model may leave at most ENTRY_LAG_MAX_OUTSIDE of the points beyond the heights which it
         reaches, which are weighted as if its velocity was 1 there, and alpha and beta are bound by
-        ALPHA_BETA_BOUNDS.
+        ALPHA_BETA_BOUNDS. The fits start only from models which reach the points, and a ValueError is raised
+        if no starting point does.
 
     Arguments:
         time_data: [ndarray] Time of every point (s).
@@ -2929,6 +2930,12 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         starts += [tuple(x0[:2]) for x0 in x0_alpha_beta]
     log_starts = [np.clip(np.log(start), log_bounds[0], log_bounds[1]) for start in starts]
 
+    def _reachesPoints(x):
+        """ Check that the model for (ln alpha, ln beta) reaches the column heights of the points. """
+
+        return _entryLagModel(np.exp(x[0]), np.exp(x[1]), ht_normed, length_scale)[2] <= ENTRY_LAG_MAX_OUTSIDE
+
+
     v_model = np.ones_like(time_data)
     x_best = None
     passes = []
@@ -2938,6 +2945,9 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         # Weights of the fit, from the velocity of the model of the previous fit
         weights = (v_model/sigma_length)**2
 
+        # Residual of the models which do not reach the points, set above the cost of the start of the fit
+        penalty = {'residual': 1e4}
+
         def _residuals(x, weights=weights):
             """ Weighted residuals of the lag for (ln alpha, ln beta), with dv and the offsets fitted. """
 
@@ -2946,7 +2956,7 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
 
             # Reject models which do not reach the column heights of the points
             if outside > ENTRY_LAG_MAX_OUTSIDE:
-                return np.full(len(time_data), 1e4)
+                return np.full(len(time_data), penalty['residual'])
 
             _, _, residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
                 n_stations)
@@ -2954,10 +2964,20 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
             return np.sqrt(weights)*residuals
 
 
-        # Start from the best of the grid, the given starting points and the previous fit, with these weights
-        candidates = log_starts + ([x_best] if x_best is not None else [])
+        # Start from the best of the grid, the given starting points and the previous fit, with these weights,
+        #   of the models which reach the points
+        candidates = [candidate for candidate in log_starts + ([x_best] if x_best is not None else []) \
+            if _reachesPoints(candidate)]
+        if not candidates:
+            raise ValueError("No starting point of the fit of the entry lag gives a model which reaches " \
+                "the points")
+
         costs = [np.sum(_residuals(candidate)**2) for candidate in candidates]
         x_start = candidates[int(np.argmin(costs))]
+
+        # Make the rejected models cost much more than the start, so the fit never steps into them
+        penalty['residual'] = max(1e4, 10*np.sqrt(np.min(costs)/len(time_data)))
+
         res = scipy.optimize.least_squares(_residuals, x_start, bounds=log_bounds, x_scale='jac', \
             max_nfev=300)
 
@@ -2969,7 +2989,7 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
                 res = res_previous
 
         x_previous = x_best
-        x_best = res.x
+        x_best = res.x if _reachesPoints(res.x) else x_start
 
         # Velocity of the model at the points, for the weights of the next fit
         alpha, beta = np.exp(x_best)
