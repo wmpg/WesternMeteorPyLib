@@ -2328,6 +2328,15 @@ ENTRY_LAG_MIN_NOISE = 0.01
 #   step, up to the largest step
 ENTRY_LAG_PROFILE_SLOW_STEPS = 20
 
+# Largest fraction of the points beyond the heights reached by a model of the fit of the entry lag
+ENTRY_LAG_MAX_OUTSIDE = 0.02
+
+# Largest number of fits of the entry lag with the weights from the previous fit
+ENTRY_LAG_MAX_PASSES = 10
+
+# Change of ln alpha and ln beta between two fits of the entry lag below which the fits have converged
+ENTRY_LAG_PASS_TOL = 1e-3
+
 
 
 class AlphaBetaSlantColumn(object):
@@ -2724,15 +2733,21 @@ def _entryLagModel(alpha, beta, ht_normed, length_scale):
     Return:
         (lag_model, v_model, outside):
             - lag_model: [ndarray] Model lag at every point (m).
-            - v_model: [ndarray] Normalized velocity of the model at every point.
+            - v_model: [ndarray] Normalized velocity of the model at every point, for the weights of the fit.
+                It is 1 at the points below the lowest height reached by the model, where the model has no
+                velocity.
             - outside: [float] Fraction of the points outside the heights reached by the model.
     """
 
     ht_nodes, lag_nodes, v_nodes = alphaBetaEntryLag(alpha, beta, length_scale)
 
-    outside = np.mean((ht_normed < ht_nodes[0]) | (ht_normed > ht_nodes[-1]))
+    below = ht_normed < ht_nodes[0]
+    outside = np.mean(below | (ht_normed > ht_nodes[-1]))
 
-    return -np.interp(ht_normed, ht_nodes, lag_nodes), np.interp(ht_normed, ht_nodes, v_nodes), outside
+    # The points which the model never reaches are weighted as at entry, so their weights do not vanish
+    v_model = np.where(below, 1.0, np.interp(ht_normed, ht_nodes, v_nodes))
+
+    return -np.interp(ht_normed, ht_nodes, lag_nodes), v_model, outside
 
 
 
@@ -2814,7 +2829,7 @@ def _entryLagTauInt(time_data, residuals_normed, station_index, n_stations, \
 
 
 def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, sigma_length, v_ref, \
-    n_pass=2, x0_alpha_beta=None, estimate_errors=False, ci=95.0):
+    max_pass=ENTRY_LAG_MAX_PASSES, x0_alpha_beta=None, estimate_errors=False, ci=95.0):
     """ Fit the alpha-beta model to the entry lag in slant-column coordinates, with an offset and a noise
         level for every station (the full fit of the lag).
 
@@ -2827,10 +2842,17 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         already decelerates where the line is fitted, and K_S is an offset of the station S of the point,
         which absorbs a constant offset of its clock. For given alpha and beta, dv and the offsets follow in
         closed form by weighted least squares, so only ln alpha and ln beta are fitted, and the velocities
-        are not needed. A point is weighted by 1/(sigma_S/v_i)^2, with sigma_S the noise of its station and
-        v_i the normalized velocity of the model at it, which is 1 in the first fit and that of the previous
-        fit in the next ones, so the weights are fixed during a fit. The first fit starts from the best point
-        of a grid in ln alpha and ln beta, and alpha and beta are bound by ALPHA_BETA_BOUNDS.
+        are not needed. An error of the distance of a point moves the lag of the model at its column height
+        too, so the residual is the error divided by the normalized velocity v_i of the model at the point,
+        and the point is weighted by 1/(sigma_S/v_i)^2, with sigma_S the noise of its station. Then v_i*r_i
+        is the residual of the distance at the time of the point. The velocity is 1 in the first fit and that
+        of the model of the previous fit in the next ones, so the weights are fixed during a fit, and the fits
+        are repeated until alpha and beta change by less than ENTRY_LAG_PASS_TOL in ln, or max_pass fits. If
+        they do not converge, the fit of which the model fits the distances best is kept. Every fit starts
+        from the best of a grid in ln alpha and ln beta, the given starting points and the previous fit, with
+        its weights. A model may leave at most ENTRY_LAG_MAX_OUTSIDE of the points beyond the heights which it
+        reaches, which are weighted as if its velocity was 1 there, and alpha and beta are bound by
+        ALPHA_BETA_BOUNDS.
 
     Arguments:
         time_data: [ndarray] Time of every point (s).
@@ -2846,8 +2868,8 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         v_ref: [float] Slope of the reference line of the lag (m/s), e.g. Trajectory.v_init.
 
     Keyword arguments:
-        n_pass: [int] Number of fits. 2 by default.
-        x0_alpha_beta: [list] Additional (alpha, beta) starting points of the first fit, e.g. the results of
+        max_pass: [int] Largest number of fits. ENTRY_LAG_MAX_PASSES by default.
+        x0_alpha_beta: [list] Additional (alpha, beta) starting points of the fits, e.g. the results of
             fitAlphaBeta(). None by default.
         estimate_errors: [bool] Also return the Wald uncertainties of the fit, in the format of
             fitAlphaBetaLag(estimate_errors=True), so they can be passed to alphaBetaMasses(), with the
@@ -2864,10 +2886,13 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
             - lag_residuals: [ndarray] Residual of the lag of every point (m).
             - entry_fit: [dict] The fit, for profileAlphaBetaEntryLag(), with the keys 'v_ref', 'dv',
                 'offsets' (offset of every station, m), 'sigma_station' (noise of every station, m),
-                'weights', 'cost' (weighted sum of the squared residuals), 'dof' (degrees of freedom),
+                'weights', 'v_model' (normalized velocity of the model at every point, 1 beyond the heights
+                which it reaches, by which the lag residuals are multiplied to give the residuals of the
+                distances), 'cost' (weighted sum of the squared residuals), 'dof' (degrees of freedom),
                 'chi2_nu' (reduced chi-squared), 'tau_int' (integrated autocorrelation time of the
-                normalized residuals), 'scale' (chi2_nu*tau_int, the variance factor of the uncertainties)
-                and 'jac' (Jacobian of the weighted residuals by ln alpha and ln beta).
+                normalized residuals), 'scale' (chi2_nu*tau_int, the variance factor of the uncertainties),
+                'jac' (Jacobian of the weighted residuals by ln alpha and ln beta), 'n_pass' (number of fits)
+                and 'converged' (False if the fits did not converge in max_pass fits).
             - errors: [dict] See estimate_errors.
     """
 
@@ -2882,9 +2907,17 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
 
     log_bounds = _logAlphaBetaBounds()
 
+    # Starting points of the fits, a grid in ln alpha and ln beta and the given starting points
+    starts = [(alpha, beta) for alpha in np.geomspace(1e-2, 1e3, 21) for beta in np.geomspace(1e-3, 40.0, 21)]
+    if x0_alpha_beta is not None:
+        starts += [tuple(x0[:2]) for x0 in x0_alpha_beta]
+    log_starts = [np.clip(np.log(start), log_bounds[0], log_bounds[1]) for start in starts]
+
     v_model = np.ones_like(time_data)
     x_best = None
-    for _ in range(n_pass):
+    passes = []
+    converged = False
+    for _ in range(max_pass):
 
         # Weights of the fit, from the velocity of the model of the previous fit
         weights = (v_model/sigma_length)**2
@@ -2895,8 +2928,8 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
             alpha, beta = np.exp(x)
             lag_model, _, outside = _entryLagModel(alpha, beta, ht_normed, length_scale)
 
-            # Reject models which do not reach the column heights of most points
-            if outside > 0.25:
+            # Reject models which do not reach the column heights of the points
+            if outside > ENTRY_LAG_MAX_OUTSIDE:
                 return np.full(len(time_data), 1e4)
 
             _, _, residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
@@ -2905,27 +2938,47 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
             return np.sqrt(weights)*residuals
 
 
-        # Start the first fit from the best point of a grid and of the given starting points
-        if x_best is None:
+        # Start from the best of the grid, the given starting points and the previous fit, with these weights
+        candidates = log_starts + ([x_best] if x_best is not None else [])
+        costs = [np.sum(_residuals(candidate)**2) for candidate in candidates]
+        x_start = candidates[int(np.argmin(costs))]
+        res = scipy.optimize.least_squares(_residuals, x_start, bounds=log_bounds, x_scale='jac', \
+            max_nfev=300)
 
-            starts = [(alpha, beta) for alpha in np.geomspace(1e-2, 1e3, 21) \
-                for beta in np.geomspace(1e-3, 40.0, 21)]
-            if x0_alpha_beta is not None:
-                starts += [tuple(x0[:2]) for x0 in x0_alpha_beta]
+        # Also continue the previous fit if the fit started elsewhere, and keep the better one
+        if (x_best is not None) and np.any(x_start != x_best):
+            res_previous = scipy.optimize.least_squares(_residuals, x_best, bounds=log_bounds, \
+                x_scale='jac', max_nfev=300)
+            if res_previous.cost < res.cost:
+                res = res_previous
 
-            log_starts = [np.clip(np.log(start), log_bounds[0], log_bounds[1]) for start in starts]
-            costs = [np.sum(_residuals(log_start)**2) for log_start in log_starts]
-            x_best = log_starts[int(np.argmin(costs))]
-
-        res = scipy.optimize.least_squares(_residuals, x_best, bounds=log_bounds, x_scale='jac', max_nfev=300)
+        x_previous = x_best
         x_best = res.x
 
         # Velocity of the model at the points, for the weights of the next fit
         alpha, beta = np.exp(x_best)
         lag_model, v_model, _ = _entryLagModel(alpha, beta, ht_normed, length_scale)
-        v_model = np.clip(v_model, 0.02, 1.0)
+        v_model = np.clip(v_model, ENTRY_LAG_V_NODES[0], 1.0)
 
-    # Entry velocity, offsets and residuals of the last fit
+        # Residuals of the distances of the model, by which the fits are compared if they do not converge
+        _, _, lag_residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
+            n_stations)
+        passes.append({'x': x_best, 'weights': weights, 'v_model': v_model, \
+            'cost_length': np.sum((v_model*lag_residuals/sigma_length)**2)})
+
+        # Stop when alpha and beta do not change any more
+        if (x_previous is not None) and (np.max(np.abs(x_best - x_previous)) < ENTRY_LAG_PASS_TOL):
+            converged = True
+            break
+
+    # If the fits did not converge, keep the one of which the model fits the distances best
+    best_pass = passes[-1] if converged else min(passes, key=lambda fit_pass: fit_pass['cost_length'])
+    weights = best_pass['weights']
+    v_model = best_pass['v_model']
+    alpha, beta = np.exp(best_pass['x'])
+    lag_model, _, _ = _entryLagModel(alpha, beta, ht_normed, length_scale)
+
+    # Entry velocity, offsets and residuals of the kept fit
     dv, offsets, lag_residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
         n_stations)
     v_init = v_ref + dv
@@ -2936,6 +2989,22 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
     chi2_nu = cost/dof
     tau_int = _entryLagTauInt(time_data, np.sqrt(weights)*lag_residuals, station_index, n_stations)
 
+    # Derivatives of the model lag by ln alpha and ln beta, by central differences of the model, so they do
+    #   not cross the rejection of the models which do not reach the points
+    log_step = 1e-4
+    lag_derivs = []
+    for log_factors in [(log_step, 0.0), (0.0, log_step)]:
+
+        lag_plus, _, _ = _entryLagModel(alpha*np.exp(log_factors[0]), beta*np.exp(log_factors[1]), \
+            ht_normed, length_scale)
+        lag_minus, _, _ = _entryLagModel(alpha*np.exp(-log_factors[0]), beta*np.exp(-log_factors[1]), \
+            ht_normed, length_scale)
+        lag_derivs.append((lag_plus - lag_minus)/(2*log_step))
+
+    # Jacobian of the weighted residuals, with dv and the offsets fitted, which are linear in the lag
+    jac = np.column_stack([np.sqrt(weights)*_entryLagLinear(-lag_deriv, time_data, weights, station_index, \
+        n_stations)[2] for lag_deriv in lag_derivs])
+
     entry_fit = {
         'v_ref': v_ref,
         'dv': dv,
@@ -2943,12 +3012,15 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         'sigma_station': {station_id: sigma_length[station_index == i][0] \
             for i, station_id in enumerate(station_ids)},
         'weights': weights,
+        'v_model': v_model,
         'cost': cost,
         'dof': dof,
         'chi2_nu': chi2_nu,
         'tau_int': tau_int,
         'scale': chi2_nu*tau_int,
-        'jac': res.jac
+        'jac': jac,
+        'n_pass': len(passes),
+        'converged': converged
         }
 
     if not estimate_errors:
@@ -2967,17 +3039,6 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
     # The Gaussian approximation is not valid at a bound, nor without more points than parameters
     if alphaBetaBoundWarnings(alpha, beta) or (len(time_data) <= 3 + n_stations):
         return v_init, alpha, beta, lag_residuals, entry_fit, errors
-
-    # Derivatives of the model lag by ln alpha and ln beta, by central differences
-    log_step = 1e-4
-    lag_derivs = []
-    for log_factors in [(log_step, 0.0), (0.0, log_step)]:
-
-        lag_plus, _, _ = _entryLagModel(alpha*np.exp(log_factors[0]), beta*np.exp(log_factors[1]), \
-            ht_normed, length_scale)
-        lag_minus, _, _ = _entryLagModel(alpha*np.exp(-log_factors[0]), beta*np.exp(-log_factors[1]), \
-            ht_normed, length_scale)
-        lag_derivs.append((lag_plus - lag_minus)/(2*log_step))
 
     # Covariance of ln alpha, ln beta, dv and the offsets of the stations
     design = np.column_stack(lag_derivs + [time_data, np.eye(n_stations)[station_index]])
@@ -3120,7 +3181,7 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         """ Cost and the entry velocity of a model, with dv and the offsets of the stations fitted. """
 
         lag_model, _, outside = _entryLagModel(np.exp(log_alpha), np.exp(log_beta), ht_normed, length_scale)
-        if outside > 0.25:
+        if outside > ENTRY_LAG_MAX_OUTSIDE:
             return np.inf, np.nan
 
         dv, _, residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
@@ -8258,6 +8319,14 @@ if __name__ == "__main__":
                 air_speed))
             print("  Reduced chi-squared = {:.2f}, integrated autocorrelation time of the residuals = " \
                 "{:.2f}".format(entry_fit['chi2_nu'], entry_fit['tau_int']))
+
+            # The weights of the points depend on the model, so the fits may not converge
+            if not entry_fit['converged']:
+                print("NOTE: The fits with the weights from the velocity of the previous model did not " \
+                    "converge in {:d} fits, the fit which fits the distances best is used".format( \
+                    entry_fit['n_pass']))
+
+            # Noise and offset of every station
             print("  Station      Noise (m)   Offset (m)")
             for station_id in station_ids:
                 print("  {:10s} {:9.1f} {:12.1f}".format(station_id, entry_fit['sigma_station'][station_id], \

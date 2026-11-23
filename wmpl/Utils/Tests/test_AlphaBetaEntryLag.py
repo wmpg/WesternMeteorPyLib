@@ -18,8 +18,8 @@ import scipy.special
 from wmpl.Utils.AlphaBeta import alphaBetaEntryLag, AlphaBetaSlantColumn, \
     slantColumnFromPoints, airSpeedAlongPath, gravityLengthAlongLine, stationLengthNoise, \
     fitAlphaBetaEntryLag, profileAlphaBetaEntryLag, profileRegionAlphaBetaLag, profileIntervalText, \
-    stationJackknifeAlphaBetaEntryLag, \
-    HT_NORM_CONST, RHO_ATM_0, RESCALE_COLUMN_TOP
+    stationJackknifeAlphaBetaEntryLag, _entryLagModel, \
+    HT_NORM_CONST, RHO_ATM_0, RESCALE_COLUMN_TOP, ENTRY_LAG_MAX_OUTSIDE, ENTRY_LAG_PASS_TOL
 from wmpl.Utils.Physics import EARTH_ROTATION_RATE
 from wmpl.Utils.TrajConversions import EARTH, G
 from wmpl.Utils.Tests.AlphaBetaSynthetic import integrateAlphaBetaPath
@@ -52,8 +52,69 @@ def _exponentialProfile():
 
 
 
+def _observeSyntheticMeteor(alpha, beta, v_entry, time_step=0.01, ht_min=30000.0, v_min=0.0, \
+    noise_factor=1.0, seed=1):
+    """ Generate a synthetic meteor observed by the stations STATIONS, with the noise and the clock offset of
+        each, between 90 km and the given smallest height and velocity.
+
+    Arguments:
+        alpha: [float] Alpha of the meteor.
+        beta: [float] Beta of the meteor.
+        v_entry: [float] Velocity at entry (m/s).
+
+    Keyword arguments:
+        time_step: [float] Time between the points of the path (s). 0.01 by default.
+        ht_min: [float] Smallest height of the points (m). 30000 by default.
+        v_min: [float] Smallest velocity of the points, relative to the entry velocity. 0 by default.
+        noise_factor: [float] Factor of the noise of the stations. 1 by default.
+        seed: [int] Seed of the noise. 1 by default.
+
+    Return:
+        (time_data, length_data, ht_data, station_data, time_grid, length_true):
+            - time_data: [ndarray] Times recorded by the stations (s), with their clock offsets.
+            - length_data: [ndarray] Noisy distances along the path (m).
+            - ht_data: [ndarray] Heights of the noisy points on the path (m).
+            - station_data: [ndarray] Station of every point.
+            - time_grid: [ndarray] Times of the points of the path (s).
+            - length_true: [ndarray] True distances along the path (m).
+    """
+
+    ht_begin = 100000.0
+
+    # Integrate the distance at regular times
+    time_grid = np.arange(0.0, 8.0, time_step)
+    length_true, ht_true = integrateAlphaBetaPath(time_grid, v_entry, alpha, beta, SLOPE, ht_begin, \
+        rtol=1e-11, atol=1e-7)
+
+    # Keep the points below 90 km and above the smallest height and velocity
+    vel_true = np.gradient(length_true, time_grid)
+    keep = (ht_true < 90000.0) & (ht_true > ht_min) & (vel_true > v_min*v_entry)
+    time_grid, length_true = time_grid[keep], length_true[keep]
+
+    # Observe the meteor with every station, whose clock offset shifts the recorded times
+    rng = np.random.RandomState(seed)
+    time_data, length_data, station_data = [], [], []
+    for k, (station_id, noise, clock_offset, step) in enumerate(STATIONS):
+
+        indices = np.arange(k, len(time_grid), step)
+        time_data.append(time_grid[indices] + clock_offset)
+        length_data.append(length_true[indices] + rng.normal(0, noise_factor*noise, len(indices)))
+        station_data.append(np.full(len(indices), station_id))
+
+    time_data = np.concatenate(time_data)
+    length_data = np.concatenate(length_data)
+    station_data = np.concatenate(station_data)
+
+    # The heights of a trajectory solution are those of the points on its path
+    ht_data = ht_begin - length_data*np.sin(SLOPE)
+
+    return time_data, length_data, ht_data, station_data, time_grid, length_true
+
+
+
 def _syntheticMeteor():
-    """ Generate a synthetic meteor observed by three stations, with the noise and the clock offset of each.
+    """ Generate the synthetic meteor of the tests, observed by three stations, with the noise and the clock
+        offset of each.
 
     Return:
         (time_data, length_data, ht_data, station_data):
@@ -66,38 +127,48 @@ def _syntheticMeteor():
     if _SYNTHETIC:
         return _SYNTHETIC['data']
 
-    ht_begin = 100000.0
+    observed = _observeSyntheticMeteor(ALPHA_TRUE, BETA_TRUE, V_ENTRY_TRUE)
 
-    # Integrate the distance at regular times
-    time_grid = np.arange(0.0, 8.0, 0.01)
-    length_true, ht_true = integrateAlphaBetaPath(time_grid, V_ENTRY_TRUE, ALPHA_TRUE, BETA_TRUE, SLOPE, \
-        ht_begin, rtol=1e-11, atol=1e-7)
-
-    # Keep the points between 90 and 30 km
-    keep = (ht_true < 90000.0) & (ht_true > 30000.0)
-    time_grid, length_true = time_grid[keep], length_true[keep]
-
-    # Observe the meteor with every station, whose clock offset shifts the recorded times
-    rng = np.random.RandomState(1)
-    time_data, length_data, station_data = [], [], []
-    for k, (station_id, noise, clock_offset, step) in enumerate(STATIONS):
-
-        indices = np.arange(k, len(time_grid), step)
-        time_data.append(time_grid[indices] + clock_offset)
-        length_data.append(length_true[indices] + rng.normal(0, noise, len(indices)))
-        station_data.append(np.full(len(indices), station_id))
-
-    time_data = np.concatenate(time_data)
-    length_data = np.concatenate(length_data)
-    station_data = np.concatenate(station_data)
-
-    # The heights of a trajectory solution are those of the points on its path
-    ht_data = ht_begin - length_data*np.sin(SLOPE)
-
-    _SYNTHETIC['data'] = (time_data, length_data, ht_data, station_data)
-    _SYNTHETIC['truth'] = (time_grid, length_true)
+    _SYNTHETIC['data'] = observed[:4]
+    _SYNTHETIC['truth'] = observed[4:]
 
     return _SYNTHETIC['data']
+
+
+
+def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, **kwargs):
+    """ Fit the entry lag of a synthetic meteor in the exponential atmosphere.
+
+    Arguments:
+        time_data: [ndarray] Times recorded by the stations (s).
+        length_data: [ndarray] Noisy distances along the path (m).
+        ht_data: [ndarray] Heights of the noisy points on the path (m).
+        station_data: [ndarray] Station of every point.
+        v_ref: [float] Slope of the reference line of the lag (m/s).
+
+    Keyword arguments:
+        kwargs: [dict] Passed to fitAlphaBetaEntryLag().
+
+    Return:
+        (inputs, result):
+            - inputs: [tuple] time_data, lag_data, ht_normed, station_data, the slant column and the noise of
+                the distances.
+            - result: [tuple] The result of fitAlphaBetaEntryLag().
+    """
+
+    profile_hts, profile_dens = _exponentialProfile()
+
+    slant_column, length_air = slantColumnFromPoints(time_data, length_data, ht_data, profile_hts, \
+        profile_dens, np.sin(SLOPE))
+    ht_normed = slant_column.htNormed(length_air)
+
+    lag_data = length_data - v_ref*time_data
+    sigma_length = stationLengthNoise(time_data, length_data, station_data)
+
+    result = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, slant_column.lengthScale, \
+        sigma_length, v_ref, **kwargs)
+
+    return (time_data, lag_data, ht_normed, station_data, slant_column, sigma_length), result
 
 
 
@@ -114,21 +185,10 @@ def _syntheticFit(v_ref_offset=-60.0, estimate_errors=False):
             - result: [tuple] The result of fitAlphaBetaEntryLag().
     """
 
-    time_data, length_data, ht_data, station_data = _syntheticMeteor()
-    profile_hts, profile_dens = _exponentialProfile()
+    inputs, result = _fitSyntheticMeteor(*_syntheticMeteor(), V_ENTRY_TRUE + v_ref_offset, \
+        estimate_errors=estimate_errors)
 
-    slant_column, length_air = slantColumnFromPoints(time_data, length_data, ht_data, profile_hts, \
-        profile_dens, np.sin(SLOPE))
-    ht_normed = slant_column.htNormed(length_air)
-
-    v_ref = V_ENTRY_TRUE + v_ref_offset
-    lag_data = length_data - v_ref*time_data
-    sigma_length = stationLengthNoise(time_data, length_data, station_data)
-
-    result = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, slant_column.lengthScale, \
-        sigma_length, v_ref, estimate_errors=estimate_errors)
-
-    return (time_data, lag_data, ht_normed, station_data, slant_column), result
+    return inputs[:5], result
 
 
 
@@ -325,9 +385,9 @@ def testFitAlphaBetaEntryLagIgnoresClockOffsets():
     lag_shifted = lag_data + v_ref*time_data - v_ref*time_data_shifted
     sigma_length = 1.0/np.sqrt(result[4]['weights'])
     result_shifted = fitAlphaBetaEntryLag(time_data_shifted, lag_shifted, ht_normed, station_data, \
-        slant_column.lengthScale, sigma_length, v_ref, n_pass=1)
+        slant_column.lengthScale, sigma_length, v_ref, max_pass=1)
     result_same = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
-        slant_column.lengthScale, sigma_length, v_ref, n_pass=1)
+        slant_column.lengthScale, sigma_length, v_ref, max_pass=1)
 
     for idx in range(3):
         assert np.isclose(result_shifted[idx], result_same[idx], rtol=1e-6)
@@ -346,6 +406,60 @@ def testFitAlphaBetaEntryLagErrors():
     assert errors['alpha_ci_wald_lower'] < ALPHA_TRUE < errors['alpha_ci_wald_upper']
     assert errors['beta_ci_wald_lower'] < BETA_TRUE < errors['beta_ci_wald_upper']
     assert abs(v_init - V_ENTRY_TRUE) < 3*errors['v_init_std']
+
+
+
+def testFitAlphaBetaEntryLagConverges():
+    """ The fits are repeated until the weights are those of the velocity of the kept model, so one more fit
+        does not change alpha and beta, and a single fit is not taken as converged.
+    """
+
+    inputs, result = _fitSyntheticMeteor(*_syntheticMeteor(), V_ENTRY_TRUE - 60.0)
+    time_data, lag_data, ht_normed, station_data, slant_column, sigma_length = inputs
+    _, alpha, beta, _, entry_fit = result
+
+    assert entry_fit['converged']
+    assert entry_fit['n_pass'] >= 2
+
+    # The weights are those of the velocity of the kept model
+    assert np.allclose(entry_fit['weights'], (entry_fit['v_model']/sigma_length)**2, rtol=0.01)
+
+    # One more fit with the weights of the kept model gives the same alpha and beta
+    result_next = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, sigma_length/entry_fit['v_model'], V_ENTRY_TRUE - 60.0, max_pass=1)
+    assert abs(np.log(result_next[1]/alpha)) < 10*ENTRY_LAG_PASS_TOL
+    assert abs(np.log(result_next[2]/beta)) < 10*ENTRY_LAG_PASS_TOL
+
+    # A single fit, with the weights of a model at entry speed, is not converged
+    result_single = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, sigma_length, V_ENTRY_TRUE - 60.0, max_pass=1)
+    assert (not result_single[4]['converged']) and (result_single[4]['n_pass'] == 1)
+
+
+
+def testFitAlphaBetaEntryLagReachesAllPoints():
+    """ A fast meteor which barely decelerates is not fitted by a model which ends above its last points, and
+        the points below the lowest height which a model reaches are weighted as at entry speed.
+    """
+
+    v_entry = 60000.0
+    observed = _observeSyntheticMeteor(3000.0, 20.0, v_entry, time_step=0.004, ht_min=10000.0, v_min=0.9, \
+        noise_factor=3.0, seed=2)
+    inputs, result = _fitSyntheticMeteor(*observed[:4], v_entry - 60.0)
+    ht_normed, slant_column = inputs[2], inputs[4]
+    alpha, beta = result[1], result[2]
+
+    # The model reaches the points, which are observed at above 0.9 of the entry velocity
+    _, v_model, outside = _entryLagModel(alpha, beta, ht_normed, slant_column.lengthScale)
+    assert outside <= ENTRY_LAG_MAX_OUTSIDE
+    assert np.min(v_model) > 0.5
+
+    # Points below the lowest height of the model have the velocity 1 for their weights
+    ht_lowest = np.min(alphaBetaEntryLag(alpha, beta, slant_column.lengthScale)[0])
+    _, v_below, outside_below = _entryLagModel(alpha, beta, ht_lowest - np.array([0.1, 0.5]), \
+        slant_column.lengthScale)
+    assert np.all(v_below == 1.0)
+    assert outside_below == 1.0
 
 
 
@@ -472,6 +586,7 @@ if __name__ == "__main__":
         testSlantColumnOfAStraightPathInTheExponentialAtmosphere, testSlantColumnFollowsTheAirAlongThePath, \
         testAirSpeedAlongPath, testGravityLengthAlongLine, testStationLengthNoise, testFitAlphaBetaEntryLag, \
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
+        testFitAlphaBetaEntryLagConverges, testFitAlphaBetaEntryLagReachesAllPoints, \
         testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
         testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, testStationJackknifeFindsABiasedStation]
 
