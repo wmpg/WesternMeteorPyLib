@@ -137,7 +137,7 @@ def _syntheticMeteor():
 
 
 
-def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, **kwargs):
+def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, air_speed=0.0, **kwargs):
     """ Fit the entry lag of a synthetic meteor in the exponential atmosphere.
 
     Arguments:
@@ -148,6 +148,8 @@ def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, **
         v_ref: [float] Slope of the reference line of the lag (m/s).
 
     Keyword arguments:
+        air_speed: [float] Speed of the air along the path (m/s), if the distances are along the line in an
+            inertial frame, passed to slantColumnFromPoints() and fitAlphaBetaEntryLag(). 0 by default.
         kwargs: [dict] Passed to fitAlphaBetaEntryLag().
 
     Return:
@@ -160,14 +162,14 @@ def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, **
     profile_hts, profile_dens = _exponentialProfile()
 
     slant_column, length_air = slantColumnFromPoints(time_data, length_data, ht_data, profile_hts, \
-        profile_dens, np.sin(SLOPE))
+        profile_dens, np.sin(SLOPE), air_speed=air_speed)
     ht_normed = slant_column.htNormed(length_air)
 
     lag_data = length_data - v_ref*time_data
     sigma_length = stationLengthNoise(time_data, length_data, station_data)
 
     result = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, slant_column.lengthScale, \
-        sigma_length, v_ref, **kwargs)
+        sigma_length, v_ref, air_speed=air_speed, **kwargs)
 
     return (time_data, lag_data, ht_normed, station_data, slant_column, sigma_length), result
 
@@ -480,6 +482,42 @@ def testFitAlphaBetaEntryLagReachesAllPoints():
 
 
 
+def testFitAlphaBetaEntryLagInTheAirFrame():
+    """ The distances along the line of an inertial solution exceed those flown through the air by the speed
+        of the air along the path times the time, so the slope of the lag is the inertial entry velocity, and
+        the fit and its profile give the entry velocity relative to the air, which scales the model.
+    """
+
+    air_speed = 300.0
+    v_ref = V_ENTRY_TRUE + air_speed - 60.0
+
+    # Distances of the synthetic meteor, flown through the air, along the line in the inertial frame
+    time_data, length_air, ht_data, station_data = _syntheticMeteor()
+    length_line = length_air + air_speed*(time_data - time_data[np.argmin(length_air)])
+
+    inputs, result = _fitSyntheticMeteor(time_data, length_line, ht_data, station_data, v_ref, \
+        air_speed=air_speed)
+    time_data, lag_data, ht_normed, station_data, slant_column, sigma_length = inputs
+    v_init, alpha, beta, _, entry_fit = result
+
+    assert abs(v_init - V_ENTRY_TRUE) < 5.0, v_init
+    assert np.isclose(alpha, ALPHA_TRUE, rtol=0.01), alpha
+    assert np.isclose(beta, BETA_TRUE, rtol=0.03), beta
+
+    # Without the air speed, the fit gives the same model with the inertial entry velocity
+    result_inertial = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, sigma_length, v_ref)
+    assert np.isclose(result_inertial[1], alpha) and np.isclose(result_inertial[2], beta)
+    assert np.isclose(result_inertial[0] - v_init, air_speed)
+
+    # The models of the profile have the entry velocity relative to the air
+    profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, alpha, beta, entry_fit, n_grid=0)
+    for name in ['alpha', 'beta']:
+        assert np.all(np.abs(profile[name + '_profile_models'][:, 2] - V_ENTRY_TRUE) < 50.0)
+
+
+
 def testFitAlphaBetaEntryLagWithPreciseDistances():
     """ With distances so precise that the starting models cost more than the models which do not reach the
         points and are rejected, the fit still starts from and ends at a model which reaches them.
@@ -687,9 +725,9 @@ if __name__ == "__main__":
         testAirSpeedAlongPath, testGravityLengthAlongLine, testStationLengthNoise, testFitAlphaBetaEntryLag, \
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
         testFitAlphaBetaEntryLagConverges, testFitAlphaBetaEntryLagReachesAllPoints, \
-        testFitAlphaBetaEntryLagWithPreciseDistances, testProfileAlphaBetaEntryLagOfAFastArc, \
-        testProfileAlphaBetaEntryLagEdgeModels, testProfileAlphaBetaEntryLag, \
-        testStationLengthNoiseNeedsEnoughPoints, \
+        testFitAlphaBetaEntryLagInTheAirFrame, testFitAlphaBetaEntryLagWithPreciseDistances, \
+        testProfileAlphaBetaEntryLagOfAFastArc, testProfileAlphaBetaEntryLagEdgeModels, \
+        testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
         testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, \
         testStationJackknifeFindsABiasedStation, testProfileAlphaBetaEntryLagKeepsAlphaInBounds]
 

@@ -2845,7 +2845,7 @@ def _entryLagTauInt(time_data, residuals_normed, station_index, n_stations, \
 
 
 def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, sigma_length, v_ref, \
-    max_pass=ENTRY_LAG_MAX_PASSES, x0_alpha_beta=None, estimate_errors=False, ci=95.0):
+    max_pass=ENTRY_LAG_MAX_PASSES, x0_alpha_beta=None, estimate_errors=False, ci=95.0, air_speed=0.0):
     """ Fit the alpha-beta model to the entry lag in slant-column coordinates, with an offset and a noise
         level for every station (the full fit of the lag).
 
@@ -2856,20 +2856,24 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
 
         where dv is the entry velocity minus the slope of the reference line, which is too low if the meteor
         already decelerates where the line is fitted, and K_S is an offset of the station S of the point,
-        which absorbs a constant offset of its clock. For given alpha and beta, dv and the offsets follow in
-        closed form by weighted least squares, so only ln alpha and ln beta are fitted, and the velocities
-        are not needed. An error of the distance of a point moves the lag of the model at its column height
-        too, so the residual is the error divided by the normalized velocity v_i of the model at the point,
-        and the point is weighted by 1/(sigma_S/v_i)^2, with sigma_S the noise of its station. Then v_i*r_i
-        is the residual of the distance at the time of the point. The velocity is 1 in the first fit and that
-        of the model of the previous fit in the next ones, so the weights are fixed during a fit, and the fits
-        are repeated until alpha and beta change by less than ENTRY_LAG_PASS_TOL in ln, or max_pass fits. If
-        they do not converge, the fit of which the model fits the distances best is kept. Every fit starts
-        from the best of a grid in ln alpha and ln beta, the given starting points and the previous fit, with
-        its weights. A model may leave at most ENTRY_LAG_MAX_OUTSIDE of the points beyond the heights which it
-        reaches, which are weighted as if its velocity was 1 there, and alpha and beta are bound by
-        ALPHA_BETA_BOUNDS. The fits start only from models which reach the points, and a ValueError is raised
-        if no starting point does.
+        which absorbs a constant offset of its clock. If the lag is formed from the distances along the line
+        of a solution in an inertial frame and the column heights from the distances flown through the air
+        (slantColumnFromPoints()), the slope of the lag is the inertial entry velocity, which exceeds the
+        entry velocity relative to the air, the velocity of the model, by the speed of the air along the path,
+        so the entry velocity v_ref + dv - air_speed relative to the air is returned. For given alpha and
+        beta, dv and the offsets follow in closed form by weighted least squares, so only ln alpha and ln beta
+        are fitted, and the velocities are not needed. An error of the distance of a point moves the lag of
+        the model at its column height too, so the residual is the error divided by the normalized velocity
+        v_i of the model at the point, and the point is weighted by 1/(sigma_S/v_i)^2, with sigma_S the noise
+        of its station. Then v_i*r_i is the residual of the distance at the time of the point. The velocity is
+        1 in the first fit and that of the model of the previous fit in the next ones, so the weights are
+        fixed during a fit, and the fits are repeated until alpha and beta change by less than
+        ENTRY_LAG_PASS_TOL in ln, or max_pass fits. If they do not converge, the fit of which the model fits
+        the distances best is kept. Every fit starts from the best of a grid in ln alpha and ln beta, the
+        given starting points and the previous fit, with its weights. A model may leave at most
+        ENTRY_LAG_MAX_OUTSIDE of the points beyond the heights which it reaches, which are weighted as if its
+        velocity was 1 there, and alpha and beta are bound by ALPHA_BETA_BOUNDS. The fits start only from
+        models which reach the points, and a ValueError is raised if no starting point does.
 
     Arguments:
         time_data: [ndarray] Time of every point (s).
@@ -2893,23 +2897,27 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
             covariance scaled by the reduced chi-squared and the integrated autocorrelation time of the
             residuals. NaN if alpha or beta end at a bound of the fit. False by default.
         ci: [float] Confidence level of the Wald intervals (percent). 95 by default.
+        air_speed: [float] Speed of the air along the path (m/s), by which the slope of the lag exceeds the
+            entry velocity of the model, see airSpeedAlongPath() and slantColumnFromPoints(). 0 by default,
+            for distances which are already relative to the air.
 
     Return:
         (v_init, alpha, beta, lag_residuals, entry_fit), or (v_init, alpha, beta, lag_residuals, entry_fit,
             errors) if estimate_errors is True:
-            - v_init: [float] Entry velocity, v_ref + dv (m/s).
+            - v_init: [float] Entry velocity relative to the air, v_ref + dv - air_speed (m/s), by which the
+                normalized velocities of the model are scaled.
             - alpha: [float] Ballistic coefficient.
             - beta: [float] Mass loss parameter.
             - lag_residuals: [ndarray] Residual of the lag of every point (m).
             - entry_fit: [dict] The fit, for profileAlphaBetaEntryLag(), with the keys 'v_ref', 'dv',
-                'offsets' (offset of every station, m), 'sigma_station' (noise of every station, m),
-                'weights', 'v_model' (normalized velocity of the model at every point, 1 beyond the heights
-                which it reaches, by which the lag residuals are multiplied to give the residuals of the
-                distances), 'cost' (weighted sum of the squared residuals), 'dof' (degrees of freedom),
-                'chi2_nu' (reduced chi-squared), 'tau_int' (integrated autocorrelation time of the
-                normalized residuals), 'scale' (chi2_nu*tau_int, the variance factor of the uncertainties),
-                'jac' (Jacobian of the weighted residuals by ln alpha and ln beta), 'n_pass' (number of fits)
-                and 'converged' (False if the fits did not converge in max_pass fits).
+                'air_speed', 'offsets' (offset of every station, m), 'sigma_station' (noise of every station,
+                m), 'weights', 'v_model' (normalized velocity of the model at every point, 1 beyond the
+                heights which it reaches, by which the lag residuals are multiplied to give the residuals of
+                the distances), 'cost' (weighted sum of the squared residuals), 'dof' (degrees of freedom),
+                'chi2_nu' (reduced chi-squared), 'tau_int' (integrated autocorrelation time of the normalized
+                residuals), 'scale' (chi2_nu*tau_int, the variance factor of the uncertainties), 'jac'
+                (Jacobian of the weighted residuals by ln alpha and ln beta), 'n_pass' (number of fits) and
+                'converged' (False if the fits did not converge in max_pass fits).
             - errors: [dict] See estimate_errors.
     """
 
@@ -3017,7 +3025,7 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
     # Entry velocity, offsets and residuals of the kept fit
     dv, offsets, lag_residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
         n_stations)
-    v_init = v_ref + dv
+    v_init = v_ref + dv - air_speed
 
     # Reduced chi-squared and the autocorrelation time of the normalized residuals
     cost = np.sum(weights*lag_residuals**2)
@@ -3044,6 +3052,7 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
     entry_fit = {
         'v_ref': v_ref,
         'dv': dv,
+        'air_speed': air_speed,
         'offsets': dict(zip(station_ids, offsets)),
         'sigma_station': {station_id: sigma_length[station_index == i][0] \
             for i, station_id in enumerate(station_ids)},
@@ -3199,9 +3208,9 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
             default. 0 skips the grid.
 
     Return:
-        profile: [dict] With the keys of profileAlphaBetaLag(), where the entry velocity takes the place of
-            the fitted initial velocity and 'sigma2' is the variance factor of the rise of the cost
-            (entry_fit['scale']), and also 'chi2_nu' and 'tau_int' of the fit.
+        profile: [dict] With the keys of profileAlphaBetaLag(), where the entry velocity relative to the air
+            takes the place of the fitted initial velocity and 'sigma2' is the variance factor of the rise of
+            the cost (entry_fit['scale']), and also 'chi2_nu' and 'tau_int' of the fit.
     """
 
     time_data = np.asarray(time_data, dtype=np.float64)
@@ -3227,7 +3236,7 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         dv, _, residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
             n_stations)
 
-        return np.sum(weights*residuals**2), entry_fit['v_ref'] + dv
+        return np.sum(weights*residuals**2), entry_fit['v_ref'] + dv - entry_fit['air_speed']
 
 
     threshold = scipy.stats.chi2.ppf(ci/100.0, 1)
@@ -3248,7 +3257,7 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         for std in wald_std]
 
     x_best = [np.log(alpha), np.log(beta)]
-    v_init_best = entry_fit['v_ref'] + entry_fit['dv']
+    v_init_best = entry_fit['v_ref'] + entry_fit['dv'] - entry_fit['air_speed']
 
     # The profile of ln beta follows the floor of the valley in ln alpha from the best fit
     valley = {'log_alpha': x_best[0]}
@@ -8271,7 +8280,7 @@ if __name__ == "__main__":
 
                     fit_result = fitAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, \
                         station_data, slant_column.lengthScale, sigma_length, traj.v_init, \
-                        x0_alpha_beta=x0_alpha_beta, estimate_errors=cml_args.errors)
+                        x0_alpha_beta=x0_alpha_beta, estimate_errors=cml_args.errors, air_speed=air_speed)
 
                     # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the
                     #   uncertainties
@@ -8345,6 +8354,11 @@ if __name__ == "__main__":
                 lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, \
                     beta, v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
 
+        # Speed of the air along the path, which is added to the velocities of the model of the full fit,
+        #   relative to the air, to compare them with the inertial velocities of the trajectory
+        air_offset = air_speed if (cml_args.lagfit == 'full') else 0.0
+        v_init_inertial = v_init + air_offset
+
         # Residuals of the distances at the times of the points, from the lag residuals of the full fit, which
         #   grow as one over the velocity of the model, or directly from the simple fit
         if cml_args.lagfit == 'full':
@@ -8369,15 +8383,12 @@ if __name__ == "__main__":
 
             return "  [95% profile: " + fmt.format(np.min(values)) + " - " + fmt.format(np.max(values)) + "]"
 
-        # Model velocity at the observed points
-        vel_model = alphaBetaVelocity(ht_data_rescaled, alpha, beta, v_init)
-
         # Fit the smooth model of the lag (exponential, then constant deceleration), if asked for
         if cml_args.lagsmooth:
             print("Fitting lag function...")
             vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, traj.v_init)
 
-        # Estimate the final velocity from the fitted alpha-beta solution
+        # Estimate the final velocity from the fitted alpha-beta solution, relative to the air for the masses
         vel_end = alphaBetaVelocity(ht_data_rescaled[0], alpha, beta, v_init)
 
         # Optional independent slope/density uncertainties (only used with --errors). Velocities
@@ -8420,7 +8431,8 @@ if __name__ == "__main__":
         #   entry velocity is the asymptote of the model above the atmosphere without gravity, not the speed at
         #   the first point, which the initial velocity of the trajectory is
         ht_first = np.max(ht_data)
-        v_model_first = alphaBetaVelocity(ht_data_rescaled[np.argmax(ht_data)], alpha, beta, v_init)
+        v_model_first = alphaBetaVelocity(ht_data_rescaled[np.argmax(ht_data)], alpha, beta, v_init) \
+            + air_offset
 
         print("Alpha-beta fit to the lag of {:d} points, {:.1f} to {:.1f} km".format(len(ht_data), \
             ht_first/1000, np.min(ht_data)/1000))
@@ -8451,19 +8463,27 @@ if __name__ == "__main__":
                 "density, which biases alpha and beta where the scale height is not 7.16 km)")
         print("  Distance residuals RMS = {:.1f} m".format(np.sqrt(np.mean(length_residuals**2))))
 
-        # Print the entry velocity, the model speed at the first point and the trajectory's velocity
+        # Print the entry velocity, the model speed at the first point and the trajectory's velocity, in the
+        #   inertial frame of the trajectory, and the entry velocity relative to the air of the full fit
         print("Velocities:")
         v_init_std = fit_errors.get('v_init_std', np.nan) if (fit_errors is not None) else np.nan
         print("  V_e, alpha-beta entry velocity (asymptote above the atmosphere, without gravity)")
         print("                                             = {:.3f}{:s} km/s (fitted to the lag)".format(
-            v_init/1000, " +/- {:.3f}".format(v_init_std/1000) if np.isfinite(v_init_std) else ""))
+            v_init_inertial/1000, " +/- {:.3f}".format(v_init_std/1000) if np.isfinite(v_init_std) \
+            else ""))
+        if cml_args.lagfit == 'full':
+            print("  V_e relative to the air                    = {:.3f} km/s".format(v_init/1000))
         print("  Speed at 180 km, with gravity              = {:.3f} km/s".format(
-            alphaBetaEntryVelocityWithGravity(v_init, ht_first)/1000))
+            alphaBetaEntryVelocityWithGravity(v_init_inertial, ht_first)/1000))
         print("  Model speed at the first point, {:5.1f} km   = {:.3f} km/s".format(ht_first/1000,
             v_model_first/1000))
         print("  Trajectory's initial velocity (solver)     = {:.3f} km/s (the model is {:+.0f} m/s from " \
             "it at the first point)".format(traj.v_init/1000, v_model_first - traj.v_init))
-        print("  The masses below use V_e.")
+        if cml_args.lagfit == 'full':
+            print("  The masses, the dynamic mass and the dynamic pressure below use the velocities " \
+                "relative to the air.")
+        else:
+            print("  The masses below use V_e.")
 
         print()
         print("Alpha-beta analysis")
@@ -8568,7 +8588,8 @@ if __name__ == "__main__":
         print("-----------------------------------")
         print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
         print("Height       = {:5.2f} km".format(ht_dyn/1000))
-        print("Velocity     = {:5.2f} km/s".format(vel_dyn/1000))
+        print("Velocity     = {:5.2f} km/s{:s}".format(vel_dyn/1000, " (relative to the air)" \
+            if (cml_args.lagfit == 'full') else ""))
         print("Deceleration = {:5.2f} km/s^2".format(decel_dyn/1000))
         print("Gamma*A      = {:5.2f}".format(cml_args.ga))
         # Dynamic masses of the models within the 95% interval
@@ -8632,14 +8653,13 @@ if __name__ == "__main__":
 
 
 
-        # Predict velocity from height
+        # Heights of the curves of the model, from below the end to above the beginning
         ht_end = traj.rend_ele - 5000
         if ht_end < 10000:
             ht_end = 10000
         elif (ht_end > 20000) and (ht_end < 35000):
             ht_end = 20000
         ht_arr = np.linspace(ht_end, traj.rbeg_ele + 5000, 200)
-        vel_arr = alphaBetaVelocity(ht_arr, alpha, beta, v_init)
 
 
 
@@ -8653,7 +8673,7 @@ if __name__ == "__main__":
 
         # Label of the alpha-beta fit, with the profile intervals of alpha and beta
         fit_label = "$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.3g} ({:s})\n$\\beta$ = {:.3g} ({:s})".format( \
-            v_init/1000, alpha, profileIntervalText(lag_profile, 'alpha', notes=False), beta, \
+            v_init_inertial/1000, alpha, profileIntervalText(lag_profile, 'alpha', notes=False), beta, \
             profileIntervalText(lag_profile, 'beta', notes=False))
 
         # Label of the dynamic mass
@@ -8723,8 +8743,8 @@ if __name__ == "__main__":
                 length_band_hi = np.max(length_band, axis=0)
 
         # Limits of the velocity axes which are robust to single outliers of the point-to-point velocities
-        vel_axis_lo = min(0.0, max(np.percentile(vel_data, 1), -0.5*v_init))
-        vel_axis_hi = max(1.2*v_init, min(np.percentile(vel_data, 99), 3*v_init))
+        vel_axis_lo = min(0.0, max(np.percentile(vel_data, 1), -0.5*v_init_inertial))
+        vel_axis_hi = max(1.2*v_init_inertial, min(np.percentile(vel_data, 99), 3*v_init_inertial))
 
         def _plotFit(ax_vel, ax_lag, ax_lag_res, print_results=True):
             """ Plot the alpha-beta fit: the velocities against the observed heights, with the model from
@@ -8751,19 +8771,20 @@ if __name__ == "__main__":
 
             # Plot the alpha-beta velocity from above the first point down to below the last one, at the
             #   heights rescaled to the exponential atmosphere at the mean position, as the dynamic pressure,
-            #   with the band of the models within the region
+            #   with the band of the models within the region, in the inertial frame of the observations
             if have_band:
                 ht_arr_rescaled_mean = rescaleRealHeights(ht_arr)
                 vel_band = np.array([alphaBetaVelocityInterp(ht_arr_rescaled_mean, a, b, v0) \
-                    for a, b, v0 in region_models])
+                    for a, b, v0 in region_models]) + air_offset
                 ax_vel.fill_betweenx(ht_arr/1000, np.min(vel_band, axis=0)/1000, \
                     np.max(vel_band, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
 
-            ax_vel.plot(vel_arr_real/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
+            ax_vel.plot((vel_arr_real + air_offset)/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
 
             # Plot the point where the dynamic mass is estimated
             if np.isfinite(dyn_mass):
-                ax_vel.scatter([vel_dyn/1000], [ht_dyn/1000], color='k', zorder=3, label=dyn_label)
+                ax_vel.scatter([(vel_dyn + air_offset)/1000], [ht_dyn/1000], color='k', zorder=3, \
+                    label=dyn_label)
             else:
                 ax_vel.plot([], [], ' ', label=dyn_label)
 
@@ -8944,6 +8965,8 @@ if __name__ == "__main__":
         # Print height, model velocity and the dynamic pressure of the alpha-beta model
         print()
         print("AlphaBeta model:")
+        if cml_args.lagfit == 'full':
+            print("Velocities relative to the air")
         print("Height (km)  Vel (km/s)  DynPress (MPa)")
         for i in range(len(ht_arr)):
 
