@@ -9,7 +9,7 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 
 from wmpl.Utils.Math import medianStddev, circPercentile, findClosestPoints, findClosestPoints_vect, \
-    isGraphConnected, integratedAutocorrTime
+    isGraphConnected, weightedMedian, integratedAutocorrTime
 
 
 
@@ -23,6 +23,26 @@ def testMedianStddev():
     # Values without a valid deviation are taken as exact
     assert medianStddev([None, np.inf]) == 0.0
     assert medianStddev([]) == 0.0
+
+
+
+def testWeightedMedian():
+    """ Check the weighted median against the median and a brute force minimum of the absolute deviations. """
+
+    # With equal weights it is the median, also of an even number of values
+    assert weightedMedian([3.0, 1.0, 2.0], [1.0, 1.0, 1.0]) == 2.0
+    assert weightedMedian([4.0, 1.0, 2.0, 3.0], [1.0, 1.0, 1.0, 1.0]) == 2.5
+
+    # A heavy value pulls the median to it
+    assert weightedMedian([1.0, 2.0, 10.0], [1.0, 1.0, 5.0]) == 10.0
+
+    # The weighted sum of absolute deviations is the smallest at the weighted median
+    rng = np.random.RandomState(1)
+    x = rng.normal(0, 1, 51)
+    weights = rng.uniform(0.1, 2.0, 51)
+    x_grid = np.linspace(-3, 3, 6001)
+    cost = [np.sum(weights*np.abs(x - x_val)) for x_val in x_grid]
+    assert abs(weightedMedian(x, weights) - x_grid[np.argmin(cost)]) < 1e-3
 
 
 
@@ -160,7 +180,7 @@ def testIntegratedAutocorrTime():
 if __name__ == "__main__":
 
     # Run all tests
-    test_list = [testMedianStddev, testCircPercentileOfAnglesFrom0To360, \
+    test_list = [testMedianStddev, testWeightedMedian, testCircPercentileOfAnglesFrom0To360, \
         testCircPercentileOfAnglesFromMinus180To180, testClosestPointsOfManyLinesAreThoseOfEachLine, \
         testGraphConnectivity, testIntegratedAutocorrTime]
 
