@@ -18,6 +18,7 @@ import scipy.special
 from wmpl.Utils.AlphaBeta import alphaBetaEntryLag, AlphaBetaSlantColumn, \
     slantColumnFromPoints, airSpeedAlongPath, gravityLengthAlongLine, stationLengthNoise, \
     fitAlphaBetaEntryLag, profileAlphaBetaEntryLag, profileRegionAlphaBetaLag, profileIntervalText, \
+    stationJackknifeAlphaBetaEntryLag, \
     HT_NORM_CONST, RHO_ATM_0, RESCALE_COLUMN_TOP
 from wmpl.Utils.Physics import EARTH_ROTATION_RATE
 from wmpl.Utils.TrajConversions import EARTH, G
@@ -435,6 +436,35 @@ def testStationLengthNoiseOfShortStationsIgnoresTheDeceleration():
 
 
 
+
+def testStationJackknifeFindsABiasedStation():
+    """ Check that the fit without every station recovers the meteor without a station whose distances have
+        a systematic error growing along the path, like an error of its calibration, while the fits without
+        the other stations stay biased.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column), result = _syntheticFit()
+    sigma_length = stationLengthNoise(time_data, lag_data, station_data)
+
+    # Add a systematic error of up to 400 m to the distances of the station S2
+    biased = station_data == 'S2'
+    time_rel = (time_data[biased] - np.min(time_data[biased]))/np.ptp(time_data[biased])
+    lag_biased = np.copy(lag_data)
+    lag_biased[biased] += 400.0*time_rel**2
+
+    jackknife = stationJackknifeAlphaBetaEntryLag(time_data, lag_biased, ht_normed, station_data, \
+        slant_column.lengthScale, sigma_length, V_ENTRY_TRUE - 60.0, result[1], result[2])
+
+    assert [station_id for station_id, _, _ in jackknife] == ['S1', 'S2', 'S3']
+
+    # The fit without the biased station is the closest to the true alpha and beta
+    errors = {station_id: abs(np.log(alpha/ALPHA_TRUE)) + abs(np.log(beta/BETA_TRUE)) \
+        for station_id, alpha, beta in jackknife}
+
+    assert min(errors, key=errors.get) == 'S2'
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
@@ -443,7 +473,7 @@ if __name__ == "__main__":
         testAirSpeedAlongPath, testGravityLengthAlongLine, testStationLengthNoise, testFitAlphaBetaEntryLag, \
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
         testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
-        testStationLengthNoiseOfShortStationsIgnoresTheDeceleration]
+        testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, testStationJackknifeFindsABiasedStation]
 
     for test in test_list:
         test()

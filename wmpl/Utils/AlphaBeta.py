@@ -3017,6 +3017,48 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
 
 
 
+def stationJackknifeAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, \
+    sigma_length, v_ref, alpha, beta):
+    """ Fit the entry lag again without every station in turn (see fitAlphaBetaEntryLag()). The profile
+        intervals only contain the random noise of the distances, so a station with a systematic error, e.g.
+        of its calibration, shows as a fit without it which is far outside the intervals.
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s).
+        lag_data: [ndarray] Lag of every point (m), see fitAlphaBetaEntryLag().
+        ht_normed: [ndarray] Normalized slant column height of every point.
+        station_data: [ndarray] Station of every point.
+        length_scale: [function or float] Length of the path per unit of the normalized column height (m).
+        sigma_length: [ndarray] Noise of the distance of every point (m).
+        v_ref: [float] Slope of the reference line of the lag (m/s).
+        alpha: [float] Alpha of the fit with all stations, from which the fits start.
+        beta: [float] Beta of the fit with all stations, from which the fits start.
+
+    Return:
+        [list] (station, alpha, beta) of the fit without every station, for the stations without which
+            at least two stations are left.
+    """
+
+    station_data = np.asarray(station_data)
+    station_ids = np.unique(station_data)
+
+    jackknife = []
+    for station_id in station_ids:
+
+        # Keep the points of the other stations, if at least two of them are left
+        keep = station_data != station_id
+        if len(np.unique(station_data[keep])) < 2:
+            continue
+
+        fit_result = fitAlphaBetaEntryLag(time_data[keep], lag_data[keep], ht_normed[keep], \
+            station_data[keep], length_scale, sigma_length[keep], v_ref, x0_alpha_beta=[[alpha, beta]])
+
+        jackknife.append((station_id, fit_result[1], fit_result[2]))
+
+    return jackknife
+
+
+
 def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, alpha, beta, \
     entry_fit, ci=95.0, n_grid=40):
     """ Profile likelihood intervals of alpha and beta of the fit of the entry lag (fitAlphaBetaEntryLag()),
@@ -3029,7 +3071,9 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         is nearly flat along the valley at a fixed alpha. The rise of the cost is divided by the reduced
         chi-squared of the fit times the integrated autocorrelation time of its residuals, which is about 1
         for independent errors and widens the intervals if the errors are correlated in time, and compared
-        with the chi-squared threshold of one parameter. Each profile starts with steps of half the Wald
+        with the chi-squared threshold of one parameter. The intervals contain the random noise of the
+        distances, also correlated in time, but not the systematic errors of the stations, see
+        stationJackknifeAlphaBetaEntryLag(). Each profile starts with steps of half the Wald
         error and the crossings of the threshold are refined with Brent's method. A side which reaches a
         bound of the fit gives only a limit.
 
@@ -8225,6 +8269,21 @@ if __name__ == "__main__":
         print("  Beta:  {:s}".format(profileIntervalText(lag_profile, 'beta')))
         if lag_profile['beta_lower_at_bound'] and (not lag_profile['beta_upper_at_bound']):
             print("NOTE: The lag only gives an upper limit of beta, so ln(beta) is not meaningful")
+
+        # Fit again without every station, as the intervals do not contain the systematic errors of the
+        #   stations, and name the stations without which the fit is outside the intervals
+        if (cml_args.lagfit == 'full') and (len(np.unique(station_data)) >= 3):
+
+            print("Fit without every station (* outside the {:.3g}% intervals):".format(lag_profile['ci']))
+            for station_id, alpha_jack, beta_jack in stationJackknifeAlphaBetaEntryLag(time_data, \
+                entry_lag_data, ht_normed_data, station_data, slant_column.lengthScale, sigma_length, \
+                traj.v_init, alpha, beta):
+
+                outside = (alpha_jack < lag_profile['alpha_lower']) \
+                    or (alpha_jack > lag_profile['alpha_upper']) or (beta_jack < lag_profile['beta_lower']) \
+                    or (beta_jack > lag_profile['beta_upper'])
+                print("  {:s} Without {:s}: alpha = {:.3g}, beta = {:.3g}".format("*" if outside else " ", \
+                    str(station_id), alpha_jack, beta_jack))
 
         print("-------------------")
         print("ln(beta)             = {:.2f}".format(np.log(beta)))
