@@ -6790,8 +6790,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('-e', '--errors', action="store_true", \
         help="Estimate and report alpha/beta and initial/final mass uncertainties, from the covariance "
         "of the fit of the lag. Propagates the fitted (ln alpha, ln beta) covariance into the masses, plots "
-        "the profile likelihood of alpha and beta, draws its 1 sigma and 95% regions on the survival diagram, "
-        "and the band of the models within the 95% region on the velocities and the lag.")
+        "the profile likelihood of alpha and beta, draws its 1 sigma and 95%% regions on the survival diagram, "
+        "and the band of the models within the 95%% region on the velocities and the lag.")
 
     arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
         help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
