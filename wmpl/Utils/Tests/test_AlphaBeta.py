@@ -15,6 +15,8 @@ or standalone (no pytest required):
     python -m wmpl.Utils.Tests.test_AlphaBeta
 """
 
+import subprocess
+import sys
 import time
 
 import numpy as np
@@ -2174,10 +2176,25 @@ def testLightCurveNeedsTheDensityRatioWithTheColumnMapping():
 
 
 
+
+def testCommandLineHelp():
+    """ Check that the help of the command line prints, which failed on a "%" in a help text that argparse
+        took as a format.
+    """
+
+    result = subprocess.run([sys.executable, '-m', 'wmpl.Utils.AlphaBeta', '--help'], capture_output=True, \
+        text=True, timeout=300)
+
+    assert result.returncode == 0, result.stderr
+    assert "--errors" in result.stdout
+
+
+
 if __name__ == "__main__":
 
     # Standalone runner so the tests can be executed without pytest installed
     test_functions = [
+        testCommandLineHelp,
         testFitAlphaBetaUnconstrained,
         testInitialMassConstraint,
         testFinalMassConstraint,
