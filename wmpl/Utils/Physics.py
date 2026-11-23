@@ -16,8 +16,9 @@ except ImportError:
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 
-# Product of the drag coefficient Gamma and the shape factor A assumed for the masses by default, the value of
-#   the literature, to be refined on fireballs with recovered meteorites
+# Product of the drag coefficient Gamma and the shape factor A assumed for the masses of fireballs by default,
+#   the value of the literature, to be refined on fireballs with recovered meteorites. Faint meteors use
+#   Gamma = 1 and A = 1.21 (sphere)
 GAMMA_A = 0.78
 
 # Mapping of luminous efficiency model names to the integer lum_eff_type codes used by
@@ -70,7 +71,7 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
     return dyn_pressure
 
 
-def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, shape_factor=GAMMA_A, \
+def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, shape_factor=1.21, \
     atm_dens=None):
     """ Calculate dynamic mass at the given point on meteor's trajectory. 
     
@@ -88,8 +89,9 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
 
     Keyword arguments:
         gamma: [flot] Drag coefficient. 1 by default.
-        shape_factor: [float] Shape factor of the body. With gamma = 1, it is the product Gamma*A,
-            GAMMA_A = 0.78 by default, as for all masses in WMPL. Values of A for some shapes:
+        shape_factor: [float] Shape factor of the body. 1.21 (sphere) by default, for faint meteors. For
+            fireballs, use gamma = 1 and shape_factor = GAMMA_A (0.78), as the fireball tools in WMPL
+            do. Other values:
             - sphere      = 1.21
             - hemisphere  = 1.92
             - cube        = 1.0

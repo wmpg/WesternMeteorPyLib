@@ -4090,7 +4090,7 @@ def alphaBetaMasses(
             the whole surface. Default value is 0.
         dens: [float] Bulk density in kg/m^3.
         shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick. As shape_coeff and Gamma are
-            factored together, we use gamma*A = GAMMA_A = 0.78 by default, as for all masses in WMPL.
+            factored together, we use gamma*A = GAMMA_A = 0.78 by default, as for all fireball masses in WMPL.
         gamma: [float] Drag parameter Γ (= C_D /2).
         vel_init: [float] Initial velocity in m/s. If both vel_init and vel_end are given, the final
             mass is computed using the full alpha-beta solution. If either is None, the simple
@@ -4332,7 +4332,8 @@ def fitAlphaBetaMass(
     Keyword arguments:
         mass_constraint: [str] Mass constraint to use: "initial" ("i"), "final" ("f"), or "both" ("b").
         shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick. As shape_coeff and Gamma
-            are factored together, we use gamma*A = GAMMA_A = 0.78 by default, as for all masses in WMPL.
+            are factored together, we use gamma*A = GAMMA_A = 0.78 by default, as for all fireball masses in
+            WMPL.
         gamma: [float] Drag parameter Γ (= C_D /2).
         density: [float or None] If given, the bulk density (kg/m^3) is held fixed at this
             value instead of being fitted, removing it as a free parameter (e.g. a recovered

@@ -286,8 +286,9 @@ m = (Gamma*A / (K*rho_m^(2/3)))^3
 This is the same dynamic mass as in `wmpl.Utils.Physics.dynamicMass` and
 `wmpl.Utils.DynamicMassFit`, as `K = decel/(rho*v^2)`. Here it comes from the fit of the whole
 trajectory instead of the deceleration at one point. By default `Gamma*A = 0.78` and
-`rho_m = 3500 kg/m³`, which can be changed with `--ga` and `--dens`. All masses in WMPL use
-`Gamma*A = 0.78` by default (`wmpl.Utils.Physics.GAMMA_A`).
+`rho_m = 3500 kg/m³`, which can be changed with `--ga` and `--dens`. All fireball masses in WMPL use
+`Gamma*A = 0.78` by default (`wmpl.Utils.Physics.GAMMA_A`). `wmpl.Utils.Physics.dynamicMass` keeps
+`Gamma = 1` and `A = 1.21` (sphere) by default, for faint meteors.
 
 The **final dynamic mass** at the last point is the best estimate of the mass that leaves the
 luminous part of the trajectory. Below the end `K` is kept constant, so this is also the mass of the

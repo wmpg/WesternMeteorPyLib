@@ -175,9 +175,9 @@ def testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy():
 
 
 
-def testAllMassesUseTheSameGammaA():
-    """ Check that the dynamic and the alpha-beta masses and their command lines use the same Gamma*A by
-        default.
+def testAllFireballMassesUseTheSameGammaA():
+    """ Check that the dynamic and the alpha-beta masses of fireballs and their command lines use the same
+        Gamma*A by default, and that the dynamic mass of faint meteors keeps Gamma = 1 and A = 1.21.
     """
 
     from wmpl.Utils.AlphaBeta import alphaBetaMasses, fitAlphaBetaMass, plotAlphaBetaMassDiagram, \
@@ -188,7 +188,7 @@ def testAllMassesUseTheSameGammaA():
 
     # Defaults of the functions
     assert inspect.signature(dynamicMass).parameters['gamma'].default == 1.0
-    assert inspect.signature(dynamicMass).parameters['shape_factor'].default == GAMMA_A
+    assert inspect.signature(dynamicMass).parameters['shape_factor'].default == 1.21
     for func in [alphaBetaMasses, fitAlphaBetaMass, plotAlphaBetaMassDiagram, plotAlphaBetaSurvivalDiagram, \
         alphaBetaLuminousEfficiency]:
         assert inspect.signature(func).parameters['shape_coeff'].default == GAMMA_A, func.__name__
@@ -210,7 +210,8 @@ if __name__ == "__main__":
     test_list = [testBallisticCoeffMass, testCalcMassTakesNumpyIntegersAsModelCodes, \
         testCalcMassWarnsAboutP0mForThe1500WModels, testCalcMassAtZeroLumEffMassIsTheSmallMassLimit, \
         testCalcMassConstantCodeIsAlways0p7Percent, \
-        testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy, testAllMassesUseTheSameGammaA]
+        testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy, \
+        testAllFireballMassesUseTheSameGammaA]
 
     for test in test_list:
         test()
