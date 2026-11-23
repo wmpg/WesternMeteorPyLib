@@ -34,7 +34,7 @@ def interpolateEGM96Data(geoid_heights):
     """ Interpolate geoid heights on a sphere. """
 
     # Interpolate the data
-    lat_points = np.radians(np.linspace(0.25, 179.25, 719))
+    lat_points = np.radians(np.linspace(0.25, 179.75, 719))
     lon_points = np.radians(np.linspace(0, 359.75, 1440))
 
     # Extract pole values
