@@ -3377,9 +3377,18 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
             limits.append(np.exp(crossing))
             at_bound.append(False)
 
-            # Keep the inner point next to the crossing, for the intervals of derived quantities
-            inner = side_points[k - 1]
-            edge_models.append([np.exp(inner[1]), np.exp(inner[2]), inner[3], delta_chi2[k - 1]])
+            # Keep the model at the crossing, or just inside it, for the intervals of derived quantities, and
+            #   the inner point of the walk if neither is within the threshold
+            edge_point, edge_delta = side_points[k - 1], delta_chi2[k - 1]
+            for log_edge in [crossing, crossing - direction*1e-4]:
+
+                point = _profilePoint(idx, log_edge)
+                delta_edge = (point[0] - cost_best)/scale
+                if delta_edge <= threshold:
+                    edge_point, edge_delta = point, delta_edge
+                    break
+
+            edge_models.append([np.exp(edge_point[1]), np.exp(edge_point[2]), edge_point[3], edge_delta])
 
         # Sort the points of the profile by the value of the parameter
         points.sort(key=lambda point: point[idx + 1])

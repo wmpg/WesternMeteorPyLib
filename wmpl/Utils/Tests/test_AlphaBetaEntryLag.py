@@ -512,6 +512,30 @@ def testProfileAlphaBetaEntryLagOfAFastArc():
 
 
 
+def testProfileAlphaBetaEntryLagEdgeModels():
+    """ The models kept for the intervals of derived quantities are at the refined crossings of the
+        threshold, so they span the profile intervals.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column), result = _syntheticFit()
+    _, alpha, beta, _, entry_fit = result
+
+    profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, alpha, beta, entry_fit, n_grid=0)
+
+    for idx, name in enumerate(['alpha', 'beta']):
+
+        edge_models = profile[name + '_edge_models']
+        assert edge_models.shape == (2, 4)
+
+        # The rise of the chi-squared at the models is the threshold, and they are at the limits
+        assert np.all(edge_models[:, 3] <= profile['threshold'])
+        assert np.all(edge_models[:, 3] > profile['threshold'] - 0.05)
+        limits = [profile[name + '_lower'], profile[name + '_upper']]
+        assert np.allclose(np.sort(edge_models[:, idx]), limits, rtol=1e-3)
+
+
+
 def testProfileAlphaBetaEntryLag():
     """ The profile intervals bracket the fit and contain the true values, and the profile has the format of
         profileAlphaBetaLag(), so its region and its text work with the same functions.
@@ -664,7 +688,8 @@ if __name__ == "__main__":
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
         testFitAlphaBetaEntryLagConverges, testFitAlphaBetaEntryLagReachesAllPoints, \
         testFitAlphaBetaEntryLagWithPreciseDistances, testProfileAlphaBetaEntryLagOfAFastArc, \
-        testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
+        testProfileAlphaBetaEntryLagEdgeModels, testProfileAlphaBetaEntryLag, \
+        testStationLengthNoiseNeedsEnoughPoints, \
         testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, \
         testStationJackknifeFindsABiasedStation, testProfileAlphaBetaEntryLagKeepsAlphaInBounds]
 
