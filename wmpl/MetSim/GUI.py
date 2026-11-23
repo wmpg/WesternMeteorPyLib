@@ -1416,8 +1416,9 @@ def fitLagTimeOffset(norm_sim_time, norm_sim_len, norm_sim_vel, time_data, len_d
 
     weights = np.asarray(weights, dtype=np.float64)
 
-    # Use only the points with a time and a length
-    valid = ~np.isnan(time_data) & ~np.isnan(len_data)
+    # Use only the points with a time, a length and a positive weight, so the offset stays at 0 when the
+    #   lengths are not fitted
+    valid = ~np.isnan(time_data) & ~np.isnan(len_data) & (weights > 0)
     time_data, len_data, weights = time_data[valid], len_data[valid], weights[valid]
 
     if (len(time_data) < 2) or (len(norm_sim_time) < 2):
@@ -1444,11 +1445,17 @@ def fitLagTimeOffset(norm_sim_time, norm_sim_len, norm_sim_vel, time_data, len_d
             len_res = len_data - sim_len_interp(time_data - time_offset)
             vel = sim_vel_interp(time_data - time_offset)
 
+            # Stop if the simulation does not move at the observed times
+            step_weights = weights*np.abs(vel)
+            if not np.any(step_weights > 0):
+                break
+
             # Find the offset change for the residuals linearized at the current offset
             if step_loss == 'l2':
                 time_step = -np.sum(weights*len_res*vel)/np.sum(weights*vel**2)
             else:
-                time_step = weightedMedian(-len_res/vel, weights*np.abs(vel))
+                moving = step_weights > 0
+                time_step = weightedMedian(-len_res[moving]/vel[moving], step_weights[moving])
 
             time_offset_new = np.clip(time_offset + time_step, -time_offset_max, time_offset_max)
 
@@ -1460,6 +1467,21 @@ def fitLagTimeOffset(norm_sim_time, norm_sim_len, norm_sim_vel, time_data, len_d
 
 
     return float(time_offset)
+
+
+
+def nanFunction(x):
+    """ Return NaN for every value, used in place of the simulated length or height when the simulation
+        stops before it reaches the first observed point.
+
+    Arguments:
+        x: [ndarray] Values.
+
+    Return:
+        [ndarray] NaN values of the same shape.
+    """
+
+    return np.zeros_like(np.asarray(x, dtype=np.float64)) + np.nan
 
 
 
@@ -1566,9 +1588,14 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         time_offset = fitLagTimeOffset(norm_sim_time, norm_sim_len, norm_sim_vel, fit_input_data[:, 2], \
             fit_input_data[:, 3], weights=lag_weight_data, time_offset_max=time_offset_max)
 
-    # Interpolate the simulated length by the observed time
-    len_sim_interpol = scipy.interpolate.interp1d(norm_sim_time + time_offset, norm_sim_len, \
-        bounds_error=False, fill_value='extrapolate')
+    # Interpolate the simulated length by the observed time, unless the simulation stops before it reaches the
+    #   first point, in which case the length residuals get the penalty below
+    if len(norm_sim_time) >= 2:
+        len_sim_interpol = scipy.interpolate.interp1d(norm_sim_time + time_offset, norm_sim_len, \
+            bounds_error=False, fill_value='extrapolate')
+
+    else:
+        len_sim_interpol = nanFunction
 
 
     # Go through every height point and compute the residual contribution
@@ -1609,8 +1636,9 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         if not np.isnan(length):
             lag_res = lag_weight*(length - len_sim_interpol(time_rel))**2
 
+        # Penalize a length without a simulated value, unless the lengths are not fitted
         if np.isnan(lag_res):
-            lag_res = 10000**2
+            lag_res = lag_weight*10000**2
 
 
         total_mag_residual += mag_res
@@ -2449,13 +2477,21 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
     norm_sim_time = norm_sim_time[norm_sim_len > 0]
     norm_sim_len = norm_sim_len[norm_sim_len > 0]
 
-    # Interpolate the normalized length by time
-    sim_norm_len_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_len,
-                                                    bounds_error=False, fill_value='extrapolate')
-    
-    # Interpolate the simulated height by time
-    sim_norm_ht_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_ht,
-                                                    bounds_error=False, fill_value='extrapolate')
+    # Interpolate the normalized length and the simulated height by time, unless the simulation stops before
+    #   it reaches the first point
+    if len(norm_sim_time) >= 2:
+
+        # Interpolate the normalized length by time
+        sim_norm_len_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_len,
+                                                        bounds_error=False, fill_value='extrapolate')
+        
+        # Interpolate the simulated height by time
+        sim_norm_ht_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_ht,
+                                                        bounds_error=False, fill_value='extrapolate')
+
+    else:
+        sim_norm_len_interp = nanFunction
+        sim_norm_ht_interp = nanFunction
 
 
 
@@ -4643,13 +4679,21 @@ class MetSimGUI(QMainWindow):
             if not show_previous:
                 self.const.lag_time_offset = self.sim_time_offset
 
-            # Interpolate the normalized length by time
-            self.sim_norm_len_interp = scipy.interpolate.interp1d(self.norm_sim_time, self.norm_sim_len,
-                bounds_error=False, fill_value='extrapolate')
+            # Interpolate the normalized length by time and the height by normalized length, unless the
+            #   simulation stops before it reaches the first point
+            if len(self.norm_sim_time) >= 2:
 
-            # Interpolate the height by normalized length
-            self.sim_norm_ht_interp = scipy.interpolate.interp1d(self.norm_sim_len, self.norm_sim_ht,
-                bounds_error=False, fill_value='extrapolate')
+                # Interpolate the normalized length by time
+                self.sim_norm_len_interp = scipy.interpolate.interp1d(self.norm_sim_time, self.norm_sim_len,
+                    bounds_error=False, fill_value='extrapolate')
+
+                # Interpolate the height by normalized length
+                self.sim_norm_ht_interp = scipy.interpolate.interp1d(self.norm_sim_len, self.norm_sim_ht,
+                    bounds_error=False, fill_value='extrapolate')
+
+            else:
+                self.sim_norm_len_interp = nanFunction
+                self.sim_norm_ht_interp = nanFunction
 
 
     def updateVelocityPlot(self, show_previous=False):

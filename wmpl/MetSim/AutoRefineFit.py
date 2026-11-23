@@ -14,13 +14,19 @@ import scipy.optimize
 from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations, \
-    fitLagTimeOffset, lagTimeOffsetMax
+    fitLagTimeOffset, lagTimeOffsetMax, nanFunction
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants, loadedConstantsRelativeToGround, \
     atmDensityDescription
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
     ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Pickling import loadPickle
+
+
+# Length residual of a point without a simulated length, e.g. when the simulation stops before the first
+#   observed point (m)
+LENGTH_RESIDUAL_PENALTY = 10000.0
+
 
 
 def lengthFilter(obs):
@@ -120,9 +126,14 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False, fit_
     # Shift the simulated time so the simulation passes the height of the first point at the offset
     norm_sim_time = norm_sim_time + time_offset
 
-    # Interpolate the normalized length by time
-    sim_norm_len_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_len,
-        bounds_error=False, fill_value='extrapolate')
+    # Interpolate the normalized length by time, unless the simulation stops before it reaches the first
+    #   point, in which case the lengths get the penalty below
+    if len(norm_sim_time) >= 2:
+        sim_norm_len_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_len,
+            bounds_error=False, fill_value='extrapolate')
+
+    else:
+        sim_norm_len_interp = nanFunction
 
     
     ### TEST
@@ -164,8 +175,11 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False, fit_
         # Sample the simulated normalized length at observed times
         sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[len_filter])
 
-        # Compute the length residual, averaged only over the points used
-        len_res_sum += np.sum(np.abs(obs.state_vect_dist[len_filter] - sim_norm_len_sampled))
+        # Compute the length residual, averaged only over the points used, with a penalty for the lengths
+        #   without a simulated value
+        len_res_abs = np.abs(obs.state_vect_dist[len_filter] - sim_norm_len_sampled)
+        len_res_abs[np.isnan(len_res_abs)] = LENGTH_RESIDUAL_PENALTY
+        len_res_sum += np.sum(len_res_abs)
         len_res_count += np.sum(len_filter)
 
 

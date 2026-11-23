@@ -30,17 +30,18 @@ FIRST_POINT_ERROR = 300.0
 
 
 
-def simulate(v_init=V_INIT):
+def simulate(v_init=V_INIT, h_kill=20000.0):
     """ Simulate a decelerating single body.
 
     Keyword arguments:
         v_init: [float] Initial speed (m/s). V_INIT by default.
+        h_kill: [float] Height at which the simulation stops (m). 20000 by default.
 
     Return:
         sr: [SimulationResults object] Simulation results.
     """
 
-    const = bodyConstants(0.1, v_init, 45.0, 20000.0)
+    const = bodyConstants(0.1, v_init, 45.0, h_kill)
 
     return SimulationResults(const, *runSimulation(const))
 
@@ -104,18 +105,46 @@ def pointCount(traj):
 
 
 
-def fitInputData(traj):
-    """ Make the input data of the GUI fit, without magnitudes.
+def fitInputData(traj, abs_mag=np.nan):
+    """ Make the input data of the GUI fit.
 
     Arguments:
         traj: [SimpleNamespace] Trajectory made by observe().
+
+    Keyword arguments:
+        abs_mag: [float] Absolute magnitude of all points. NaN by default, i.e. without magnitudes.
 
     Return:
         [ndarray] Rows of the height (m), magnitude, time (s) and length (m) of every point.
     """
 
-    return np.vstack([np.c_[obs.model_ht, np.zeros_like(obs.model_ht) + np.nan, obs.time_data, \
+    return np.vstack([np.c_[obs.model_ht, np.zeros_like(obs.model_ht) + abs_mag, obs.time_data, \
         obs.state_vect_dist] for obs in traj.observations])
+
+
+
+def guiFitResidual(const, traj, fit_input_data, **kwargs):
+    """ Compute the residual of the GUI fit with the mass, the speed, the density and the ablation coefficient
+        at the given constants.
+
+    Arguments:
+        const: [Constants object] Constants of the simulation.
+        traj: [SimpleNamespace] Trajectory made by observe().
+        fit_input_data: [ndarray] Input data made by fitInputData().
+
+    Keyword arguments:
+        kwargs: [dict] Keyword arguments of fitResiduals.
+
+    Return:
+        [float] Residual of the fit.
+    """
+
+    p0 = [const.m_init, const.v_init, const.rho, const.sigma]
+    mini_norm_handle = MinimizationParameterNormalization(p0)
+    p0_normed, _ = mini_norm_handle.normalizeBounds([[0.5*x, 2*x] for x in p0])
+
+    return fitResiduals(p0_normed, fit_input_data, 'm', copy.deepcopy(const), traj, mini_norm_handle, \
+        verbose=False, **kwargs)
 
 
 
@@ -239,20 +268,58 @@ def testGUIFitResidualUsesTheTimeOffset():
     traj = observe(sr, FIRST_POINT_ERROR)
     fit_input_data = fitInputData(traj)
 
-    # Fit the mass, the speed, the density and the ablation coefficient, at the true values
-    const = copy.deepcopy(sr.const)
-    p0 = [const.m_init, const.v_init, const.rho, const.sigma]
-    mini_norm_handle = MinimizationParameterNormalization(p0)
-    p0_normed, _ = mini_norm_handle.normalizeBounds([[0.5*x, 2*x] for x in p0])
-
-    residual_offset = fitResiduals(p0_normed, fit_input_data, 'm', const, traj, mini_norm_handle, \
-        verbose=False)
-    residual_anchor = fitResiduals(p0_normed, fit_input_data, 'm', const, traj, mini_norm_handle, \
-        verbose=False, fit_time_offset=False)
+    residual_offset = guiFitResidual(sr.const, traj, fit_input_data)
+    residual_anchor = guiFitResidual(sr.const, traj, fit_input_data, fit_time_offset=False)
 
     # The residual is the mean squared length residual, with the offset only that of the moved first point
     assert np.isclose(residual_offset, FIRST_POINT_ERROR**2/pointCount(traj), rtol=0.05)
     assert residual_anchor > 100.0**2
+
+
+
+def testZeroLagWeightsLeaveTheLengthsOut():
+    """ Check that the offset is zero when no length has a positive weight, and that the lengths then do not
+        add to the residual of the GUI fit, with or without the offset.
+    """
+
+    norm_sim_time = np.linspace(-1, 2, 301)
+    time_data = np.arange(0, 1, 0.04)
+    for loss in ['l2', 'l1']:
+        time_offset = fitLagTimeOffset(norm_sim_time, 20000.0*norm_sim_time, np.zeros_like(norm_sim_time) \
+            + 20000.0, time_data, 20000.0*time_data + 500.0, weights=np.zeros_like(time_data), loss=loss)
+        assert time_offset == 0.0
+
+    # Fit only the magnitudes, which are all 5 while the simulated ones are brighter
+    sr = simulate()
+    traj = observe(sr, FIRST_POINT_ERROR)
+    fit_input_data = fitInputData(traj, abs_mag=5.0)
+
+    residual_offset = guiFitResidual(sr.const, traj, fit_input_data, lag_weights=[0.0, 0.0])
+    residual_anchor = guiFitResidual(sr.const, traj, fit_input_data, lag_weights=[0.0, 0.0], \
+        fit_time_offset=False)
+
+    assert np.isfinite(residual_offset)
+    assert residual_offset == residual_anchor
+
+
+
+def testSimulationStoppingAboveTheFirstPointIsPenalized():
+    """ Check that a simulation which stops above the first point gives the length penalty instead of an
+        error, in the GUI fit and in the cost function of AutoRefineFit.
+    """
+
+    traj = observe(simulate(), FIRST_POINT_ERROR)
+
+    # The simulation starts at 100 km and stops at 95 km, above the first point at 90 km
+    sr_short = simulate(h_kill=95000.0)
+
+    residual = guiFitResidual(sr_short.const, traj, fitInputData(traj))
+    assert np.isclose(residual, 10000.0**2)
+
+    _, len_res, cost, time_offset = costFunc(traj, None, sr_short, 1.0, 1.0)
+    assert np.isclose(len_res, 10000.0)
+    assert np.isfinite(cost)
+    assert time_offset == 0.0
 
 
 
@@ -280,6 +347,7 @@ if __name__ == "__main__":
     # Run all tests
     test_list = [testTimeOffsetTakesUpFirstPointError, testInitialSpeedIsRecoveredWithTimeOffset, \
         testWithoutTimeOffsetTheSimulationPassesTheFirstPoint, testGUIFitResidualUsesTheTimeOffset, \
+        testZeroLagWeightsLeaveTheLengthsOut, testSimulationStoppingAboveTheFirstPointIsPenalized, \
         testTimeOffsetIsBounded]
 
     for test in test_list:
