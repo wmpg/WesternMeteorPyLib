@@ -3239,8 +3239,24 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
             # Minimize over ln alpha within a bracket around the previous point of the valley
             res = scipy.optimize.minimize_scalar(lambda log_alpha: _cost(log_alpha, log_value)[0], \
                 bracket=(valley['log_alpha'] - 0.05, valley['log_alpha'] + 0.05), tol=1e-6)
-            valley['log_alpha'] = res.x
-            log_alpha, log_beta = res.x, log_value
+            log_alpha = res.x
+
+            # If the valley leaves the bounds of alpha of the fit, minimize between the previous point and
+            #   the bound which it crosses
+            if (log_alpha < lower_bounds[0]) or (log_alpha > upper_bounds[0]):
+
+                edge = lower_bounds[0] if (log_alpha < lower_bounds[0]) else upper_bounds[0]
+                inner = float(np.clip(valley['log_alpha'], lower_bounds[0], upper_bounds[0]))
+                log_alpha = edge
+
+                if inner != edge:
+                    res = scipy.optimize.minimize_scalar(lambda log_alpha: _cost(log_alpha, log_value)[0], \
+                        method='bounded', bounds=(min(inner, edge), max(inner, edge)), \
+                        options={'xatol': 1e-6})
+                    log_alpha = res.x
+
+            valley['log_alpha'] = log_alpha
+            log_beta = log_value
 
         else:
 

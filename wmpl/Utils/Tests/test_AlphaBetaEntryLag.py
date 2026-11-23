@@ -15,6 +15,7 @@ import numpy as np
 import scipy.integrate
 import scipy.special
 
+import wmpl.Utils.AlphaBeta as AlphaBeta
 from wmpl.Utils.AlphaBeta import alphaBetaEntryLag, AlphaBetaSlantColumn, \
     slantColumnFromPoints, airSpeedAlongPath, gravityLengthAlongLine, stationLengthNoise, \
     fitAlphaBetaEntryLag, profileAlphaBetaEntryLag, profileRegionAlphaBetaLag, profileIntervalText, \
@@ -582,6 +583,33 @@ def testStationJackknifeFindsABiasedStation():
 
 
 
+
+def testProfileAlphaBetaEntryLagKeepsAlphaInBounds():
+    """ Check that the profile of beta follows the valley of ln alpha only within the bounds of alpha of the
+        fit, also where the valley crosses a bound.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column), result = _syntheticFit()
+    sigma_length = stationLengthNoise(time_data, lag_data, station_data)
+
+    # Narrow the bounds of alpha around the best fit, so the valley of the beta profile crosses them
+    bounds_original = AlphaBeta.ALPHA_BETA_BOUNDS
+    alpha_bounds = (0.997*result[1], 1.003*result[1])
+    try:
+        AlphaBeta.ALPHA_BETA_BOUNDS = (alpha_bounds, bounds_original[1])
+        profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+            slant_column.lengthScale, result[1], result[2], result[4])
+
+    finally:
+        AlphaBeta.ALPHA_BETA_BOUNDS = bounds_original
+
+    alpha_profile = profile['beta_profile_models'][:, 0]
+
+    assert np.all(alpha_profile >= alpha_bounds[0]*(1 - 1e-6))
+    assert np.all(alpha_profile <= alpha_bounds[1]*(1 + 1e-6))
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
@@ -591,7 +619,8 @@ if __name__ == "__main__":
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
         testFitAlphaBetaEntryLagConverges, testFitAlphaBetaEntryLagReachesAllPoints, \
         testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
-        testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, testStationJackknifeFindsABiasedStation]
+        testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, \
+        testStationJackknifeFindsABiasedStation, testProfileAlphaBetaEntryLagKeepsAlphaInBounds]
 
     for test in test_list:
         test()
