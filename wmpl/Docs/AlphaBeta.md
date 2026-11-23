@@ -74,6 +74,20 @@ printed:
   Beta:  0.695 - 0.832
 ```
 
+With the full fit of the lag (`--lagfit full`, the default), the rise of the cost is also divided by the
+integrated autocorrelation time of the residuals, which is about 1 for independent errors. The residuals of real
+fireballs are usually correlated in time, so the intervals are wider than with `--lagfit simple`, and beta more
+often gets only an upper limit. This is intended. In synthetic tests with noise correlated in time
+(autocorrelation times of 5-40), the 95% intervals of the full fit contained the true values in 84-95% of the
+cases, against 38-75% when the rise is divided by the variance of the residuals alone.
+
+The intervals contain the random noise of the distances, also when it is correlated in time, but not the
+systematic errors of the stations, e.g. of their calibration. The fit takes such an error into alpha and beta,
+and the residuals do not show it. To check for it, the full fit is repeated without every station in turn when
+there are at least three stations. The stations without which alpha or beta falls outside the intervals are
+marked with `*`. A fit without one station which is far outside the intervals points to a systematic error of
+that station.
+
 `--errors` also gives the Wald uncertainties from the covariance of the fit, which are propagated into the
 masses, and draws the uncertainties in the bottom left of the summary plot:
 
@@ -205,9 +219,11 @@ pressure are usually still well constrained.
   the direction of the motion is used instead. A meteor which climbs along the observed path, e.g. an
   Earth-grazer, cannot be fitted by the model, and AlphaBeta stops with an error.
 
-- The intervals assume that the lag residuals are independent. A station with a timing or a geometric offset
-  makes the residuals of all its points correlated, and the real intervals are then wider. Check the residuals of
-  every station in the summary plot.
+- The intervals of the full fit contain the random noise, also when it is correlated in time, but not the
+  systematic errors of the stations. Check the fits without every station and the residuals of every station
+  in the summary plot. The intervals of `--lagfit simple` assume that the lag residuals are independent: a
+  station with a timing or a geometric offset makes the residuals of all its points correlated, and the real
+  intervals are then wider.
 - The model is a single body with a constant shape and mu. Fragmentation shows as a trend in the lag residuals
   which the model cannot follow.
 - The masses depend on the assumed density and on the drag and shape coefficients, which are not part of the
