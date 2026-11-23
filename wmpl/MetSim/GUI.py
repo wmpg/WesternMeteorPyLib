@@ -36,7 +36,8 @@ from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, getAtmDensityTable, \
     atmDensTable, atmDensityTableInfo, ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, \
     msisModelName, setAtmosphere
-from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
+from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle, \
+    weightedMedian
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
@@ -63,6 +64,16 @@ FRAG_FILE_NAME = "metsim_fragmentation.txt"
 
 # Simulation output file name
 SIM_RESULTS_CSV = "metsim_results.csv"
+
+# Largest time offset of the simulation from the first observed point, in intervals between the observed
+#   points
+LAG_TIME_OFFSET_MAX_INTERVALS = 2.0
+
+# Largest number of iterations of the time offset fit
+LAG_TIME_OFFSET_ITERATIONS = 20
+
+# Change of the time offset at which its fit has converged (s)
+LAG_TIME_OFFSET_TOLERANCE = 1e-7
 
 ### ###
 
@@ -1345,10 +1356,159 @@ def extractConstantParams(const_original, params, param_string, mini_norm_handle
 
 
 
+def lagTimeOffsetMax(time_data_list):
+    """ Largest time offset of the simulation from the first observed point, a few intervals between the
+        observed points. The offset takes up the along-track error of the first point and of the time zero,
+        which is about the distance the meteor moves in one frame or less, so the bound only stops the fit
+        from running away, e.g. when the simulation does not cover the observations.
+
+    Arguments:
+        time_data_list: [list] A list of arrays of the relative times of the points of each station (s).
+
+    Return:
+        [float] Largest absolute time offset (s), 0 if no station has two points.
+    """
+
+    # Take the median interval between the points of every station
+    point_intervals = [np.median(np.diff(np.sort(time_data))) for time_data in time_data_list \
+        if len(time_data) > 1]
+
+    if not point_intervals:
+        return 0.0
+
+    return LAG_TIME_OFFSET_MAX_INTERVALS*np.median(point_intervals)
+
+
+
+def fitLagTimeOffset(norm_sim_time, norm_sim_len, norm_sim_vel, time_data, len_data, weights=None, \
+    loss='l2', time_offset_max=None):
+    """ Fit the time at which the simulation passes the height of the first observed point, using all
+        observed lengths. The simulated length at the observed time t is then the normalized simulated
+        length at t - t0. The heights are not changed, so the magnitudes compared by height do not depend
+        on the offset.
+
+    Arguments:
+        norm_sim_time: [ndarray] Simulated time from the time the simulation passes the height of the first
+            observed point (s).
+        norm_sim_len: [ndarray] Simulated length from the first observed point (m).
+        norm_sim_vel: [ndarray] Simulated velocity (m/s).
+        time_data: [ndarray] Relative times of the observed points (s).
+        len_data: [ndarray] Observed lengths, i.e. distances from the state vector (m). Points with a NaN
+            length are not used.
+
+    Keyword arguments:
+        weights: [ndarray] Weights of the points. None by default, in which case all points have the same
+            weight.
+        loss: [str] 'l2' minimizes the weighted sum of squared length residuals, and 'l1' the weighted sum
+            of absolute length residuals. 'l2' by default.
+        time_offset_max: [float] Largest absolute time offset (s). None by default, in which case the offset
+            is not bounded.
+
+    Return:
+        time_offset: [float] Time t0 at which the simulation passes the height of the first point (s).
+    """
+
+    time_data = np.asarray(time_data, dtype=np.float64)
+    len_data = np.asarray(len_data, dtype=np.float64)
+
+    if weights is None:
+        weights = np.ones_like(len_data)
+
+    weights = np.asarray(weights, dtype=np.float64)
+
+    # Use only the points with a time and a length
+    valid = ~np.isnan(time_data) & ~np.isnan(len_data)
+    time_data, len_data, weights = time_data[valid], len_data[valid], weights[valid]
+
+    if (len(time_data) < 2) or (len(norm_sim_time) < 2):
+        return 0.0
+
+    if time_offset_max is None:
+        time_offset_max = np.inf
+
+    # Interpolate the simulated length and velocity by time
+    sim_len_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_len, bounds_error=False, \
+        fill_value='extrapolate')
+    sim_vel_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_vel, bounds_error=False, \
+        fill_value=(norm_sim_vel[0], norm_sim_vel[-1]))
+
+    # Start at the first point, take Gauss-Newton steps for the squared residuals and then continue with
+    #   steps for the absolute residuals if they are used
+    time_offset = 0.0
+    step_losses = ['l2', 'l1'] if loss == 'l1' else ['l2']
+    for step_loss in step_losses:
+
+        for _ in range(LAG_TIME_OFFSET_ITERATIONS):
+
+            # The residual of every point changes with the offset at the simulated velocity
+            len_res = len_data - sim_len_interp(time_data - time_offset)
+            vel = sim_vel_interp(time_data - time_offset)
+
+            # Find the offset change for the residuals linearized at the current offset
+            if step_loss == 'l2':
+                time_step = -np.sum(weights*len_res*vel)/np.sum(weights*vel**2)
+            else:
+                time_step = weightedMedian(-len_res/vel, weights*np.abs(vel))
+
+            time_offset_new = np.clip(time_offset + time_step, -time_offset_max, time_offset_max)
+
+            converged = abs(time_offset_new - time_offset) < LAG_TIME_OFFSET_TOLERANCE
+            time_offset = time_offset_new
+
+            if converged:
+                break
+
+
+    return float(time_offset)
+
+
+
+def lagWeights(height_data, lag_weights, lag_weight_ht_change):
+    """ Weights of the lag residuals of the automated fit, which change at the given height.
+
+    Arguments:
+        height_data: [ndarray] Heights of the points (m).
+        lag_weights: [list] Weights of the points above and below the change height.
+        lag_weight_ht_change: [float] Height at which the weight changes (m).
+
+    Return:
+        [ndarray] Weights of the points.
+    """
+
+    return np.where(np.asarray(height_data) > lag_weight_ht_change, lag_weights[0], lag_weights[1])
+
+
 
 def fitResiduals(params, fit_input_data, param_string, const_original, traj, mini_norm_handle, 
-    mag_weight=10.0, lag_weights=None, lag_weight_ht_change=0.0, verbose=True, gui_handle=None):
-    """ Compute the fit residual. """
+    mag_weight=10.0, lag_weights=None, lag_weight_ht_change=0.0, verbose=True, gui_handle=None, \
+    fit_time_offset=True):
+    """ Compute the fit residual. The magnitudes are compared at the observed heights, and the lengths at
+        the observed times, with the simulation passing the height of the first observed point at the time
+        offset fitted to all lengths (see fitLagTimeOffset).
+
+    Arguments:
+        params: [ndarray] Normalized fit parameters.
+        fit_input_data: [ndarray] One row per point with the height (m), the absolute magnitude, the
+            relative time (s) and the length, i.e. the distance from the state vector (m). The magnitude or
+            the length is NaN if it was not measured.
+        param_string: [str] Groups of fitted parameters, see extractConstantParams.
+        const_original: [Constants object] Constants which are not fitted.
+        traj: [Trajectory object] Trajectory solution.
+        mini_norm_handle: [MinimizationParameterNormalization object] Normalization of the parameters.
+
+    Keyword arguments:
+        mag_weight: [float] Weight of the magnitude residuals. 10.0 by default.
+        lag_weights: [list] Weights of the lag residuals above and below lag_weight_ht_change. None by
+            default, in which case both are 1.
+        lag_weight_ht_change: [float] Height at which the lag weight changes (m). 0 by default.
+        verbose: [bool] Print the parameters and the residual, and show the fit in the GUI. True by default.
+        gui_handle: [MetSimGUI object] GUI in which the fit is shown. None by default.
+        fit_time_offset: [bool] Fit the time at which the simulation passes the height of the first point,
+            instead of fixing it to 0. True by default.
+
+    Return:
+        total_residual: [float] Sum of the mean weighted magnitude and lag residuals.
+    """
 
     if verbose:
         print()
@@ -1376,37 +1536,51 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
 
     # Count the length and magnitude points with a measurement
     mag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 1])), 1)
-    lag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 2])), 1)
+    lag_point_count = max(np.sum(~np.isnan(fit_input_data[:, 3])), 1)
 
-    # Interpolate simulated magnitude and length
-    len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr, \
-        bounds_error=False, fill_value=0)
+    # Interpolate simulated magnitude
     mag_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.abs_magnitude, \
         bounds_error=False, fill_value=10)
-    time_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.time_arr, \
-        bounds_error=False, fill_value=0)
 
-    
-    # Find the length and time at the meteor begin point
-    begin_length_sim = len_sim_interpol(traj.rbeg_ele)
-    begin_time_sim = time_sim_interpol(traj.rbeg_ele)
+
+    # Find the simulated length and time of the leading fragment at the height of the first point
+    begin_length_sim = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_length_arr, \
+        bounds_error=False, fill_value='extrapolate')(traj.rbeg_ele)
+    begin_time_sim = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.time_arr, \
+        bounds_error=False, fill_value='extrapolate')(traj.rbeg_ele)
+
+    # Set the simulated length and time at the first point to zero
+    norm_sim_len = sr.leading_frag_length_arr - begin_length_sim
+    norm_sim_time = (sr.time_arr - begin_time_sim)[norm_sim_len > 0]
+    norm_sim_vel = sr.leading_frag_vel_arr[norm_sim_len > 0]
+    norm_sim_len = norm_sim_len[norm_sim_len > 0]
+
+    # Compute the weights of the lag residuals
+    lag_weight_data = lagWeights(fit_input_data[:, 0], lag_weights, lag_weight_ht_change)
+
+    # Fit the time at which the simulation passes the height of the first point
+    time_offset = 0.0
+    if fit_time_offset:
+        time_offset_max = lagTimeOffsetMax([obs.time_data[obs.ignore_list == 0] \
+            for obs in traj.observations])
+        time_offset = fitLagTimeOffset(norm_sim_time, norm_sim_len, norm_sim_vel, fit_input_data[:, 2], \
+            fit_input_data[:, 3], weights=lag_weight_data, time_offset_max=time_offset_max)
+
+    # Interpolate the simulated length by the observed time
+    len_sim_interpol = scipy.interpolate.interp1d(norm_sim_time + time_offset, norm_sim_len, \
+        bounds_error=False, fill_value='extrapolate')
 
 
     # Go through every height point and compute the residual contribution
     total_mag_residual = 0
     total_lag_residual = 0
-    for entry in fit_input_data:
+    for entry, lag_weight in zip(fit_input_data, lag_weight_data):
 
-        height, mag, lag = entry
+        height, mag, time_rel, length = entry
 
 
-        # Find the corresponding magnitude and length from the simulation to the observation
+        # Find the corresponding magnitude from the simulation to the observation
         mag_sim = mag_sim_interpol(height)
-        lag_sim = len_sim_interpol(height) - begin_length_sim \
-            - traj.orbit.v_init*(time_sim_interpol(height) - begin_time_sim)
-
-
-        # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
 
 
         # # Compute the magnitude residual 
@@ -1429,17 +1603,11 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
                 mag_res = 1e6**2
 
 
-        # Choose the lag weight
-        if height > lag_weight_ht_change:
-            lag_weight = lag_weights[0]
-        else:
-            lag_weight = lag_weights[1]
-
-
-        # Compute the length residual
+        # Compute the length residual, which is equal to the lag residual as the observed and the simulated
+        #   lag are computed with the same velocity
         lag_res = 0
-        if not np.isnan(lag):
-            lag_res = lag_weight*(lag - lag_sim)**2
+        if not np.isnan(length):
+            lag_res = lag_weight*(length - len_sim_interpol(time_rel))**2
 
         if np.isnan(lag_res):
             lag_res = 10000**2
@@ -2111,7 +2279,7 @@ def plotWakeOverview(sr, wake_containers, plot_dir, event_name, site_id=None, wa
 
 
 def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir, 
-                            wake_containers=None, plot_lag=False, camo=False):
+                            wake_containers=None, plot_lag=False, camo=False, time_offset=0.0):
     """ Plot a comparison between observed and simulated data. Plot the light curve and velocity comparison
         and wake if given.
 
@@ -2131,6 +2299,8 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
         wake_containers: [list of WakeContainer objects] List of wake containers.
         plot_lag: [bool] If True, plot the lag comparison instead of length residuals.
         camo: [bool] Should be True if CAMO mirror tracking data is used and False otherwise.
+        time_offset: [float] Time at which the simulation passes the height of the first observed point
+            (s), see fitLagTimeOffset. 0 by default.
     """
 
     # Generate a unique list of station codes using the trajectory and .met file
@@ -2271,8 +2441,9 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
     # Set the simulated length at the beginning of observations to zero
     norm_sim_len = sr.leading_frag_length_arr - sim_len_beg
 
-    # Compute the normalized time
-    norm_sim_time = sr.time_arr - sim_time_beg
+    # Compute the normalized time, with the simulation passing the height of the first point at the time
+    #   offset
+    norm_sim_time = sr.time_arr - sim_time_beg + time_offset
 
     norm_sim_ht = sr.leading_frag_height_arr[norm_sim_len > 0]
     norm_sim_time = norm_sim_time[norm_sim_len > 0]
@@ -2927,6 +3098,9 @@ class MetSimGUI(QMainWindow):
         self.const_prev = None
         self.simulation_results_prev = None
 
+        # Time at which the simulation passes the height of the first observed point (s)
+        self.sim_time_offset = 0.0
+
 
         ### ### ### ###
 
@@ -3148,6 +3322,9 @@ class MetSimGUI(QMainWindow):
         self.checkBoxPlotElectronLineDensity.toggled.connect(self.checkBoxPlotElectronLineDensitySignal)
         self.inputElectronDensityHt.editingFinished.connect(self.electronDensityMeasChanged)
         self.inputElectronDensity.editingFinished.connect(self.electronDensityMeasChanged)
+
+        # Time offset of the simulation from the first observed point
+        self.checkBoxLagTimeOffset.clicked.connect(self.checkBoxLagTimeOffsetSignal)
 
         # Plots
         self.plotAirDensityButton.clicked.connect(self.plotAtmDensity)
@@ -3483,6 +3660,13 @@ class MetSimGUI(QMainWindow):
         ###
 
 
+        ### Comparison with the observed lengths ###
+
+        self.checkBoxLagTimeOffset.setChecked(self.const.fit_lag_time_offset)
+
+        ###
+
+
         ### Radar measurements ###
 
         # Height of electron line density measurement
@@ -3710,6 +3894,19 @@ class MetSimGUI(QMainWindow):
         """ Toggle plotting the electron line density on the magnitude plot. """
 
         self.electron_density_plot_show = self.checkBoxPlotElectronLineDensity.isChecked()
+
+
+
+    def checkBoxLagTimeOffsetSignal(self, event):
+        """ Toggle fitting the time at which the simulation passes the height of the first observed point,
+            and update the lag plot.
+        """
+
+        self.const.fit_lag_time_offset = self.checkBoxLagTimeOffset.isChecked()
+
+        if self.simulation_results is not None:
+            self.updateInterpolations()
+            self.updateLagPlot()
 
 
 
@@ -4424,7 +4621,27 @@ class MetSimGUI(QMainWindow):
 
             self.norm_sim_ht = sr.leading_frag_height_arr[norm_sim_len > 0]
             self.norm_sim_time = norm_sim_time[norm_sim_len > 0]
+            norm_sim_vel = sr.leading_frag_vel_arr[norm_sim_len > 0]
             self.norm_sim_len = norm_sim_len[norm_sim_len > 0]
+
+            # Fit the time at which the simulation passes the height of the first point to the lengths used
+            #   by the automated fit, with the same weights
+            self.sim_time_offset = 0.0
+            if self.const.fit_lag_time_offset:
+                fit_input_data = self.fitInputData()
+                time_offset_max = lagTimeOffsetMax([obs.time_data[obs.ignore_list == 0] \
+                    for obs in self.traj.observations])
+                self.sim_time_offset = fitLagTimeOffset(self.norm_sim_time, self.norm_sim_len, norm_sim_vel, \
+                    fit_input_data[:, 2], fit_input_data[:, 3], weights=lagWeights(fit_input_data[:, 0], \
+                    self.autofit_lag_weights, self.autofit_lag_weight_ht_change), \
+                    time_offset_max=time_offset_max)
+
+            # Shift the simulated time so the simulation passes the height of the first point at the offset
+            self.norm_sim_time = self.norm_sim_time + self.sim_time_offset
+
+            # Keep the offset of the current simulation with the constants, so it is saved with them
+            if not show_previous:
+                self.const.lag_time_offset = self.sim_time_offset
 
             # Interpolate the normalized length by time
             self.sim_norm_len_interp = scipy.interpolate.interp1d(self.norm_sim_time, self.norm_sim_len,
@@ -4798,7 +5015,15 @@ class MetSimGUI(QMainWindow):
         lag_residuals_plot.get_yaxis().set_visible(False)
         lag_residuals_plot.legend(prop={'size': LEGEND_TEXT_SIZE})
         lag_residuals_plot.grid(color="k", linestyle='dotted', alpha=0.3)
-        lag_residuals_plot.set_title('Lag residuals')
+
+        # Show the time at which the simulation passes the height of the first point, and where the
+        #   simulation is at the time of the first point relative to it
+        if (sr is not None) and self.const.fit_lag_time_offset:
+            lag_residuals_plot.set_title("Lag residuals\nt0 = {:+.1f} ms ({:+.0f} m)".format( \
+                1000*self.sim_time_offset, -self.sim_vel_beg*self.sim_time_offset))
+
+        else:
+            lag_residuals_plot.set_title('Lag residuals')
 
 
         self.lagPlot.canvas.figure.tight_layout()
@@ -5510,7 +5735,8 @@ class MetSimGUI(QMainWindow):
             # Plot the comparison between the simulations and observations (excluding the wake)
             plotObsAndSimComparison(self.traj, self.simulation_results, self.ecsv_obs, self.met_obs, 
                                     self.lc_data, self.dir_path, 
-                                    wake_containers=None, plot_lag=True, camo=camo)
+                                    wake_containers=None, plot_lag=True, camo=camo, \
+                                    time_offset=self.sim_time_offset)
 
             # Show a message box
             msg = QMessageBox()
@@ -5818,6 +6044,100 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def fitInputData(self):
+        """ Collect the observed points used by the automated fit and by the fit of the time offset.
+
+        Return:
+            fit_input_data: [ndarray] One row per point with the height (m), the absolute magnitude, the
+                relative time (s) and the length, i.e. the distance from the state vector (m), sorted by
+                height from the top. The magnitude or the length is NaN if it was not measured.
+        """
+
+        # Construct 2D array of height vs. absolute magnitude vs. time vs. length
+        temp_list = []
+        for obs in self.traj.observations:
+
+
+            # Extract data
+            height_data = obs.model_ht[obs.ignore_list == 0]
+            time_data = obs.time_data[obs.ignore_list == 0]
+
+            # Take the lengths, which are not measured in the light curves of the USG data
+            if obs.state_vect_dist is None:
+                len_data = np.zeros_like(height_data) + np.nan
+
+            else:
+                len_data = obs.state_vect_dist[obs.ignore_list == 0]
+
+
+            # If the magnitudes are None, only fit the lag
+            if obs.absolute_magnitudes is None:
+                abs_mag_data = np.zeros_like(height_data) + np.nan
+
+            else:
+                abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]    
+
+
+            temp_arr = np.c_[height_data, abs_mag_data, time_data, len_data]
+
+            # Skip infinite magnitude
+            temp_arr = temp_arr[~np.isinf(abs_mag_data)]
+
+            temp_list.append(temp_arr)
+
+
+        # Add data from the ECSV files (if available)
+        if self.ecsv_obs is not None:
+
+            for site in self.ecsv_obs.sites:
+
+                # Extract data
+                height_data = self.ecsv_obs.height_data[site]
+                abs_mag_data = self.ecsv_obs.abs_mag_data[site]
+                time_data = self.ecsv_obs.time_data[site]
+                len_data = self.ecsv_obs.state_vect_dist_data[site]
+
+
+                temp_arr = np.c_[height_data, abs_mag_data, time_data, len_data]
+
+                # Skip infinite magnitude
+                temp_arr = temp_arr[~np.isinf(abs_mag_data)]
+
+                temp_list.append(temp_arr)
+
+
+        # Add data from the met file (if available)
+        if self.met_obs is not None:
+
+            # Plot additional magnitudes for all sites
+            for site in self.met_obs.sites:
+
+                # Extract data
+                height_data = self.met_obs.height_data[site]
+                abs_mag_data = self.met_obs.abs_mag_data[site]
+                time_data = self.met_obs.time_data[site]
+
+
+                # Add dummy length data
+                len_data = np.zeros_like(height_data) + np.nan
+
+                temp_arr = np.c_[height_data, abs_mag_data, time_data, len_data]
+
+                # Skip infinite magnitude
+                temp_arr = temp_arr[~np.isinf(abs_mag_data)]
+
+                temp_list.append(temp_arr)
+
+
+        # Construct single data matrix and sort by reverse height
+        fit_input_data = np.vstack(temp_list)
+        fit_input_data = fit_input_data[np.argsort(fit_input_data[:, 0])[::-1]]
+
+
+        return fit_input_data
+
+
+
     def autoFit(self):
         """ Run the auto fit procedure. """
 
@@ -5844,81 +6164,8 @@ class MetSimGUI(QMainWindow):
         # Save current simulation results
         simulation_results_prefit = copy.deepcopy(self.simulation_results)
 
-        ### Construct input data matrix ###
-
-        # Construct 2D array of height vs. absolute magnitude vs. lag
-        temp_list = []
-        for obs in self.traj.observations:
-
-
-            # Extract data
-            height_data = obs.model_ht[obs.ignore_list == 0]
-            lag_data = obs.lag[obs.ignore_list == 0]
-
-
-            # If the magnitudes are None, only fit the lag
-            if obs.absolute_magnitudes is None:
-                abs_mag_data = np.zeros_like(height_data) + np.nan
-
-            else:
-                abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]    
-
-
-            temp_arr = np.c_[height_data, abs_mag_data, lag_data]
-
-            # Skip infinite magnitude
-            temp_arr = temp_arr[~np.isinf(abs_mag_data)]
-
-            temp_list.append(temp_arr)
-
-
-        # Add data from the ECSV files (if available)
-        if self.ecsv_obs is not None:
-
-            for site in self.ecsv_obs.sites:
-
-                # Extract data
-                height_data = self.ecsv_obs.height_data[site]
-                abs_mag_data = self.ecsv_obs.abs_mag_data[site]
-                lag_data = self.ecsv_obs.lag_data[site]
-
-
-                temp_arr = np.c_[height_data, abs_mag_data, lag_data]
-
-                # Skip infinite magnitude
-                temp_arr = temp_arr[~np.isinf(abs_mag_data)]
-
-                temp_list.append(temp_arr)
-
-
-        # Add data from the met file (if available)
-        if self.met_obs is not None:
-
-            # Plot additional magnitudes for all sites
-            for site in self.met_obs.sites:
-
-                # Extract data
-                height_data = self.met_obs.height_data[site]
-                abs_mag_data = self.met_obs.abs_mag_data[site]                
-
-
-                # Add dummy lag data
-                lag_data = np.zeros_like(height_data) + np.nan
-
-                temp_arr = np.c_[height_data, abs_mag_data, lag_data]
-
-                # Skip infinite magnitude
-                temp_arr = temp_arr[~np.isinf(abs_mag_data)]
-
-                temp_list.append(temp_arr)
-
-
-        # Construct single data matrix and sort by reverse height
-        fit_input_data = np.vstack(temp_list)
-        fit_input_data = fit_input_data[np.argsort(fit_input_data[:, 0])[::-1]]
-
-
-        ### ###
+        # Construct the input data matrix
+        fit_input_data = self.fitInputData()
 
 
         ### Only fit parameters of fragmentation processes which are used ###
@@ -5994,7 +6241,7 @@ class MetSimGUI(QMainWindow):
         print("Starting residual value: {:.5f}".format(fitResiduals(p0_normed, fit_input_data, \
             param_string, const, self.traj, mini_norm_handle, mag_weight=self.autofit_mag_weight, \
             lag_weights=self.autofit_lag_weights, lag_weight_ht_change=self.autofit_lag_weight_ht_change, \
-            verbose=False)))
+            verbose=False, fit_time_offset=const.fit_lag_time_offset)))
         print()
 
 
@@ -6009,7 +6256,8 @@ class MetSimGUI(QMainWindow):
             # Run the fit
             res = scipy.optimize.minimize(fitResiduals, p0_normed, args=(fit_input_data, param_string, \
                 const, self.traj, mini_norm_handle, self.autofit_mag_weight, self.autofit_lag_weights, \
-                self.autofit_lag_weight_ht_change, True, self), bounds=bounds_normed, tol=0.001)
+                self.autofit_lag_weight_ht_change, True, self, const.fit_lag_time_offset), \
+                bounds=bounds_normed, tol=0.001)
 
             print(res)
 
@@ -6069,7 +6317,8 @@ class MetSimGUI(QMainWindow):
                 n_processes=mp.cpu_count() - 1, fit_input_data=fit_input_data, param_string=param_string, \
                 const_original=const, traj=self.traj, mini_norm_handle=mini_norm_handle, \
                 mag_weight=self.autofit_mag_weight, lag_weights=self.autofit_lag_weights, \
-                lag_weight_ht_change=self.autofit_lag_weight_ht_change, verbose=False)
+                lag_weight_ht_change=self.autofit_lag_weight_ht_change, verbose=False, \
+                fit_time_offset=const.fit_lag_time_offset)
 
             print(cost, pos)
 
