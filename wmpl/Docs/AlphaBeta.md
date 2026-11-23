@@ -40,33 +40,57 @@ and the product of the drag and the shape coefficients used for the masses (3500
 
 ## The fit to the lag
 
-Alpha, beta and the entry velocity V_e are fitted directly to the distances along the track at the observed
-times, i.e. to the lag, of all used points of all stations. The alpha-beta velocity is integrated along the path
-to give the model distance at every observed time, so neither noisy point-to-point velocities nor a smoothing
-model of the lag are needed.
+By default (`--lagfit full`), alpha and beta are fitted to the entry lag against the slant air column traversed
+along the path, with an offset and a noise level for every station (`fitAlphaBetaEntryLag()`). The fit uses the
+lag of all used points of all stations, so neither noisy point-to-point velocities nor a smoothing model of the
+lag are needed.
 
-- The heights are mapped to the exponential atmosphere of the model by the air column above them
-  (`--atmrescale column`), from the NRLMSIS atmosphere at the time of the fireball.
+- The height coordinate of the model is the slant column, the air column traversed along the path, from the
+  NRLMSIS atmosphere at the time of the fireball. In this coordinate the model holds in any atmosphere and on a
+  path whose slope changes, e.g. with the curvature of the Earth.
+- The lag of every point is fitted with the entry lag of the model at its column height (the distance by which
+  the meteor trails a companion which keeps moving at the entry velocity), a straight line in time, which gives
+  the entry velocity V_e, and an offset for every station. The offsets absorb constant clock offsets between the
+  stations, so these do not affect V_e.
+- A point is weighted by 1/(sigma_S/v_i)^2, with sigma_S the noise level of its station, estimated from the
+  scatter of its distances about a quartic in time, and v_i the velocity of the model at the point divided by
+  V_e. The noise and the offset of every station are printed, with the reduced chi-squared of the fit and the
+  integrated autocorrelation time of its residuals.
+
+`--lagfit simple` fits alpha, beta and V_e to the distances along the path at the observed times, with one offset
+and one noise level for all stations (`fitAlphaBetaLag()`). The alpha-beta velocity is integrated along the path
+to give the model distance at every observed time. The heights are mapped to the exponential atmosphere of the
+model by the air column above them (`--atmrescale column`, the default) or by the local density
+(`--atmrescale density`, which biases alpha and beta where the scale height is not 7.16 km). `--atmrescale` and
+`--slopeunc` apply only to the simple fit.
+
+If the full fit cannot be set up, because the path does not descend at its first point or the noise of the
+distances cannot be estimated, the simple fit is used and a note is printed.
+
+In both fits:
+
 - The distance gained from gravity along the path is taken out, as the model has no gravity.
 - V_e is the asymptote of the model above the atmosphere, so it can differ a little from the initial velocity of
   the trajectory solution. Both are printed, and the masses use V_e.
-- The fit starts from a grid of alpha and beta and from the fit to the observed velocities, and keeps the best
-  result, as the cost has local minima.
+- The fit starts from a grid of alpha and beta and from the fit to the observed velocities, as the cost has local
+  minima.
 
 The top row of the summary plot shows the velocities against the observed heights, with the model from above the
 first point down to below the last one, the lag, the lag residuals and the dynamic pressure. The points are
 colored by station with the colors of the trajectory plots, and the legend gives the RMS of the lag residuals of
-every station, so a station which does not agree with the others stands out.
+every station, so a station which does not agree with the others stands out. With the full fit, the residuals are
+those left after the offset of every station, so a constant offset of a station does not show in them.
 
 ---
 
 ## Uncertainties of alpha and beta
 
 Every run prints the 95% profile intervals of alpha and beta. One parameter is fixed on a grid, and the other
-one and V_e are fitted again at every point. The interval is where the rise of the cost, scaled by the variance
-of the lag residuals at the best fit, stays below the chi-squared threshold of one parameter (3.84 for 95%). If
-the interval reaches the bound of the fit on one side, that side is not constrained by the data, and this is
-printed:
+one and V_e (and the offsets of the stations with the full fit) are fitted again at every point. The interval is
+where the rise of the cost, scaled by the variance of the lag residuals at the best fit (the reduced chi-squared
+with the full fit), stays below the chi-squared threshold of one parameter (3.84 for 95%). If the interval
+reaches the bound of the fit on one side, that side is not constrained by the data, and this is printed. For the
+Croatia example below, `--lagfit simple` prints:
 
 ```
 95% profile intervals (lag residuals assumed independent):
@@ -79,7 +103,12 @@ integrated autocorrelation time of the residuals, which is about 1 for independe
 fireballs are usually correlated in time, so the intervals are wider than with `--lagfit simple`, and beta more
 often gets only an upper limit. This is intended. In synthetic tests with noise correlated in time
 (autocorrelation times of 5-40), the 95% intervals of the full fit contained the true values in 84-95% of the
-cases, against 38-75% when the rise is divided by the variance of the residuals alone.
+cases, against 38-75% when the rise is divided by the variance of the residuals alone. The full fit prints its
+intervals under the header
+
+```
+95% profile intervals (threshold scaled by the autocorrelation time of the residuals):
+```
 
 The intervals contain the random noise of the distances, also when it is correlated in time, but not the
 systematic errors of the stations, e.g. of their calibration. The fit takes such an error into alpha and beta,
@@ -98,9 +127,9 @@ masses, and draws the uncertainties in the bottom left of the summary plot:
 
 The 1 sigma and the 95% regions are also drawn on the survival diagram, so the uncertainty of a fireball can be
 compared to the final mass lines directly. In the top row, the gray bands show the range of the models with
-alpha and beta within the 95% region: their velocities, their lag, and their difference from the best fit in
-the panel of the residuals. A band which is narrow compared to the residuals means that the residuals come from
-the data and not from the uncertainty of the model.
+alpha and beta within the 95% region: their velocities, their lag (with `--lagfit simple`), and their difference
+from the best fit in the panel of the residuals. A band which is narrow compared to the residuals means that the
+residuals come from the data and not from the uncertainty of the model.
 
 Alpha and beta are strongly anticorrelated, as a larger mass loss can be traded for a smaller ballistic
 coefficient, so the region is a narrow tilted valley. When both parameters are well constrained, the profile and
@@ -110,8 +139,9 @@ With `--errors`, the final masses, the dynamic mass and the peak dynamic pressur
 intervals: the range of their values over the models within the 95% interval of one parameter (the
 points of the grid and of the profiles below the threshold of 3.84). These hold also when beta only has an upper
 limit, where the Wald errors of the masses are not defined. They include only the uncertainty of the fit, while
-the Wald errors also include `--densunc` and `--slopeunc`. If the models within the interval stop decelerating at
-the end, the dynamic mass has no upper limit.
+the Wald errors also include `--densunc` and, with `--lagfit simple`, `--slopeunc`. The full fit does not use
+`--slopeunc` and prints a note, as alpha*sin(slope) is fixed by the data and the slope does not change its
+masses. If the models within the interval stop decelerating at the end, the dynamic mass has no upper limit.
 
 If the profile finds a better fit than the fit itself, which then ended in a local minimum, the fit is repeated
 from that point and a note is printed.
@@ -167,7 +197,8 @@ underestimated 4-10 times).
 ## Example: the 2020-01-09 fireball over Croatia
 
 The fireball was observed by four Global Meteor Network cameras in Croatia from 84 to 25 km, and slowed from
-14.6 to 2.6 km/s. The fit to the 384 points of the lag gives (masses for 3500 kg/m^3 and Gamma*A = 0.78):
+14.6 to 2.6 km/s. The numbers and the figure of this example were made with `--lagfit simple --errors`. The fit
+to the 384 points of the lag gives (masses for 3500 kg/m^3 and Gamma*A = 0.78):
 
 | Quantity | Value |
 |---|---|
@@ -196,7 +227,7 @@ above 100 g for mu = 0 and around 100 g for mu = 2/3, so a meteorite of about 10
 The mass loss shows in the lag only where the meteoroid decelerates strongly. If that part is short or noisy,
 the lag constrains beta only from above: any beta from zero up to some value fits it equally well, and the best
 fit can end anywhere in that range, also at practically zero. The profile of beta is then flat towards small
-values, and the output says so:
+values, and the output says so (here with `--lagfit simple`):
 
 ```
 95% profile intervals (lag residuals assumed independent):
@@ -217,7 +248,10 @@ pressure are usually still well constrained.
 - The slope of the alpha-beta model is the apparent elevation of the radiant. If it is negative, the direction of
   the trajectory solution is likely reversed (check its timing), and the local slope of the observed path along
   the direction of the motion is used instead. A meteor which climbs along the observed path, e.g. an
-  Earth-grazer, cannot be fitted by the model, and AlphaBeta stops with an error.
+  Earth-grazer, cannot be fitted by the model, and AlphaBeta stops with an error. If the path does not descend
+  at its first point, the full fit cannot be set up and the simple fit is used, with a note. The simple fit does
+  not let the height rise along the path: a part of the path which climbs is fitted as level, at the lowest
+  height of the points before it.
 
 - The intervals of the full fit contain the random noise, also when it is correlated in time, but not the
   systematic errors of the stations. Check the fits without every station and the residuals of every station
