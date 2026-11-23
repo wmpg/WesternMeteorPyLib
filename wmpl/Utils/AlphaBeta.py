@@ -8455,7 +8455,7 @@ if __name__ == "__main__":
         _printMass("Final  ", m_final_mu23, mass_err_mu23, 'm_final', interval_masses[2/3][:, 1])
         if interval_models:
             print("  The profile intervals include only the uncertainty of the fit, the Wald CIs also " \
-                "--densunc and --slopeunc")
+                "--densunc{:s}".format(" and --slopeunc" if cml_args.lagfit == 'simple' else ""))
 
         print("*********************************************")
 

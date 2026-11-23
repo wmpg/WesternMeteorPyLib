@@ -246,6 +246,18 @@ class Constants(object):
         ### ###
 
 
+        ### Comparison with the observed lengths ###
+
+        # Fit the time at which the simulation passes the height of the first observed point, instead of
+        #   fixing it to the time of that point
+        self.fit_lag_time_offset = True
+
+        # Fitted time at which the simulation passes the height of the first observed point (s)
+        self.lag_time_offset = 0.0
+
+        ### ###
+
+
         
         ### OUTPUT PARAMETERS ###
 
