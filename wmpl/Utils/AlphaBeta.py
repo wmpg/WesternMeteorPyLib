@@ -19,7 +19,7 @@ import scipy.interpolate
 
 
 from wmpl.Utils.Math import meanAngle, vectNorm, integratedAutocorrTime
-from wmpl.Utils.Physics import dynamicPressure, dynamicMass, earthRotationVelocity
+from wmpl.Utils.Physics import GAMMA_A, dynamicPressure, dynamicMass, earthRotationVelocity
 from wmpl.Utils.Plotting import stationColors
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.TrajConversions import EARTH, G
@@ -5057,7 +5057,7 @@ def alphaBetaMasses(
         slope,
         mu=0,
         dens=3500,
-        shape_coeff=0.55,
+        shape_coeff=GAMMA_A,
         gamma=1.0,
         vel_init=None,
         vel_end=None,
@@ -5081,7 +5081,7 @@ def alphaBetaMasses(
             the whole surface. Default value is 0.
         dens: [float] Bulk density in kg/m^3.
         shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick. As shape_coeff and Gamma are
-            factored together, we use the empirical value of gamma*A = 0.55 by default.
+            factored together, we use gamma*A = GAMMA_A = 0.78 by default, as for all fireball masses in WMPL.
         gamma: [float] Drag parameter Γ (= C_D /2).
         vel_init: [float] Initial velocity in m/s. If both vel_init and vel_end are given, the final
             mass is computed using the full alpha-beta solution. If either is None, the simple
@@ -5287,7 +5287,7 @@ def fitAlphaBetaMass(
         slope,
         mass,
         mass_constraint="initial",
-        shape_coeff=0.55,
+        shape_coeff=GAMMA_A,
         gamma=1.0,
         density=None,
         v_init=None,
@@ -5323,7 +5323,8 @@ def fitAlphaBetaMass(
     Keyword arguments:
         mass_constraint: [str] Mass constraint to use: "initial" ("i"), "final" ("f"), or "both" ("b").
         shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick. As shape_coeff and Gamma
-            are factored together, we use the empirical value of gamma*A = 0.55 by default.
+            are factored together, we use gamma*A = GAMMA_A = 0.78 by default, as for all fireball masses in
+            WMPL.
         gamma: [float] Drag parameter Γ (= C_D /2).
         density: [float or None] If given, the bulk density (kg/m^3) is held fixed at this
             value instead of being fitted, removing it as a free parameter (e.g. a recovered
@@ -6203,7 +6204,7 @@ def plotAlphaBetaSurvivalDiagram(
         mu_low=0.0,
         mu_high=2/3,
         dens=3500,
-        shape_coeff=0.55,
+        shape_coeff=GAMMA_A,
         gamma=1.0,
         errors=None,
         ci=None,
@@ -6520,7 +6521,7 @@ def _formatMass(mass):
 
 
 def plotAlphaBetaMassDiagram(alpha, beta, slope, profile=None, zone_masses=(0.05, 0.1), mu_zones=0.0, \
-    mu_other=2/3, dens=3500, shape_coeff=0.55, gamma=1.0, axes=None):
+    mu_other=2/3, dens=3500, shape_coeff=GAMMA_A, gamma=1.0, axes=None):
     """ Plot the meteorite survival diagram with beta on a linear axis, where the lines of a constant final
         mass are straight. With the final mass m_final = m0s/(alpha*sin(slope))^3*exp(-beta/(1 - mu)) (the
         approximation of a final velocity much smaller than the initial one, as in
@@ -6544,7 +6545,7 @@ def plotAlphaBetaMassDiagram(alpha, beta, slope, profile=None, zone_masses=(0.05
         mu_other: [float] Shape change coefficient of the dashed lines of the same final masses. 2/3 (fast
             rotation) by default.
         dens: [float] Bulk density (kg/m^3), see alphaBetaMasses(). 3500 by default.
-        shape_coeff: [float] Shape coefficient, see alphaBetaMasses(). 0.55 by default.
+        shape_coeff: [float] Shape coefficient, see alphaBetaMasses(). 0.78 by default.
         gamma: [float] Drag parameter, see alphaBetaMasses(). 1.0 by default.
         axes: [Axes] Axes to draw into. A new figure if None (default).
 
@@ -7654,7 +7655,7 @@ def fitAlphaBetaLightCurve(
 
 
 def alphaBetaLuminousEfficiency(K, alpha, beta, slope, v_init, mu=0.0, dens=3500.0,
-        shape_coeff=0.55, gamma=1.0, v_final=None, verbose=False):
+        shape_coeff=GAMMA_A, gamma=1.0, v_final=None, verbose=False):
     """ Recover the (dimensionless) luminous efficiency tau from a light curve amplitude K (e.g.
         fits[mu]['K'] returned by fitAlphaBetaLightCurve()), by combining it with the initial
         mass M_e that alphaBetaMasses() computes from the SAME alpha/beta/mu under an assumed
@@ -7774,8 +7775,8 @@ if __name__ == "__main__":
         type=float, default=3500)
 
     arg_parser.add_argument('-g', '--ga', metavar='GAMMA_A', \
-        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the alpha-beta masses and the dynamic mass. Default is 0.78.', \
-        type=float, default=0.78)
+        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the alpha-beta masses and the dynamic mass. Default is {:.2f}.'.format(GAMMA_A), \
+        type=float, default=GAMMA_A)
 
     arg_parser.add_argument('-e', '--errors', action="store_true", \
         help="Estimate and report alpha/beta and initial/final mass uncertainties, from the covariance "
