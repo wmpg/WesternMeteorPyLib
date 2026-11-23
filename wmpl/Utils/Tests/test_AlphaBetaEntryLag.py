@@ -15,12 +15,13 @@ import numpy as np
 import scipy.integrate
 import scipy.special
 
-from wmpl.Utils.AlphaBeta import alphaBetaEntryLag, alphaBetaVelocityNormed, AlphaBetaSlantColumn, \
+from wmpl.Utils.AlphaBeta import alphaBetaEntryLag, AlphaBetaSlantColumn, \
     slantColumnFromPoints, airSpeedAlongPath, gravityLengthAlongLine, stationLengthNoise, \
     fitAlphaBetaEntryLag, profileAlphaBetaEntryLag, profileRegionAlphaBetaLag, profileIntervalText, \
     HT_NORM_CONST, RHO_ATM_0, RESCALE_COLUMN_TOP
 from wmpl.Utils.Physics import EARTH_ROTATION_RATE
 from wmpl.Utils.TrajConversions import EARTH, G
+from wmpl.Utils.Tests.AlphaBetaSynthetic import integrateAlphaBetaPath
 
 
 # True parameters of the synthetic meteor
@@ -66,20 +67,10 @@ def _syntheticMeteor():
 
     ht_begin = 100000.0
 
-    def _velocity(t, length):
-        """ Velocity along the path at the given distance (m/s). """
-
-        ht_normed = (ht_begin - length*np.sin(SLOPE))/HT_NORM_CONST
-
-        return V_ENTRY_TRUE*alphaBetaVelocityNormed(ht_normed, ALPHA_TRUE, BETA_TRUE)
-
-
     # Integrate the distance at regular times
     time_grid = np.arange(0.0, 8.0, 0.01)
-    sol = scipy.integrate.solve_ivp(_velocity, (time_grid[0], time_grid[-1]), [0.0], t_eval=time_grid, \
-        rtol=1e-11, atol=1e-7)
-    length_true = sol.y[0]
-    ht_true = ht_begin - length_true*np.sin(SLOPE)
+    length_true, ht_true = integrateAlphaBetaPath(time_grid, V_ENTRY_TRUE, ALPHA_TRUE, BETA_TRUE, SLOPE, \
+        ht_begin, rtol=1e-11, atol=1e-7)
 
     # Keep the points between 90 and 30 km
     keep = (ht_true < 90000.0) & (ht_true > 30000.0)
@@ -388,6 +379,62 @@ def testProfileAlphaBetaEntryLag():
 
 
 
+
+def testStationLengthNoiseNeedsEnoughPoints():
+    """ Check that the noise of the distances is not estimated from stations with too few points, which gave
+        a NaN noise that stopped the fit, and that a station with a zero estimate takes the noise of the
+        others instead of an infinite weight.
+    """
+
+    # Two stations with 3 points each cannot give the noise
+    time_data = np.array([0.0, 0.1, 0.2, 0.05, 0.15, 0.25])
+    length_data = 20000.0*time_data
+    station_data = np.array(['A', 'A', 'A', 'B', 'B', 'B'])
+
+    raised = False
+    try:
+        stationLengthNoise(time_data, length_data, station_data)
+    except ValueError:
+        raised = True
+
+    assert raised
+
+    # A station with quantized distances takes the noise of the noisy station
+    rng = np.random.RandomState(2)
+    time_a = np.arange(0.0, 2.0, 0.04)
+    time_b = time_a + 0.02
+    length_a = 20000.0*time_a + rng.normal(0, 20.0, len(time_a))
+    length_b = 20000.0*time_b
+    sigma = stationLengthNoise(np.concatenate([time_a, time_b]), np.concatenate([length_a, length_b]), \
+        np.array(['A']*len(time_a) + ['B']*len(time_b)))
+
+    assert np.all(sigma > 0)
+    assert np.allclose(sigma[len(time_a):], sigma[0])
+
+
+
+def testStationLengthNoiseOfShortStationsIgnoresTheDeceleration():
+    """ Check that the pooled noise of stations with few points is estimated about a quadratic in time, so
+        the deceleration of the meteor is not taken as noise.
+    """
+
+    rng = np.random.RandomState(3)
+    time_data, length_data, station_data = [], [], []
+    for k in range(6):
+
+        # A decelerating meteor seen by stations of 8 points with 10 m noise
+        time_station = 0.5*k + np.arange(8)*0.1
+        time_data.append(time_station)
+        length_data.append(20000.0*time_station - 3000.0*time_station**2 + rng.normal(0, 10.0, 8))
+        station_data.append(np.full(8, str(k)))
+
+    sigma = stationLengthNoise(np.concatenate(time_data), np.concatenate(length_data), \
+        np.concatenate(station_data))
+
+    assert 5.0 < sigma[0] < 20.0
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
@@ -395,7 +442,8 @@ if __name__ == "__main__":
         testSlantColumnOfAStraightPathInTheExponentialAtmosphere, testSlantColumnFollowsTheAirAlongThePath, \
         testAirSpeedAlongPath, testGravityLengthAlongLine, testStationLengthNoise, testFitAlphaBetaEntryLag, \
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
-        testProfileAlphaBetaEntryLag]
+        testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
+        testStationLengthNoiseOfShortStationsIgnoresTheDeceleration]
 
     for test in test_list:
         test()

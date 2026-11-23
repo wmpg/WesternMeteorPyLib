@@ -37,6 +37,7 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
 from wmpl.Utils.AlphaBeta import profileAlphaBetaLag, profileIntervalText, plotAlphaBetaLagProfile, \
     AlphaBetaPath, profileRegionAlphaBetaLag, plotAlphaBetaMassDiagram, plotAlphaBetaMasses, _formatMass, \
     _formatMu
+from wmpl.Utils.Tests.AlphaBetaSynthetic import integrateAlphaBetaPath
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -622,22 +623,10 @@ def _syntheticLag(v_init_true, noise_std, seed, alpha_true=ALPHA_TRUE, beta_true
             - ht_data: [ndarray] Heights at the true distances (m).
     """
 
-    # Straight path from 90 km at the slope of the synthetic trajectory
-    ht_begin = 90000.0
-
-    def _velocity(t, length):
-        """ Velocity along the path at the given distance (m/s). """
-
-        ht_normed = (ht_begin - length*np.sin(SLOPE))/HT_NORM_CONST
-
-        return v_init_true*alphaBetaVelocityNormed(ht_normed, alpha_true, beta_true)
-
-    # Integrate the distance at regular times, down to 40 km
+    # Integrate the distance at regular times along a straight path from 90 km, down to 40 km
     time_data = np.arange(0.0, 6.0, 0.02)
-    sol = scipy.integrate.solve_ivp(_velocity, (time_data[0], time_data[-1]), [0.0], t_eval=time_data, \
-        rtol=1e-10, atol=1e-6)
-    length_true = sol.y[0]
-    ht_data = ht_begin - length_true*np.sin(SLOPE)
+    length_true, ht_data = integrateAlphaBetaPath(time_data, v_init_true, alpha_true, beta_true, SLOPE, \
+        90000.0)
 
     # Keep the points above 40 km and add the noise
     keep = ht_data > 40000.0

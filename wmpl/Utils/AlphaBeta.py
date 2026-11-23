@@ -245,9 +245,9 @@ def airDensityProfile(lat, lon, ht_data, jd, ht_min=None):
         point up to RESCALE_COLUMN_TOP, for exponentialAtmosphereHeights() and AlphaBetaSlantColumn.
 
     Arguments:
-        lat: [ndarray] Latitude of the points in radians.
-        lon: [ndarray] Longitude of the points in radians.
-        ht_data: [ndarray] Height of the points in meters.
+        lat: [ndarray] Latitude of the points (rad).
+        lon: [ndarray] Longitude of the points (rad).
+        ht_data: [ndarray] Height of the points (m).
         jd: [float] Julian date.
 
     Keyword arguments:
@@ -2311,9 +2311,7 @@ def profileRegionAlphaBetaLag(profile, ci=95.0, n_params=2):
 # Power-law nodes of the normalized velocity from 0.02, of which those below 0.9 are nodes of the entry lag
 ENTRY_LAG_POWER_NODES = 0.02 + (1.0 - 1e-13 - 0.02)*np.linspace(0.0, 1.0, 1200)**1.5
 
-# Nodes of the normalized velocity at which the entry lag is integrated. Near entry the lag falls
-#   exponentially with the column height and the first observed points lie at 1 - v = 1e-4 to 1e-2, so
-#   there the nodes are spaced uniformly in ln(1 - v), down to 1 - v = 1e-13
+# Nodes of the normalized velocity at which the entry lag is integrated, uniform in ln(1 - v) near entry
 ENTRY_LAG_V_NODES = np.unique(np.concatenate([ENTRY_LAG_POWER_NODES[ENTRY_LAG_POWER_NODES < 0.9], \
     1.0 - np.logspace(-1, -13, 1000)]))
 
@@ -2322,6 +2320,9 @@ SLANT_COLUMN_TOP = 120e3
 
 # Smallest number of points of a station for its own estimate of the noise and of the autocorrelation time
 ENTRY_LAG_MIN_STATION_POINTS = 10
+
+# Smallest noise of the distances of a station (m)
+ENTRY_LAG_MIN_NOISE = 0.01
 
 
 
@@ -2584,8 +2585,9 @@ def stationLengthNoise(time_data, length_data, station_data, n_min=ENTRY_LAG_MIN
 
         where MAD is the median absolute deviation. The estimate also contains the effect of the timing
         errors on the distances. A station with fewer than n_min points takes the median of the estimates of
-        the other stations, and if no station has n_min points, the second differences of all stations are
-        pooled.
+        the other stations, and if no station has n_min points, the second differences of the residuals of
+        all stations about a quadratic in time are pooled. A station with an estimate below
+        ENTRY_LAG_MIN_NOISE, e.g. from quantized distances, also takes the median of the others.
 
     Arguments:
         time_data: [ndarray] Time of every point (s).
@@ -2597,7 +2599,8 @@ def stationLengthNoise(time_data, length_data, station_data, n_min=ENTRY_LAG_MIN
             ENTRY_LAG_MIN_STATION_POINTS by default.
 
     Return:
-        [ndarray] Noise of the distance of every point (m).
+        [ndarray] Noise of the distance of every point (m). A ValueError is raised if no station has the
+            points to estimate the noise from.
     """
 
     time_data = np.asarray(time_data, dtype=np.float64)
@@ -2610,6 +2613,7 @@ def stationLengthNoise(time_data, length_data, station_data, n_min=ENTRY_LAG_MIN
         return 1.4826*np.median(np.abs(second_diffs - np.median(second_diffs)))/np.sqrt(6)
 
 
+    # Estimate the noise of every station, or keep its second differences to pool them
     station_sigma = {}
     pooled_diffs = []
     for station_id in np.unique(station_data):
@@ -2626,11 +2630,18 @@ def stationLengthNoise(time_data, length_data, station_data, n_min=ENTRY_LAG_MIN
             residuals = station_lengths - np.polyval(np.polyfit(time_rel, station_lengths, 4), time_rel)
             station_sigma[station_id] = _robustSigma(residuals[2:] - 2*residuals[1:-1] + residuals[:-2])
 
-        elif len(indices) >= 3:
+        elif len(indices) >= 4:
 
-            # Keep the second differences of the distances to pool them
-            second_diffs = station_lengths[2:] - 2*station_lengths[1:-1] + station_lengths[:-2]
+            # Keep the second differences of the residuals about a quadratic in time to pool them, so the
+            #   deceleration is not taken as noise
+            time_rel = time_data[indices] - np.mean(time_data[indices])
+            residuals = station_lengths - np.polyval(np.polyfit(time_rel, station_lengths, 2), time_rel)
+            second_diffs = residuals[2:] - 2*residuals[1:-1] + residuals[:-2]
             pooled_diffs.append(second_diffs - np.median(second_diffs))
+
+    # Use only the estimates above the smallest noise, as a zero noise would give an infinite weight
+    station_sigma = {station_id: sigma for station_id, sigma in station_sigma.items() \
+        if sigma > ENTRY_LAG_MIN_NOISE}
 
     # The noise of the stations with too few points
     if station_sigma:
@@ -2639,6 +2650,9 @@ def stationLengthNoise(time_data, length_data, station_data, n_min=ENTRY_LAG_MIN
         sigma_fill = _robustSigma(np.concatenate(pooled_diffs))
     else:
         sigma_fill = np.nan
+
+    if not (sigma_fill > ENTRY_LAG_MIN_NOISE):
+        raise ValueError("The noise of the distances cannot be estimated, as no station has enough points")
 
     return np.array([station_sigma.get(station_id, sigma_fill) for station_id in station_data])
 
@@ -7965,31 +7979,41 @@ if __name__ == "__main__":
 
         if cml_args.lagfit == 'full':
 
-            # Normalized heights of the slant air column along the path flown through the air, with the
-            #   density profile of the event down to the lowest height of the plots, and alpha in the unit of
-            #   the slope of the masses
-            profile_hts, profile_dens = airDensityProfile(lat_data, lon_data, ht_data, traj.jdt_ref, \
-                ht_min=min(10000.0, np.min(ht_data) - RESCALE_STEP_FINE))
-            air_speed = airSpeedAlongPath(traj.state_vect_mini, traj.radiant_eci_mini)
-            slant_column, length_air = slantColumnFromPoints(time_data, length_data_line, ht_data, \
-                profile_hts, profile_dens, np.sin(slope), air_speed=air_speed)
-            ht_normed_data = slant_column.htNormed(length_air)
-            ht_data_rescaled = HT_NORM_CONST*ht_normed_data
+            try:
 
-            # Lags of all stations relative to the initial velocity of the solution, without the distance
-            #   added by gravity along the line, which is computed at every point
-            if getattr(traj, 'gravity_correction', False):
-                gravity_length = gravityLengthAlongLine(time_data, length_data_line, traj.state_vect_mini, \
-                    traj.radiant_eci_mini, gravity_factor=getattr(traj, 'gravity_factor', 1.0))
-            else:
-                gravity_length = np.zeros_like(time_data)
+                # Normalized heights of the slant air column along the path flown through the air, with the
+                #   density profile of the event down to the lowest height of the plots, and alpha in the unit
+                #   of the slope of the masses
+                profile_hts, profile_dens = airDensityProfile(lat_data, lon_data, ht_data, traj.jdt_ref, \
+                    ht_min=min(10000.0, np.min(ht_data) - RESCALE_STEP_FINE))
+                air_speed = airSpeedAlongPath(traj.state_vect_mini, traj.radiant_eci_mini)
+                slant_column, length_air = slantColumnFromPoints(time_data, length_data_line, ht_data, \
+                    profile_hts, profile_dens, np.sin(slope), air_speed=air_speed)
+                ht_normed_data = slant_column.htNormed(length_air)
+                ht_data_rescaled = HT_NORM_CONST*ht_normed_data
 
-            entry_lag_data = length_data_line - traj.v_init*time_data - gravity_length
+                # Lags of all stations relative to the initial velocity of the solution, without the distance
+                #   added by gravity along the line, which is computed at every point
+                if getattr(traj, 'gravity_correction', False):
+                    gravity_length = gravityLengthAlongLine(time_data, length_data_line, \
+                        traj.state_vect_mini, traj.radiant_eci_mini, \
+                        gravity_factor=getattr(traj, 'gravity_factor', 1.0))
+                else:
+                    gravity_length = np.zeros_like(time_data)
 
-            # Noise of the distances of every station
-            sigma_length = stationLengthNoise(time_data, length_data_line, station_data)
+                entry_lag_data = length_data_line - traj.v_init*time_data - gravity_length
 
-        else:
+                # Noise of the distances of every station
+                sigma_length = stationLengthNoise(time_data, length_data_line, station_data)
+
+            except ValueError as e:
+
+                # Fall back to the simple fit if the full fit cannot be set up, e.g. if the path does not
+                #   descend at its first point
+                print("NOTE: {:s}, so the simple fit of the lag is used (--lagfit simple)".format(str(e)))
+                cml_args.lagfit = 'simple'
+
+        if cml_args.lagfit == 'simple':
 
             # Rescale the heights to the exponential atmosphere used by alpha-beta
             ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, \
@@ -8105,6 +8129,12 @@ if __name__ == "__main__":
         #   would double-count it.
         sigma_slope = np.radians(cml_args.slopeunc) \
             if (cml_args.errors and (cml_args.slopeunc is not None)) else None
+
+        # The full fit fixes alpha*sin(slope) by the data, so the slope only sets the unit of alpha and its
+        #   uncertainty does not change the masses
+        if (cml_args.lagfit == 'full') and (sigma_slope is not None):
+            print("NOTE: --slopeunc is not used with the full fit, as the slope does not change its masses")
+            sigma_slope = None
         sigma_dens = cml_args.densunc if (cml_args.errors and (cml_args.densunc is not None)) else None
 
         # Compute initial and final mass (with error propagation if --errors was set)
