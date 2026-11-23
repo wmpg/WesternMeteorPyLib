@@ -2324,6 +2324,10 @@ ENTRY_LAG_MIN_STATION_POINTS = 10
 # Smallest noise of the distances of a station (m)
 ENTRY_LAG_MIN_NOISE = 0.01
 
+# Number of steps of a side of a profile of the fit of the entry lag after which the step is doubled at every
+#   step, up to the largest step
+ENTRY_LAG_PROFILE_SLOW_STEPS = 20
+
 
 
 class AlphaBetaSlantColumn(object):
@@ -3074,7 +3078,8 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         with the chi-squared threshold of one parameter. The intervals contain the random noise of the
         distances, also correlated in time, but not the systematic errors of the stations, see
         stationJackknifeAlphaBetaEntryLag(). Each profile starts with steps of half the Wald
-        error and the crossings of the threshold are refined with Brent's method. A side which reaches a
+        error, which double after ENTRY_LAG_PROFILE_SLOW_STEPS steps where the cost rises slower than
+        expected, and the crossings of the threshold are refined with Brent's method. A side which reaches a
         bound of the fit gives only a limit.
 
     Arguments:
@@ -3192,10 +3197,15 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
 
             side_values = [x_best[idx]]
             side_points = [points[0]]
+            step = steps[idx]
             while ((side_points[-1][0] - cost_best)/scale < walk_threshold) \
                 and (direction*(bound - side_values[-1]) > 0):
 
-                log_value = float(np.clip(side_values[-1] + direction*steps[idx], lower_bounds[idx], \
+                # Grow the step if the cost rises much slower than expected from the Wald error
+                if len(side_values) > ENTRY_LAG_PROFILE_SLOW_STEPS:
+                    step = min(2*step, 0.5)
+
+                log_value = float(np.clip(side_values[-1] + direction*step, lower_bounds[idx], \
                     upper_bounds[idx]))
                 side_values.append(log_value)
                 side_points.append(_profilePoint(idx, log_value))
@@ -3891,6 +3901,36 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init, v_eps=1e-10, fast=False):
         return vel_data[0]
 
     return vel_data
+
+
+
+def alphaBetaVelocityInterp(ht_data, alpha, beta, v_init):
+    """ Compute the velocity given the height and alpha, beta parameters, as alphaBetaVelocity(), but by
+        interpolating the height of the model at the nodes ENTRY_LAG_V_NODES of the normalized velocity
+        (extended down to 1e-10), which is much faster for many heights. The normalized velocity is accurate
+        to about 1e-5.
+
+    Arguments:
+        ht_data: [ndarray] Height data (m).
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+        v_init: [float] Initial velocity (m/s).
+
+    Return:
+        [ndarray] Velocity at the given heights (m/s).
+    """
+
+    # Nodes of the normalized velocity, extended down to almost zero
+    v_nodes = np.concatenate([np.geomspace(1e-10, ENTRY_LAG_V_NODES[0], 200)[:-1], ENTRY_LAG_V_NODES])
+
+    # Height of the model at the nodes, sorted by the height
+    ht_nodes = alphaBetaHeightNormed(v_nodes, alpha, beta)
+    finite = np.isfinite(ht_nodes)
+    order = np.argsort(ht_nodes[finite])
+
+    return v_init*np.interp(np.asarray(ht_data)/HT_NORM_CONST, ht_nodes[finite][order], \
+        v_nodes[finite][order])
+
 
 
 # ============================================================================================
@@ -8532,7 +8572,7 @@ if __name__ == "__main__":
             #   with the band of the models within the region
             if have_band:
                 ht_arr_rescaled_mean = rescaleRealHeights(ht_arr)
-                vel_band = np.array([alphaBetaVelocity(ht_arr_rescaled_mean, a, b, v0) \
+                vel_band = np.array([alphaBetaVelocityInterp(ht_arr_rescaled_mean, a, b, v0) \
                     for a, b, v0 in region_models])
                 ax_vel.fill_betweenx(ht_arr/1000, np.min(vel_band, axis=0)/1000, \
                     np.max(vel_band, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
@@ -8757,7 +8797,7 @@ if __name__ == "__main__":
             atm_dens = getAtmDensity_vect(lat_mean, lon_mean, ht_arr, traj.jdt_ref)
             ht_arr_rescaled = rescaleRealHeights(ht_arr)
             for a, b, v0 in interval_models:
-                dyn_pressure_model = atm_dens*alphaBetaVelocity(ht_arr_rescaled, a, b, v0)**2
+                dyn_pressure_model = atm_dens*alphaBetaVelocityInterp(ht_arr_rescaled, a, b, v0)**2
                 interval_pressures.append(dyn_pressure_model)
                 interval_peaks.append([np.max(dyn_pressure_model)/1e6, \
                     ht_arr[np.argmax(dyn_pressure_model)]/1000])
