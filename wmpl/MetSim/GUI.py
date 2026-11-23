@@ -2873,7 +2873,7 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
             # Get a list of sites from both the .met and ECSV files
             site_list = []
             if met_obs is not None:
-                site_list += list(map(str, met_obs.sites))
+                site_list += list(map(str, met_sites))
             if ecsv_obs is not None:
                 site_list += list(map(str, ecsv_obs.sites))
 

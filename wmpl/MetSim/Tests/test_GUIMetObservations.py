@@ -1,5 +1,6 @@
 """ Tests that the comparison plot of the GUI does not change the observations from a .met file, which the
-automated fit and the time offset of the simulation use afterwards.
+automated fit and the time offset of the simulation use afterwards, and that its legend names the renamed
+CAMO sites.
 
 Run with pytest:
     python -m pytest wmpl/MetSim/Tests/test_GUIMetObservations.py -v
@@ -10,10 +11,12 @@ from __future__ import print_function, division, absolute_import
 import copy
 import tempfile
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from wmpl.MetSim.GUI import MetSimGUI, plotObsAndSimComparison
 from wmpl.MetSim.Tests.DisplacedFirstPoint import simulate, observe
@@ -22,7 +25,8 @@ from wmpl.MetSim.Tests.DisplacedFirstPoint import simulate, observe
 
 def testComparisonPlotKeepsTheMetSites():
     """ Check that CAMO observations from the .met sites 2 and 4, which the plot shows as 1 and 2, keep their
-        sites and data after the plot, so the input data of the fit can still be made from them.
+        sites and data after the plot, so the input data of the fit can still be made from them, and that the
+        legend names both wide-field sites.
     """
 
     sr = simulate()
@@ -43,8 +47,23 @@ def testComparisonPlotKeepsTheMetSites():
 
     met_obs_before = copy.deepcopy(met_obs)
 
-    with tempfile.TemporaryDirectory() as plot_dir:
+    # Keep the figure, which the plot closes after saving it
+    figures = []
+    close = plt.close
+    def keepFigure(fig=None):
+        """ Keep the figure and close it. """
+
+        figures.append(fig)
+        close(fig)
+
+    with tempfile.TemporaryDirectory() as plot_dir, mock.patch.object(plt, 'close', keepFigure):
         plotObsAndSimComparison(traj, sr, None, met_obs, None, plot_dir, plot_lag=True, camo=True)
+
+    # The legend has both wide-field sites under their CAMO names
+    labels = [text.get_text() for ax in figures[0].axes if ax.get_legend() is not None \
+        for text in ax.get_legend().get_texts()]
+    assert "WF - Tavistock" in labels
+    assert "WF - Elginfield" in labels
 
     assert met_obs.sites == met_obs_before.sites
     for key in ['height_data', 'abs_mag_data', 'time_data']:
