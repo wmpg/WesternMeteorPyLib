@@ -3151,8 +3151,12 @@ def stationJackknifeAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_da
         if len(np.unique(station_data[keep])) < 2:
             continue
 
-        fit_result = fitAlphaBetaEntryLag(time_data[keep], lag_data[keep], ht_normed[keep], \
-            station_data[keep], length_scale, sigma_length[keep], v_ref, x0_alpha_beta=[[alpha, beta]])
+        # Skip the station if no model reaches the points of the others
+        try:
+            fit_result = fitAlphaBetaEntryLag(time_data[keep], lag_data[keep], ht_normed[keep], \
+                station_data[keep], length_scale, sigma_length[keep], v_ref, x0_alpha_beta=[[alpha, beta]])
+        except ValueError:
+            continue
 
         jackknife.append((station_id, fit_result[1], fit_result[2]))
 
@@ -8260,41 +8264,52 @@ if __name__ == "__main__":
 
         if cml_args.lagfit == 'full':
 
-            def _fitEntryLag(x0_alpha_beta):
-                """ Fit the entry lag and compute the profile intervals of alpha and beta. """
+            try:
 
-                fit_result = fitAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, station_data, \
-                    slant_column.lengthScale, sigma_length, traj.v_init, x0_alpha_beta=x0_alpha_beta, \
-                    estimate_errors=cml_args.errors)
+                def _fitEntryLag(x0_alpha_beta):
+                    """ Fit the entry lag and compute the profile intervals of alpha and beta. """
 
-                # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the
-                #   uncertainties
-                profile = profileAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, station_data, \
-                    slant_column.lengthScale, fit_result[1], fit_result[2], fit_result[4], \
-                    n_grid=(40 if cml_args.errors else 0))
+                    fit_result = fitAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, \
+                        station_data, slant_column.lengthScale, sigma_length, traj.v_init, \
+                        x0_alpha_beta=x0_alpha_beta, estimate_errors=cml_args.errors)
 
-                return fit_result, profile
+                    # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the
+                    #   uncertainties
+                    profile = profileAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, \
+                        station_data, slant_column.lengthScale, fit_result[1], fit_result[2], fit_result[4], \
+                        n_grid=(40 if cml_args.errors else 0))
+
+                    return fit_result, profile
 
 
-            fit_result, lag_profile = _fitEntryLag(x0_alpha_beta)
-
-            # If the profile found a better fit, the fit ended in a local minimum, so fit again from that
-            #   point
-            for _ in range(2):
-
-                if lag_profile['min_delta_chi2'] > -0.1:
-                    break
-
-                print("NOTE: The profile found a better fit (chi-squared lower by {:.1f}), fitting again " \
-                    "from it".format(-lag_profile['min_delta_chi2']))
-
-                x0_alpha_beta.append(lag_profile['min_model'][:2])
                 fit_result, lag_profile = _fitEntryLag(x0_alpha_beta)
 
-            v_init, alpha, beta, lag_residuals, entry_fit = fit_result[:5]
-            fit_errors = fit_result[5] if cml_args.errors else None
+                # If the profile found a better fit, the fit ended in a local minimum, so fit again from that
+                #   point
+                for _ in range(2):
 
-        else:
+                    if lag_profile['min_delta_chi2'] > -0.1:
+                        break
+
+                    print("NOTE: The profile found a better fit (chi-squared lower by {:.1f}), fitting " \
+                        "again from it".format(-lag_profile['min_delta_chi2']))
+
+                    x0_alpha_beta.append(lag_profile['min_model'][:2])
+                    fit_result, lag_profile = _fitEntryLag(x0_alpha_beta)
+
+                v_init, alpha, beta, lag_residuals, entry_fit = fit_result[:5]
+                fit_errors = fit_result[5] if cml_args.errors else None
+
+            except ValueError as e:
+
+                # Fall back to the simple fit if no model of the full fit reaches the points
+                print("NOTE: {:s}, so the simple fit of the lag is used (--lagfit simple)".format(str(e)))
+                cml_args.lagfit = 'simple'
+                ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, \
+                    traj.jdt_ref, method=cml_args.atmrescale)
+                x0_alpha_beta = [fitAlphaBeta(vel_data_nograv, ht_data_rescaled, v_init=traj.v_init)[1:]]
+
+        if cml_args.lagfit == 'simple':
 
             if cml_args.errors:
                 v_init, alpha, beta, lag_residuals, fit_errors = fitAlphaBetaLag(time_data, length_data, \
