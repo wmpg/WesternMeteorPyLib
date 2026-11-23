@@ -2732,7 +2732,10 @@ def _entryLagModel(alpha, beta, ht_normed, length_scale):
 
     Return:
         (lag_model, v_model, outside):
-            - lag_model: [ndarray] Model lag at every point (m).
+            - lag_model: [ndarray] Model lag at every point (m). Below the lowest height reached by the
+                model, the entry lag continues with its slope at the lowest node, H*(1/v - 1) per unit of the
+                column height, so the residuals of the points which the model does not reach grow
+                continuously with their distance beyond its end.
             - v_model: [ndarray] Normalized velocity of the model at every point, for the weights of the fit.
                 It is 1 at the points below the lowest height reached by the model, where the model has no
                 velocity.
@@ -2744,10 +2747,23 @@ def _entryLagModel(alpha, beta, ht_normed, length_scale):
     below = ht_normed < ht_nodes[0]
     outside = np.mean(below | (ht_normed > ht_nodes[-1]))
 
+    lag_model = -np.interp(ht_normed, ht_nodes, lag_nodes)
+
+    # Continue the entry lag below the lowest height of the model with its slope there
+    if np.any(below):
+
+        if callable(length_scale):
+            length_scale_lowest = length_scale(ht_nodes[:1])[0]
+        else:
+            length_scale_lowest = length_scale
+
+        lag_slope = length_scale_lowest*(1.0/v_nodes[0] - 1.0)
+        lag_model[below] = -(lag_nodes[0] + lag_slope*(ht_nodes[0] - ht_normed[below]))
+
     # The points which the model never reaches are weighted as at entry, so their weights do not vanish
     v_model = np.where(below, 1.0, np.interp(ht_normed, ht_nodes, v_nodes))
 
-    return -np.interp(ht_normed, ht_nodes, lag_nodes), v_model, outside
+    return lag_model, v_model, outside
 
 
 

@@ -454,12 +454,15 @@ def testFitAlphaBetaEntryLagReachesAllPoints():
     assert outside <= ENTRY_LAG_MAX_OUTSIDE
     assert np.min(v_model) > 0.5
 
-    # Points below the lowest height of the model have the velocity 1 for their weights
-    ht_lowest = np.min(alphaBetaEntryLag(alpha, beta, slant_column.lengthScale)[0])
-    _, v_below, outside_below = _entryLagModel(alpha, beta, ht_lowest - np.array([0.1, 0.5]), \
+    # Points below the lowest height of the model have the velocity 1 for their weights, and the model lag
+    #   continues from its lowest node, falling further behind with the distance beyond it
+    ht_nodes, lag_nodes, _ = alphaBetaEntryLag(alpha, beta, slant_column.lengthScale)
+    lag_below, v_below, outside_below = _entryLagModel(alpha, beta, ht_nodes[0] - np.array([0.0, 0.1, 0.5]), \
         slant_column.lengthScale)
-    assert np.all(v_below == 1.0)
-    assert outside_below == 1.0
+    assert np.isclose(lag_below[0], -lag_nodes[0])
+    assert lag_below[2] < lag_below[1] < lag_below[0]
+    assert np.all(v_below[1:] == 1.0)
+    assert np.isclose(outside_below, 2/3)
 
 
 
