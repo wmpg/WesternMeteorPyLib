@@ -71,7 +71,7 @@ import scipy.optimize
 from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MIN_VEL, applyGravityDrop, gravityDropOrigin, \
     gravityDropVectors, solutionDropTimeOrigin
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
-from wmpl.Utils.Math import findClosestPoints, vectMag
+from wmpl.Utils.Math import findClosestPoints, integratedAutocorrTime, vectMag
 from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationSpeed, earthRotationVelocity
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, ecef2LatLonAlt
@@ -133,7 +133,7 @@ def usedPoints(traj):
 
 class DragFit(object):
     def __init__(self, traj, n_knots=None, h_top=200000.0, penalty=1.0, drag_above=False, max_bending=5.0, \
-        max_vel_growth=0.1, knot_hts=None, knot_spread=0.0):
+        max_vel_growth=0.1, knot_hts=None, knot_spread=0.0, v_rotation=None):
         """ Fit the drag model to the lengths and times of the used points of the given trajectory.
 
         Arguments:
@@ -161,6 +161,9 @@ class DragFit(object):
             knot_spread: [float] Height below each of knot_hts over which the ballistic coefficient grows
                 without penalty (m). 0 by default, for a jump, which takes one step of the grid of the
                 observed part (a thousandth of its length).
+            v_rotation: [float] Speed of the Earth's rotation along the trajectory (m/s), for a trajectory
+                without an orbit yet. None by default, in which case it is taken from the orbit (see
+                wmpl.Utils.Physics.earthRotationSpeed).
         """
 
         self.traj = traj
@@ -174,7 +177,7 @@ class DragFit(object):
 
         # Speed of the Earth's rotation along the trajectory, by which the inertial speed exceeds the speed
         #   relative to the air
-        self.v_rotation = earthRotationSpeed(traj)
+        self.v_rotation = earthRotationSpeed(traj) if v_rotation is None else v_rotation
 
         # Get the data
         self.time_data, self.len_data = usedPoints(traj)
@@ -1137,6 +1140,99 @@ class DragFit(object):
         """
 
         return self.velocityAtLength(self.lengthAtHeight(ht_arr))
+
+
+
+    def residualAutocorrTime(self, min_points=10):
+        """ Compute the integrated autocorrelation time of the residuals of the fit, from the residuals of
+            every station with at least min_points used points in time order, averaged over the stations
+            with the numbers of their points as weights. It is about 1 for independent errors and at least 1,
+            and 1 if no station has min_points points. If the residuals are correlated in time, the variances
+            of the fitted parameters are larger than those of params_cov by about this factor.
+
+        Keyword arguments:
+            min_points: [int] Smallest number of used points of a station which is used. 10 by default.
+
+        Return:
+            [float] Integrated autocorrelation time.
+        """
+
+        tau_sum = 0.0
+        n_sum = 0
+        for obs in self.traj.observations:
+
+            used = np.array(obs.ignore_list) == 0
+            if obs.ignore_station or (np.count_nonzero(used) < min_points):
+                continue
+
+            # Residuals of the station in time order, inside the modelled part
+            time_used = np.array(obs.time_data)[used]
+            time_order = np.argsort(time_used)
+            residuals = (self.lengthAtTime(time_used) - np.array(obs.state_vect_dist)[used])[time_order]
+            residuals = residuals[np.isfinite(residuals)]
+
+            tau = integratedAutocorrTime(residuals)
+            if not np.isfinite(tau):
+                continue
+
+            tau_sum += len(residuals)*tau
+            n_sum += len(residuals)
+
+        if n_sum == 0:
+            return 1.0
+
+        return max(tau_sum/n_sum, 1.0)
+
+
+
+    def dragFreeVelocity(self):
+        """ Compute the velocity which the meteor would have at the first observed point without the drag,
+            and its uncertainty from the fit. It is the velocity at the top of the modelled part brought down
+            to the first point by gravity alone, so it is only defined if the drag above the first point is
+            kept (drag_above). The model above the first point depends only on the velocity and the
+            ballistic coefficient there, so the uncertainty follows from their covariance, scaled for the
+            residuals correlated in time (see residualAutocorrTime).
+
+        Return:
+            (v_free, v_free_std):
+                - v_free: [float] Velocity at the first point without the drag (m/s). None if the drag is not
+                    kept above the first point, or if the model stops below the top because the velocity
+                    grows too much there (see max_vel_growth).
+                - v_free_std: [float] Standard deviation of v_free (m/s), infinite if it depends on a
+                    direction not constrained by the data.
+        """
+
+        if (not self.drag_above) or (not np.isfinite(self.vel_grid[0])):
+            return None, None
+
+        # Work done by gravity from the top to the first point, per unit mass
+        g_above = self.g_grid[:self.i_first + 1]
+        grav_work = np.sum(0.5*(g_above[1:] + g_above[:-1])*np.diff(self.len_grid[:self.i_first + 1]))
+
+        v_free = np.sqrt(self.vel_grid[0]**2 + 2*grav_work)
+
+        # Differentiate v_free by the velocity and ln K at the first point
+        params = np.copy(self.params)
+        grad = np.zeros(len(params))
+        for i, step in ((1, 1.0), (2, 1e-3)):
+
+            v_steps = []
+            for sign in (1, -1):
+                self.params = np.copy(params)
+                self.params[i] += sign*step
+                self._solveFull()
+                v_steps.append(np.sqrt(self.vel_grid[0]**2 + 2*grav_work))
+
+            grad[i] = (v_steps[0] - v_steps[1])/(2*step)
+
+        # Restore the solution with the fitted parameters
+        self.params = params
+        self._solveFull()
+
+        if not np.all(np.isfinite(grad)):
+            return v_free, np.inf
+
+        return v_free, self._paramStd(grad[None, :])[0]*np.sqrt(self.residualAutocorrTime())
 
 
 

@@ -171,6 +171,66 @@ def testNoDragAboveTheBeginning():
 
 
 
+def testDragFreeVelocity():
+    """ Check the velocity at the first point without the drag against the truth. The fireball moves at
+        18 km/s at the top of the simulation, so without the drag it would reach the first point about 19 m/s
+        faster, by gravity alone. The velocity is only defined with the drag kept above the first point.
+    """
+
+    meteor, traj, drag_fit = _solvedMeteor()
+
+    assert drag_fit.dragFreeVelocity() == (None, None)
+
+    drag_fit_kept = DragFit(traj, drag_above=True)
+    len_arr = drag_fit_kept.lengthAtTime(np.linspace(0.0, 3.3, 10))
+    v_free, v_free_std = drag_fit_kept.dragFreeVelocity()
+
+    # The truth at the first point
+    ht_first = max(np.max(obs.model_ht[obs.ignore_list == 0]) for obs in traj.observations)
+    v_free_true = meteor.dragFreeVelocity(ht_first)
+
+    assert abs(v_free - v_free_true) < min(2*v_free_std, 30.0)
+
+    # The fitted model is restored after the derivatives
+    assert np.allclose(drag_fit_kept.lengthAtTime(np.linspace(0.0, 3.3, 10)), len_arr, rtol=0.0, atol=1e-6)
+
+
+
+def testResidualAutocorrTime():
+    """ Check that the autocorrelation time of the residuals is about 1 for independent residuals, as those of
+        the fit to the synthetic measurements, and large for residuals correlated in time, as an
+        autoregressive series with the coefficient 0.8, whose autocorrelation time is 9.
+    """
+
+    _, _, drag_fit = _solvedMeteor()
+
+    assert 1.0 <= drag_fit.residualAutocorrTime() < 1.5
+
+    rng = np.random.RandomState(0)
+
+    tau_list = []
+    for phi in (0.0, 0.8):
+
+        # Replace the observed lengths by the model plus the residuals in time order
+        drag_fit_res = copy.copy(drag_fit)
+        drag_fit_res.traj = copy.deepcopy(drag_fit.traj)
+        for obs in drag_fit_res.traj.observations:
+
+            residuals = rng.normal(0, 20.0, len(obs.time_data))
+            for i in range(1, len(residuals)):
+                residuals[i] += phi*residuals[i - 1]
+
+            time_order = np.argsort(obs.time_data)
+            obs.state_vect_dist = drag_fit.lengthAtTime(obs.time_data)
+            obs.state_vect_dist[time_order] += residuals
+
+        tau_list.append(drag_fit_res.residualAutocorrTime())
+
+    assert 1.0 <= tau_list[0] < 1.5
+    assert tau_list[1] > 4.0
+
+
+
 def testTimeAndHeightFunctions():
     """ Check the velocities and heights at given times and heights against the functions of the length. """
 
@@ -415,9 +475,10 @@ if __name__ == "__main__":
     # Run all tests
     test_list = [testFitsTheData, testVelocityInTheObservedPart, testExtrapolationAboveTheBeginning, \
         testExtrapolationBelowTheEnd, testBallisticCoefficient, testNoDragAboveTheBeginning, \
-        testTimeAndHeightFunctions, testSummaryTable, testDynamicMass, testVelocityIsPhysical, \
-        testHeightsAreConsistent, testGravityDropMatchesTheSolution, testRadiantBentByGravity, \
-        testUnconstrainedCoefficient, testPlotWithALargeUncertainty, testNoUsedPoints, testPlotDragFit]
+        testDragFreeVelocity, testResidualAutocorrTime, testTimeAndHeightFunctions, testSummaryTable, \
+        testDynamicMass, testVelocityIsPhysical, testHeightsAreConsistent, \
+        testGravityDropMatchesTheSolution, testRadiantBentByGravity, testUnconstrainedCoefficient, \
+        testPlotWithALargeUncertainty, testNoUsedPoints, testPlotDragFit]
 
     for test in test_list:
         test()

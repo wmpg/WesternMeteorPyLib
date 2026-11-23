@@ -55,6 +55,7 @@ class DragMeteor(object):
                 the ground, as on a real meteor. False by default, in which case it acts on the inertial speed.
         """
 
+        self.v_init = v_init
         self.t_vis_beg = t_vis_beg
         self.t_vis_end = t_vis_end
 
@@ -161,6 +162,21 @@ class DragMeteor(object):
         """
 
         return np.interp(np.atleast_1d(time_arr) + self.t_vis_beg, self.time, self.vel)
+
+
+
+    def dragFreeVelocity(self, ht):
+        """ Compute the velocity which the meteor would have at the given height without the drag, from the
+            velocity at the top and the constant gravity of the simulation.
+
+        Arguments:
+            ht: [float] Height (m).
+
+        Return:
+            [float] Velocity without the drag (m/s).
+        """
+
+        return np.sqrt(self.v_init**2 + 2*9.81*(TOP_HT - ht))
 
 
 
