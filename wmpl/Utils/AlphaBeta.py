@@ -8240,6 +8240,13 @@ if __name__ == "__main__":
                 lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, \
                     beta, v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
 
+        # Residuals of the distances at the times of the points, from the lag residuals of the full fit, which
+        #   grow as one over the velocity of the model, or directly from the simple fit
+        if cml_args.lagfit == 'full':
+            length_residuals = lag_residuals*entry_fit['v_model']
+        else:
+            length_residuals = lag_residuals
+
         # Models within the 95% interval of one parameter (with the best fit), whose range of the masses, the
         #   dynamic mass and the peak dynamic pressure gives their 95% intervals (only with --errors, which
         #   computes the 2D grid)
@@ -8337,7 +8344,7 @@ if __name__ == "__main__":
         else:
             print("  Heights mapped to the model's exponential atmosphere by local density (--atmrescale " \
                 "density, which biases alpha and beta where the scale height is not 7.16 km)")
-        print("  Lag residuals RMS = {:.1f} m".format(np.sqrt(np.mean(lag_residuals**2))))
+        print("  Distance residuals RMS = {:.1f} m".format(np.sqrt(np.mean(length_residuals**2))))
 
         # Print the entry velocity, the model speed at the first point and the trajectory's velocity
         print("Velocities:")
@@ -8559,8 +8566,8 @@ if __name__ == "__main__":
             #   own points
             common_lag_line = False
 
-            # Band of the lag of the models within the region at the observed points, relative to the best
-            #   model, with dv and the offsets of the stations fitted for every model
+            # Band of the distance residuals of the models within the region at the observed points, relative
+            #   to the best model, with dv and the offsets of the stations fitted for every model
             if have_band:
                 region_models = list(zip(region_alpha, region_beta, region_v_init))
                 station_index_fit = np.unique(station_data, return_inverse=True)[1]
@@ -8571,7 +8578,8 @@ if __name__ == "__main__":
                     lag_model_region, _, _ = _entryLagModel(a, b, ht_normed_data, slant_column.lengthScale)
                     _, _, residuals_region = _entryLagLinear(entry_lag_data - lag_model_region, time_data, \
                         entry_fit['weights'], station_index_fit, n_stations_fit)
-                    length_band.append(entry_lag_data - residuals_region - lag_fit_best)
+                    length_band.append((entry_lag_data - residuals_region - lag_fit_best) \
+                        *entry_fit['v_model'])
 
                 # Sort the band by the height of the points
                 ht_order = np.argsort(ht_data)
@@ -8615,13 +8623,13 @@ if __name__ == "__main__":
 
         def _plotFit(ax_vel, ax_lag, ax_lag_res, print_results=True):
             """ Plot the alpha-beta fit: the velocities against the observed heights, with the model from
-                above the first point down to below the last one, the lag and the lag residuals, with the
+                above the first point down to below the last one, the lag and the distance residuals, with the
                 points of every station in its color.
 
             Arguments:
                 ax_vel: [Axes] Velocities against the observed heights.
                 ax_lag: [Axes] Lag.
-                ax_lag_res: [Axes] Lag residuals.
+                ax_lag_res: [Axes] Distance residuals.
 
             Keyword arguments:
                 print_results: [bool] Print the dynamic mass of the lag smoothing. True by default.
@@ -8746,14 +8754,14 @@ if __name__ == "__main__":
             ax_lag.legend(loc='lower left', fontsize=8)
 
 
-            ### Plot the residuals of the alpha-beta fit to the lag of every station ###
+            ### Plot the distance residuals of the alpha-beta fit of every station ###
 
             for station_id in station_ids:
                 station_mask = station_data == station_id
-                ax_lag_res.scatter(lag_residuals[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
+                ax_lag_res.scatter(length_residuals[station_mask]/1000, ht_data[station_mask]/1000, s=5, \
                     color=station_colors[station_id], alpha=station_alpha, \
                     label="{:s}, RMS {:.0f} m".format(station_id, \
-                    np.sqrt(np.mean(lag_residuals[station_mask]**2))))
+                    np.sqrt(np.mean(length_residuals[station_mask]**2))))
 
             ax_lag_res.axvline(0, color='0.5', lw=0.8, zorder=0)
             if have_band:
@@ -8766,7 +8774,7 @@ if __name__ == "__main__":
                 ax_lag_res.scatter(lag_data/1000 - expLinearLag(time_data, *lag_fit_params)/1000, \
                     ht_data/1000, s=5, color='r', label="Lag-based velocity smoothing")
 
-            ax_lag_res.set_xlabel("Lag residuals (km)")
+            ax_lag_res.set_xlabel("Distance residuals (km)")
             ax_lag_res.legend(loc='upper left', fontsize=7 if len(station_ids) <= 8 else 5, \
                 ncol=(1 if len(station_ids) <= 8 else 2))
 
