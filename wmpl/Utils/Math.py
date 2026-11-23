@@ -924,6 +924,38 @@ def medianStddev(stddev_list, n_samples=100000):
 
 
 
+def weightedMedian(x, weights):
+    """ Compute the weighted median, the value which minimizes the weighted sum of absolute deviations.
+
+    Arguments:
+        x: [ndarray] Values.
+        weights: [ndarray] Non-negative weights of the values.
+
+    Return:
+        [float] Weighted median. If the weights of the values on both sides of a value are equal, it is the
+            mean of the two middle values.
+    """
+
+    x = np.asarray(x, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+
+    # Sort the values and accumulate their weights
+    sort_ind = np.argsort(x)
+    x = x[sort_ind]
+    weights_cum = np.cumsum(weights[sort_ind])
+    weight_half = 0.5*weights_cum[-1]
+
+    # Take the first value at which the accumulated weight reaches one half
+    i = np.searchsorted(weights_cum, weight_half)
+
+    # Take the mean with the next value if the weights are split exactly at this value
+    if np.isclose(weights_cum[i], weight_half) and (i + 1 < len(x)):
+        return 0.5*(x[i] + x[i + 1])
+
+    return x[i]
+
+
+
 def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method="avg"):
     """Finds if points have similar sample values on the independent axis x (if they are within delta) and
         averages all y values.
