@@ -38,6 +38,7 @@ Run any of them with `--help` for the full list of options. The ones that matter
 | `-d`, `--disablemc` | Only compute the geometric solution, skipping the Monte Carlo step. Fast, but gives no uncertainties. |
 | `-t`, `--maxtoffset` | Maximum timing offset allowed between stations, in seconds, 5 s by default. With 3 or more stations, a station whose clock needs a larger offset is ignored. |
 | `-v`, `--vinitht` | Estimate the initial velocity as the average above this height, in km. |
+| `--vinitdrag` | Take the initial velocity from the drag fit (see [DragFit](DragFit.md)) instead of the sliding fit, for meteors which already decelerate in the first part of the trajectory. |
 | `--disableairrot` | Keep the air at rest when computing the drop across the path (see [The drop](#the-drop)). |
 | `-l`, `--plotallspatial` | Save the full set of diagnostic plots. |
 

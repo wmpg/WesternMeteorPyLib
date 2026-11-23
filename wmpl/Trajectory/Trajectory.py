@@ -2400,7 +2400,8 @@ def calcCovMatrices(mc_traj_list):
 def sampleMCVelocities(traj_list):
     """ Sample the initial velocity of every trajectory within the standard deviation of its direct fit,
         and recompute the orbit. Used for the Monte Carlo uncertainties when the timing is not estimated, as
-        the noise is only added to the angles and it does not change the velocity.
+        the noise is only added to the angles and it does not change the velocity, and when the initial
+        velocity is taken from the drag fit, whose uncertainty the spread of the runs does not include.
 
     Arguments:
         traj_list: [list] A list of Trajectory objects.
@@ -2692,8 +2693,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Assign geometric uncertainty flag, if it was changed
     traj_best.geometric_uncert = geometric_uncert
 
-    # Without timing estimation the noise does not change the velocity, so sample it within its uncertainty
-    if not traj.estimate_timing_vel:
+    # Sample the velocity within its uncertainty, which the spread of the runs does not include
+    if (not traj.estimate_timing_vel) or (getattr(traj, 'v_init_drag_delta', None) is not None):
         mc_results = sampleMCVelocities(mc_results)
 
     print('Computing uncertainties...')
@@ -3051,6 +3052,9 @@ GRAVITY_DROP_MIN_VEL = 1000.0
 # Smallest number of used points to which the drag equation is fitted for the speeds of the gravity drop
 GRAVITY_VEL_MIN_POINTS = 12
 
+# Lowest height of the shortest window of the sliding fit without a note on the deceleration (m)
+V_INIT_DRAG_NOTE_HT = 75000.0
+
 
 
 def gravityDropVelocity(time_table, vel, t0, t_drop):
@@ -3256,7 +3260,7 @@ class Trajectory(object):
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
-        save_kml=False, kml_measured=False, air_rotation=True):
+        save_kml=False, kml_measured=False, air_rotation=True, v_init_drag=False):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -3330,6 +3334,13 @@ class Trajectory(object):
             air_rotation: [bool] Take the drag against the air, which rotates with the Earth, into account in
                 the gravity drop across the path (see gravityDropTable). True by default. If False, the air
                 is at rest in ECI.
+            v_init_drag: [bool] Take the initial velocity from the drag fit, without the deceleration by the
+                air above and in the first part of the trajectory (see calcDragFitVelocity), instead of the
+                sliding fit. Use it when the meteor already decelerates in the first part of the trajectory.
+                If the drag fit fails, the sliding fit is kept. v_init_ht takes precedence. The Monte Carlo
+                runs do not fit the drag again: each adds the correction of the main solution to its own
+                sliding fit, and its velocity is sampled within the standard deviation of the drag fit (see
+                sampleMCVelocities). False by default.
 
         """
 
@@ -3359,6 +3370,13 @@ class Trajectory(object):
         # (Optional) Height in kilometers above which points will be taken for estimating the initial
         #   velocity (linear fit)
         self.v_init_ht = v_init_ht
+
+        # Take the initial velocity from the drag fit instead of the sliding fit
+        self.v_init_drag = v_init_drag
+
+        # Correction by the drag fit and its uncertainty, kept for the Monte Carlo runs (m/s)
+        self.v_init_drag_delta = None
+        self.v_init_drag_stddev = None
 
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.fixed_time_offsets = {}
@@ -4118,6 +4136,55 @@ class Trajectory(object):
             sigma=all_inv_weights)
 
         return line_params[0], line_params[1], np.sqrt(line_cov[0, 0])
+
+
+
+    def calcDragFitVelocity(self):
+        """ Compute the initial velocity from the drag fit to the lengths and times of the used points, with
+            the ballistic coefficient above the first point kept at its first value (see
+            wmpl.Utils.DragFit). The initial velocity is the velocity at the first point without the drag,
+            so the deceleration above and in the first part of the trajectory does not lower it, as it lowers
+            the slope of a straight line. The air rotates with the Earth, as with the orbit (see
+            wmpl.Utils.Physics.earthRotationSpeed), unless air_rotation is False or the stations are fixed.
+            The speed of the rotation is computed from the radiant and the state vector as the orbit computes
+            it, as the first pass has no orbit yet. The Monte Carlo runs do not call this, they add the
+            correction of the main solution to their own sliding fit.
+
+        Return:
+            (v_init, intercept, v_init_stddev): [tuple] Initial velocity (m/s), intercept of the line with
+                this velocity through the first point of the fit (m), and the standard deviation of the
+                velocity (m/s). None for all if there are too few used points or the drag cannot be fitted.
+        """
+
+        # Imported here, as the drag fit imports this module
+        from wmpl.Utils.DragFit import DragFit
+
+        # The drag fit needs a few points for each of its parameters
+        n_used = sum(np.count_nonzero(obs.ignore_list == 0) for obs in self.observations \
+            if not obs.ignore_station)
+        if n_used < GRAVITY_VEL_MIN_POINTS:
+            return None, None, None
+
+        # Speed of the Earth's rotation along the trajectory, as calcOrbit computes it
+        v_rotation = 0.0
+        if getattr(self, 'air_rotation', True) and getattr(self, 'los_mini_status', True):
+            v_rotation = self.v_init - vectMag(self.v_init*np.array(self.radiant_eci_mini) \
+                + earthRotationVelocity(np.array(self.state_vect_mini)))
+
+        try:
+            drag_fit = DragFit(self, drag_above=True, v_rotation=v_rotation)
+            v_free, v_free_std = drag_fit.dragFreeVelocity()
+
+        except (ValueError, np.linalg.LinAlgError):
+            return None, None, None
+
+        if (v_free is None) or (not np.isfinite(v_free_std)):
+            return None, None, None
+
+        # Pass the line through the first point of the fit
+        intercept = drag_fit.len_first - v_free*drag_fit.params[0]
+
+        return v_free, intercept, v_free_std
 
 
 
@@ -7836,6 +7903,69 @@ class Trajectory(object):
 
                 # Refit jacchia lag fit
                 self.jacchia_fit = self.fitJacchiaLag(self.observations)
+
+
+        # Otherwise take the initial velocity from the drag fit, without the deceleration by the air
+        #   (optional)
+        elif getattr(self, 'v_init_drag', False):
+
+            velocity_fit_drag = None
+
+            # In a Monte Carlo run, add the correction of the main solution to its line
+            if _mc_run:
+                if getattr(self, 'v_init_drag_delta', None) is not None:
+                    velocity_fit_drag = [self.v_init + self.v_init_drag_delta, self.velocity_fit[1]]
+
+            # Otherwise fit the drag and keep its correction for the Monte Carlo runs
+            else:
+                v_drag, intercept_drag, v_drag_stddev = self.calcDragFitVelocity()
+
+                self.v_init_drag_delta = None
+                if v_drag is not None:
+                    self.v_init_drag_delta = v_drag - self.v_init
+                    self.v_init_drag_stddev = v_drag_stddev
+                    velocity_fit_drag = [v_drag, intercept_drag]
+
+                elif self.verbose:
+                    print("The drag fit failed, the initial velocity is kept from the sliding fit")
+
+            # Assign the velocity of the drag fit as the initial velocity
+            if velocity_fit_drag is not None:
+
+                self.v_init = velocity_fit_drag[0]
+                self.v_init_stddev = self.v_init_drag_stddev
+                self.velocity_fit = velocity_fit_drag
+
+                # Recalculate the lag
+                self.calcLag(self.observations, velocity_fit=self.velocity_fit)
+
+                # Refit jacchia lag fit
+                self.jacchia_fit = self.fitJacchiaLag(self.observations)
+
+                if self.verbose:
+                    print("Initial velocity from the drag fit: {:.2f} +/- {:.2f} m/s".format(self.v_init, \
+                        self.v_init_stddev))
+
+
+        # Otherwise note if the shortest window of the sliding fit reaches where fireballs decelerate
+        elif self.verbose and (not _mc_run) and (not _rerun_bad_picks):
+
+            # Times and heights of the used points
+            obs_used = [obs for obs in self.observations if not obs.ignore_station]
+            time_used = np.concatenate([obs.time_data[obs.ignore_list == 0] for obs in obs_used])
+            ht_used = np.concatenate([obs.model_ht[obs.ignore_list == 0] for obs in obs_used])
+
+            if len(ht_used):
+
+                # Lowest height of the first v_init_part of the points in time order
+                n_part = max(int(self.v_init_part*len(ht_used)), 1)
+                ht_window = np.min(ht_used[np.argsort(time_used)][:n_part])
+
+                if ht_window < V_INIT_DRAG_NOTE_HT:
+                    print("NOTE: The shortest window of the sliding fit reaches down to {:.1f} km, where " \
+                        "the meteor may already decelerate, so the initial velocity can be too low. The " \
+                        "drag fit gives it without the deceleration (v_init_drag, --vinitdrag).".format( \
+                        ht_window/1000))
 
 
         # Calculate ECI positions of the CPA on the radiant line, RA and Dec of the points on the radiant

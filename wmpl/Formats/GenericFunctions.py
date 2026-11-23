@@ -422,6 +422,12 @@ def addSolverOptions(arg_parser, skip_velpart=False):
         help='The initial veloicty will be estimated as the average velocity above this height (in km). If not given, the initial velocity will be estimated using the sliding fit which can be controlled with the --velpart option.', \
         type=float)
 
+    arg_parser.add_argument('--vinitdrag', \
+        help='Take the initial velocity from the drag fit (DragFit with the drag above the first point) ' \
+            'instead of the sliding fit. Use it when the meteor already decelerates in the first part of ' \
+            'the trajectory.', \
+        action="store_true")
+
     if not skip_velpart:
         arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
             help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25 percent), but for noisier data this might be bumped up to 0.5.', \
