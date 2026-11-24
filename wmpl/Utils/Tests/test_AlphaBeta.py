@@ -855,10 +855,15 @@ def testProfileAlphaBetaLagUpperLimit():
     assert ax.get_xlim()[0] < alpha*np.sin(SLOPE) < ax.get_xlim()[1]
     plt.close(fig)
 
-    # The masses are drawn also without an interval, with no upper limit and when not defined
+    # The masses are drawn also without an interval, with an open side and when not defined
     fig, ax = plotAlphaBetaMasses([("A", 0.07, 0.03, 0.08, 'k'), ("B", 0.2, 0.1, np.inf, 'k'), \
-        ("C", 0.5, None, None, 'k'), ("D", np.nan, None, None, 'k')])
-    assert len(ax.get_yticklabels()) == 4
+        ("C", 0.5, None, None, 'k'), ("D", np.nan, None, None, 'k'), ("E", 0.3, 0.0, 0.9, 'k'), \
+        ("F", 0.3, 0.0, np.inf, 'k')])
+    assert len(ax.get_yticklabels()) == 6
+    texts = [text.get_text() for text in ax.texts]
+    assert any(text.endswith("(95%: > 100 g)") for text in texts)
+    assert any(text.endswith("(95%: < 900 g)") for text in texts)
+    assert any(text.endswith("(95%: not constrained)") for text in texts)
     plt.close(fig)
 
 

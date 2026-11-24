@@ -6985,8 +6985,8 @@ def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), title=No
 
     Arguments:
         masses: [list] One (label, mass, lower, upper, color) tuple per mass (kg). The lower and the upper
-            limit can be None if not known, and the upper one inf if there is no upper limit. A mass which is
-            not defined is NaN.
+            limit can be None if not known, the lower one 0 if there is no lower limit, and the upper one inf
+            if there is no upper limit. A mass which is not defined is NaN.
 
     Keyword arguments:
         axes: [Axes] Axes to draw into. A new figure if None (default).
@@ -7027,8 +7027,19 @@ def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), title=No
                 ax.annotate("", xy=(x_hi, y), xytext=(x_hi/3, y), \
                     arrowprops=dict(arrowstyle='->', color=color, lw=1.5))
 
-            interval_text = "{:s} - {:s}".format(_formatMass(lower), _formatMass(upper)) \
-                if np.isfinite(upper) else "> {:s}".format(_formatMass(lower))
+            # Mark the interval without a lower limit with an arrow to the left edge of the axis
+            if lower <= 0:
+                ax.annotate("", xy=(x_lo, y), xytext=(3*x_lo, y), \
+                    arrowprops=dict(arrowstyle='->', color=color, lw=1.5))
+
+            if (lower <= 0) and (not np.isfinite(upper)):
+                interval_text = "not constrained"
+            elif lower <= 0:
+                interval_text = "< {:s}".format(_formatMass(upper))
+            elif not np.isfinite(upper):
+                interval_text = "> {:s}".format(_formatMass(lower))
+            else:
+                interval_text = "{:s} - {:s}".format(_formatMass(lower), _formatMass(upper))
         else:
             interval_text = ""
 
@@ -9193,17 +9204,18 @@ if __name__ == "__main__":
                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='0.5'))
 
         # Plot the masses with their 95% intervals
-        def _massEntry(label, mass, interval_values, color, no_upper_limit=False):
+        def _massEntry(label, mass, interval_values, color, no_lower_limit=False, no_upper_limit=False):
             """ One mass of the plot of the masses, with its interval from the values of the models within
-                the 95% interval.
+                the 95% interval, and the sides which are not constrained by the data open.
             """
 
             if not len(interval_values):
                 return (label, mass, None, None, color)
 
+            lower = 0.0 if no_lower_limit else np.min(interval_values)
             upper = np.inf if no_upper_limit else np.max(interval_values)
 
-            return (label, mass, np.min(interval_values), upper, color)
+            return (label, mass, lower, upper, color)
 
         # Without a significant deceleration the final masses are ~0
         if little_deceleration:
@@ -9215,7 +9227,7 @@ if __name__ == "__main__":
         else:
             masses = [
                 _massEntry("Initial", m_init_mu0, interval_masses[0][:, 0], 'tab:purple', \
-                    no_upper_limit=init_no_upper),
+                    no_lower_limit=init_no_lower, no_upper_limit=init_no_upper),
                 _massEntry("Final, $\\mu$ = 0", m_final_mu0, interval_masses[0][:, 1], 'tab:blue'),
                 _massEntry("Final, $\\mu$ = 2/3", m_final_mu23, interval_masses[2/3][:, 1], 'tab:orange'),
                 _massEntry("Dynamic, end", dyn_mass, interval_dyn_masses, 'k', no_upper_limit=no_decel),
