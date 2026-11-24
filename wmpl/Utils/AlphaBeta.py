@@ -256,7 +256,7 @@ def airDensityProfile(lat, lon, ht_data, jd, ht_min=None, atm_table=None):
             step of the profile below the lowest point by default.
         atm_table: [tuple] Density table (table_ht, table_log10_rho) of an atmosphere profile
             (loadAtmosphereProfile()), used up to its top, with the MSIS model scaled to join it above
-            (atmDensProfileMSIS()). None by default, which uses the MSIS model.
+            (atmDensProfileMSIS()). If None, the MSIS model is used. None by default.
 
     Return:
         (profile_hts, profile_dens):
@@ -8187,14 +8187,14 @@ if __name__ == "__main__":
         length_data = np.array(length_data)
         station_data = np.array(station_data)
 
-        # The profile must reach down to the lowest point, as above its top the scaled MSIS density is used
+        # Check that the profile reaches down to the lowest point
         if (atm_table is not None) and (np.min(ht_data) < atm_table[0][0]):
             print()
             print("ERROR: The atmosphere profile starts at {:.2f} km, above the lowest point at {:.2f} km" \
                 .format(atm_table[0][0]/1000, np.min(ht_data)/1000))
             sys.exit(1)
 
-        # Tell where the profile is joined to MSIS, with the factor at the mean location of the points
+        # Print the height and the factor of the join to MSIS
         if atm_table is not None:
             join_factor = atmProfileJoinFactor(np.arctan2(np.mean(np.sin(lat_data)), \
                 np.mean(np.cos(lat_data))), meanAngle(lon_data), traj.jdt_ref, *atm_table)

@@ -659,7 +659,7 @@ def atmDensProfileMSIS(ht, lat, lon, jd, table_ht, table_log10_rho):
     # The density of the profile up to its top
     atm_dens = np.atleast_1d(atmDensTable(ht_arr, table_ht, table_log10_rho)).astype(np.float64)
 
-    # Above the top, the MSIS density scaled to the density of the profile at the top
+    # Above the top, scale the MSIS density to join the profile
     above = ht_arr > table_ht[-1]
     if np.any(above):
         join_factor = atmProfileJoinFactor(lat_arr[above], lon_arr[above], jd, table_ht, table_log10_rho)
