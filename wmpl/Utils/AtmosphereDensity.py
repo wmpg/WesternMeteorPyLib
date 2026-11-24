@@ -611,6 +611,64 @@ def loadAtmosphereProfile(file_path):
 
 
 
+def atmProfileJoinFactor(lat, lon, jd, table_ht, table_log10_rho):
+    """ Compute the factor by which the MSIS density is scaled above the top of an atmosphere profile, the
+        ratio of the density of the profile to that of MSIS at the top (see atmDensProfileMSIS()).
+
+    Arguments:
+        lat: [float or ndarray] Latitude (rad).
+        lon: [float or ndarray] Longitude (rad).
+        jd: [float] Julian date.
+        table_ht: [list] Table heights (m), ascending.
+        table_log10_rho: [list] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        [float or ndarray] Density of the profile over the MSIS density at the top of the profile.
+    """
+
+    ht_top = np.full(np.shape(lat), table_ht[-1]) if np.ndim(lat) else table_ht[-1]
+
+    return 10**table_log10_rho[-1]/getAtmDensity(lat, lon, ht_top, jd)
+
+
+
+def atmDensProfileMSIS(ht, lat, lon, jd, table_ht, table_log10_rho):
+    """ Compute the atmosphere density from a tabulated profile (loadAtmosphereProfile()) up to the top of the
+        profile, and above it from the MSIS model scaled by the ratio of the two densities at the top, so that
+        the density does not jump there. A profile which ends below the heights of a meteor, e.g. at 46 km for
+        ERA5 on pressure levels, is thus continued upwards. A jump of the density at the top would change the
+        scale height of the air there, which the fits of the deceleration would take into beta and the entry
+        velocity. Below the bottom of the profile, its lowest segment is extrapolated (atmDensTable()).
+
+    Arguments:
+        ht: [float or ndarray] Height above sea level (m).
+        lat: [float or ndarray] Latitude (rad), of all the heights or of every height.
+        lon: [float or ndarray] Longitude (rad), of all the heights or of every height.
+        jd: [float] Julian date.
+        table_ht: [list] Table heights (m), ascending.
+        table_log10_rho: [list] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        atm_dens: [float or ndarray] Atmosphere neutral mass density in kg/m^3.
+    """
+
+    ht_arr = np.atleast_1d(np.asarray(ht, dtype=np.float64))
+    lat_arr = np.broadcast_to(np.asarray(lat, dtype=np.float64), ht_arr.shape)
+    lon_arr = np.broadcast_to(np.asarray(lon, dtype=np.float64), ht_arr.shape)
+
+    # The density of the profile up to its top
+    atm_dens = np.atleast_1d(atmDensTable(ht_arr, table_ht, table_log10_rho)).astype(np.float64)
+
+    # Above the top, the MSIS density scaled to the density of the profile at the top
+    above = ht_arr > table_ht[-1]
+    if np.any(above):
+        join_factor = atmProfileJoinFactor(lat_arr[above], lon_arr[above], jd, table_ht, table_log10_rho)
+        atm_dens[above] = join_factor*getAtmDensity(lat_arr[above], lon_arr[above], ht_arr[above], jd)
+
+    return atm_dens if np.ndim(ht) else float(atm_dens[0])
+
+
+
 def atmTableSegments(table_ht, table_log10_rho):
     """ Compute the exponential segments of a density table.
 

@@ -57,6 +57,17 @@ lag are needed.
   V_e. The noise and the offset of every station are printed, with the reduced chi-squared of the fit and the
   integrated autocorrelation time of its residuals.
 
+The air density comes from the NRLMSIS model at the time and place of the fireball (`--atm` selects its
+version). `--atm_profile` takes it instead from an atmosphere profile, e.g. the ERA5 profile of the event that
+OpenDarkflight downloads, in the CSV format that DynamicMassFit also reads (its height and density columns). The
+profile gives the density up to its top, about 46 km for ERA5 on pressure levels, and above it the MSIS density
+is scaled to join the profile at its top, so that the density does not jump there: a jump would change the scale
+height of the column at the top, which the fit would take into beta and the entry velocity. The CLI prints the
+height of the top and the factor by which MSIS is scaled above it, the ratio of the two densities there. Both
+fits, the dynamic pressure and the dynamic mass use the profile; its winds are not used. As in DynamicMassFit, a
+profile that does not cover the heights it is needed for, here down to the lowest point of the fireball, is
+refused.
+
 `--lagfit simple` fits alpha, beta and V_e to the distances along the path at the observed times, with one offset
 and one noise level for all stations (`fitAlphaBetaLag()`). The alpha-beta velocity is integrated along the path
 to give the model distance at every observed time. The heights are mapped to the exponential atmosphere of the
