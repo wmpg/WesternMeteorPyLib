@@ -11,6 +11,7 @@ step (it needs a density/shape/drag assumption fitAlphaBetaLightCurve() itself d
 
 
 import sys
+import itertools
 import numpy as np
 import scipy.special
 import scipy.optimize
@@ -2266,7 +2267,7 @@ def profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, fi
 
 
 
-def profileRegionAlphaBetaLag(profile, ci=95.0, n_params=2):
+def profileRegionAlphaBetaLag(profile, ci=95.0, n_params=2, with_knots=False):
     """ Alpha, beta and the initial velocity at the points of the 2D grid of profileAlphaBetaLag() within the
         region at the given confidence level, e.g. to draw the band of the models which fit the lag within the
         region of alpha and beta, or to find the interval of a quantity derived from them, e.g. a mass, as the
@@ -2279,28 +2280,42 @@ def profileRegionAlphaBetaLag(profile, ci=95.0, n_params=2):
         ci: [float] Confidence level of the region (percent). 95 by default.
         n_params: [int] Number of parameters of the chi-squared threshold of the region: 2 for the joint
             region of alpha and beta, 1 for the interval of a single quantity derived from them. 2 by default.
+        with_knots: [bool] Also return the u of the knots of every model, for a profile of a fit with knots
+            (profileAlphaBetaEntryLag()). False by default.
 
     Return:
-        (alpha, beta, v_init): [tuple of ndarrays] Parameters of the points of the grid and of the profiles
-            within the region. Empty if there is no grid.
+        (alpha, beta, v_init), or (alpha, beta, v_init, knot_log_mass) with with_knots: [tuple of ndarrays]
+            Parameters of the points of the grid and of the profiles within the region, and the u of the knots
+            of every point in a row. Empty if there is no grid.
     """
 
+    n_knots = len(profile.get('knot_ht_normed', []))
+
     if profile['grid_delta_chi2'].size == 0:
+        if with_knots:
+            return np.array([]), np.array([]), np.array([]), np.zeros((0, n_knots))
         return np.array([]), np.array([]), np.array([])
 
     threshold = scipy.stats.chi2.ppf(ci/100.0, n_params)
 
     inside = profile['grid_delta_chi2'] <= threshold
     alpha_mesh, beta_mesh = np.meshgrid(profile['grid_alpha'], profile['grid_beta'])
-    models = [np.column_stack([alpha_mesh[inside], beta_mesh[inside], profile['grid_v_init'][inside]])]
+    models = [np.column_stack([alpha_mesh[inside], beta_mesh[inside], profile['grid_v_init'][inside]] \
+        + ([profile['grid_log_mass'][inside]] if n_knots else []))]
 
     # Add the points of the profiles within the region, which reach its edges more closely than the grid
     for name in ['alpha', 'beta']:
         models.append(profile[name + '_profile_models'][profile[name + '_profile'][1] <= threshold])
         edge_models = profile[name + '_edge_models']
-        models.append(edge_models[edge_models[:, 3] <= threshold, :3])
+
+        # Drop the chi-squared rise of the edge models
+        edge_columns = [0, 1, 2] + list(range(4, 4 + n_knots))
+        models.append(edge_models[edge_models[:, 3] <= threshold][:, edge_columns])
 
     models = np.vstack(models)
+
+    if with_knots:
+        return models[:, 0], models[:, 1], models[:, 2], models[:, 3:]
 
     return models[:, 0], models[:, 1], models[:, 2]
 
@@ -2336,6 +2351,9 @@ ENTRY_LAG_MAX_PASSES = 10
 
 # Change of ln alpha and ln beta between two fits of the entry lag below which the fits have converged
 ENTRY_LAG_PASS_TOL = 1e-3
+
+# Largest log mass ratio at a knot, 95% of the mass lost
+ENTRY_LAG_KNOT_MAX_LOG_MASS = -np.log(1.0 - 0.95)
 
 
 
@@ -2671,7 +2689,112 @@ def stationLengthNoise(time_data, length_data, station_data, n_min=ENTRY_LAG_MIN
 
 
 
-def alphaBetaEntryLag(alpha, beta, length_scale):
+def _knotNodes(alpha, beta, knot_ht_normed, knot_log_mass):
+    """ Nodes of the normalized velocity of the alpha-beta model with knots (see alphaBetaEntryLag()): the
+        nodes ENTRY_LAG_V_NODES, and every knot which the model reaches twice, at the end of its segment and
+        at the start of the next one, with the normalized column height and the alpha of every node.
+
+    Arguments:
+        alpha: [float] Alpha before the first knot.
+        beta: [float] Mass loss parameter.
+        knot_ht_normed: [ndarray] Normalized column heights of the knots, decreasing.
+        knot_log_mass: [ndarray] Logarithm of the ratio of the masses before and after every knot.
+
+    Return:
+        (v_nodes, ht_normed, alpha_nodes):
+            - v_nodes: [ndarray] Normalized velocity of every node, increasing.
+            - ht_normed: [ndarray] Normalized column height of the model at every node.
+            - alpha_nodes: [ndarray] Alpha of the segment of every node.
+    """
+
+    v_grid = ENTRY_LAG_V_NODES
+
+    # Master function F = 2*alpha*exp(-y) at the nodes
+    master_grid = np.exp(-alphaBetaHeightNormed(v_grid, 0.5, beta))
+
+    # Alpha of every segment, and the master function at the knots
+    knot_exp = np.exp(-np.asarray(knot_ht_normed, dtype=np.float64))
+    alpha_segments = alpha*np.exp(np.concatenate([[0.0], \
+        np.cumsum(np.asarray(knot_log_mass, dtype=np.float64)/3.0)]))
+    knot_master = np.cumsum(2*alpha_segments[:-1]*np.diff(np.concatenate([[0.0], knot_exp])))
+
+    # Keep the knots which the model reaches above its lowest node
+    reached = knot_master < master_grid[0]
+    knot_master = knot_master[reached]
+    knot_exp = knot_exp[reached]
+    n_reached = len(knot_master)
+
+    # Velocity at the knots, refined by a Newton step on F
+    knot_v = np.interp(knot_master, master_grid[::-1], v_grid[::-1])
+    if n_reached:
+        master_knot_v = np.exp(-alphaBetaHeightNormed(knot_v, 0.5, beta))
+        knot_v = np.clip(knot_v + (master_knot_v - knot_master)*knot_v/(2*np.exp(-beta*(1.0 - knot_v**2))), \
+            v_grid[0], v_grid[-1])
+
+    # Every knot ends one segment and starts the next one
+    segments = np.searchsorted(knot_master, master_grid, side='left')
+    v_nodes = np.concatenate([v_grid, knot_v, knot_v])
+    master_nodes = np.concatenate([master_grid, knot_master, knot_master])
+    segment_nodes = np.concatenate([segments, np.arange(n_reached), np.arange(1, n_reached + 1)])
+
+    # Height of every node from the knot at which its segment starts
+    exp_start = np.concatenate([[0.0], knot_exp])
+    master_start = np.concatenate([[0.0], knot_master])
+    alpha_nodes = alpha_segments[segment_nodes]
+    ht_normed = -np.log(exp_start[segment_nodes] + (master_nodes - master_start[segment_nodes]) \
+        /(2*alpha_nodes))
+
+    # Sort by the velocity, a segment's start first at a knot
+    order = np.lexsort((-segment_nodes, v_nodes))
+
+    return v_nodes[order], ht_normed[order], alpha_nodes[order]
+
+
+
+def knotHeightNormed(ht_normed, alpha, knot_ht_normed, knot_log_mass):
+    """ Normalized column height at which a single body with the alpha after the last knot has the velocity
+        of the model with knots (alphaBetaEntryLag()) at the given heights. The velocity, the deceleration
+        and the masses of the leading fragment then follow from the functions of a single body with that
+        alpha, e.g. alphaBetaVelocity() and alphaBetaMasses(). In the segment j between the knots, with
+        alpha_j,
+
+            exp(-y_1) = (F_j + 2 alpha_j (exp(-y) - exp(-y_j)))/(2 alpha_last),
+
+        where F_j is the master function at the knot j (see alphaBetaEntryLag()). Above the first knot y_1 is
+        y + ln(alpha_last/alpha). It does not depend on beta.
+
+    Arguments:
+        ht_normed: [float or ndarray] Normalized column height.
+        alpha: [float] Alpha before the first knot.
+        knot_ht_normed: [ndarray] Normalized column heights of the knots, decreasing.
+        knot_log_mass: [ndarray] Logarithm of the ratio of the masses before and after every knot.
+
+    Return:
+        (ht_normed_single, alpha_last):
+            - ht_normed_single: [float or ndarray] Normalized height of the single body.
+            - alpha_last: [float] Alpha after the last knot.
+    """
+
+    knot_exp = np.exp(-np.asarray(knot_ht_normed, dtype=np.float64))
+    alpha_segments = alpha*np.exp(np.concatenate([[0.0], \
+        np.cumsum(np.asarray(knot_log_mass, dtype=np.float64)/3.0)]))
+    knot_master = np.cumsum(2*alpha_segments[:-1]*np.diff(np.concatenate([[0.0], knot_exp])))
+    alpha_last = alpha_segments[-1]
+
+    # Segment of every height, the number of knots above it
+    exp_ht = np.exp(-np.asarray(ht_normed, dtype=np.float64))
+    segments = np.searchsorted(knot_exp, exp_ht, side='left')
+
+    # Master function at every height
+    exp_start = np.concatenate([[0.0], knot_exp])
+    master_start = np.concatenate([[0.0], knot_master])
+    master = master_start[segments] + 2*alpha_segments[segments]*(exp_ht - exp_start[segments])
+
+    return -np.log(master/(2*alpha_last)), alpha_last
+
+
+
+def alphaBetaEntryLag(alpha, beta, length_scale, knot_ht_normed=None, knot_log_mass=None):
     """ Compute the entry lag of the alpha-beta model, the distance by which the meteor trails a companion
         which keeps moving at the entry velocity, as a function of the normalized column height y:
 
@@ -2683,12 +2806,30 @@ def alphaBetaEntryLag(alpha, beta, length_scale):
         alphaBetaHeightNormed(), so the model never has to be inverted, with dy/dv = exp(y - beta*(1 - v^2))/
         (alpha*v).
 
+        At a knot, e.g. at the height of a flare, the meteor can lose a fraction f of its mass and keep its
+        shape, as at a fragmentation after which the cameras follow the leading fragment. Its alpha then
+        grows by exp(u/3), with u = -ln(1 - f) the logarithm of the ratio of the masses before and after, and
+        beta and the velocity are continuous. With the master function F(v) = 2 alpha exp(-y(v)), every
+        segment j between the knots, with its alpha_j, follows
+
+            exp(-y) = exp(-y_j) + (F(v) - F_j)/(2 alpha_j),   F_j = F_(j-1) + 2 alpha_(j-1) (exp(-y_j)
+                - exp(-y_(j-1))),
+
+        from the knot (y_j, F_j) at which it starts (y_0 = inf, F_0 = 0), and dy/dv = exp(y - beta*(1 - v^2))/
+        (alpha_j*v).
+
     Arguments:
-        alpha: [float] Ballistic coefficient.
+        alpha: [float] Ballistic coefficient, before the first knot.
         beta: [float] Mass loss parameter.
         length_scale: [function or float] Length of the path per unit of the normalized column height (m) at
             the given normalized heights, e.g. AlphaBetaSlantColumn.lengthScale, or a constant, e.g.
             HT_NORM_CONST/sin(slope) for a straight path in the exponential atmosphere.
+
+    Keyword arguments:
+        knot_ht_normed: [ndarray] Normalized column heights of the knots, decreasing. None by default, for a
+            single body.
+        knot_log_mass: [ndarray] Logarithm u of the ratio of the masses before and after every knot. None by
+            default.
 
     Return:
         (ht_normed, lag, v_normed):
@@ -2697,11 +2838,15 @@ def alphaBetaEntryLag(alpha, beta, length_scale):
             - v_normed: [ndarray] Normalized velocity at the nodes.
     """
 
-    v_nodes = ENTRY_LAG_V_NODES
-
     # Height of the model at the nodes and its derivative by the velocity
-    ht_normed = alphaBetaHeightNormed(v_nodes, alpha, beta)
-    dy_dv = np.exp(ht_normed - beta*(1.0 - v_nodes**2))/(alpha*v_nodes)
+    if (knot_ht_normed is None) or (len(knot_ht_normed) == 0):
+        v_nodes = ENTRY_LAG_V_NODES
+        ht_normed = alphaBetaHeightNormed(v_nodes, alpha, beta)
+        dy_dv = np.exp(ht_normed - beta*(1.0 - v_nodes**2))/(alpha*v_nodes)
+
+    else:
+        v_nodes, ht_normed, alpha_nodes = _knotNodes(alpha, beta, knot_ht_normed, knot_log_mass)
+        dy_dv = np.exp(ht_normed - beta*(1.0 - v_nodes**2))/(alpha_nodes*v_nodes)
 
     # Length of the path per unit of the column height at the height of the model
     if callable(length_scale):
@@ -2721,7 +2866,7 @@ def alphaBetaEntryLag(alpha, beta, length_scale):
 
 
 
-def _entryLagModel(alpha, beta, ht_normed, length_scale):
+def _entryLagModel(alpha, beta, ht_normed, length_scale, knot_ht_normed=None, knot_log_mass=None):
     """ Model lag of the fit of the entry lag, the negative entry lag, at the column heights of the points.
 
     Arguments:
@@ -2729,6 +2874,12 @@ def _entryLagModel(alpha, beta, ht_normed, length_scale):
         beta: [float] Mass loss parameter.
         ht_normed: [ndarray] Normalized column height of every point.
         length_scale: [function or float] See alphaBetaEntryLag().
+
+    Keyword arguments:
+        knot_ht_normed: [ndarray] Normalized column heights of the knots, see alphaBetaEntryLag(). None by
+            default.
+        knot_log_mass: [ndarray] Logarithm of the ratio of the masses before and after every knot. None by
+            default.
 
     Return:
         (lag_model, v_model, outside):
@@ -2742,7 +2893,8 @@ def _entryLagModel(alpha, beta, ht_normed, length_scale):
             - outside: [float] Fraction of the points outside the heights reached by the model.
     """
 
-    ht_nodes, lag_nodes, v_nodes = alphaBetaEntryLag(alpha, beta, length_scale)
+    ht_nodes, lag_nodes, v_nodes = alphaBetaEntryLag(alpha, beta, length_scale, \
+        knot_ht_normed=knot_ht_normed, knot_log_mass=knot_log_mass)
 
     below = ht_normed < ht_nodes[0]
     outside = np.mean(below | (ht_normed > ht_nodes[-1]))
@@ -2845,7 +2997,8 @@ def _entryLagTauInt(time_data, residuals_normed, station_index, n_stations, \
 
 
 def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, sigma_length, v_ref, \
-    max_pass=ENTRY_LAG_MAX_PASSES, x0_alpha_beta=None, estimate_errors=False, ci=95.0, air_speed=0.0):
+    max_pass=ENTRY_LAG_MAX_PASSES, x0_alpha_beta=None, estimate_errors=False, ci=95.0, air_speed=0.0, \
+    knot_ht_normed=None):
     """ Fit the alpha-beta model to the entry lag in slant-column coordinates, with an offset and a noise
         level for every station (the full fit of the lag).
 
@@ -2875,6 +3028,13 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         velocity was 1 there, and alpha and beta are bound by ALPHA_BETA_BOUNDS. The fits start only from
         models which reach the points, and a ValueError is raised if no starting point does.
 
+        At the knots, e.g. the heights of the flares, alpha can jump as at a fragmentation (see
+        alphaBetaEntryLag()), and the logarithm u = -ln(1 - f) of the ratio of the masses before and after
+        every knot is fitted too, between 0 and ENTRY_LAG_KNOT_MAX_LOG_MASS. The grid then starts without
+        jumps, and every given starting point also with jumps of u = 0, 0.3 and 1 at the knots (0 and 0.3 for
+        more than three knots), with its alpha before the first knot or after the last one, which a fit of a
+        single body to a meteor that fragmented early describes.
+
     Arguments:
         time_data: [ndarray] Time of every point (s).
         lag_data: [ndarray] Lag of every point (m): its distance along the path minus v_ref times its time,
@@ -2900,13 +3060,15 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         air_speed: [float] Speed of the air along the path (m/s), by which the slope of the lag exceeds the
             entry velocity of the model, see airSpeedAlongPath() and slantColumnFromPoints(). 0 by default,
             for distances which are already relative to the air.
+        knot_ht_normed: [ndarray] Normalized slant column heights of the knots, decreasing, e.g. those of the
+            flares from AlphaBetaSlantColumn.htNormedAtHeights(). None by default, for a single body.
 
     Return:
         (v_init, alpha, beta, lag_residuals, entry_fit), or (v_init, alpha, beta, lag_residuals, entry_fit,
             errors) if estimate_errors is True:
             - v_init: [float] Entry velocity relative to the air, v_ref + dv - air_speed (m/s), by which the
                 normalized velocities of the model are scaled.
-            - alpha: [float] Ballistic coefficient.
+            - alpha: [float] Ballistic coefficient, before the first knot.
             - beta: [float] Mass loss parameter.
             - lag_residuals: [ndarray] Residual of the lag of every point (m).
             - entry_fit: [dict] The fit, for profileAlphaBetaEntryLag(), with the keys 'v_ref', 'dv',
@@ -2916,9 +3078,14 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
                 the distances), 'cost' (weighted sum of the squared residuals), 'dof' (degrees of freedom),
                 'chi2_nu' (reduced chi-squared), 'tau_int' (integrated autocorrelation time of the normalized
                 residuals), 'scale' (chi2_nu*tau_int, the variance factor of the uncertainties), 'jac'
-                (Jacobian of the weighted residuals by ln alpha and ln beta), 'n_pass' (number of fits) and
-                'converged' (False if the fits did not converge in max_pass fits).
-            - errors: [dict] See estimate_errors.
+                (Jacobian of the weighted residuals by ln alpha, ln beta and the u of the knots), 'n_pass'
+                (number of fits), 'converged' (False if the fits did not converge in max_pass fits),
+                'knot_ht_normed' (the knots, empty without them), 'knot_log_mass' (u of every knot),
+                'knot_mass_lost' (fraction f of the mass lost at every knot) and 'alpha_last' (alpha after
+                the last knot, of the leading fragment).
+            - errors: [dict] See estimate_errors. With knots, also 'knot_log_mass_std' (the uncertainty of
+                the u of every knot), 'knot_mass_lost_lower' and 'knot_mass_lost_upper' (Wald interval of
+                f, from that of u) and 'cov_knots' (covariance of ln alpha, ln beta and the u of the knots).
     """
 
     time_data = np.asarray(time_data, dtype=np.float64)
@@ -2938,10 +3105,36 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         starts += [tuple(x0[:2]) for x0 in x0_alpha_beta]
     log_starts = [np.clip(np.log(start), log_bounds[0], log_bounds[1]) for start in starts]
 
+    # With knots, also start the given points with jumps
+    n_knots = 0 if knot_ht_normed is None else len(knot_ht_normed)
+    if n_knots:
+
+        knot_ht_normed = np.asarray(knot_ht_normed, dtype=np.float64)
+        log_starts = [np.concatenate([log_start, np.zeros(n_knots)]) for log_start in log_starts]
+
+        # Keep the start's alpha before the first knot or after the last
+        knot_starts = [0.0, 0.3, 1.0] if (n_knots <= 3) else [0.0, 0.3]
+        for x0 in ([] if x0_alpha_beta is None else x0_alpha_beta):
+            for log_masses in itertools.product(knot_starts, repeat=n_knots):
+                for alpha_shift in [0.0, np.sum(log_masses)/3.0]:
+                    log_start = np.clip(np.log(x0[:2]) - np.array([alpha_shift, 0.0]), log_bounds[0], \
+                        log_bounds[1])
+                    log_starts.append(np.concatenate([log_start, log_masses]))
+
+        log_bounds = (np.concatenate([log_bounds[0], np.zeros(n_knots)]), \
+            np.concatenate([log_bounds[1], np.full(n_knots, ENTRY_LAG_KNOT_MAX_LOG_MASS)]))
+
+    def _model(x):
+        """ Model lag, velocity and fraction outside for (ln alpha, ln beta) and the u of the knots. """
+
+        return _entryLagModel(np.exp(x[0]), np.exp(x[1]), ht_normed, length_scale, \
+            knot_ht_normed=(knot_ht_normed if n_knots else None), knot_log_mass=x[2:])
+
+
     def _reachesPoints(x):
         """ Check that the model for (ln alpha, ln beta) reaches the column heights of the points. """
 
-        return _entryLagModel(np.exp(x[0]), np.exp(x[1]), ht_normed, length_scale)[2] <= ENTRY_LAG_MAX_OUTSIDE
+        return _model(x)[2] <= ENTRY_LAG_MAX_OUTSIDE
 
 
     v_model = np.ones_like(time_data)
@@ -2959,8 +3152,7 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         def _residuals(x, weights=weights):
             """ Weighted residuals of the lag for (ln alpha, ln beta), with dv and the offsets fitted. """
 
-            alpha, beta = np.exp(x)
-            lag_model, _, outside = _entryLagModel(alpha, beta, ht_normed, length_scale)
+            lag_model, _, outside = _model(x)
 
             # Reject models which do not reach the column heights of the points
             if outside > ENTRY_LAG_MAX_OUTSIDE:
@@ -3000,8 +3192,7 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         x_best = res.x if _reachesPoints(res.x) else x_start
 
         # Velocity of the model at the points, for the weights of the next fit
-        alpha, beta = np.exp(x_best)
-        lag_model, v_model, _ = _entryLagModel(alpha, beta, ht_normed, length_scale)
+        lag_model, v_model, _ = _model(x_best)
         v_model = np.clip(v_model, ENTRY_LAG_V_NODES[0], 1.0)
 
         # Residuals of the distances of the model, by which the fits are compared if they do not converge
@@ -3019,8 +3210,9 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
     best_pass = passes[-1] if converged else min(passes, key=lambda fit_pass: fit_pass['cost_length'])
     weights = best_pass['weights']
     v_model = best_pass['v_model']
-    alpha, beta = np.exp(best_pass['x'])
-    lag_model, _, _ = _entryLagModel(alpha, beta, ht_normed, length_scale)
+    alpha, beta = np.exp(best_pass['x'][:2])
+    knot_log_mass = best_pass['x'][2:]
+    lag_model, _, _ = _model(best_pass['x'])
 
     # Entry velocity, offsets and residuals of the kept fit
     dv, offsets, lag_residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
@@ -3029,7 +3221,7 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
 
     # Reduced chi-squared and the autocorrelation time of the normalized residuals
     cost = np.sum(weights*lag_residuals**2)
-    dof = max(len(time_data) - 3 - n_stations, 1)
+    dof = max(len(time_data) - 3 - n_stations - n_knots, 1)
     chi2_nu = cost/dof
     tau_int = _entryLagTauInt(time_data, np.sqrt(weights)*lag_residuals, station_index, n_stations)
 
@@ -3040,9 +3232,18 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
     for log_factors in [(log_step, 0.0), (0.0, log_step)]:
 
         lag_plus, _, _ = _entryLagModel(alpha*np.exp(log_factors[0]), beta*np.exp(log_factors[1]), \
-            ht_normed, length_scale)
+            ht_normed, length_scale, knot_ht_normed=(knot_ht_normed if n_knots else None), \
+            knot_log_mass=knot_log_mass)
         lag_minus, _, _ = _entryLagModel(alpha*np.exp(-log_factors[0]), beta*np.exp(-log_factors[1]), \
-            ht_normed, length_scale)
+            ht_normed, length_scale, knot_ht_normed=(knot_ht_normed if n_knots else None), \
+            knot_log_mass=knot_log_mass)
+        lag_derivs.append((lag_plus - lag_minus)/(2*log_step))
+
+    # Derivatives by the u of the knots
+    for knot_step in log_step*np.eye(n_knots):
+
+        lag_plus, _, _ = _model(np.concatenate([best_pass['x'][:2], knot_log_mass + knot_step]))
+        lag_minus, _, _ = _model(np.concatenate([best_pass['x'][:2], knot_log_mass - knot_step]))
         lag_derivs.append((lag_plus - lag_minus)/(2*log_step))
 
     # Jacobian of the weighted residuals, with dv and the offsets fitted, which are linear in the lag
@@ -3065,7 +3266,11 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         'scale': chi2_nu*tau_int,
         'jac': jac,
         'n_pass': len(passes),
-        'converged': converged
+        'converged': converged,
+        'knot_ht_normed': knot_ht_normed if n_knots else np.array([]),
+        'knot_log_mass': knot_log_mass,
+        'knot_mass_lost': 1.0 - np.exp(-knot_log_mass),
+        'alpha_last': alpha*np.exp(np.sum(knot_log_mass)/3.0)
         }
 
     if not estimate_errors:
@@ -3081,8 +3286,14 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
             'alpha_ci_wald_lower', 'alpha_ci_wald_upper', 'beta_ci_wald_lower', 'beta_ci_wald_upper']:
         errors[key] = np.nan
 
+    if n_knots:
+        errors.update({'knot_log_mass_std': np.full(n_knots, np.nan), \
+            'knot_mass_lost_lower': np.full(n_knots, np.nan), \
+            'knot_mass_lost_upper': np.full(n_knots, np.nan), \
+            'cov_knots': np.full((2 + n_knots, 2 + n_knots), np.nan)})
+
     # The Gaussian approximation is not valid at a bound, nor without more points than parameters
-    if alphaBetaBoundWarnings(alpha, beta) or (len(time_data) <= 3 + n_stations):
+    if alphaBetaBoundWarnings(alpha, beta) or (len(time_data) <= 3 + n_stations + n_knots):
         return v_init, alpha, beta, lag_residuals, entry_fit, errors
 
     # Covariance of ln alpha, ln beta, dv and the offsets of the stations
@@ -3119,16 +3330,26 @@ def fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_sc
         'alpha_ci_wald_upper': alpha*np.exp(z*alpha_std_rel),
         'beta_ci_wald_lower': beta*np.exp(-z*beta_std_rel),
         'beta_ci_wald_upper': beta*np.exp(z*beta_std_rel),
-        'v_init_std': np.sqrt(cov_params[2, 2]),
-        'cov_full': cov_params[np.ix_([2, 0, 1], [2, 0, 1])]
+        'v_init_std': np.sqrt(cov_params[2 + n_knots, 2 + n_knots]),
+        'cov_full': cov_params[np.ix_([2 + n_knots, 0, 1], [2 + n_knots, 0, 1])]
         })
+
+    # Wald intervals of f at the knots, from those of u
+    if n_knots:
+        knot_log_mass_std = np.sqrt(np.diag(cov_params)[2:2 + n_knots])
+        errors.update({
+            'knot_log_mass_std': knot_log_mass_std,
+            'knot_mass_lost_lower': 1.0 - np.exp(-np.maximum(knot_log_mass - z*knot_log_mass_std, 0.0)),
+            'knot_mass_lost_upper': 1.0 - np.exp(-(knot_log_mass + z*knot_log_mass_std)),
+            'cov_knots': cov_params[:2 + n_knots, :2 + n_knots]
+            })
 
     return v_init, alpha, beta, lag_residuals, entry_fit, errors
 
 
 
 def stationJackknifeAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, \
-    sigma_length, v_ref, alpha, beta):
+    sigma_length, v_ref, alpha, beta, knot_ht_normed=None):
     """ Fit the entry lag again without every station in turn (see fitAlphaBetaEntryLag()). The profile
         intervals only contain the random noise of the distances, so a station with a systematic error, e.g.
         of its calibration, shows as a fit without it which is far outside the intervals.
@@ -3143,6 +3364,10 @@ def stationJackknifeAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_da
         v_ref: [float] Slope of the reference line of the lag (m/s).
         alpha: [float] Alpha of the fit with all stations, from which the fits start.
         beta: [float] Beta of the fit with all stations, from which the fits start.
+
+    Keyword arguments:
+        knot_ht_normed: [ndarray] Normalized column heights of the knots of the fit, see
+            fitAlphaBetaEntryLag(). None by default.
 
     Return:
         [list] (station, alpha, beta) of the fit without every station, for the stations without which
@@ -3163,13 +3388,79 @@ def stationJackknifeAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_da
         # Skip the station if no model reaches the points of the others
         try:
             fit_result = fitAlphaBetaEntryLag(time_data[keep], lag_data[keep], ht_normed[keep], \
-                station_data[keep], length_scale, sigma_length[keep], v_ref, x0_alpha_beta=[[alpha, beta]])
+                station_data[keep], length_scale, sigma_length[keep], v_ref, x0_alpha_beta=[[alpha, beta]], \
+                knot_ht_normed=knot_ht_normed)
         except ValueError:
             continue
 
         jackknife.append((station_id, fit_result[1], fit_result[2]))
 
     return jackknife
+
+
+
+def knotSpreadAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, sigma_length, \
+    v_ref, knot_hts, ht_normed_at_heights, spread_max, alpha, beta, spread_step=250.0, max_spreads=12, \
+    air_speed=0.0):
+    """ Fit the entry lag with the knots, the fragmentations, moved down below their heights by a range of
+        spreads (see fitAlphaBetaEntryLag()), as how spread a fragmentation was, or how closely its flare
+        marks it, is not fixed by the motion alone. It is the analog of spreadScan() of DragFit, which spreads
+        the growth of the ballistic coefficient below the heights instead. The spreads which fit as well as
+        the best one within Delta chi2 <= 4 are acceptable, and the range of a quantity over them is its
+        systematic uncertainty from the spread. Delta chi2 is the rise of the cost divided by the reduced
+        chi-squared of the best spread times the integrated autocorrelation time of its residuals, as in the
+        profiles of profileAlphaBetaEntryLag().
+
+    Arguments:
+        time_data: [ndarray] Time of every point (s).
+        lag_data: [ndarray] Lag of every point (m), see fitAlphaBetaEntryLag().
+        ht_normed: [ndarray] Normalized slant column height of every point.
+        station_data: [ndarray] Station of every point.
+        length_scale: [function or float] Length of the path per unit of the normalized column height (m).
+        sigma_length: [ndarray] Noise of the distance of every point (m).
+        v_ref: [float] Slope of the reference line of the lag (m/s).
+        knot_hts: [ndarray] Heights of the fragmentations (m), decreasing.
+        ht_normed_at_heights: [function] Normalized slant column height at the given heights, e.g.
+            AlphaBetaSlantColumn.htNormedAtHeights.
+        spread_max: [float] Largest spread (m), e.g. down to the lowest point from the lowest fragmentation.
+        alpha: [float] Alpha of the fit with the fragmentations at their heights, from which the fits start.
+        beta: [float] Beta of that fit.
+
+    Keyword arguments:
+        spread_step: [float] Smallest step of the spreads (m). 250 m by default.
+        max_spreads: [int] Largest number of spreads besides 0, which sets a longer step on a long range. 12
+            by default.
+        air_speed: [float] Speed of the air along the path (m/s), see fitAlphaBetaEntryLag(). 0 by default.
+
+    Return:
+        (spreads, delta_chi2, fits):
+            - spreads: [ndarray] Spreads (m), from 0, and ending with spread_max itself.
+            - delta_chi2: [ndarray] Delta chi2 of every spread from the best one.
+            - fits: [list] (v_init, alpha, beta, entry_fit) of the fit of every spread, see
+                fitAlphaBetaEntryLag().
+    """
+
+    # Steps of at least spread_step, ending with the largest spread itself
+    spreads = np.zeros(1)
+    if spread_max > 0:
+        step = max(spread_step, spread_max/max_spreads)
+        spreads = np.unique(np.r_[np.arange(0.0, spread_max, step), spread_max])
+
+    # Fit every spread from the fit with the fragmentations at their heights
+    fits = []
+    for spread in spreads:
+
+        fit_result = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, length_scale, \
+            sigma_length, v_ref, x0_alpha_beta=[[alpha, beta]], air_speed=air_speed, \
+            knot_ht_normed=ht_normed_at_heights(np.asarray(knot_hts, dtype=np.float64) - spread))
+        fits.append((fit_result[0], fit_result[1], fit_result[2], fit_result[4]))
+
+    # Delta chi2 of every spread, scaled as in the profiles
+    costs = np.array([fit[3]['cost'] for fit in fits])
+    best = int(np.argmin(costs))
+    delta_chi2 = (costs - costs[best])/fits[best][3]['scale']
+
+    return spreads, delta_chi2, fits
 
 
 
@@ -3192,13 +3483,18 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         expected, and the crossings of the threshold are refined with Brent's method. A side which reaches a
         bound of the fit gives only a limit.
 
+        With the knots of a fit with knots, the logarithms u of the mass ratios at the knots are fitted at
+        every model too: at every point of a profile together with the other parameter, by least squares from
+        the previous point, and at every point of the grid from those of the fit. The models of the profiles
+        then also carry their u, see profileRegionAlphaBetaLag().
+
     Arguments:
         time_data: [ndarray] Time of every point (s), as given to fitAlphaBetaEntryLag().
         lag_data: [ndarray] Lag of every point (m), as given to fitAlphaBetaEntryLag().
         ht_normed: [ndarray] Normalized slant column height of every point.
         station_data: [ndarray] Station of every point.
         length_scale: [function or float] Length of the path per unit of the normalized column height (m).
-        alpha: [float] Alpha of the fit.
+        alpha: [float] Alpha of the fit, before the first knot.
         beta: [float] Beta of the fit.
         entry_fit: [dict] The fit, from fitAlphaBetaEntryLag().
 
@@ -3210,7 +3506,8 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
     Return:
         profile: [dict] With the keys of profileAlphaBetaLag(), where the entry velocity relative to the air
             takes the place of the fitted initial velocity and 'sigma2' is the variance factor of the rise of
-            the cost (entry_fit['scale']), and also 'chi2_nu' and 'tau_int' of the fit.
+            the cost (entry_fit['scale']), and also 'chi2_nu' and 'tau_int' of the fit, 'knot_ht_normed' (the
+            knots of the fit) and 'grid_log_mass' (the u of the knots at every point of the grid).
     """
 
     time_data = np.asarray(time_data, dtype=np.float64)
@@ -3239,13 +3536,65 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         return np.sum(weights*residuals**2), entry_fit['v_ref'] + dv - entry_fit['air_speed']
 
 
+    # With knots, their u are fitted at every model
+    knot_ht_normed = entry_fit.get('knot_ht_normed', np.array([]))
+    n_knots = len(knot_ht_normed)
+    knot_best = np.asarray(entry_fit.get('knot_log_mass', np.array([])), dtype=np.float64)
+    lower_all = np.concatenate([lower_bounds, np.zeros(n_knots)])
+    upper_all = np.concatenate([upper_bounds, np.full(n_knots, ENTRY_LAG_KNOT_MAX_LOG_MASS)])
+    penalty = max(1e4, 10*np.sqrt(cost_best/len(time_data)))
+
+    def _knotResiduals(x):
+        """ Weighted residuals for ln alpha, ln beta and the knot u, with dv and the offsets fitted. """
+
+        lag_model, _, outside = _entryLagModel(np.exp(x[0]), np.exp(x[1]), ht_normed, length_scale, \
+            knot_ht_normed=knot_ht_normed, knot_log_mass=x[2:])
+        if outside > ENTRY_LAG_MAX_OUTSIDE:
+            return np.full(len(time_data), penalty)
+
+        _, _, residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, n_stations)
+
+        return np.sqrt(weights)*residuals
+
+
+    def _knotFit(x_start, free):
+        """ Fit the parameters of the given indices (of ln alpha, ln beta and the u of the knots) from
+            x_start, with the others fixed, and return the cost, the entry velocity and all parameters.
+        """
+
+        def _freeResiduals(x_free):
+            """ Weighted residuals as a function of the free parameters. """
+
+            x = np.array(x_start, dtype=np.float64)
+            x[free] = x_free
+
+            return _knotResiduals(x)
+
+
+        res = scipy.optimize.least_squares(_freeResiduals, np.clip(x_start[free], lower_all[free], \
+            upper_all[free]), bounds=(lower_all[free], upper_all[free]), x_scale='jac', max_nfev=200)
+        x = np.array(x_start, dtype=np.float64)
+        x[free] = res.x
+
+        # Cost and entry velocity, infinite if the model misses the points
+        cost, v_init = np.inf, np.nan
+        lag_model, _, outside = _entryLagModel(np.exp(x[0]), np.exp(x[1]), ht_normed, length_scale, \
+            knot_ht_normed=knot_ht_normed, knot_log_mass=x[2:])
+        if outside <= ENTRY_LAG_MAX_OUTSIDE:
+            dv, _, residuals = _entryLagLinear(lag_data - lag_model, time_data, weights, station_index, \
+                n_stations)
+            cost, v_init = np.sum(weights*residuals**2), entry_fit['v_ref'] + dv - entry_fit['air_speed']
+
+        return cost, v_init, x
+
+
     threshold = scipy.stats.chi2.ppf(ci/100.0, 1)
 
     # Walk far enough to also show the 3 sigma level of two parameters
     walk_threshold = max(threshold, scipy.stats.chi2.ppf(0.9973, 2))
 
     profile = {'ci': ci, 'threshold': threshold, 'sigma2': scale, 'chi2_nu': entry_fit['chi2_nu'], \
-        'tau_int': entry_fit['tau_int']}
+        'tau_int': entry_fit['tau_int'], 'knot_ht_normed': knot_ht_normed}
 
     # Steps of half the Wald errors of ln alpha and ln beta
     try:
@@ -3260,12 +3609,22 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
     v_init_best = entry_fit['v_ref'] + entry_fit['dv'] - entry_fit['air_speed']
 
     # The profile of ln beta follows the floor of the valley in ln alpha from the best fit
-    valley = {'log_alpha': x_best[0]}
+    valley = {'log_alpha': x_best[0], 'x': None}
 
     def _profilePoint(idx, log_value):
         """ Minimize the cost over the other parameter with ln alpha (idx 0) or ln beta (idx 1) fixed, and
-            return the cost, ln alpha, ln beta and the entry velocity there.
+            return the cost, ln alpha, ln beta and the entry velocity there, and with knots also their u.
         """
+
+        if n_knots:
+
+            # Fit the other parameter and the u from the previous point
+            x_start = np.concatenate([x_best, knot_best]) if (valley['x'] is None) else np.copy(valley['x'])
+            x_start[idx] = log_value
+            cost, v_init, x = _knotFit(x_start, np.array([1 - idx] + list(range(2, 2 + n_knots))))
+            valley['x'] = x
+
+            return cost, x[0], x[1], v_init, x[2:]
 
         if idx == 1:
 
@@ -3339,7 +3698,7 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
 
     for idx, name in enumerate(['alpha', 'beta']):
 
-        points = [(cost_best, x_best[0], x_best[1], v_init_best)]
+        points = [(cost_best, x_best[0], x_best[1], v_init_best) + ((knot_best,) if n_knots else ())]
         limits = []
         at_bound = []
         edge_models = []
@@ -3347,7 +3706,7 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         # Walk from the best fit to each side, until the rise passes walk_threshold or the bound is reached
         for direction in [-1, 1]:
 
-            valley['log_alpha'] = x_best[0]
+            valley.update(log_alpha=x_best[0], x=None)
             bound = lower_bounds[idx] if direction < 0 else upper_bounds[idx]
 
             side_values = [x_best[idx]]
@@ -3377,7 +3736,7 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
 
             # Refine the crossing of the threshold with Brent's method
             k = above[0]
-            valley['log_alpha'] = x_best[0]
+            valley.update(log_alpha=x_best[0], x=None)
             try:
                 crossing = scipy.optimize.brentq(lambda log_value: (_profilePoint(idx, log_value)[0] \
                     - cost_best)/scale - threshold, min(side_values[k - 1], side_values[k]), \
@@ -3401,7 +3760,8 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
                     edge_point, edge_delta = point, delta_edge
                     break
 
-            edge_models.append([np.exp(edge_point[1]), np.exp(edge_point[2]), edge_point[3], edge_delta])
+            edge_models.append([np.exp(edge_point[1]), np.exp(edge_point[2]), edge_point[3], edge_delta] \
+                + list(edge_point[4:5][0] if n_knots else []))
 
         # Sort the points of the profile by the value of the parameter
         points.sort(key=lambda point: point[idx + 1])
@@ -3411,12 +3771,12 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         profile[name + '_profile'] = (np.exp([point[idx + 1] for point in points]), \
             (np.array([point[0] for point in points]) - cost_best)/scale)
 
-        # Alpha, beta and the entry velocity of every point of the profile
+        # Alpha, beta, the entry velocity and the knot u of every point
         profile[name + '_profile_models'] = np.array([[np.exp(point[1]), np.exp(point[2]), point[3]] \
-            for point in points])
+            + list(point[4] if n_knots else []) for point in points])
 
-        # Alpha, beta, the entry velocity and the chi-squared rise at the points next to the crossings
-        profile[name + '_edge_models'] = np.array(edge_models).reshape(-1, 4)
+        # Models next to the crossings, with their chi-squared rise and knot u
+        profile[name + '_edge_models'] = np.array(edge_models).reshape(-1, 4 + n_knots)
 
 
     ### Compute the chi-squared rise on a 2D grid of alpha and beta ###
@@ -3425,6 +3785,7 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
     profile['grid_beta'] = np.array([])
     profile['grid_delta_chi2'] = np.zeros((0, 0))
     profile['grid_v_init'] = np.zeros((0, 0))
+    profile['grid_log_mass'] = np.zeros((0, 0, n_knots))
     profile['corr_log'] = np.nan
 
     if n_grid > 0:
@@ -3442,10 +3803,18 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         # The offsets and dv are fitted in closed form, so every point is a single evaluation
         grid_delta_chi2 = np.zeros((n_grid, n_grid))
         grid_v_init = np.zeros((n_grid, n_grid))
+        grid_log_mass = np.zeros((n_grid, n_grid, n_knots))
         for i, log_beta in enumerate(log_beta_grid):
             for j, log_alpha in enumerate(log_alpha_grid):
 
-                cost, v_init = _cost(log_alpha, log_beta)
+                # With knots, fit their u from those of the fit
+                if n_knots:
+                    cost, v_init, x = _knotFit(np.concatenate([[log_alpha, log_beta], knot_best]), \
+                        np.arange(2, 2 + n_knots))
+                    grid_log_mass[i, j] = x[2:]
+                else:
+                    cost, v_init = _cost(log_alpha, log_beta)
+
                 grid_delta_chi2[i, j] = (cost - cost_best)/scale
                 grid_v_init[i, j] = v_init
 
@@ -3459,6 +3828,7 @@ def profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, lengt
         profile['grid_beta'] = np.exp(log_beta_grid)
         profile['grid_delta_chi2'] = grid_delta_chi2
         profile['grid_v_init'] = grid_v_init
+        profile['grid_log_mass'] = grid_log_mass
         profile['corr_log'] = cov_log[0, 1]/np.sqrt(cov_log[0, 0]*cov_log[1, 1])
 
         # Extend the intervals over the points of the grid within them, as the walk of a profile stops at the
@@ -8067,6 +8437,15 @@ if __name__ == "__main__":
         "and 'density' to the height with the same local density, which biases alpha and beta where the " \
         "scale height is not 7.16 km.")
 
+    arg_parser.add_argument('-f', '--fragheights', metavar='HT', type=float, nargs='+', \
+        help="Heights of the fragmentations in km, e.g. those of the flares, where alpha can jump without " \
+        "penalty as the meteor loses mass and the cameras follow its leading fragment (only with --lagfit " \
+        "full). The fraction of the mass lost at every height is fitted, the initial mass is that of the " \
+        "meteoroid and the final mass, the dynamic mass and the dynamic pressure are those of the leading " \
+        "fragment. The fit is repeated with the fragmentations moved down below their heights by a " \
+        "spread, up to the last point, and the masses include the range over the spreads which fit as " \
+        "well.")
+
     arg_parser.add_argument('-x', '--hideplots', action="store_true", \
         help="Don't show the plots on the screen. Combine with --saveplots to only write them to disk.")
 
@@ -8267,6 +8646,22 @@ if __name__ == "__main__":
             ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, \
                 traj.jdt_ref, method=cml_args.atmrescale)
 
+        # Fragmentation heights within the observed part, for the full fit
+        knot_hts = np.array([])
+        if cml_args.fragheights is not None:
+
+            knot_hts = 1000*np.sort(np.array(cml_args.fragheights))[::-1]
+            outside_knots = (knot_hts >= np.max(ht_data)) | (knot_hts <= np.min(ht_data))
+            if np.any(outside_knots):
+                print("NOTE: The fragmentations at {:s} km are outside the observed heights, {:.1f} to " \
+                    "{:.1f} km, and are not used".format(", ".join("{:.1f}".format(ht/1000) \
+                    for ht in knot_hts[outside_knots]), np.min(ht_data)/1000, np.max(ht_data)/1000))
+            knot_hts = knot_hts[~outside_knots]
+
+            if cml_args.lagfit != 'full':
+                print("NOTE: The heights of the fragmentations are used only by the full fit (--lagfit full)")
+                knot_hts = np.array([])
+
         # Fit alpha-beta directly to the lag, starting also from the Q4 fit of the observed velocities
         print("Fitting alpha-beta to the lag...")
         x0_alpha_beta = [fitAlphaBeta(vel_data_nograv, ht_data_rescaled, v_init=traj.v_init)[1:]]
@@ -8275,18 +8670,20 @@ if __name__ == "__main__":
 
             try:
 
-                def _fitEntryLag(x0_alpha_beta):
+                def _fitEntryLag(x0_alpha_beta, knot_ht_normed=None):
                     """ Fit the entry lag and compute the profile intervals of alpha and beta. """
 
                     fit_result = fitAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, \
                         station_data, slant_column.lengthScale, sigma_length, traj.v_init, \
-                        x0_alpha_beta=x0_alpha_beta, estimate_errors=cml_args.errors, air_speed=air_speed)
+                        x0_alpha_beta=x0_alpha_beta, estimate_errors=cml_args.errors, air_speed=air_speed, \
+                        knot_ht_normed=knot_ht_normed)
 
                     # Profile intervals of alpha and beta, with the likelihood on a grid for the plot of the
-                    #   uncertainties
+                    #   uncertainties, coarser with knots, whose u are fitted at every point
+                    n_grid = (40 if knot_ht_normed is None else 20) if cml_args.errors else 0
                     profile = profileAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, \
                         station_data, slant_column.lengthScale, fit_result[1], fit_result[2], fit_result[4], \
-                        n_grid=(40 if cml_args.errors else 0))
+                        n_grid=n_grid)
 
                     return fit_result, profile
 
@@ -8305,6 +8702,35 @@ if __name__ == "__main__":
 
                     x0_alpha_beta.append(lag_profile['min_model'][:2])
                     fit_result, lag_profile = _fitEntryLag(x0_alpha_beta)
+
+                # With fragmentations, fit again from the single body, alpha jumping at them
+                chi2_nu_single = fit_result[4]['chi2_nu']
+                knot_spread = None
+                if len(knot_hts):
+
+                    print("Fitting alpha-beta to the lag with alpha jumping at the fragmentations...")
+                    x0_knots = x0_alpha_beta + [list(fit_result[1:3])]
+                    knot_ht_normed_fit = slant_column.htNormedAtHeights(knot_hts)
+                    fit_result, lag_profile = _fitEntryLag(x0_knots, knot_ht_normed_fit)
+
+                    # Fit again from a better fit found by the profile
+                    for _ in range(2):
+
+                        if lag_profile['min_delta_chi2'] > -0.1:
+                            break
+
+                        print("NOTE: The profile found a better fit (chi-squared lower by {:.1f}), fitting " \
+                            "again from it".format(-lag_profile['min_delta_chi2']))
+
+                        x0_knots.append(lag_profile['min_model'][:2])
+                        fit_result, lag_profile = _fitEntryLag(x0_knots, knot_ht_normed_fit)
+
+                    # Fit again with the fragmentations moved down
+                    print("Fitting with the fragmentations moved down below their heights...")
+                    knot_spread = knotSpreadAlphaBetaEntryLag(time_data, entry_lag_data, ht_normed_data, \
+                        station_data, slant_column.lengthScale, sigma_length, traj.v_init, knot_hts, \
+                        slant_column.htNormedAtHeights, knot_hts[-1] - np.min(ht_data), fit_result[1], \
+                        fit_result[2], air_speed=air_speed)
 
                 v_init, alpha, beta, lag_residuals, entry_fit = fit_result[:5]
                 fit_errors = fit_result[5] if cml_args.errors else None
@@ -8354,6 +8780,42 @@ if __name__ == "__main__":
                 lag_profile = profileAlphaBetaLag(time_data, length_data, ht_data_rescaled, v_init, alpha, \
                     beta, v_init_start=traj.v_init, n_grid=(40 if cml_args.errors else 0))
 
+        # Use the leading fragment for the motion and masses at the end
+        knot_ht_normed = entry_fit['knot_ht_normed'] if (cml_args.lagfit == 'full') else np.array([])
+        knots_used = knot_ht_normed if len(knot_ht_normed) else None
+        alpha_entry = alpha
+        if len(knot_ht_normed):
+            ht_normed_frag, alpha = knotHeightNormed(ht_normed_data, alpha_entry, knot_ht_normed, \
+                entry_fit['knot_log_mass'])
+            ht_data_rescaled = HT_NORM_CONST*ht_normed_frag
+
+        def _leadingFragment(model, ht_normed):
+            """ Alpha, beta and the entry velocity of the leading fragment of a model of the fit with
+                fragmentations (alpha, beta, the entry velocity, the u of its knots and, if they are not those
+                of the fit, the knots), and the given normalized column heights rescaled for it, see
+                knotHeightNormed().
+            """
+
+            ht_normed_single, alpha_single = knotHeightNormed(ht_normed, model[0], \
+                model[4] if (len(model) > 4) else knot_ht_normed, model[3])
+
+            return alpha_single, model[1], model[2], HT_NORM_CONST*ht_normed_single
+
+
+        def _modelVelocityAt(model, ht_rescaled):
+            """ Velocity of a model of the profiles (alpha, beta, the entry velocity, and with fragmentations
+                the u of its knots) at the given heights rescaled to the exponential atmosphere, that of its
+                leading fragment with fragmentations.
+            """
+
+            if len(knot_ht_normed):
+                alpha_single, beta_single, v_init_single, ht_single = _leadingFragment(model, \
+                    ht_rescaled/HT_NORM_CONST)
+                return alphaBetaVelocityInterp(ht_single, alpha_single, beta_single, v_init_single)
+
+            return alphaBetaVelocityInterp(ht_rescaled, *model[:3])
+
+
         # Speed of the air along the path, which is added to the velocities of the model of the full fit,
         #   relative to the air, to compare them with the inertial velocities of the trajectory
         air_offset = air_speed if (cml_args.lagfit == 'full') else 0.0
@@ -8369,9 +8831,20 @@ if __name__ == "__main__":
         # Models within the 95% interval of one parameter (with the best fit), whose range of the masses, the
         #   dynamic mass and the peak dynamic pressure gives their 95% intervals (only with --errors, which
         #   computes the 2D grid)
-        interval_models = list(zip(*profileRegionAlphaBetaLag(lag_profile, n_params=1)))
-        if interval_models:
-            interval_models.append((alpha, beta, v_init))
+        if len(knot_ht_normed):
+            interval_models = list(zip(*profileRegionAlphaBetaLag(lag_profile, n_params=1, with_knots=True)))
+            if interval_models:
+                interval_models.append((alpha_entry, beta, v_init, entry_fit['knot_log_mass']))
+        else:
+            interval_models = list(zip(*profileRegionAlphaBetaLag(lag_profile, n_params=1)))
+            if interval_models:
+                interval_models.append((alpha, beta, v_init))
+
+        # Fits of the acceptable spreads, whose range the intervals include
+        spread_models = []
+        if len(knot_ht_normed) and interval_models:
+            spread_models = [(fit[1], fit[2], fit[0], fit[3]['knot_log_mass'], fit[3]['knot_ht_normed']) \
+                for fit, delta_chi2 in zip(knot_spread[2], knot_spread[1]) if delta_chi2 <= 4.0]
 
         def _intervalText(values, fmt):
             """ Text of the 95% interval of a derived quantity from its values for the models of the interval,
@@ -8405,16 +8878,24 @@ if __name__ == "__main__":
             sigma_slope = None
         sigma_dens = cml_args.densunc if (cml_args.errors and (cml_args.densunc is not None)) else None
 
+        # Covariance of ln alpha after the fragmentations and ln beta
+        cov_log_masses = fit_errors['cov_log'] if cml_args.errors else None
+        if len(knot_ht_normed) and cml_args.errors:
+            knot_jac = np.zeros((2, 2 + len(knot_ht_normed)))
+            knot_jac[0, 0] = knot_jac[1, 1] = 1.0
+            knot_jac[0, 2:] = 1.0/3.0
+            cov_log_masses = knot_jac.dot(fit_errors['cov_knots']).dot(knot_jac.T)
+
         # Compute initial and final mass (with error propagation if --errors was set)
         if cml_args.errors:
             m_init_mu0, m_final_mu0, mass_err_mu0 = alphaBetaMasses(alpha, beta, slope, \
                 mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
                 vel_init=v_init, vel_end=vel_end, estimate_errors=True, \
-                cov_log=fit_errors['cov_log'], sigma_slope=sigma_slope, sigma_dens=sigma_dens)
+                cov_log=cov_log_masses, sigma_slope=sigma_slope, sigma_dens=sigma_dens)
             m_init_mu23, m_final_mu23, mass_err_mu23 = alphaBetaMasses(alpha, beta, slope, \
                 mu=2/3, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
                 vel_init=v_init, vel_end=vel_end, estimate_errors=True, \
-                cov_log=fit_errors['cov_log'], sigma_slope=sigma_slope, sigma_dens=sigma_dens)
+                cov_log=cov_log_masses, sigma_slope=sigma_slope, sigma_dens=sigma_dens)
         else:
             m_init_mu0, m_final_mu0 = alphaBetaMasses(alpha, beta, slope, \
                 mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
@@ -8424,6 +8905,20 @@ if __name__ == "__main__":
                 vel_init=v_init, vel_end=vel_end)
             mass_err_mu0 = None
             mass_err_mu23 = None
+
+        # With fragmentations, the initial mass is that of the meteoroid
+        if len(knot_ht_normed):
+            if cml_args.errors:
+                m_init_mu0, _, mass_err_entry = alphaBetaMasses(alpha_entry, beta, slope, mu=0, \
+                    dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, vel_init=v_init, \
+                    vel_end=vel_end, estimate_errors=True, cov_log=fit_errors['cov_log'], \
+                    sigma_slope=sigma_slope, sigma_dens=sigma_dens)
+                for key in ['m_init_std_rel', 'm_init_ci_wald_lower', 'm_init_ci_wald_upper']:
+                    mass_err_mu0[key] = mass_err_mu23[key] = mass_err_entry[key]
+            else:
+                m_init_mu0 = alphaBetaMasses(alpha_entry, beta, slope, mu=0, dens=cml_args.dens, \
+                    shape_coeff=cml_args.ga, gamma=1.0, vel_init=v_init, vel_end=vel_end)[0]
+            m_init_mu23 = m_init_mu0
 
 
         print()
@@ -8489,15 +8984,35 @@ if __name__ == "__main__":
         print("Alpha-beta analysis")
         print("-------------------")
         if cml_args.errors:
-            print("Alpha = {:.3f} (+/-{:.1%})".format(alpha, fit_errors['alpha_std_rel']))
+            print("Alpha = {:.3f} (+/-{:.1%})".format(alpha_entry, fit_errors['alpha_std_rel']))
             print("Beta  = {:.4g} (+/-{:.1%})".format(beta, fit_errors['beta_std_rel']))
             print("corr(alpha, beta) = {:.3f}".format(fit_errors['corr']))
         else:
-            print("Alpha = {:.3f}".format(alpha))
+            print("Alpha = {:.3f}".format(alpha_entry))
             print("Beta  = {:.4g}".format(beta))
 
+        # Mass lost at the fragmentations, and alpha after them
+        if len(knot_ht_normed):
+
+            print("Fragmentations, where alpha grows by (1 - f)^(-1/3), with the fraction f of mass lost:")
+            print("  Height (km)  f{:s}".format("      {:.3g}% Wald CI".format(fit_errors['ci']) \
+                if cml_args.errors else ""))
+            for i, ht in enumerate(knot_hts):
+                ci_text = ""
+                if cml_args.errors:
+                    ci_text = "  {:.3f} - {:.3f}{:s}".format(fit_errors['knot_mass_lost_lower'][i], \
+                        fit_errors['knot_mass_lost_upper'][i], " *" \
+                        if fit_errors['knot_mass_lost_lower'][i] <= 0 else "")
+                print("  {:11.2f}  {:.3f}{:s}".format(ht/1000, entry_fit['knot_mass_lost'][i], ci_text))
+
+            if cml_args.errors and np.any(fit_errors['knot_mass_lost_lower'] <= 0):
+                print("  * The interval contains f = 0, so the motion shows no loss of mass there")
+            print("Alpha after the last fragmentation, of the leading fragment = {:.3f}".format(alpha))
+            print("Reduced chi-squared without the fragmentations = {:.2f}, with them = {:.2f}".format( \
+                chi2_nu_single, entry_fit['chi2_nu']))
+
         # Warn if alpha or beta are at a bound of the fit, where the data did not constrain them
-        for bound_warning in alphaBetaBoundWarnings(alpha, beta):
+        for bound_warning in alphaBetaBoundWarnings(alpha_entry, beta):
             print("WARNING: {:s}".format(bound_warning))
 
         # Print the profile intervals, which hold also where the Wald errors above do not
@@ -8518,7 +9033,7 @@ if __name__ == "__main__":
             print("Fit without every station (* outside the {:.3g}% intervals):".format(lag_profile['ci']))
             for station_id, alpha_jack, beta_jack in stationJackknifeAlphaBetaEntryLag(time_data, \
                 entry_lag_data, ht_normed_data, station_data, slant_column.lengthScale, sigma_length, \
-                traj.v_init, alpha, beta):
+                traj.v_init, alpha_entry, beta, knot_ht_normed=knots_used):
 
                 outside = (alpha_jack < lag_profile['alpha_lower']) \
                     or (alpha_jack > lag_profile['alpha_upper']) or (beta_jack < lag_profile['beta_lower']) \
@@ -8528,17 +9043,43 @@ if __name__ == "__main__":
 
         print("-------------------")
         print("ln(beta)             = {:.2f}".format(np.log(beta)))
-        print("ln(alpha*sin(slope)) = {:.2f}".format(np.log(alpha*np.sin(slope))))
+        if len(knot_ht_normed):
+            print("ln(alpha*sin(slope)) = {:.2f} (meteoroid), {:.2f} (leading fragment)".format( \
+                np.log(alpha_entry*np.sin(slope)), np.log(alpha*np.sin(slope))))
+        else:
+            print("ln(alpha*sin(slope)) = {:.2f}".format(np.log(alpha*np.sin(slope))))
         print("-------------------")
         print("Masses with dens = {:d} kg/m^3, Gamma*A = {:.2f}:".format(int(cml_args.dens), cml_args.ga))
         print(" * - note that the initial masses are usually 4-10x underestimated!")
+        if len(knot_ht_normed):
+            print(" The initial mass is that of the meteoroid, the final mass that of the leading fragment")
+
+        def _knotModelMasses(model, mu):
+            """ Initial mass of the meteoroid and final mass of the leading fragment of a model of the fit
+                with fragmentations (alpha, beta, the entry velocity and the u of its knots).
+            """
+
+            alpha_single, beta_single, v_init_single, ht_single = _leadingFragment(model, ht_normed_data[:1])
+            m_init = alphaBetaMasses(model[0], model[1], slope, mu=mu, dens=cml_args.dens, \
+                shape_coeff=cml_args.ga, gamma=1.0, vel_init=model[2], vel_end=model[2])[0]
+            m_final = alphaBetaMasses(alpha_single, beta_single, slope, mu=mu, dens=cml_args.dens, \
+                shape_coeff=cml_args.ga, gamma=1.0, vel_init=v_init_single, \
+                vel_end=alphaBetaVelocity(ht_single[0], alpha_single, beta_single, v_init_single))[1]
+
+            return m_init, m_final
+
 
         # Masses of the models within the 95% interval, for each mu (initial and final)
         interval_masses = {}
         for mu in [0, 2/3]:
-            interval_masses[mu] = np.array([alphaBetaMasses(a, b, slope, mu=mu, dens=cml_args.dens, \
-                shape_coeff=cml_args.ga, gamma=1.0, vel_init=v0, \
-                vel_end=alphaBetaVelocity(ht_data_rescaled[0], a, b, v0)) for a, b, v0 in interval_models])
+            if len(knot_ht_normed):
+                interval_masses[mu] = np.array([_knotModelMasses(model, mu) for model \
+                    in interval_models + spread_models])
+            else:
+                interval_masses[mu] = np.array([alphaBetaMasses(a, b, slope, mu=mu, dens=cml_args.dens, \
+                    shape_coeff=cml_args.ga, gamma=1.0, vel_init=v0, \
+                    vel_end=alphaBetaVelocity(ht_data_rescaled[0], a, b, v0)) \
+                    for a, b, v0 in interval_models])
             interval_masses[mu] = interval_masses[mu].reshape(-1, 2)
 
         def _printMass(label, mass, mass_err, key, masses):
@@ -8556,15 +9097,33 @@ if __name__ == "__main__":
             if len(masses):
                 print("      {:s}".format(_intervalText(masses, "{:.3e}").strip()))
 
+        # With fragmentations, the initial mass has an interval too
+        init_masses = {mu: (interval_masses[mu][:, 0] if len(knot_ht_normed) else []) for mu in [0, 2/3]}
+
         print("  mu = 0:")
-        _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init', [])
+        _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init', init_masses[0])
         _printMass("Final  ", m_final_mu0, mass_err_mu0, 'm_final', interval_masses[0][:, 1])
         print("  mu = 2/3:")
-        _printMass("Initial", m_init_mu23, mass_err_mu23, 'm_init', [])
+        _printMass("Initial", m_init_mu23, mass_err_mu23, 'm_init', init_masses[2/3])
         _printMass("Final  ", m_final_mu23, mass_err_mu23, 'm_final', interval_masses[2/3][:, 1])
         if interval_models:
-            print("  The profile intervals include only the uncertainty of the fit, the Wald CIs also " \
-                "--densunc{:s}".format(" and --slopeunc" if cml_args.lagfit == 'simple' else ""))
+            print("  The profile intervals include only the uncertainty of the fit{:s}, the Wald CIs also " \
+                "--densunc{:s}".format(" and the spread of the fragmentations" if len(knot_ht_normed) \
+                else "", " and --slopeunc" if cml_args.lagfit == 'simple' else ""))
+
+        # Report the fits with the fragmentations moved down
+        if len(knot_ht_normed):
+
+            print()
+            print("Fragmentations moved down below their heights by a spread, acceptable (*) within " \
+                "Delta chi2 <= 4")
+            print(" Spread (km), Delta chi2, f, initial mass (kg), final mass mu = 2/3 (kg)")
+            for spread, delta_chi2, fit in zip(*knot_spread):
+                m_init_spread, m_final_spread = _knotModelMasses((fit[1], fit[2], fit[0], \
+                    fit[3]['knot_log_mass'], fit[3]['knot_ht_normed']), 2/3)
+                print("  {:6.2f}{:s}  {:9.2f}  {:s}  {:.3e}  {:.3e}".format(spread/1000, \
+                    "*" if (delta_chi2 <= 4.0) else " ", delta_chi2, "/".join("{:.3f}".format(f) \
+                    for f in fit[3]['knot_mass_lost']), m_init_spread, m_final_spread))
 
         print("*********************************************")
 
@@ -8597,8 +9156,16 @@ if __name__ == "__main__":
         #   not decelerate at the end
         interval_dyn_masses = []
         no_decel = False
-        for a, b, v0 in interval_models:
-            vel_model_end, decel_model_end = ab_path.velocityDeceleration(length_path[end_index], a, b, v0)
+        for model in interval_models + spread_models:
+
+            # With fragmentations, every model has its own leading fragment
+            if len(knot_ht_normed):
+                a, b, v0, ht_model = _leadingFragment(model, ht_normed_data)
+                vel_model_end, decel_model_end = AlphaBetaPath(length_path, ht_model).velocityDeceleration( \
+                    length_path[end_index], a, b, v0)
+            else:
+                vel_model_end, decel_model_end = ab_path.velocityDeceleration(length_path[end_index], *model)
+
             if decel_model_end <= 0:
                 no_decel = True
                 continue
@@ -8622,7 +9189,7 @@ if __name__ == "__main__":
                 dyn_interval_text))
 
         # The deceleration of a fit at a bound is not constrained by the data
-        if alphaBetaBoundWarnings(alpha, beta):
+        if alphaBetaBoundWarnings(alpha_entry, beta):
             print("NOTE: alpha or beta are at a bound of the fit, so the deceleration and the dynamic mass "
                 "are not constrained by the data")
 
@@ -8667,14 +9234,19 @@ if __name__ == "__main__":
 
         # Models within the 95% region of alpha and beta of the profile, which give the bands of the
         #   velocity and of the lag (only with --errors, which computes the 2D grid)
-        region_alpha, region_beta, region_v_init = profileRegionAlphaBetaLag(lag_profile)
+        region_alpha, region_beta, region_v_init, region_log_mass = profileRegionAlphaBetaLag(lag_profile, \
+            with_knots=True)
         have_band = len(region_alpha) > 0
         band_label = "95% region of alpha and beta"
 
         # Label of the alpha-beta fit, with the profile intervals of alpha and beta
         fit_label = "$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.3g} ({:s})\n$\\beta$ = {:.3g} ({:s})".format( \
-            v_init_inertial/1000, alpha, profileIntervalText(lag_profile, 'alpha', notes=False), beta, \
+            v_init_inertial/1000, alpha_entry, profileIntervalText(lag_profile, 'alpha', notes=False), beta, \
             profileIntervalText(lag_profile, 'beta', notes=False))
+
+        # With fragmentations, also alpha of the leading fragment
+        if len(knot_ht_normed):
+            fit_label += "\n$\\alpha$ after the fragmentations = {:.3g}".format(alpha)
 
         # Label of the dynamic mass
         if little_deceleration:
@@ -8694,13 +9266,14 @@ if __name__ == "__main__":
             # Band of the distance residuals of the models within the region at the observed points, relative
             #   to the best model, with dv and the offsets of the stations fitted for every model
             if have_band:
-                region_models = list(zip(region_alpha, region_beta, region_v_init))
+                region_models = list(zip(region_alpha, region_beta, region_v_init, region_log_mass))
                 station_index_fit = np.unique(station_data, return_inverse=True)[1]
                 n_stations_fit = int(np.max(station_index_fit)) + 1
                 lag_fit_best = entry_lag_data - lag_residuals
                 length_band = []
-                for a, b, _ in region_models:
-                    lag_model_region, _, _ = _entryLagModel(a, b, ht_normed_data, slant_column.lengthScale)
+                for a, b, _, log_mass in region_models:
+                    lag_model_region, _, _ = _entryLagModel(a, b, ht_normed_data, slant_column.lengthScale, \
+                        knot_ht_normed=knots_used, knot_log_mass=log_mass)
                     _, _, residuals_region = _entryLagLinear(entry_lag_data - lag_model_region, time_data, \
                         entry_fit['weights'], station_index_fit, n_stations_fit)
                     length_band.append((entry_lag_data - residuals_region - lag_fit_best) \
@@ -8774,8 +9347,8 @@ if __name__ == "__main__":
             #   with the band of the models within the region, in the inertial frame of the observations
             if have_band:
                 ht_arr_rescaled_mean = rescaleRealHeights(ht_arr)
-                vel_band = np.array([alphaBetaVelocityInterp(ht_arr_rescaled_mean, a, b, v0) \
-                    for a, b, v0 in region_models]) + air_offset
+                vel_band = np.array([_modelVelocityAt(model, ht_arr_rescaled_mean) \
+                    for model in region_models]) + air_offset
                 ax_vel.fill_betweenx(ht_arr/1000, np.min(vel_band, axis=0)/1000, \
                     np.max(vel_band, axis=0)/1000, color='k', alpha=0.15, lw=0, zorder=1, label=band_label)
 
@@ -8931,7 +9504,14 @@ if __name__ == "__main__":
         def modelVelocityAtRealHeights(ht_real):
             """ Compute the alpha-beta velocity at real heights, rescaled to the model atmosphere. """
 
-            return alphaBetaVelocity(rescaleRealHeights(ht_real), alpha, beta, v_init)
+            ht_rescaled = rescaleRealHeights(ht_real)
+
+            # With fragmentations, the heights of the leading fragment
+            if len(knot_ht_normed):
+                ht_rescaled = HT_NORM_CONST*knotHeightNormed(ht_rescaled/HT_NORM_CONST, alpha_entry, \
+                    knot_ht_normed, entry_fit['knot_log_mass'])[0]
+
+            return alphaBetaVelocity(ht_rescaled, alpha, beta, v_init)
 
         # Compute the dynamic pressure using alpha and beta, with the real density at real heights, and the
         #   model velocity at those heights rescaled to its atmosphere
@@ -9001,8 +9581,8 @@ if __name__ == "__main__":
         if interval_models:
             atm_dens = getAtmDensity_vect(lat_mean, lon_mean, ht_arr, traj.jdt_ref)
             ht_arr_rescaled = rescaleRealHeights(ht_arr)
-            for a, b, v0 in interval_models:
-                dyn_pressure_model = atm_dens*alphaBetaVelocityInterp(ht_arr_rescaled, a, b, v0)**2
+            for model in interval_models + spread_models:
+                dyn_pressure_model = atm_dens*_modelVelocityAt(model, ht_arr_rescaled)**2
                 interval_pressures.append(dyn_pressure_model)
                 interval_peaks.append([np.max(dyn_pressure_model)/1e6, \
                     ht_arr[np.argmax(dyn_pressure_model)]/1000])
@@ -9085,7 +9665,7 @@ if __name__ == "__main__":
 
         # Plot the uncertainties of alpha and beta
         if cml_args.errors:
-            plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, fig=fig_sum, \
+            plotAlphaBetaLagProfile(lag_profile, alpha_entry, beta, errors=fit_errors, fig=fig_sum, \
                 subplot_spec=grid_bottom[0])
         else:
             ax_note = fig_sum.add_subplot(grid_bottom[0])
@@ -9095,7 +9675,8 @@ if __name__ == "__main__":
 
         # Plot the survival diagram in the space of the initial mass and beta
         ax_mass_diagram = fig_sum.add_subplot(grid_bottom[1])
-        plotAlphaBetaMassDiagram(alpha, beta, slope, profile=(lag_profile if cml_args.errors else None), \
+        plotAlphaBetaMassDiagram(alpha, beta, slope, profile=(lag_profile if (cml_args.errors \
+            and (len(knot_ht_normed) == 0)) else None), \
             dens=cml_args.dens, shape_coeff=cml_args.ga, axes=ax_mass_diagram)
         if little_deceleration:
             ax_mass_diagram.text(0.5, 0.5, "Not constrained by the dynamics\n(velocity loss {:.1%})".format( \

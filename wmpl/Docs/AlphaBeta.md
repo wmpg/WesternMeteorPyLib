@@ -13,6 +13,7 @@ diagram, and they give the initial and final masses, the dynamic mass at the end
 - [The summary plot and the final masses](#the-summary-plot-and-the-final-masses)
 - [Example: the 2020-01-09 fireball over Croatia](#example-the-2020-01-09-fireball-over-croatia)
 - [When beta only has an upper limit](#when-beta-only-has-an-upper-limit)
+- [Known fragmentations](#known-fragmentations)
 - [Limits](#limits)
 
 ---
@@ -245,6 +246,50 @@ pressure are usually still well constrained.
 
 ---
 
+## Known fragmentations
+
+If the heights of the fragmentations are known, e.g. from the flares, `-f` (`--fragheights`, in km, as in
+DragFit) lets alpha jump at them with the full fit. At a fragmentation the meteor loses a fraction `f` of its
+mass and keeps its shape, and the cameras follow its leading fragment, so alpha grows by `(1 - f)^(-1/3)` while
+beta and the velocity are continuous (`alphaBetaEntryLag()`). The full fit then also fits `f` at every height
+(`fitAlphaBetaEntryLag(knot_ht_normed=...)`), from the fit of a single body. Heights outside the observed part
+are not used. The output gives `f` at every height, with its Wald interval with `--errors` (marked when it
+contains 0: the motion then shows no loss of mass there), alpha before the first fragmentation and after the
+last one, and the reduced chi-squared with and without the fragmentations. The initial mass is that of the
+meteoroid at entry, from alpha before the first fragmentation, and the final mass, the dynamic mass and the
+dynamic pressure are those of the leading fragment. The profile intervals fit `f` at every model. With several
+fragmentations, their losses can take up all of the loss of mass: beta then goes to its lower bound, where the
+lag only gives an upper limit of it and only the profile intervals are given.
+
+How spread a fragmentation was, or how well its flare marks it, is not fixed by the motion alone, so the fit is
+repeated with the fragmentations moved down below their heights, in steps of at least 250 m down to the last
+point (at most 12 steps), as DragFit repeats its fit with the growth of K spread below them, and with `--errors`
+the intervals of the masses, of the dynamic mass and of the peak dynamic pressure include the spreads which fit
+within `Delta chi2 <= 4`. Delta chi2 is scaled by the reduced chi-squared and the autocorrelation time of the
+residuals, as the profiles, so with errors correlated in time a wide range of spreads fits, and the final mass
+is then poorly constrained.
+
+On meteors simulated with MetSim, which fragment at known heights, observed with a realistic network and noise:
+
+- **Fragmentations deep in the trajectory.** On 80 fireballs with 2 or 3 fragmentations of 10-50% between 17 and
+  32 km, the last one 1.5 to 9 km above the end, the median error of the final mass went from 15% for a single
+  body to 3.3% with the fragmentations at their true heights (4.2-4.6% with heights off by 0.1 s, as from a
+  light curve), that of beta from 72% to 14%, and the 95% intervals contained the truth in 86-96% of the fits
+  instead of 0-14%. For one fragmentation of 10% or 20% at 1 MPa, the error of beta went from 5.5% and 11% to
+  2.8% and 2.2%, that of the final mass from 2.4% and 4.8% to 1.4% and 1.1%. The intervals of beta are 2-15
+  times wider, as `f` and beta are correlated.
+- **Fragmentations high up, before the meteor decelerates.** A fit of a single body already describes the
+  leading fragment there, but its initial mass is that of the leading fragment, 20-70% below that of the
+  meteoroid. With the fragmentation at its height, the bias of the initial mass fell to 5-8%, with errors of
+  20-35% that grow with the error of the height (0.1 s moved it by -15% to +55% for a loss of 70%). With errors
+  correlated in time, a fragmentation given where nothing happened gave `f` of 0.3-0.4 (with errors correlated
+  over 1 s, its interval contained 0 in all the fits).
+- **A flare without a loss of mass,** e.g. a change of the shape or of the drag, makes alpha jump just the same,
+  and the motion cannot tell the two apart: a jump of the drag coefficient by 25% gave `f` = 0.5, and the final
+  mass was then half the true one, as with a fit of a single body.
+
+---
+
 ## Limits
 
 - The slope of the alpha-beta model is the apparent elevation of the radiant. If it is negative, the direction of
@@ -261,6 +306,8 @@ pressure are usually still well constrained.
   station with a timing or a geometric offset makes the residuals of all its points correlated, and the real
   intervals are then wider.
 - The model is a single body with a constant shape and mu. Fragmentation shows as a trend in the lag residuals
-  which the model cannot follow.
+  which the model cannot follow, unless its heights are given (see [Known
+  fragmentations](#known-fragmentations)). After a large fragmentation the measured positions follow the
+  centroid of the luminous cloud, which can lag the leading fragment.
 - The masses depend on the assumed density and on the drag and shape coefficients, which are not part of the
   uncertainties unless `--densunc` is given. The initial masses are usually 4-10 times underestimated.

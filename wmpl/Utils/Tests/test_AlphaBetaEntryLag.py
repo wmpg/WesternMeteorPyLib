@@ -19,8 +19,9 @@ import wmpl.Utils.AlphaBeta as AlphaBeta
 from wmpl.Utils.AlphaBeta import alphaBetaEntryLag, AlphaBetaSlantColumn, \
     slantColumnFromPoints, airSpeedAlongPath, gravityLengthAlongLine, stationLengthNoise, \
     fitAlphaBetaEntryLag, profileAlphaBetaEntryLag, profileRegionAlphaBetaLag, profileIntervalText, \
-    stationJackknifeAlphaBetaEntryLag, _entryLagModel, \
-    HT_NORM_CONST, RHO_ATM_0, RESCALE_COLUMN_TOP, ENTRY_LAG_MAX_OUTSIDE, ENTRY_LAG_PASS_TOL
+    stationJackknifeAlphaBetaEntryLag, _entryLagModel, knotHeightNormed, knotSpreadAlphaBetaEntryLag, \
+    alphaBetaVelocityNormed, HT_NORM_CONST, RHO_ATM_0, RESCALE_COLUMN_TOP, ENTRY_LAG_MAX_OUTSIDE, \
+    ENTRY_LAG_PASS_TOL
 from wmpl.Utils.Physics import EARTH_ROTATION_RATE
 from wmpl.Utils.TrajConversions import EARTH, G
 from wmpl.Utils.Tests.AlphaBetaSynthetic import integrateAlphaBetaPath
@@ -38,6 +39,13 @@ STATIONS = [('S1', 15.0, 0.01, 2), ('S2', 30.0, -0.02, 3), ('S3', 10.0, 0.0, 4)]
 # The synthetic data, generated once
 _SYNTHETIC = {}
 
+# Height of a fragmentation (m) and the fraction of mass lost
+FRAG_HT = 40000.0
+FRAG_MASS_LOST = 0.3
+
+# The synthetic data with the fragmentation and their fits, generated once
+_SYNTHETIC_FRAG = {}
+
 
 
 def _exponentialProfile():
@@ -54,7 +62,7 @@ def _exponentialProfile():
 
 
 def _observeSyntheticMeteor(alpha, beta, v_entry, time_step=0.01, ht_min=30000.0, v_min=0.0, \
-    noise_factor=1.0, seed=1):
+    noise_factor=1.0, seed=1, knot_ht_normed=None, knot_log_mass=None):
     """ Generate a synthetic meteor observed by the stations STATIONS, with the noise and the clock offset of
         each, between 90 km and the given smallest height and velocity.
 
@@ -69,6 +77,10 @@ def _observeSyntheticMeteor(alpha, beta, v_entry, time_step=0.01, ht_min=30000.0
         v_min: [float] Smallest velocity of the points, relative to the entry velocity. 0 by default.
         noise_factor: [float] Factor of the noise of the stations. 1 by default.
         seed: [int] Seed of the noise. 1 by default.
+        knot_ht_normed: [ndarray] Normalized heights at which the meteor loses mass, see
+            integrateAlphaBetaPath(). None by default.
+        knot_log_mass: [ndarray] Logarithm of the ratio of the masses before and after every knot. None by
+            default.
 
     Return:
         (time_data, length_data, ht_data, station_data, time_grid, length_true):
@@ -85,7 +97,7 @@ def _observeSyntheticMeteor(alpha, beta, v_entry, time_step=0.01, ht_min=30000.0
     # Integrate the distance at regular times
     time_grid = np.arange(0.0, 8.0, time_step)
     length_true, ht_true = integrateAlphaBetaPath(time_grid, v_entry, alpha, beta, SLOPE, ht_begin, \
-        rtol=1e-11, atol=1e-7)
+        rtol=1e-11, atol=1e-7, knot_ht_normed=knot_ht_normed, knot_log_mass=knot_log_mass)
 
     # Keep the points below 90 km and above the smallest height and velocity
     vel_true = np.gradient(length_true, time_grid)
@@ -717,6 +729,175 @@ def testProfileAlphaBetaEntryLagKeepsAlphaInBounds():
 
 
 
+def _syntheticFragmentingMeteor():
+    """ Generate the synthetic meteor of the tests, losing FRAG_MASS_LOST of its mass at FRAG_HT, with the
+        noise of the stations divided by 10, and fit it with a knot at that height and without it.
+
+    Return:
+        (inputs, fit_knot, fit_single):
+            - inputs: [tuple] Inputs of the fits, see _fitSyntheticMeteor().
+            - fit_knot: [tuple] Result of fitAlphaBetaEntryLag() with the knot and the Wald errors.
+            - fit_single: [tuple] Result of fitAlphaBetaEntryLag() without it.
+    """
+
+    if _SYNTHETIC_FRAG:
+        return _SYNTHETIC_FRAG['fits']
+
+    time_data, length_data, ht_data, station_data, _, _ = _observeSyntheticMeteor(ALPHA_TRUE, BETA_TRUE, \
+        V_ENTRY_TRUE, noise_factor=0.1, knot_ht_normed=np.array([FRAG_HT/HT_NORM_CONST]), \
+        knot_log_mass=np.array([-np.log(1.0 - FRAG_MASS_LOST)]))
+
+    inputs, fit_single = _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, V_ENTRY_TRUE)
+    knot_ht_normed = inputs[4].htNormedAtHeights(np.array([FRAG_HT]))
+    _, fit_knot = _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, V_ENTRY_TRUE, \
+        x0_alpha_beta=[fit_single[1:3]], knot_ht_normed=knot_ht_normed, estimate_errors=True)
+
+    _SYNTHETIC_FRAG['fits'] = (inputs, fit_knot, fit_single)
+
+    return _SYNTHETIC_FRAG['fits']
+
+
+
+def testKnotModelWithoutJumpsIsTheSingleBody():
+    """ Check that the model with knots at which no mass is lost is the model of a single body. """
+
+    length_scale = HT_NORM_CONST/np.sin(SLOPE)
+    ht_single, lag_single, v_single = alphaBetaEntryLag(ALPHA_TRUE, BETA_TRUE, length_scale)
+    ht_knots, lag_knots, v_knots = alphaBetaEntryLag(ALPHA_TRUE, BETA_TRUE, length_scale, \
+        knot_ht_normed=np.array([6.0, 5.0]), knot_log_mass=np.zeros(2))
+
+    assert np.max(np.abs(np.interp(ht_single, ht_knots, lag_knots) - lag_single)) < 1e-3
+    assert np.max(np.abs(np.interp(ht_single, ht_knots, v_knots) - v_single)) < 1e-9
+
+
+
+def testKnotModelFollowsAFragmentingMeteor():
+    """ Check that the velocity of the model with a knot is that of a meteor which loses mass there,
+        integrated in time independently of the model, and that it is continuous at the knot.
+    """
+
+    knot_ht_normed = np.array([FRAG_HT/HT_NORM_CONST])
+    knot_log_mass = np.array([-np.log(1.0 - FRAG_MASS_LOST)])
+
+    # Velocity of the integrated meteor, from its distances at short steps
+    time_data = np.arange(0.0, 8.0, 0.001)
+    length_data, ht_data = integrateAlphaBetaPath(time_data, V_ENTRY_TRUE, ALPHA_TRUE, BETA_TRUE, SLOPE, \
+        100000.0, rtol=1e-11, atol=1e-7, knot_ht_normed=knot_ht_normed, knot_log_mass=knot_log_mass)
+    v_integrated = np.gradient(length_data, time_data)/V_ENTRY_TRUE
+
+    # Velocity of the model at the same heights, away from the knot
+    ht_nodes, _, v_nodes = alphaBetaEntryLag(ALPHA_TRUE, BETA_TRUE, HT_NORM_CONST/np.sin(SLOPE), \
+        knot_ht_normed=knot_ht_normed, knot_log_mass=knot_log_mass)
+    ht_normed = ht_data/HT_NORM_CONST
+    away = (np.abs(ht_normed - knot_ht_normed[0]) > 0.01) & (v_integrated > 0.05) & (time_data > 0.01) \
+        & (time_data < time_data[-1] - 0.01)
+
+    assert np.max(np.abs(np.interp(ht_normed[away], ht_nodes, v_nodes) - v_integrated[away])) < 5e-5
+
+    # The velocity is continuous at the knot
+    v_above, v_below = np.interp(knot_ht_normed[0] + np.array([1e-7, -1e-7]), ht_nodes, v_nodes)
+    assert abs(v_above - v_below) < 1e-6
+
+
+
+def testKnotHeightGivesTheVelocityOfTheKnotModel():
+    """ Check that the single body with the alpha after the last knot, at the heights of knotHeightNormed(),
+        has the velocity of the model with knots.
+    """
+
+    knot_ht_normed = np.array([6.0, 5.4])
+    knot_log_mass = np.array([0.2, 0.5])
+    ht_nodes, _, v_nodes = alphaBetaEntryLag(ALPHA_TRUE, BETA_TRUE, HT_NORM_CONST/np.sin(SLOPE), \
+        knot_ht_normed=knot_ht_normed, knot_log_mass=knot_log_mass)
+
+    # Within the velocities of the model, where it is defined
+    inside = (v_nodes > 0.05) & (v_nodes < 0.999)
+    ht_single, alpha_last = knotHeightNormed(ht_nodes[inside], ALPHA_TRUE, knot_ht_normed, knot_log_mass)
+
+    assert abs(alpha_last/(ALPHA_TRUE*np.exp(np.sum(knot_log_mass)/3)) - 1) < 1e-12
+    assert np.max(np.abs(alphaBetaVelocityNormed(ht_single, alpha_last, BETA_TRUE) - v_nodes[inside])) < 1e-9
+
+
+
+def testFitAlphaBetaEntryLagRecoversTheMassLost():
+    """ Check that the fit with a knot at the height of a fragmentation recovers alpha before it, beta and the
+        fraction of the mass lost, within its Wald interval, and that the fit of a single body takes the
+        fragmentation into beta.
+    """
+
+    _, fit_knot, fit_single = _syntheticFragmentingMeteor()
+    _, alpha, beta, _, entry_fit, errors = fit_knot
+
+    assert abs(alpha/ALPHA_TRUE - 1) < 0.01
+    assert abs(beta/BETA_TRUE - 1) < 0.02
+    assert abs(entry_fit['knot_mass_lost'][0] - FRAG_MASS_LOST) < 0.01
+    assert errors['knot_mass_lost_lower'][0] <= FRAG_MASS_LOST <= errors['knot_mass_lost_upper'][0]
+    assert abs(entry_fit['alpha_last']/(ALPHA_TRUE*(1.0 - FRAG_MASS_LOST)**(-1/3.0)) - 1) < 0.01
+
+    # The fit of a single body is biased in beta
+    assert abs(fit_single[2]/BETA_TRUE - 1) > 3*abs(beta/BETA_TRUE - 1)
+
+
+
+def testProfileAlphaBetaEntryLagWithKnots():
+    """ Check that the profiles of the fit with a knot, which fit its u at every point, contain the true alpha
+        and beta, and that the models of their region carry their u, which covers the true one.
+    """
+
+    inputs, fit_knot, _ = _syntheticFragmentingMeteor()
+    time_data, lag_data, ht_normed, station_data, slant_column, _ = inputs
+
+    profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, fit_knot[1], fit_knot[2], fit_knot[4], n_grid=8)
+
+    assert profile['alpha_lower'] <= ALPHA_TRUE <= profile['alpha_upper']
+    assert profile['beta_lower'] <= BETA_TRUE <= profile['beta_upper']
+
+    # The knot u varies over the region and covers the truth
+    alpha_region, _, _, log_mass_region = profileRegionAlphaBetaLag(profile, n_params=1, with_knots=True)
+    assert log_mass_region.shape == (len(alpha_region), 1)
+    assert np.max(log_mass_region) - np.min(log_mass_region) > 1e-3
+    assert np.min(log_mass_region) <= -np.log(1.0 - FRAG_MASS_LOST) <= np.max(log_mass_region)
+
+
+
+def testKnotSpreadFindsTheHeightOfTheFragmentation():
+    """ Check that with the knot given above the height of the fragmentation, the spread which fits best is
+        the distance to the true height, and that the knot at the given height does not fit as well.
+    """
+
+    inputs, _, fit_single = _syntheticFragmentingMeteor()
+    time_data, lag_data, ht_normed, station_data, slant_column, sigma_length = inputs
+
+    spreads, delta_chi2, fits = knotSpreadAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, sigma_length, V_ENTRY_TRUE, np.array([FRAG_HT + 1500.0]), \
+        slant_column.htNormedAtHeights, 2000.0, fit_single[1], fit_single[2], spread_step=250.0, \
+        max_spreads=8)
+
+    assert len(fits) == len(spreads)
+    assert abs(spreads[np.argmin(delta_chi2)] - 1500.0) <= 250.0
+    assert delta_chi2[0] > 4.0
+
+
+
+def testStationJackknifeTakesTheKnots():
+    """ Check that the fits without every station take the knots, so their beta is that of the meteor, which
+        a fit of a single body overestimates by 15%.
+    """
+
+    inputs, fit_knot, _ = _syntheticFragmentingMeteor()
+    time_data, lag_data, ht_normed, station_data, slant_column, sigma_length = inputs
+
+    jackknife = stationJackknifeAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, sigma_length, V_ENTRY_TRUE, fit_knot[1], fit_knot[2], \
+        knot_ht_normed=fit_knot[4]['knot_ht_normed'])
+
+    assert len(jackknife) == len(STATIONS)
+    for _, _, beta_jack in jackknife:
+        assert abs(beta_jack/BETA_TRUE - 1) < 0.02
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
@@ -729,7 +910,11 @@ if __name__ == "__main__":
         testProfileAlphaBetaEntryLagOfAFastArc, testProfileAlphaBetaEntryLagEdgeModels, \
         testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
         testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, \
-        testStationJackknifeFindsABiasedStation, testProfileAlphaBetaEntryLagKeepsAlphaInBounds]
+        testStationJackknifeFindsABiasedStation, testProfileAlphaBetaEntryLagKeepsAlphaInBounds, \
+        testKnotModelWithoutJumpsIsTheSingleBody, testKnotModelFollowsAFragmentingMeteor, \
+        testKnotHeightGivesTheVelocityOfTheKnotModel, testFitAlphaBetaEntryLagRecoversTheMassLost, \
+        testProfileAlphaBetaEntryLagWithKnots, testKnotSpreadFindsTheHeightOfTheFragmentation, \
+        testStationJackknifeTakesTheKnots]
 
     for test in test_list:
         test()
