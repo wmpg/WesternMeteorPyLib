@@ -9213,18 +9213,17 @@ if __name__ == "__main__":
                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='0.5'))
 
         # Plot the masses with their 95% intervals
-        def _massEntry(label, mass, interval_values, color, no_lower_limit=False, no_upper_limit=False):
+        def _massEntry(label, mass, interval_values, color, no_upper_limit=False):
             """ One mass of the plot of the masses, with its interval from the values of the models within
-                the 95% interval, and the sides which are not constrained by the data open.
+                the 95% interval.
             """
 
             if not len(interval_values):
                 return (label, mass, None, None, color)
 
-            lower = 0.0 if no_lower_limit else np.min(interval_values)
             upper = np.inf if no_upper_limit else np.max(interval_values)
 
-            return (label, mass, lower, upper, color)
+            return (label, mass, np.min(interval_values), upper, color)
 
         # Without a significant deceleration the final masses are ~0
         if little_deceleration:
@@ -9235,8 +9234,6 @@ if __name__ == "__main__":
                 "masses, and the\nfireball most likely ablated completely".format(velocity_loss)
         else:
             masses = [
-                _massEntry("Initial", m_init_mu0, interval_masses[0][:, 0], 'tab:purple', \
-                    no_lower_limit=init_no_lower, no_upper_limit=init_no_upper),
                 _massEntry("Final, $\\mu$ = 0", m_final_mu0, interval_masses[0][:, 1], 'tab:blue'),
                 _massEntry("Final, $\\mu$ = 2/3", m_final_mu23, interval_masses[2/3][:, 1], 'tab:orange'),
                 _massEntry("Dynamic, end", dyn_mass, interval_dyn_masses, 'k', no_upper_limit=no_decel),
