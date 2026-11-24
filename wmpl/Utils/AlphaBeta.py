@@ -4937,7 +4937,8 @@ def plotProfileAlphaBeta(v_data, ht_data, fit, profile, delta_cost=True, degener
 
 def profileIntervalText(profile, name, fmt="{:.3g}", notes=True):
     """ Text of a profile interval from profileAlphaBetaLag(), which says if a side of it is not
-        constrained by the data.
+        constrained by the data. An interval of beta which reaches the lower bound of the fit starts at 0, as
+        beta is then consistent with zero (no mass loss), which is a physical limit and not a missing one.
 
     Arguments:
         profile: [dict] Result of profileAlphaBetaLag().
@@ -4945,10 +4946,12 @@ def profileIntervalText(profile, name, fmt="{:.3g}", notes=True):
 
     Keyword arguments:
         fmt: [str] Format of the limits. "{:.3g}" by default.
-        notes: [bool] Say which side of the interval is not constrained. True by default.
+        notes: [bool] Say which side of the interval is not constrained, or that beta is consistent with
+            zero. True by default.
 
     Return:
-        [str] The interval, e.g. "49.6 - 60.2", or "< 0.482 (no lower limit)".
+        [str] The interval, e.g. "49.6 - 60.2", "< 0.482 (no lower limit)" for alpha, or
+            "0 - 1.31 (consistent with zero)" for beta.
     """
 
     lower = fmt.format(profile[name + '_lower'])
@@ -4958,6 +4961,10 @@ def profileIntervalText(profile, name, fmt="{:.3g}", notes=True):
 
     if lower_open and upper_open:
         return "not constrained"
+
+    # Beta at the lower bound of the fit is consistent with zero
+    if lower_open and (name == 'beta'):
+        return "0 - {:s}{:s}".format(upper, " (consistent with zero)" if notes else "")
 
     if lower_open:
         return "< {:s}{:s}".format(upper, " (no lower limit)" if notes else "")
@@ -5541,6 +5548,52 @@ def alphaBetaMasses(
         return m_init, m_final, errors
 
     return m_init, m_final
+
+
+
+def profileMassesAlphaBetaLag(profile, alpha, beta, v_init, slope, ht_end, mu=0, dens=3500, \
+    shape_coeff=GAMMA_A, gamma=1.0, ci=95.0):
+    """ Initial and final masses of the best fit and of the models within the profile interval of one
+        parameter (see profileRegionAlphaBetaLag()), whose ranges are the profile intervals of the masses.
+        The intervals hold also when beta is consistent with zero, where the Wald intervals of
+        alphaBetaMasses(estimate_errors=True) from the covariance of ln alpha and ln beta are not meaningful,
+        as the masses are finite at beta = 0 (no mass loss).
+
+    Arguments:
+        profile: [dict] Result of profileAlphaBetaLag() or profileAlphaBetaEntryLag(), with the 2D grid.
+        alpha: [float] Alpha of the best fit.
+        beta: [float] Beta of the best fit.
+        v_init: [float] Initial velocity of the best fit (m/s).
+        slope: [float] Entry angle above the horizon (radians).
+        ht_end: [float] Height of the final mass in the exponential atmosphere of the model (m).
+
+    Keyword arguments:
+        mu: [float] Shape change coefficient. 0 by default.
+        dens: [float] Bulk density (kg/m^3). 3500 by default.
+        shape_coeff: [float] Shape coefficient, see alphaBetaMasses(). GAMMA_A by default.
+        gamma: [float] Drag parameter, see alphaBetaMasses(). 1.0 by default.
+        ci: [float] Confidence level of the intervals (percent). 95 by default.
+
+    Return:
+        (m_init, m_final):
+            - m_init: [ndarray] Initial masses of the models (kg), empty if the profile has no grid.
+            - m_final: [ndarray] Final masses of the models (kg), empty if the profile has no grid.
+    """
+
+    region_alpha, region_beta, region_v_init = profileRegionAlphaBetaLag(profile, ci=ci, n_params=1)
+
+    if len(region_alpha) == 0:
+        return np.array([]), np.array([])
+
+    # Add the best fit to the models within the interval
+    models = list(zip(region_alpha, region_beta, region_v_init)) + [(alpha, beta, v_init)]
+
+    # Compute the masses with the final velocity of every model at the given height
+    masses = np.array([alphaBetaMasses(a, b, slope, mu=mu, dens=dens, shape_coeff=shape_coeff, gamma=gamma, \
+        vel_init=v0, vel_end=alphaBetaVelocity(ht_end, a, b, v0)) for a, b, v0 in models])
+
+    return masses[:, 0], masses[:, 1]
+
 
 
 def fitAlphaBetaMass(
@@ -8373,13 +8426,22 @@ if __name__ == "__main__":
         if interval_models:
             interval_models.append((alpha, beta, v_init))
 
-        def _intervalText(values, fmt):
+        def _intervalText(values, fmt, no_lower=False, no_upper=False):
             """ Text of the 95% interval of a derived quantity from its values for the models of the interval,
-                empty without them.
+                empty without them, with the sides which are not constrained by the data marked.
             """
 
             if not len(values):
                 return ""
+
+            if no_lower and no_upper:
+                return "  [95% profile: not constrained]"
+
+            if no_upper:
+                return "  [95% profile: > " + fmt.format(np.min(values)) + " (no upper limit)]"
+
+            if no_lower:
+                return "  [95% profile: < " + fmt.format(np.max(values)) + " (no lower limit)]"
 
             return "  [95% profile: " + fmt.format(np.min(values)) + " - " + fmt.format(np.max(values)) + "]"
 
@@ -8405,8 +8467,16 @@ if __name__ == "__main__":
             sigma_slope = None
         sigma_dens = cml_args.densunc if (cml_args.errors and (cml_args.densunc is not None)) else None
 
-        # Compute initial and final mass (with error propagation if --errors was set)
-        if cml_args.errors:
+        # The interval of beta reaches zero at the lower bound of the fit, where ln(beta) goes to minus
+        #   infinity and the Wald uncertainties from the covariance of ln alpha and ln beta are not meaningful
+        beta_at_zero = lag_profile['beta_lower_at_bound']
+        if beta_at_zero and ((sigma_dens is not None) or (sigma_slope is not None)):
+            print("NOTE: --densunc and --slopeunc are not used, as the Wald uncertainties are not computed " \
+                "when beta reaches zero")
+
+        # Compute initial and final mass (with error propagation if --errors was set and beta is not
+        #   consistent with zero)
+        if cml_args.errors and (not beta_at_zero):
             m_init_mu0, m_final_mu0, mass_err_mu0 = alphaBetaMasses(alpha, beta, slope, \
                 mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
                 vel_init=v_init, vel_end=vel_end, estimate_errors=True, \
@@ -8488,7 +8558,7 @@ if __name__ == "__main__":
         print()
         print("Alpha-beta analysis")
         print("-------------------")
-        if cml_args.errors:
+        if cml_args.errors and (not beta_at_zero):
             print("Alpha = {:.3f} (+/-{:.1%})".format(alpha, fit_errors['alpha_std_rel']))
             print("Beta  = {:.4g} (+/-{:.1%})".format(beta, fit_errors['beta_std_rel']))
             print("corr(alpha, beta) = {:.3f}".format(fit_errors['corr']))
@@ -8508,8 +8578,16 @@ if __name__ == "__main__":
             print("{:.3g}% profile intervals (lag residuals assumed independent):".format(lag_profile['ci']))
         print("  Alpha: {:s}".format(profileIntervalText(lag_profile, 'alpha')))
         print("  Beta:  {:s}".format(profileIntervalText(lag_profile, 'beta')))
-        if lag_profile['beta_lower_at_bound'] and (not lag_profile['beta_upper_at_bound']):
-            print("NOTE: The lag only gives an upper limit of beta, so ln(beta) is not meaningful")
+
+        # Beta with only an upper limit is consistent with zero
+        if beta_at_zero and (not lag_profile['beta_upper_at_bound']):
+            print("NOTE: Beta is consistent with zero, as the lag gives only an upper limit of the mass loss")
+
+        # Without the Wald uncertainties the intervals are taken from the profile region
+        if beta_at_zero and cml_args.errors:
+            print("NOTE: The intervals of beta and of the quantities derived from it, e.g. the masses, are " \
+                "taken from the {:.3g}% profile region, as the Wald uncertainties are not meaningful when " \
+                "beta reaches zero".format(lag_profile['ci']))
 
         # Fit again without every station, as the intervals do not contain the systematic errors of the
         #   stations, and name the stations without which the fit is outside the intervals
@@ -8536,15 +8614,15 @@ if __name__ == "__main__":
         # Masses of the models within the 95% interval, for each mu (initial and final)
         interval_masses = {}
         for mu in [0, 2/3]:
-            interval_masses[mu] = np.array([alphaBetaMasses(a, b, slope, mu=mu, dens=cml_args.dens, \
-                shape_coeff=cml_args.ga, gamma=1.0, vel_init=v0, \
-                vel_end=alphaBetaVelocity(ht_data_rescaled[0], a, b, v0)) for a, b, v0 in interval_models])
-            interval_masses[mu] = interval_masses[mu].reshape(-1, 2)
+            interval_masses[mu] = np.column_stack(profileMassesAlphaBetaLag(lag_profile, alpha, beta, \
+                v_init, slope, ht_data_rescaled[0], mu=mu, dens=cml_args.dens, shape_coeff=cml_args.ga, \
+                gamma=1.0))
 
-        def _printMass(label, mass, mass_err, key, masses):
+        def _printMass(label, mass, mass_err, key, masses, no_lower=False, no_upper=False):
             """ Print a single mass line, annotated with its 1-sigma relative error and Wald CI
                 if --errors produced a (finite) estimate for it, plain otherwise, and with the 95% profile
-                interval if the masses of the models within it are given.
+                interval if the masses of the models within it are given, with the sides which are not
+                constrained by the data marked.
             """
             if (mass_err is not None) and np.isfinite(mass_err[key + '_std_rel']):
                 print("    {:s} = {:.3e} kg (+/-{:.1%})  [{:.3g}% CI: {:.3e} - {:.3e}]".format(
@@ -8554,17 +8632,27 @@ if __name__ == "__main__":
                 print("    {:s} = {:.3e} kg".format(label, mass))
 
             if len(masses):
-                print("      {:s}".format(_intervalText(masses, "{:.3e}").strip()))
+                print("      {:s}".format(_intervalText(masses, "{:.3e}", no_lower=no_lower, \
+                    no_upper=no_upper).strip()))
+
+        # The initial mass goes as alpha^-3, so it has no upper limit if alpha has no lower limit and the
+        #   other way around
+        init_no_lower = lag_profile['alpha_upper_at_bound']
+        init_no_upper = lag_profile['alpha_lower_at_bound']
 
         print("  mu = 0:")
-        _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init', [])
+        _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init', interval_masses[0][:, 0], \
+            no_lower=init_no_lower, no_upper=init_no_upper)
         _printMass("Final  ", m_final_mu0, mass_err_mu0, 'm_final', interval_masses[0][:, 1])
         print("  mu = 2/3:")
-        _printMass("Initial", m_init_mu23, mass_err_mu23, 'm_init', [])
+        _printMass("Initial", m_init_mu23, mass_err_mu23, 'm_init', interval_masses[2/3][:, 0], \
+            no_lower=init_no_lower, no_upper=init_no_upper)
         _printMass("Final  ", m_final_mu23, mass_err_mu23, 'm_final', interval_masses[2/3][:, 1])
-        if interval_models:
+        if interval_models and (mass_err_mu0 is not None):
             print("  The profile intervals include only the uncertainty of the fit, the Wald CIs also " \
                 "--densunc{:s}".format(" and --slopeunc" if cml_args.lagfit == 'simple' else ""))
+        elif interval_models:
+            print("  The profile intervals include only the uncertainty of the fit")
 
         print("*********************************************")
 
@@ -9085,8 +9173,8 @@ if __name__ == "__main__":
 
         # Plot the uncertainties of alpha and beta
         if cml_args.errors:
-            plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=fit_errors, fig=fig_sum, \
-                subplot_spec=grid_bottom[0])
+            plotAlphaBetaLagProfile(lag_profile, alpha, beta, errors=(None if beta_at_zero else fit_errors), \
+                fig=fig_sum, subplot_spec=grid_bottom[0])
         else:
             ax_note = fig_sum.add_subplot(grid_bottom[0])
             ax_note.axis('off')
@@ -9124,6 +9212,8 @@ if __name__ == "__main__":
                 "masses, and the\nfireball most likely ablated completely".format(velocity_loss)
         else:
             masses = [
+                _massEntry("Initial", m_init_mu0, interval_masses[0][:, 0], 'tab:purple', \
+                    no_upper_limit=init_no_upper),
                 _massEntry("Final, $\\mu$ = 0", m_final_mu0, interval_masses[0][:, 1], 'tab:blue'),
                 _massEntry("Final, $\\mu$ = 2/3", m_final_mu23, interval_masses[2/3][:, 1], 'tab:orange'),
                 _massEntry("Dynamic, end", dyn_mass, interval_dyn_masses, 'k', no_upper_limit=no_decel),

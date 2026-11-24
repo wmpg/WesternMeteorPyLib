@@ -38,7 +38,7 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     getDefaultInverseEiLUT, fitAlphaBetaLag, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 from wmpl.Utils.AlphaBeta import profileAlphaBetaLag, profileIntervalText, plotAlphaBetaLagProfile, \
     AlphaBetaPath, profileRegionAlphaBetaLag, plotAlphaBetaMassDiagram, plotAlphaBetaMasses, _formatMass, \
-    _formatMu
+    _formatMu, profileMassesAlphaBetaLag
 from wmpl.Utils.Tests.AlphaBetaSynthetic import integrateAlphaBetaPath
 
 
@@ -831,8 +831,9 @@ def testProfileAlphaBetaLagUpperLimit():
     assert profile['beta_lower_at_bound'] and (not profile['beta_upper_at_bound'])
     assert profile['beta_upper'] < ALPHA_BETA_BOUNDS[1][1]
     assert not (profile['alpha_lower_at_bound'] or profile['alpha_upper_at_bound'])
-    assert profileIntervalText(profile, 'beta').startswith("<")
-    assert profileIntervalText(profile, 'beta', notes=False) == "< {:.3g}".format(profile['beta_upper'])
+    assert profileIntervalText(profile, 'beta') == "0 - {:.3g} (consistent with zero)".format( \
+        profile['beta_upper'])
+    assert profileIntervalText(profile, 'beta', notes=False) == "0 - {:.3g}".format(profile['beta_upper'])
 
     # The plot is drawn also when the Wald region is far larger than the bounds of the fit
     fig = plotAlphaBetaLagProfile(profile, alpha, beta, errors=errors, title="Test")
@@ -859,6 +860,83 @@ def testProfileAlphaBetaLagUpperLimit():
         ("C", 0.5, None, None, 'k'), ("D", np.nan, None, None, 'k')])
     assert len(ax.get_yticklabels()) == 4
     plt.close(fig)
+
+
+
+def testProfileIntervalTextBounds():
+    """ The interval of beta which reaches the lower bound of the fit should start at zero, while an open side
+        of alpha and the upper side of beta stay without a limit.
+    """
+
+    def _profile(name, lower_at_bound, upper_at_bound):
+        """ Profile with the interval 0.5 - 2 of the given parameter and the given open sides. """
+
+        return {name + '_lower': 0.5, name + '_upper': 2.0, name + '_lower_at_bound': lower_at_bound, \
+            name + '_upper_at_bound': upper_at_bound}
+
+
+    # Beta at the lower bound is consistent with zero
+    assert profileIntervalText(_profile('beta', True, False), 'beta') == "0 - 2 (consistent with zero)"
+    assert profileIntervalText(_profile('beta', True, False), 'beta', notes=False) == "0 - 2"
+
+    # The other open sides have no limit
+    assert profileIntervalText(_profile('alpha', True, False), 'alpha') == "< 2 (no lower limit)"
+    assert profileIntervalText(_profile('alpha', True, False), 'alpha', notes=False) == "< 2"
+    assert profileIntervalText(_profile('beta', False, True), 'beta') == "> 0.5 (no upper limit)"
+    assert profileIntervalText(_profile('alpha', False, True), 'alpha') == "> 0.5 (no upper limit)"
+
+    # Both sides open or both closed
+    assert profileIntervalText(_profile('beta', True, True), 'beta') == "not constrained"
+    assert profileIntervalText(_profile('beta', False, False), 'beta') == "0.5 - 2"
+
+
+
+def testProfileMassesAlphaBetaLagBetaAtZero():
+    """ A meteor whose lag gives only an upper limit of beta should have bounded profile intervals of the
+        initial and final masses, as the masses are finite at beta = 0, while the Wald uncertainty of beta
+        from the covariance of ln alpha and ln beta explodes.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 5, beta_true=0.001)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=12)
+
+    # Beta is consistent with zero and its Wald uncertainty is not meaningful
+    assert profile['beta_lower_at_bound'] and (not profile['beta_upper_at_bound'])
+    assert (not np.isfinite(errors['beta_std_rel'])) or (errors['beta_std_rel'] > 1.0)
+
+    # Masses of the models within the interval, with the final velocity at the lowest point
+    ht_end = np.min(ht_data)
+    m_init_true, _ = alphaBetaMasses(ALPHA_TRUE, 0.001, SLOPE, dens=DENS_TRUE)
+    for mu in [0, 2/3]:
+
+        m_init, m_final = profileMassesAlphaBetaLag(profile, alpha, beta, v_init, SLOPE, ht_end, mu=mu, \
+            dens=DENS_TRUE)
+
+        # The intervals are finite, positive and bounded, and the final mass is never above the initial one
+        assert len(m_init) == len(m_final) > 1
+        assert np.all(np.isfinite(m_init)) and np.all(np.isfinite(m_final))
+        assert np.min(m_final) > 0
+        assert np.all(m_final <= m_init*(1 + 1e-12))
+        assert np.max(m_init)/np.min(m_init) < 2.0
+        assert np.max(m_final)/np.min(m_final) < 10.0
+
+        # The interval of the initial mass covers the true one, and the final mass reaches the initial one
+        #   at beta = 0
+        assert np.min(m_init) < m_init_true < np.max(m_init)
+        assert np.max(m_final) > 0.9*np.min(m_init)
+
+        # The best fit is included
+        _assertClose(m_init[-1], alphaBetaMasses(alpha, beta, SLOPE, mu=mu, dens=DENS_TRUE)[0], 1e-12, \
+            "initial mass of the best fit")
+
+    # Without the grid there is no interval
+    profile_no_grid = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=0)
+    m_init, m_final = profileMassesAlphaBetaLag(profile_no_grid, alpha, beta, v_init, SLOPE, ht_end)
+    assert len(m_init) == len(m_final) == 0
 
 
 
@@ -2211,6 +2289,8 @@ if __name__ == "__main__":
         testFitAlphaBetaLag,
         testFitAlphaBetaLagGravity,
         testFitAlphaBetaLagErrors,
+        testProfileIntervalTextBounds,
+        testProfileMassesAlphaBetaLagBetaAtZero,
         testFitAlphaBetaErrorEstimationRejectsQ4,
         testFitAlphaBetaErrorEstimationRejectsBadCi,
         testFitAlphaBetaErrorEstimationPointEstimateUnchanged,
