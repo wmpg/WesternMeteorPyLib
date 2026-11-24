@@ -6978,7 +6978,8 @@ def plotAlphaBetaMassDiagram(alpha, beta, slope, profile=None, zone_masses=(0.05
 
 
 
-def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), title=None, note=None):
+def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), mass_min=0.001, title=None, \
+    note=None):
     """ Plot masses with their 95% intervals as points with horizontal bars on a log axis, with the values
         written next to them, over the zones of plotAlphaBetaMassDiagram(): red below the first mass
         threshold, yellow between the thresholds and green above them.
@@ -6991,6 +6992,8 @@ def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), title=No
     Keyword arguments:
         axes: [Axes] Axes to draw into. A new figure if None (default).
         mass_thresholds: [tuple] Masses between the zones (kg), in increasing order. (0.05, 0.1) by default.
+        mass_min: [float] Lowest mass on the axis (kg), smaller masses and limits are shown with an arrow at
+            its left edge. 0.001 (1 g) by default.
         title: [str] Title of the plot. None by default.
         note: [str] Text written in the middle of the plot, e.g. why the masses are not constrained. None by
             default.
@@ -7010,8 +7013,8 @@ def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), title=No
     finite = [m for entry in masses for m in entry[1:4] if (m is not None) and np.isfinite(m) and (m > 0)]
     finite += list(mass_thresholds)
 
-    # Keep the axis between 1 mg and 1000 t, as the masses of degenerate fits can be absurd
-    x_lo, x_hi = max(0.2*np.min(finite), 1e-6), min(5*np.max(finite), 1e6)
+    # Keep the axis between the lowest mass and 1000 t, as the masses of degenerate fits can be absurd
+    x_lo, x_hi = max(0.2*np.min(finite), mass_min), min(5*np.max(finite), 1e6)
 
     for i, (label, mass, lower, upper, color) in enumerate(masses):
 
@@ -7020,15 +7023,15 @@ def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), title=No
         if (lower is not None) and (upper is not None):
 
             # Draw the interval within the axis, with an arrow if it goes beyond the axis
-            upper_drawn = min(upper, x_hi)
-            ax.plot([min(max(lower, x_lo), x_hi), upper_drawn], [y, y], color=color, lw=4, alpha=0.4, \
-                solid_capstyle='butt')
+            if upper >= x_lo:
+                ax.plot([min(max(lower, x_lo), x_hi), min(upper, x_hi)], [y, y], color=color, lw=4, \
+                    alpha=0.4, solid_capstyle='butt')
             if upper > x_hi:
                 ax.annotate("", xy=(x_hi, y), xytext=(x_hi/3, y), \
                     arrowprops=dict(arrowstyle='->', color=color, lw=1.5))
 
-            # Mark the interval without a lower limit with an arrow to the left edge of the axis
-            if lower <= 0:
+            # Mark the interval below the axis or without a lower limit with an arrow to the left edge
+            if lower < x_lo:
                 ax.annotate("", xy=(x_lo, y), xytext=(3*x_lo, y), \
                     arrowprops=dict(arrowstyle='->', color=color, lw=1.5))
 
@@ -7046,6 +7049,12 @@ def plotAlphaBetaMasses(masses, axes=None, mass_thresholds=(0.05, 0.1), title=No
         if np.isfinite(mass) and (mass > 0):
             if x_lo <= mass <= x_hi:
                 ax.scatter([mass], [y], color=color, s=40, zorder=3)
+
+            # Mark the mass below the axis without an interval with an arrow to the left edge
+            elif (mass < x_lo) and ((lower is None) or (upper is None)):
+                ax.annotate("", xy=(x_lo, y), xytext=(3*x_lo, y), \
+                    arrowprops=dict(arrowstyle='->', color=color, lw=1.5))
+
             value_text = _formatMass(mass)
         elif mass == 0:
             value_text = "~0"

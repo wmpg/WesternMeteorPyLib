@@ -858,8 +858,11 @@ def testProfileAlphaBetaLagUpperLimit():
     # The masses are drawn also without an interval, with an open side and when not defined
     fig, ax = plotAlphaBetaMasses([("A", 0.07, 0.03, 0.08, 'k'), ("B", 0.2, 0.1, np.inf, 'k'), \
         ("C", 0.5, None, None, 'k'), ("D", np.nan, None, None, 'k'), ("E", 0.3, 0.0, 0.9, 'k'), \
-        ("F", 0.3, 0.0, np.inf, 'k')])
-    assert len(ax.get_yticklabels()) == 6
+        ("F", 0.3, 0.0, np.inf, 'k'), ("G", 1e-5, 1e-6, 1e-4, 'k'), ("H", 1e-5, None, None, 'k')])
+    assert len(ax.get_yticklabels()) == 8
+
+    # The axis starts at 1 g, the smaller masses are shown with arrows at its left edge
+    assert ax.get_xlim()[0] == 0.001
     texts = [text.get_text() for text in ax.texts]
     assert any(text.endswith("(95%: > 100 g)") for text in texts)
     assert any(text.endswith("(95%: < 900 g)") for text in texts)
