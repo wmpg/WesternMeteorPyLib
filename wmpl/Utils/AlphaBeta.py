@@ -8818,7 +8818,7 @@ if __name__ == "__main__":
                     t_dyn = time_data[midpoint_index]
                     v_dyn_smooth = expLinearVelocity(t_dyn, traj.v_init, *lag_fit_params)
 
-                    # Dynamic mass with the velocity relative to the air, as for the alpha-beta model
+                    # Dynamic mass with the air-relative velocity, as for the alpha-beta model
                     dyn_mass_smooth = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, \
                         ht_dyn_smooth, traj.jdt_ref, v_dyn_smooth - air_offset, 1000*abs(decel), \
                         gamma=1.0, shape_factor=cml_args.ga)
@@ -8980,7 +8980,7 @@ if __name__ == "__main__":
         #   peak
         if cml_args.lagsmooth:
 
-            # Velocities of the lag smoothing relative to the air, as for the alpha-beta model
+            # Air-relative velocities of the lag smoothing, as for the alpha-beta model
             vel_data_smooth_air = vel_data_smooth - air_offset
 
             dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data, traj.jdt_ref, vel_data_smooth_air)
