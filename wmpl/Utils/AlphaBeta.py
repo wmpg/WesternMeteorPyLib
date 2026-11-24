@@ -5115,7 +5115,9 @@ def plotAlphaBetaLagProfile(profile, alpha, beta, errors=None, title=None, fig=N
     lines = ["alpha = {:.3g} ({:s})".format(alpha, profileIntervalText(profile, 'alpha', notes=False)), \
         "beta = {:.3g} ({:s})".format(beta, profileIntervalText(profile, 'beta', notes=False)), \
         "{:.3g}% profile intervals".format(ci)]
-    if np.isfinite(profile['corr_log']):
+
+    # The correlation of ln alpha and ln beta is not meaningful when beta reaches zero
+    if np.isfinite(profile['corr_log']) and (not profile['beta_lower_at_bound']):
         lines.append("corr(ln alpha, ln beta) = {:.2f}".format(profile['corr_log']))
 
     # One line in the title of the figure, several lines over the plot in a figure with several plots
