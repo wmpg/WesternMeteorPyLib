@@ -253,13 +253,14 @@ DragFit) lets alpha jump at them with the full fit. At a fragmentation the meteo
 mass and keeps its shape, and the cameras follow its leading fragment, so alpha grows by `(1 - f)^(-1/3)` while
 beta and the velocity are continuous (`alphaBetaEntryLag()`). The full fit then also fits `f` at every height
 (`fitAlphaBetaEntryLag(knot_ht_normed=...)`), from the fit of a single body. Heights outside the observed part
-are not used. The output gives `f` at every height, with its Wald interval with `--errors` (marked when it
-contains 0: the motion then shows no loss of mass there), alpha before the first fragmentation and after the
-last one, and the reduced chi-squared with and without the fragmentations. The initial mass is that of the
-meteoroid at entry, from alpha before the first fragmentation, and the final mass, the dynamic mass and the
-dynamic pressure are those of the leading fragment. The profile intervals fit `f` at every model. With several
-fragmentations, their losses can take up all of the loss of mass: beta then goes to its lower bound, where the
-lag only gives an upper limit of it and only the profile intervals are given.
+are not used. The output gives `f` at every height and, with `--errors`, its Wald interval, or its range over
+the profile region when beta is consistent with zero, as for the masses (marked when it contains 0: the motion
+then shows no loss of mass there), alpha before the first fragmentation and after the last one, and the reduced
+chi-squared with and without the fragmentations. The initial mass is that of the meteoroid at entry, from alpha
+before the first fragmentation, and the final mass, the dynamic mass and the dynamic pressure are those of the
+leading fragment. The profile intervals fit `f` at every model. With several fragmentations, their losses can
+take up all of the loss of mass: beta then goes to its lower bound, where it is consistent with zero and only
+the intervals of the profile region are given.
 
 How spread a fragmentation was, or how well its flare marks it, is not fixed by the motion alone, so the fit is
 repeated with the fragmentations moved down below their heights, in steps of at least 250 m down to the last
