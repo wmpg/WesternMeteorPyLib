@@ -333,7 +333,7 @@ def expLinearLag(t, a1, a2, t0, decel):
     lag[t <  t0] = abs(a1) - abs(a1)*np.exp(abs(a2)*t[t < t0])
 
     # Second part computed with constant deceleration
-    lag[t >= t0] = (-abs(a1)*np.exp(abs(a2)*t0) # Continue at the last point
+    lag[t >= t0] = (abs(a1) - abs(a1)*np.exp(abs(a2)*t0) # Continue at the last point
                     - abs(a1*a2)*np.exp(abs(a2)*t0)*((t[t >= t0] - t0)) # Continue with the same velocity
                     + ((t[t >= t0] - t0)**2)*decel/2.0) # Apply constant deceleration
 
