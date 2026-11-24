@@ -15,6 +15,7 @@ import numpy as np
 import scipy.integrate
 import scipy.special
 
+import wmpl.Utils.AlphaBeta as AlphaBeta
 from wmpl.Utils.AlphaBeta import alphaBetaEntryLag, AlphaBetaSlantColumn, \
     slantColumnFromPoints, airSpeedAlongPath, gravityLengthAlongLine, stationLengthNoise, \
     fitAlphaBetaEntryLag, profileAlphaBetaEntryLag, profileRegionAlphaBetaLag, profileIntervalText, \
@@ -136,7 +137,7 @@ def _syntheticMeteor():
 
 
 
-def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, **kwargs):
+def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, air_speed=0.0, **kwargs):
     """ Fit the entry lag of a synthetic meteor in the exponential atmosphere.
 
     Arguments:
@@ -147,6 +148,8 @@ def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, **
         v_ref: [float] Slope of the reference line of the lag (m/s).
 
     Keyword arguments:
+        air_speed: [float] Speed of the air along the path (m/s), if the distances are along the line in an
+            inertial frame, passed to slantColumnFromPoints() and fitAlphaBetaEntryLag(). 0 by default.
         kwargs: [dict] Passed to fitAlphaBetaEntryLag().
 
     Return:
@@ -159,14 +162,14 @@ def _fitSyntheticMeteor(time_data, length_data, ht_data, station_data, v_ref, **
     profile_hts, profile_dens = _exponentialProfile()
 
     slant_column, length_air = slantColumnFromPoints(time_data, length_data, ht_data, profile_hts, \
-        profile_dens, np.sin(SLOPE))
+        profile_dens, np.sin(SLOPE), air_speed=air_speed)
     ht_normed = slant_column.htNormed(length_air)
 
     lag_data = length_data - v_ref*time_data
     sigma_length = stationLengthNoise(time_data, length_data, station_data)
 
     result = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, slant_column.lengthScale, \
-        sigma_length, v_ref, **kwargs)
+        sigma_length, v_ref, air_speed=air_speed, **kwargs)
 
     return (time_data, lag_data, ht_normed, station_data, slant_column, sigma_length), result
 
@@ -189,6 +192,22 @@ def _syntheticFit(v_ref_offset=-60.0, estimate_errors=False):
         estimate_errors=estimate_errors)
 
     return inputs[:5], result
+
+
+
+def _fastArcFit():
+    """ Fit the entry lag of a fast meteor with a large alpha and beta, which barely decelerates, observed
+        above 0.9 of its entry velocity.
+
+    Return:
+        (inputs, result): See _fitSyntheticMeteor().
+    """
+
+    v_entry = 60000.0
+    observed = _observeSyntheticMeteor(3000.0, 20.0, v_entry, time_step=0.004, ht_min=10000.0, v_min=0.9, \
+        noise_factor=3.0, seed=2)
+
+    return _fitSyntheticMeteor(*observed[:4], v_entry - 60.0)
 
 
 
@@ -442,10 +461,7 @@ def testFitAlphaBetaEntryLagReachesAllPoints():
         the points below the lowest height which a model reaches are weighted as at entry speed.
     """
 
-    v_entry = 60000.0
-    observed = _observeSyntheticMeteor(3000.0, 20.0, v_entry, time_step=0.004, ht_min=10000.0, v_min=0.9, \
-        noise_factor=3.0, seed=2)
-    inputs, result = _fitSyntheticMeteor(*observed[:4], v_entry - 60.0)
+    inputs, result = _fastArcFit()
     ht_normed, slant_column = inputs[2], inputs[4]
     alpha, beta = result[1], result[2]
 
@@ -463,6 +479,98 @@ def testFitAlphaBetaEntryLagReachesAllPoints():
     assert lag_below[2] < lag_below[1] < lag_below[0]
     assert np.all(v_below[1:] == 1.0)
     assert np.isclose(outside_below, 2/3)
+
+
+
+def testFitAlphaBetaEntryLagInTheAirFrame():
+    """ The distances along the line of an inertial solution exceed those flown through the air by the speed
+        of the air along the path times the time, so the slope of the lag is the inertial entry velocity, and
+        the fit and its profile give the entry velocity relative to the air, which scales the model.
+    """
+
+    air_speed = 300.0
+    v_ref = V_ENTRY_TRUE + air_speed - 60.0
+
+    # Distances of the synthetic meteor, flown through the air, along the line in the inertial frame
+    time_data, length_air, ht_data, station_data = _syntheticMeteor()
+    length_line = length_air + air_speed*(time_data - time_data[np.argmin(length_air)])
+
+    inputs, result = _fitSyntheticMeteor(time_data, length_line, ht_data, station_data, v_ref, \
+        air_speed=air_speed)
+    time_data, lag_data, ht_normed, station_data, slant_column, sigma_length = inputs
+    v_init, alpha, beta, _, entry_fit = result
+
+    assert abs(v_init - V_ENTRY_TRUE) < 5.0, v_init
+    assert np.isclose(alpha, ALPHA_TRUE, rtol=0.01), alpha
+    assert np.isclose(beta, BETA_TRUE, rtol=0.03), beta
+
+    # Without the air speed, the fit gives the same model with the inertial entry velocity
+    result_inertial = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, sigma_length, v_ref)
+    assert np.isclose(result_inertial[1], alpha) and np.isclose(result_inertial[2], beta)
+    assert np.isclose(result_inertial[0] - v_init, air_speed)
+
+    # The models of the profile have the entry velocity relative to the air
+    profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, alpha, beta, entry_fit, n_grid=0)
+    for name in ['alpha', 'beta']:
+        assert np.all(np.abs(profile[name + '_profile_models'][:, 2] - V_ENTRY_TRUE) < 50.0)
+
+
+
+def testFitAlphaBetaEntryLagWithPreciseDistances():
+    """ With distances so precise that the starting models cost more than the models which do not reach the
+        points and are rejected, the fit still starts from and ends at a model which reaches them.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column), _ = _syntheticFit()
+
+    result = fitAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, slant_column.lengthScale, \
+        np.full(len(time_data), 0.02), V_ENTRY_TRUE - 60.0)
+
+    assert _entryLagModel(result[1], result[2], ht_normed, slant_column.lengthScale)[2] \
+        <= ENTRY_LAG_MAX_OUTSIDE
+    assert np.isclose(result[1], ALPHA_TRUE, rtol=0.02), result[1]
+    assert np.isclose(result[2], BETA_TRUE, rtol=0.05), result[2]
+
+
+
+def testProfileAlphaBetaEntryLagOfAFastArc():
+    """ The profile of beta of a fast meteor which barely decelerates finds a model which reaches the points
+        at every beta, also where the models around the previous point of the profile do not reach them.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column, _), result = _fastArcFit()
+    _, alpha, beta, _, entry_fit = result
+
+    profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, alpha, beta, entry_fit, n_grid=0)
+
+    assert np.all(np.isfinite(profile['beta_profile'][1]))
+
+
+
+def testProfileAlphaBetaEntryLagEdgeModels():
+    """ The models kept for the intervals of derived quantities are at the refined crossings of the
+        threshold, so they span the profile intervals.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column), result = _syntheticFit()
+    _, alpha, beta, _, entry_fit = result
+
+    profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+        slant_column.lengthScale, alpha, beta, entry_fit, n_grid=0)
+
+    for idx, name in enumerate(['alpha', 'beta']):
+
+        edge_models = profile[name + '_edge_models']
+        assert edge_models.shape == (2, 4)
+
+        # The rise of the chi-squared at the models is the threshold, and they are at the limits
+        assert np.all(edge_models[:, 3] <= profile['threshold'])
+        assert np.all(edge_models[:, 3] > profile['threshold'] - 0.05)
+        limits = [profile[name + '_lower'], profile[name + '_upper']]
+        assert np.allclose(np.sort(edge_models[:, idx]), limits, rtol=1e-3)
 
 
 
@@ -582,6 +690,33 @@ def testStationJackknifeFindsABiasedStation():
 
 
 
+
+def testProfileAlphaBetaEntryLagKeepsAlphaInBounds():
+    """ Check that the profile of beta follows the valley of ln alpha only within the bounds of alpha of the
+        fit, also where the valley crosses a bound.
+    """
+
+    (time_data, lag_data, ht_normed, station_data, slant_column), result = _syntheticFit()
+    sigma_length = stationLengthNoise(time_data, lag_data, station_data)
+
+    # Narrow the bounds of alpha around the best fit, so the valley of the beta profile crosses them
+    bounds_original = AlphaBeta.ALPHA_BETA_BOUNDS
+    alpha_bounds = (0.997*result[1], 1.003*result[1])
+    try:
+        AlphaBeta.ALPHA_BETA_BOUNDS = (alpha_bounds, bounds_original[1])
+        profile = profileAlphaBetaEntryLag(time_data, lag_data, ht_normed, station_data, \
+            slant_column.lengthScale, result[1], result[2], result[4])
+
+    finally:
+        AlphaBeta.ALPHA_BETA_BOUNDS = bounds_original
+
+    alpha_profile = profile['beta_profile_models'][:, 0]
+
+    assert np.all(alpha_profile >= alpha_bounds[0]*(1 - 1e-6))
+    assert np.all(alpha_profile <= alpha_bounds[1]*(1 + 1e-6))
+
+
+
 if __name__ == "__main__":
 
     # Run all tests
@@ -590,8 +725,11 @@ if __name__ == "__main__":
         testAirSpeedAlongPath, testGravityLengthAlongLine, testStationLengthNoise, testFitAlphaBetaEntryLag, \
         testFitAlphaBetaEntryLagIgnoresClockOffsets, testFitAlphaBetaEntryLagErrors, \
         testFitAlphaBetaEntryLagConverges, testFitAlphaBetaEntryLagReachesAllPoints, \
+        testFitAlphaBetaEntryLagInTheAirFrame, testFitAlphaBetaEntryLagWithPreciseDistances, \
+        testProfileAlphaBetaEntryLagOfAFastArc, testProfileAlphaBetaEntryLagEdgeModels, \
         testProfileAlphaBetaEntryLag, testStationLengthNoiseNeedsEnoughPoints, \
-        testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, testStationJackknifeFindsABiasedStation]
+        testStationLengthNoiseOfShortStationsIgnoresTheDeceleration, \
+        testStationJackknifeFindsABiasedStation, testProfileAlphaBetaEntryLagKeepsAlphaInBounds]
 
     for test in test_list:
         test()
