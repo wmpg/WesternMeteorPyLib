@@ -1205,7 +1205,7 @@ class DragFit(object):
         if (not self.drag_above) or (not np.isfinite(self.vel_grid[0])):
             return None, None
 
-        # Work done by gravity from the top to the first point, per unit mass
+        # Work of gravity per unit mass down to the first point
         g_above = self.g_grid[:self.i_first + 1]
         grav_work = np.sum(0.5*(g_above[1:] + g_above[:-1])*np.diff(self.len_grid[:self.i_first + 1]))
 

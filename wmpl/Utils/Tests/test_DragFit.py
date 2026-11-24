@@ -211,7 +211,7 @@ def testResidualAutocorrTime():
     tau_list = []
     for phi in (0.0, 0.8):
 
-        # Replace the observed lengths by the model plus the residuals in time order
+        # Replace the observed lengths by the model plus correlated residuals
         drag_fit_res = copy.copy(drag_fit)
         drag_fit_res.traj = copy.deepcopy(drag_fit.traj)
         for obs in drag_fit_res.traj.observations:

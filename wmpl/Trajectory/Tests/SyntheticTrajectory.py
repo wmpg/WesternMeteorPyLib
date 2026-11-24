@@ -180,6 +180,18 @@ class DragMeteor(object):
 
 
 
+def deceleratingMeteor():
+    """ Integrate the meteor of the tests of the initial velocity, visible from about 85 km while it slows
+        from 18 to 10 km/s.
+
+    Return:
+        [DragMeteor] The integrated meteor.
+    """
+
+    return DragMeteor(18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
+
+
+
 class GravityDragMeteor(object):
     def __init__(self, v_init, azim, elev, mass, duration, ht_beg=90000.0, bulk_density=3500.0, gamma_a=0.8, \
         sigma=0.01e-6, air_rotation=False):

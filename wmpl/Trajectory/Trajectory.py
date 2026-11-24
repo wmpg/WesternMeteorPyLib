@@ -2693,7 +2693,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Assign geometric uncertainty flag, if it was changed
     traj_best.geometric_uncert = geometric_uncert
 
-    # Sample the velocity within its uncertainty, which the spread of the runs does not include
+    # Sample the velocity uncertainty, which the spread of the runs misses
     if (not traj.estimate_timing_vel) or (getattr(traj, 'v_init_drag_delta', None) is not None):
         mc_results = sampleMCVelocities(mc_results)
 
@@ -3052,7 +3052,7 @@ GRAVITY_DROP_MIN_VEL = 1000.0
 # Smallest number of used points to which the drag equation is fitted for the speeds of the gravity drop
 GRAVITY_VEL_MIN_POINTS = 12
 
-# Lowest height of the shortest window of the sliding fit without a note on the deceleration (m)
+# Lowest height of the shortest sliding window without a deceleration note (m)
 V_INIT_DRAG_NOTE_HT = 75000.0
 
 
@@ -3371,10 +3371,10 @@ class Trajectory(object):
         #   velocity (linear fit)
         self.v_init_ht = v_init_ht
 
-        # Take the initial velocity from the drag fit instead of the sliding fit
+        # Take the initial velocity from the drag fit, not the sliding fit
         self.v_init_drag = v_init_drag
 
-        # Correction by the drag fit and its uncertainty, kept for the Monte Carlo runs (m/s)
+        # Drag fit correction and its uncertainty for the Monte Carlo runs (m/s)
         self.v_init_drag_delta = None
         self.v_init_drag_stddev = None
 
@@ -7905,18 +7905,17 @@ class Trajectory(object):
                 self.jacchia_fit = self.fitJacchiaLag(self.observations)
 
 
-        # Otherwise take the initial velocity from the drag fit, without the deceleration by the air
-        #   (optional)
+        # Otherwise take the initial velocity from the drag fit (optional)
         elif getattr(self, 'v_init_drag', False):
 
             velocity_fit_drag = None
 
-            # In a Monte Carlo run, add the correction of the main solution to its line
+            # In a Monte Carlo run, add the main correction to its line
             if _mc_run:
                 if getattr(self, 'v_init_drag_delta', None) is not None:
                     velocity_fit_drag = [self.v_init + self.v_init_drag_delta, self.velocity_fit[1]]
 
-            # Otherwise fit the drag and keep its correction for the Monte Carlo runs
+            # Otherwise fit the drag, keeping its correction for the Monte Carlo runs
             else:
                 v_drag, intercept_drag, v_drag_stddev = self.calcDragFitVelocity()
 
@@ -7947,7 +7946,7 @@ class Trajectory(object):
                         self.v_init_stddev))
 
 
-        # Otherwise note if the shortest window of the sliding fit reaches where fireballs decelerate
+        # Otherwise note if the shortest sliding window reaches where fireballs decelerate
         elif self.verbose and (not _mc_run) and (not _rerun_bad_picks):
 
             # Times and heights of the used points

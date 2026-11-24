@@ -18,12 +18,12 @@ from types import SimpleNamespace
 import numpy as np
 
 import wmpl.Trajectory.Trajectory as TrajectoryModule
-from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
+from wmpl.Trajectory.Tests.SyntheticTrajectory import deceleratingMeteor, observeMeteor
 from wmpl.Utils.DragFit import DragFit
 
 
-# Synthetic fireball, visible from about 85 km while it slows from 18 to 10 km/s
-METEOR = DragMeteor(18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
+# Synthetic fireball slowing from 18 to 10 km/s
+METEOR = deceleratingMeteor()
 
 
 
@@ -111,7 +111,7 @@ def testDragFitVelocity():
     # The lag is computed with the same velocity
     assert traj.velocity_fit[0] == traj.v_init
 
-    # The correction is the difference from the line of the solution without the option
+    # The correction is the difference from the line without the option
     traj_line = _solvedMeteor(False)
     assert abs(traj.v_init_drag_delta - (traj.v_init - traj_line.v_init)) < 1e-6
 
@@ -129,7 +129,7 @@ def testSameRotatingAirInEveryPass():
         False.
     """
 
-    # The synthetic fireball is solved with the air at rest, here it rotates
+    # The fireball is solved with the air at rest, here it rotates
     traj = copy.copy(_solvedMeteor(True))
     traj.air_rotation = True
     orbit = traj.orbit
@@ -138,7 +138,7 @@ def testSameRotatingAirInEveryPass():
     traj.orbit = None
     v_no_orbit = traj.calcDragFitVelocity()
 
-    # An orbit with an air speed of 300 m/s is not used either
+    # An orbit with an air speed of 300 m/s is ignored too
     traj.orbit = SimpleNamespace(v_init=traj.v_init, v_init_norot=traj.v_init - 300.0)
     v_fake_orbit = traj.calcDragFitVelocity()
 
@@ -149,7 +149,7 @@ def testSameRotatingAirInEveryPass():
     v_rotating, _ = DragFit(traj, drag_above=True).dragFreeVelocity()
     assert abs(v_rotating - v_orbit[0]) < 1e-6
 
-    # With the air at rest the velocity changes, here by about 0.6 mm/s
+    # With the air at rest it changes, here by about 0.6 mm/s
     traj.air_rotation = False
     v_at_rest = traj.calcDragFitVelocity()
     assert abs(v_at_rest[0] - v_orbit[0]) > 1e-4
@@ -163,7 +163,7 @@ def testMonteCarloRunReusesTheCorrection():
 
     traj = _solvedMeteor(True)
 
-    # A noisy Monte Carlo copy of the solution, with and without the option
+    # A noisy Monte Carlo copy, with and without the option
     np.random.seed(0)
     _, traj_mc, observations = next(TrajectoryModule.trajNoiseGenerator(traj, 1.0))
     traj_mc.calcDragFitVelocity = _noDragFit
@@ -225,6 +225,7 @@ def testMonteCarloSamplesTheDragFitVelocity():
     assert sampled == [3]
     assert v_init_sigma[True] > 1.0
     assert v_init_sigma[False] < 1e-6
+
 
 
 def testNoteWhenTheShortestWindowIsLow():

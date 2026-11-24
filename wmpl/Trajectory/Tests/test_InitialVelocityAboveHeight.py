@@ -14,12 +14,12 @@ import io
 import numpy as np
 import scipy.optimize
 
-from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
+from wmpl.Trajectory.Tests.SyntheticTrajectory import deceleratingMeteor, observeMeteor
 from wmpl.Utils.Math import lineFunc
 
 
 # The synthetic meteor, and the height above which its initial velocity is estimated (km)
-METEOR = DragMeteor(18000.0, 120.0, 45.0, 0.01, 0.05, 2.7, 6.0)
+METEOR = deceleratingMeteor()
 HT_INIT = 80.0
 
 
