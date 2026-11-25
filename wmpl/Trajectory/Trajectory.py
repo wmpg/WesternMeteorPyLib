@@ -2834,7 +2834,7 @@ class Trajectory(object):
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
-        save_kml=False, kml_measured=False, l_bfgs_b_cutoff=5, parentlogger=None):
+        save_kml=False, kml_measured=False, air_rotation=True, l_bfgs_b_cutoff=5, parentlogger=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2905,6 +2905,9 @@ class Trajectory(object):
                 trajectory of the drag fit, see Utils.TrajectoryKML.trajectoryToKML(). False by default.
             kml_measured: [bool] Add the projected points, lines of sight and residuals of the measurements to
                 the 3D KML. False by default.
+            air_rotation: [bool] Take the drag against the air, which rotates with the Earth, into account in
+                the gravity drop across the path (see gravityDropTable). True by default. If False, the air
+                is at rest in ECI.
             l_bfgs_b_cutoff: [int] cutoff for switching timing models - default 5
 
         """
@@ -3680,7 +3683,7 @@ class Trajectory(object):
         if len(all_times) < 4:
             self.log.warning(f'!!! Error, there are less than 4 points for velocity estimation above the given height of {bottom_ht/1000:.2f} km!')
             self.log.info('Using automated velocity estimation with the sliding fit...')
-            return None, None
+            return None, None, None
 
         # Take off the length gained from gravity along the path, so the slope is the velocity at the beginning
         all_state_vect_dists = np.array(all_state_vect_dists) \
