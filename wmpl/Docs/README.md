@@ -9,6 +9,8 @@ and what the options are for.
 - [Drag fit of the motion along a trajectory](DragFit.md) — the drag model of the motion along a solved
   trajectory, sampling it by height or time for dark flight, and what the ballistic coefficient says
   about ablation and fragmentation.
+- [Alpha-beta fit of a fireball](AlphaBeta.md) — alpha, beta and the entry velocity fitted to the lag, their
+  uncertainties on the meteorite survival diagram, and when beta only has an upper limit.
 - [Correlating RMS data](Correlator.md) — finding and solving trajectories automatically across a whole
   RMS archive, the operation modes, the databases, and distributed processing across several servers.
 - [REBOUND orbital integration](REBOUND.md) — integrating a meteoroid orbit backwards or forwards,
