@@ -3682,6 +3682,10 @@ class Trajectory(object):
             self.log.info('Using automated velocity estimation with the sliding fit...')
             return None, None
 
+        # Take off the length gained from gravity along the path, so the slope is the velocity at the beginning
+        all_state_vect_dists = np.array(all_state_vect_dists) \
+            - self.gravityLengthAlongPath(observations, np.array(all_times))
+
         # Fit a line through the time vs. state vector distance data
         line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
             sigma=all_inv_weights)
@@ -7197,7 +7201,7 @@ class Trajectory(object):
 
                 else:
                     if self.verbose:
-                        self.log.info("All picks are within 3 sigma...")
+                        self.log.info("All picks are within {:.1f} sigma...".format(self.reject_n_sigma_outliers))
 
 
             else:
