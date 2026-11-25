@@ -331,6 +331,7 @@ class FileMonitorApp(QMainWindow):
             self.traj = solveTrajectoryGeneric(jdt_ref, meteor_list, self.dir_path, solver=kwargs.solver, \
                 max_toffset=max_toffset, monte_carlo=False, save_results=False, \
                 geometric_uncert=kwargs.uncertgeom, gravity_correction=(not kwargs.disablegravity),
+                air_rotation=(not kwargs.disableairrot), \
                 gravity_factor=kwargs.gfact,
                 plot_all_spatial_residuals=False, plot_file_type=kwargs.imgformat, \
                 show_plots=False, v_init_part=kwargs.velpart, v_init_ht=vinitht, \

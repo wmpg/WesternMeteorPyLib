@@ -173,18 +173,19 @@ if __name__ == "__main__":
                     else:
                         save_results = False
 
-                    # Init the trajectory (LoS or intersecing planes)
+                    # Init the trajectory (LoS or intersecing planes), with the air at rest as in the
+                    #   simulation
                     traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
                         meastype=2, show_plots=False, save_results=save_results, monte_carlo=False, \
-                        gravity_correction=gravity_correction, traj_id=unique_id)
+                        gravity_correction=gravity_correction, air_rotation=False, traj_id=unique_id)
 
 
                 elif traj_solver == 'monte_carlo':
 
-                    # Init the trajectory
+                    # Init the trajectory, with the air at rest as in the simulation
                     traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
                         meastype=2, show_plots=False, mc_runs=100, gravity_correction=gravity_correction,\
-                        traj_id=unique_id)
+                        air_rotation=False, traj_id=unique_id)
 
                 
                 elif 'gural' in traj_solver:

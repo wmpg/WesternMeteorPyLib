@@ -58,9 +58,10 @@ except ImportError:
     print("Dynesty package not found. Install dynesty to use the Dynesty functions.")
     DYNESTY_FOUND = False
 
-from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
+from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants, \
+    fitLagTimeOffset, lagTimeOffsetMax
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin, \
-    constantsRelativeToGround, constantsToInertial, atmDensityDescription
+    constantsRelativeToGround, constantsToInertial, atmDensityDescription, Fragment
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
@@ -115,6 +116,10 @@ def jsonDefault(o):
     # sets -> lists
     if isinstance(o, set):
         return list(o)
+
+    # fragments -> dict of all their attributes, most of which are not in their __dict__
+    if isinstance(o, Fragment):
+        return o.toDict()
 
     # custom objects -> dict (best effort)
     if hasattr(o, "__dict__"):
@@ -764,21 +769,22 @@ def plotSimVsObsResiduals(obs_data, sim_data=None, output_folder='', file_name='
                     vel_plot[1:], '.', \
                         color=station_colors[station], label=station)
 
+        # Find the simulated lengths at the observed times and the time at which the simulation passes the
+        #   first point
+        len_sim, time_offset = simulatedLengthsDynesty(sim_data, obs_data)
+
         # plot lag_arr vs leading_frag_time_arr without nan values
         sim_lag = (sim_data.leading_frag_length_arr-sim_data.leading_frag_length_arr[index])\
               - ((obs_data.v_init)*(sim_data.time_arr-sim_data.time_arr[index]))
         
-        sim_lag -= sim_lag[index]
+        # Zero the lag at the first point, and shift it by the time offset
+        sim_lag -= sim_lag[index] + obs_data.v_init*time_offset
         # plot lag_arr vs leading_frag_time_arr
-        ax3.plot(sim_data.time_arr-sim_data.time_arr[index], sim_lag, color=color_sim, label=label_sim)
+        ax3.plot(sim_data.time_arr-sim_data.time_arr[index] + time_offset, sim_lag, color=color_sim, \
+            label=label_sim)
 
-        # inerpoate the lag_arr to the leading_frag_time_arr
-        sim_lag = np.interp(obs_data.height_lag,
-                                    np.flip(sim_data.leading_frag_height_arr),
-                                    np.flip(sim_lag))
-        
-        # make the difference between the no_noise_lag and the obs_data.lag
-        sim_diff_lag = obs_data.lag - sim_lag
+        # Compute the lag residuals as in the likelihood, from the lengths at the observed times
+        sim_diff_lag = obs_data.length - len_sim
         
         # for each station in obs_data_plot
         for station in np.unique(obs_data.stations_lag):
@@ -852,6 +858,12 @@ def _compute_sim_lag(sim, obs_data):
     v0 = getattr(obs_data, 'v_init', np.nan)  # use obs_data.v_init as in your code
     lag = (L - L[idx]) - (v0*(t - t[idx]))
     lag = lag - lag[idx]  # zero at reference
+
+    # Shift the lag by the time offset at which the simulation passes the first point, as in the likelihood
+    if getattr(obs_data, 'length', None) is not None:
+        _, time_offset = simulatedLengthsDynesty(sim, obs_data)
+        lag = lag - v0*time_offset
+
     return lag
 
 
@@ -1654,13 +1666,17 @@ def plotObsVsHeight(obs_data, sim_data=None, output_folder='', file_name='', col
             #   - ((24710)*(sim_data.time_arr-sim_data.time_arr[index]))        
         sim_lag -= sim_lag[index]
 
+        # Shift the simulated lag by the time offset at which the simulation passes the first point
+        len_sim, time_offset = simulatedLengthsDynesty(sim_data, obs_data)
+        sim_lag -= obs_data.v_init*time_offset
+
         best_line, = ax_lag.plot(sim_lag, sim_data.leading_frag_height_arr/1000, color=color_sim, label=label_sim)
         
         # RESIDUALS (interpolated at obs heights)
         lum_res = obs_data.luminosity - np.interp(obs_data.height_lum, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.luminosity_arr))
         mag_res = np.interp(obs_data.height_lum, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.abs_magnitude)) - obs_data.absolute_magnitudes
         vel_res = (obs_data.velocities - np.interp(obs_data.height_lag, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.leading_frag_vel_arr)))/1000
-        lag_res = obs_data.lag - np.interp(obs_data.height_lag, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_lag))
+        lag_res = obs_data.length - len_sim
 
         # ax_lum_res.plot(lum_res, obs_data.height_lum/1000, '.', color=color_sim)
         # ax_mag_res.plot(mag_res, obs_data.height_lum/1000, '.', color=color_sim)
@@ -1989,6 +2005,10 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         os.makedirs(output_folder +os.sep+ 'fit_plots')
 
     best_guess_obj_plot = runSimulationDynesty(best_guess, obs_data, variables, fixed_values)
+
+    # Find the time at which the best fit passes the height of the first lag point
+    _, best_guess_time_offset = simulatedLengthsDynesty(best_guess_obj_plot, obs_data)
+    print("Best fit lag time offset t0: {:+.2f} ms".format(1000*best_guess_time_offset))
 
     # find the index of m_init in variables
     i_m_init = variables.index('m_init')
@@ -2533,6 +2553,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         for i in range(len(best_guess)):
             f.write(variables[i]+':\t'+str(best_guess[i])+'\n')
         f.write('\nBest fit logL: '+str(best_guess_logL)+'\n') # dynesty_run_results.logl[sim_num])+'\n')
+        f.write("Best fit lag time offset t0: {:+.2f} ms ({:s})\n".format(1000*best_guess_time_offset, \
+            "fitted" if getattr(obs_data, 'fit_lag_time_offset', True) else "fixed"))
         if diff_logL is not None:
             f.write('REAL logL: '+str(real_logL)+'\n')
             f.write('Diff logL (Best fit - REAL): '+str(diff_logL)+'\n')
@@ -3952,6 +3974,9 @@ class ObservationData:
         self.time_lag = self.time_lag-np.min(self.time_lag)
         self.time_lum = self.time_lum-np.min(self.time_lum)
 
+        # Compute the lag with the same velocity as the simulated lag, without the intercept of the solver
+        self.lag = self.length - self.v_init*self.time_lag
+
         # usually noise_lum = 2.5
         if np.isnan(self.noise_lum):
             self.noise_lum = self.fitLumNoise()
@@ -4231,12 +4256,22 @@ class ObservationData:
 
             return lag_funct
         
+        def lagPolyResiduals(params, t_time, l_data):
+            """ Residuals of the lag after the fitted deceleration and a straight line are taken out. The
+                line is free because the lag is computed with a velocity which differs from the initial one,
+                so its linear trend is not noise.
+            """
+
+            res = l_data - lagPoly(t_time, *params)
+
+            return res - np.polyval(np.polyfit(t_time, res, 1), t_time)
+
         def lagPolyRes(params, t_time, l_data):
             """
             Residual function for the optimization.
             """
 
-            return np.sum((l_data - lagPoly(t_time, *params))**2)
+            return np.sum(lagPolyResiduals(params, t_time, l_data)**2)
 
         # initial guess of deceleration decel equal to linear fit of velocity
         p0 = [np.mean(self.lag), 0, 0, np.mean(self.time_lag)]
@@ -4244,9 +4279,7 @@ class ObservationData:
         opt_res = minimize(lagPolyRes, p0, args=(np.array(self.time_lag), np.array(self.lag)), method='Nelder-Mead')
 
         # sample the fit for the velocity and acceleration
-        a_t0, b_t0, c_t0, t0 = opt_res.x
-        fitted_lag_t0 = lagPoly(self.time_lag, a_t0, b_t0, c_t0, t0)
-        residuals_t0 = self.lag - fitted_lag_t0
+        residuals_t0 = lagPolyResiduals(opt_res.x, np.array(self.time_lag), np.array(self.lag))
         # avg_residual = np.mean(abs(residuals))
         rmsd_lag_polyn = np.sqrt(np.mean(residuals_t0**2))
 
@@ -4725,6 +4758,8 @@ class ObservationData:
                 return {k: convertToSerializable(v) for k, v in obj.items()}
             elif isinstance(obj, list):
                 return [convertToSerializable(v) for v in obj]
+            elif isinstance(obj, Fragment):
+                return convertToSerializable(obj.toDict())
             elif hasattr(obj, '__dict__'):  # Convert objects with __dict__
                 return convertToSerializable(obj.__dict__)
             else:
@@ -4759,7 +4794,8 @@ class ObservationData:
 ###############################################################################
 
 def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_all_cameras=True, 
-    only_plot=True, cores=None, pool_MPI=None, pick_position=0, extraprior_file='', save_backup=True):
+    only_plot=True, cores=None, pool_MPI=None, pick_position=0, extraprior_file='', save_backup=True, \
+    fit_lag_time_offset=True):
     """ Create the output folder if it doesn't exist and run the Dynesty simulation.
 
     Arguments:
@@ -4776,6 +4812,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
         pick_position: [int] Index to pick specific position/station data. 0 by default.
         extraprior_file: [str] Path to an extra prior file. Empty string by default.
         save_backup: [bool] Flag to save a backup of the results. True by default.
+        fit_lag_time_offset: [bool] Fit the time at which the simulation passes the height of the first lag
+            point to the lengths of every simulation, instead of fixing it to the time of that point. True by
+            default.
 
     Return:
         None
@@ -4867,6 +4906,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
             obs_data.disruption_on = False
 
             obs_data.lum_eff_type = 5
+
+            # Fit the time offset of the simulation from the first lag point
+            obs_data.fit_lag_time_offset = fit_lag_time_offset
 
             obs_data.h_kill = np.min([np.min(obs_data.height_lum),np.min(obs_data.height_lag)])-1000
             # check if the h_kill is smaller than 0
@@ -5945,7 +5987,15 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
         constantsRelativeToGround(const_nominal, getattr(real_event, 'v_rotation', 0.0))
 
     if dir_path!="" and file_name!="":
-        _, _, _ = runSimulation(const_nominal, compute_wake=False) # completes the some fields in const_nominal that will be saved
+        # Run the simulation, which completes some fields of the constants that are saved
+        frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
+
+        # Save the time offset of the simulation from the first lag point with the constants
+        const_nominal.fit_lag_time_offset = getattr(real_event, 'fit_lag_time_offset', True)
+        if getattr(real_event, 'length', None) is not None:
+            _, const_nominal.lag_time_offset = simulatedLengthsDynesty(SimulationResults(const_nominal, \
+                frag_main, results_list, wake_results), real_event)
+
         saveConstants(const_nominal, dir_path, file_name)
 
     return const_nominal
@@ -6151,6 +6201,63 @@ def addFragToConst(const_nominal, var_frag_dic):
 # Function: dynesty
 ###############################################################################
 
+def simulatedLengthsDynesty(simulation_results, obs_metsim_obj):
+    """ Compute the simulated lengths of the leading fragment at the times of the observed lag points. The
+        simulation passes the height of the first lag point, where the observed length is zero, at the time
+        offset t0 fitted to all lengths with the squared residuals of the likelihood (see
+        wmpl.MetSim.GUI.fitLagTimeOffset), or at t = 0 if the offset is not fitted.
+
+    Arguments:
+        simulation_results: [SimulationResults object] Simulation results.
+        obs_metsim_obj: [ObservationData object] Observations, with the lengths (m), times (s), heights (m)
+            and stations of the lag points.
+
+    Return:
+        (len_sim, time_offset):
+            - len_sim: [ndarray] Simulated length from the first lag point at the time of every lag point
+                (m), NaN outside of the simulation.
+            - time_offset: [float] Time at which the simulation passes the height of the first lag point (s).
+    """
+
+    ht_arr = np.asarray(simulation_results.leading_frag_height_arr, dtype=np.float64)
+    len_arr = np.asarray(simulation_results.leading_frag_length_arr, dtype=np.float64)
+    time_arr = np.asarray(simulation_results.time_arr, dtype=np.float64)
+    vel_arr = np.asarray(simulation_results.leading_frag_vel_arr, dtype=np.float64)
+
+    time_data = np.asarray(obs_metsim_obj.time_lag, dtype=np.float64)
+    len_data = np.asarray(obs_metsim_obj.length, dtype=np.float64)
+
+    # Find the simulated length and time at the height of the first lag point
+    len_beg = np.interp(obs_metsim_obj.height_lag[0], np.flip(ht_arr), np.flip(len_arr), left=np.nan, \
+        right=np.nan)
+    time_beg = np.interp(obs_metsim_obj.height_lag[0], np.flip(ht_arr), np.flip(time_arr), left=np.nan, \
+        right=np.nan)
+
+    # The simulation does not reach the first point
+    if np.isnan(len_beg) or (len(time_arr) < 2):
+        return np.zeros_like(len_data) + np.nan, 0.0
+
+    # Take the simulated length and time from the first point
+    norm_sim_time = time_arr - time_beg
+    norm_sim_len = len_arr - len_beg
+
+    # Fit the time at which the simulation passes the height of the first point, bounded by the intervals
+    #   between the points of every station
+    time_offset = 0.0
+    if getattr(obs_metsim_obj, 'fit_lag_time_offset', True):
+        stations_lag = np.asarray(obs_metsim_obj.stations_lag)
+        time_offset_max = lagTimeOffsetMax([time_data[stations_lag == station] \
+            for station in np.unique(stations_lag)])
+        time_offset = fitLagTimeOffset(norm_sim_time, norm_sim_len, vel_arr, time_data, len_data, \
+            time_offset_max=time_offset_max)
+
+    # Sample the simulated length at the observed times, shifted by the offset
+    len_sim = np.interp(time_data - time_offset, norm_sim_time, norm_sim_len, left=np.nan, right=np.nan)
+
+    return len_sim, time_offset
+
+
+
 def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout=20):
     """ Calculate the log-likelihood for Dynesty.
 
@@ -6265,44 +6372,20 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
 
     ### LAG CALC ###
 
-    lag_sim = simulation_results.leading_frag_length_arr - (obs_metsim_obj.v_init*simulation_results.time_arr)
+    # Compare the lengths at the observed times, with the simulation passing the first point at the fitted
+    #   time offset, which is equal to comparing the lags computed with the same velocity
+    len_sim, _ = simulatedLengthsDynesty(simulation_results, obs_metsim_obj)
 
-    simulated_lag = np.interp(obs_metsim_obj.height_lag,
-                              np.flip(simulation_results.leading_frag_height_arr),
-                              np.flip(lag_sim),
-                              left=np.nan, right=np.nan)
-
-    lag_sim = simulated_lag - simulated_lag[0]
-
-    # check if the length of the lag_sim is the same as the length of the obs_metsim_obj.lag
-    if np.sum(~np.isnan(lag_sim)) != np.sum(~np.isnan(obs_metsim_obj.lag)):
+    # Reject the simulation if it does not cover all observed lag points
+    if np.sum(~np.isnan(len_sim)) != np.sum(~np.isnan(obs_metsim_obj.length)):
         return -np.inf
-
-    # # create a plot with the obs_metsim_obj.luminosity and simulated_lc_intensity
-    # plt.figure(figsize=(12,5))
-    # plt.subplot(1,2,1)
-    # plt.title("Luminosity")
-    # plt.plot(obs_metsim_obj.height_lum, obs_metsim_obj.luminosity, 'o', label='Observed', markersize=4)
-    # plt.plot(obs_metsim_obj.height_lum, simulated_lc_intensity, '-', label='Interpolated')
-    # plt.plot(obs_metsim_obj.height_lum, np.interp(obs_metsim_obj.height_lum,np.flip(simulation_results.leading_frag_height_arr),np.flip(simulation_results.luminosity_arr)), 'r--', label='Not Integrated', markersize=4)
-    # plt.xlabel("Height (m)")
-    # plt.ylabel("Luminosity (J/s)")
-    # plt.legend()
-    # plt.subplot(1,2,2)
-    # plt.title("Lag")
-    # plt.plot(obs_metsim_obj.height_lag, obs_metsim_obj.lag, 'o', label='Observed', markersize=4)
-    # plt.plot(obs_metsim_obj.height_lag, lag_sim, '-', label='Interpolated')
-    # plt.xlabel("Height (m)")
-    # plt.ylabel("Lag (m)")
-    # plt.legend()
-    # plt.tight_layout()
-    # plt.show()
 
     ### Log Likelihood ###
 
     log_likelihood_lum = np.nansum(-0.5*np.log(2*np.pi*obs_metsim_obj.noise_lum**2) - 0.5/(obs_metsim_obj.noise_lum**2)*(obs_metsim_obj.luminosity - simulated_lc_intensity) ** 2)
     # print("log_likelihood_lum:", log_likelihood_lum)
-    log_likelihood_lag = np.nansum(-0.5*np.log(2*np.pi*obs_metsim_obj.noise_lag**2) - 0.5/(obs_metsim_obj.noise_lag**2)*(obs_metsim_obj.lag - lag_sim) ** 2)
+    log_likelihood_lag = np.nansum(-0.5*np.log(2*np.pi*obs_metsim_obj.noise_lag**2) \
+        - 0.5/(obs_metsim_obj.noise_lag**2)*(obs_metsim_obj.length - len_sim)**2)
     # print("log_likelihood_lag:", log_likelihood_lag)
 
     log_likelihood_tot = log_likelihood_lum + log_likelihood_lag
@@ -6572,6 +6655,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('--cores', metavar='CORES', type=int, default=None,
         help="Number of cores to use. Default = all available.")
 
+    arg_parser.add_argument('--notimeoffset', dest='fit_lag_time_offset', action="store_false",
+        help="Fix the simulation to the time of the first lag point, instead of fitting the time at " \
+        "which it passes the height of that point to the lengths of every simulation.")
+
     # Optional: suppress warnings
     # warnings.filterwarnings('ignore')
 
@@ -6588,6 +6675,7 @@ if __name__ == "__main__":
     if cml_args.pick_pos < 0 or cml_args.pick_pos > 1:
         raise ValueError("pick_position must be between 0 and 1, 0 leading edge, 0.5 centroid full meteor, 1 trailing edge.")
 
-    setupDirAndRunDynesty(cml_args.input_dir, output_dir=cml_args.output_dir, prior=cml_args.prior, resume=cml_args.new_dynesty, use_all_cameras=cml_args.all_cameras, only_plot=cml_args.only_plot, cores=cml_args.cores, pick_position=cml_args.pick_pos, extraprior_file=cml_args.extraprior, save_backup=cml_args.save_backup)
+    setupDirAndRunDynesty(cml_args.input_dir, output_dir=cml_args.output_dir, prior=cml_args.prior, resume=cml_args.new_dynesty, use_all_cameras=cml_args.all_cameras, only_plot=cml_args.only_plot, cores=cml_args.cores, pick_position=cml_args.pick_pos, extraprior_file=cml_args.extraprior, save_backup=cml_args.save_backup, \
+        fit_lag_time_offset=cml_args.fit_lag_time_offset)
 
     print("\nDONE: Completed processing of all files in the input directory.\n")
