@@ -163,6 +163,65 @@ def testBothSpellingsOfUncertaintiesArePresent():
         "the two spellings must be the same object, not two copies that can drift apart"
 
 
+def testSavePickleSurvivesAnyFileName(tmp_path):
+    """ savePickle writes through a temporary file, which must not collide with the target name.
+
+    The temporary name used to be file_name.replace('.p', '_x'), a global substring replace. A name
+    containing no '.p' produced a temporary name equal to the target, so the just-written file was
+    removed and the rename then raised. It must also stay invisible to the correlator, which globs
+    for "*.pickle*" to find work, and it must not be left behind.
+    """
+
+    # Its own directory, so the listing assertions below hold under pytest and under the standalone
+    #   runner, which hands every test the same temporary directory
+    tmp_dir = os.path.join(str(tmp_path), "savepickle_names")
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    for file_name in ["a_trajectory.pickle", "results.dat", "a.pre.pickle", "noextension"]:
+
+        savePickle({"name": file_name}, tmp_dir, file_name)
+
+        assert loadPickle(tmp_dir, file_name) == {"name": file_name}
+        assert os.path.isfile(os.path.join(tmp_dir, file_name))
+
+        # Nothing else is left in the directory, under any name
+        assert os.listdir(tmp_dir) == [file_name]
+
+        os.remove(os.path.join(tmp_dir, file_name))
+
+    # Overwriting keeps the new content, and the file is never absent in between
+    savePickle({"v": 1}, tmp_dir, "t.pickle")
+    savePickle({"v": 2}, tmp_dir, "t.pickle")
+    assert loadPickle(tmp_dir, "t.pickle") == {"v": 2}
+    assert os.listdir(tmp_dir) == ["t.pickle"]
+
+
+def testLoadBackFillsTheLbfgsbCutoff(tmp_path):
+    """ A trajectory pickled before l_bfgs_b_cutoff existed still loads with a usable value.
+
+    estimateTimingAndVelocity reads self.l_bfgs_b_cutoff, so an older pickle without it would raise
+    AttributeError. loadPickle back-fills it, as it does for gravity_factor and v0z.
+    """
+
+    tmp_dir = os.path.join(str(tmp_path), "lbfgsb_backfill")
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    # The back-fill only applies to objects that look like a trajectory
+    legacy = SimpleNamespace(orbit=None, observations=[], gravity_factor=1.0, v0z=0.0)
+    assert not hasattr(legacy, "l_bfgs_b_cutoff")
+
+    savePickle(legacy, tmp_dir, "legacy_trajectory.pickle")
+    loaded = loadPickle(tmp_dir, "legacy_trajectory.pickle")
+
+    assert hasattr(loaded, "l_bfgs_b_cutoff"), "the cutoff was not back-filled"
+    assert loaded.l_bfgs_b_cutoff == 5
+
+    # An explicit value is left alone
+    explicit = SimpleNamespace(orbit=None, observations=[], l_bfgs_b_cutoff=7)
+    savePickle(explicit, tmp_dir, "explicit_trajectory.pickle")
+    assert loadPickle(tmp_dir, "explicit_trajectory.pickle").l_bfgs_b_cutoff == 7
+
+
 def testOrbitSurvivesTheRoundTrip():
     """ The orbit hangs off the trajectory and is the part most often read from an archived file. """
 
@@ -188,6 +247,8 @@ if __name__ == "__main__":
         testBothSpellingsOfUncertaintiesArePresent,
         testOrbitSurvivesTheRoundTrip,
         testLoadBackFillsTheLegacyMisspelling,
+        testSavePickleSurvivesAnyFileName,
+        testLoadBackFillsTheLbfgsbCutoff,
         ]
 
     tmp_holder = tempfile.mkdtemp()
@@ -196,7 +257,8 @@ if __name__ == "__main__":
     for test_func in test_functions:
 
         try:
-            if test_func is testLoadBackFillsTheLegacyMisspelling:
+            if test_func in (testLoadBackFillsTheLegacyMisspelling, testSavePickleSurvivesAnyFileName,
+                             testLoadBackFillsTheLbfgsbCutoff):
                 test_func(tmp_holder)
             else:
                 test_func()
