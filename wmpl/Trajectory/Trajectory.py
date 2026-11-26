@@ -48,7 +48,7 @@ except ImportError:
 
 import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.AtmosphereDensity import getAtmDensity, getAtmDensity_vect
+from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.DragVelocity import DRAG_VEL_ATM_POINTS, DRAG_VEL_GRID_POINTS, DRAG_VEL_LOG_K_BOUNDS, \
     DRAG_VEL_LOG_K_SCAN, DRAG_VEL_PHI_MAX, DRAG_VEL_RAMP_MAX, DRAG_VEL_V_BOUNDS, cumulativeTrapz, \
     fitDragVelocity
@@ -3581,7 +3581,7 @@ def lineDensityGravityDropped(state_vect, radiant_eci, len_grid, jd, drop_grid=N
     lla = np.array([cartesian2Geo(jd, *eci_grid[i]) for i in atm_ind])
     len_atm = len_grid[atm_ind]
 
-    rho_atm = getAtmDensity(lla[:, 0], lla[:, 1], np.maximum(lla[:, 2], 0.0), jd, space_weather='constant')
+    rho_atm = getAtmDensity_vect(lla[:, 0], lla[:, 1], np.maximum(lla[:, 2], 0.0), jd)
     rho = np.exp(np.interp(len_grid, len_atm, np.log(rho_atm)))
     ht_grid = np.interp(len_grid, len_atm, lla[:, 2])
 
