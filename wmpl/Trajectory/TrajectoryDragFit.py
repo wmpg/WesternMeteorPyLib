@@ -1282,23 +1282,27 @@ class DragTimingFit(object):
             result['reason'] = "ballistic coefficient K pinned at max_k0 = {:.1f} m^2/kg".format(max_k0)
             return result
 
-        # Reject poorly constrained K at the end of the trajectory
-        if (not np.isfinite(log_k_std_fit)) or (log_k_std_fit > DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD):
-            result['reason'] = "end K poorly constrained (sigma ln K = {:.2f})".format(log_k_std_fit)
-            return result
-
-        # Combine drag-fit Jacobian uncertainty and MC ensemble spread in quadrature
+        # Combine drag-fit Jacobian uncertainty and MC ensemble spread in quadrature before gating
         log_k_std_tot = log_k_std_fit
-        if (self.mc_k_lo is not None) and (self.mc_k_hi is not None) and (self.mc_k_lo[-1] > 0.0) \
-            and (self.mc_k_hi[-1] >= self.mc_k_lo[-1]):
-            log_k_std_mc = 0.5*float(np.log(self.mc_k_hi[-1]/self.mc_k_lo[-1]))
-            log_k_std_tot = float(np.hypot(log_k_std_fit, log_k_std_mc))
+        if (self.mc_k_lo is not None) and (self.mc_k_hi is not None):
+            if (not np.isfinite(self.mc_k_lo[-1])) or (not np.isfinite(self.mc_k_hi[-1])) \
+                or (self.mc_k_lo[-1] <= 0.0) or (self.mc_k_hi[-1] < self.mc_k_lo[-1]):
+                log_k_std_tot = np.inf
+            else:
+                log_k_std_mc = 0.5*float(np.log(self.mc_k_hi[-1]/self.mc_k_lo[-1]))
+                log_k_std_tot = float(np.hypot(log_k_std_fit, log_k_std_mc))
+
+        result['log_k_std'] = log_k_std_tot
+
+        # Reject poorly constrained K at the end of the trajectory (including MC ensemble spread)
+        if (not np.isfinite(log_k_std_tot)) or (log_k_std_tot > DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD):
+            result['reason'] = "end K poorly constrained (sigma ln K = {:.2f})".format(log_k_std_tot)
+            return result
 
         mass = float(ballisticCoeffMass(k_end, bulk_density, gamma_a))
         result['mass'] = mass
         result['mass_lo'] = float(mass*np.exp(-3.0*log_k_std_tot))
         result['mass_hi'] = float(mass*np.exp(3.0*log_k_std_tot))
-        result['log_k_std'] = log_k_std_tot
 
         return result
 

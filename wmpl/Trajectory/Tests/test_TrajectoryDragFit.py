@@ -398,6 +398,15 @@ def testReportSummaryAndTerminalMassGating(tmp_path):
     assert 'Terminal dynamic mass:' in report_txt
     assert 'not estimated' not in report_txt
 
+    # Wide MC ensemble spread on K_end must also suppress the terminal dynamic mass estimate
+    df_fall = traj_fall.drag_timing_fit
+    k_end = float(np.exp(df_fall.log_k_grid[-1]))
+    df_fall.mc_k_lo = np.full_like(df_fall.len_grid, k_end*np.exp(-2.0))
+    df_fall.mc_k_hi = np.full_like(df_fall.len_grid, k_end*np.exp(2.0))
+    tm_wide_mc = df_fall.terminalDynamicMass()
+    assert tm_wide_mc['mass'] is None
+    assert 'poorly constrained' in tm_wide_mc['reason']
+
     # 2. Small high-altitude meteor (100 -> 88 km, 35 km/s): terminal mass must NOT be estimated
     jd = 2460000.5
     state_vect = np.array(geo2Cartesian(np.radians(45.0), np.radians(15.0), 100000.0, jd))
