@@ -21,7 +21,8 @@ import scipy.interpolate
 from wmpl.Utils.Math import meanAngle, vectNorm, integratedAutocorrTime
 from wmpl.Utils.Physics import GAMMA_A, dynamicPressure, dynamicMass, earthRotationVelocity
 from wmpl.Utils.Plotting import stationColors
-from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere
+from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere, \
+    loadAtmosphereProfile, atmDensProfileMSIS, atmProfileJoinFactor, msisModelName
 from wmpl.Utils.TrajConversions import EARTH, G
 
 
@@ -240,7 +241,7 @@ def exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method
 
 
 
-def airDensityProfile(lat, lon, ht_data, jd, ht_min=None):
+def airDensityProfile(lat, lon, ht_data, jd, ht_min=None, atm_table=None):
     """ Compute the air density profile of a meteor at the mean location of its points, from below its lowest
         point up to RESCALE_COLUMN_TOP, for exponentialAtmosphereHeights() and AlphaBetaSlantColumn.
 
@@ -253,6 +254,9 @@ def airDensityProfile(lat, lon, ht_data, jd, ht_min=None):
     Keyword arguments:
         ht_min: [float] Lowest height of the profile (m), e.g. to evaluate the model below the last point. One
             step of the profile below the lowest point by default.
+        atm_table: [tuple] Density table (table_ht, table_log10_rho) of an atmosphere profile
+            (loadAtmosphereProfile()), used up to its top, with the MSIS model scaled to join it above
+            (atmDensProfileMSIS()). If None, the MSIS model is used. None by default.
 
     Return:
         (profile_hts, profile_dens):
@@ -269,13 +273,17 @@ def airDensityProfile(lat, lon, ht_data, jd, ht_min=None):
 
     profile_hts = np.concatenate([np.arange(ht_min, RESCALE_FINE_TOP, RESCALE_STEP_FINE), \
         np.arange(RESCALE_FINE_TOP, RESCALE_COLUMN_TOP + 1, RESCALE_STEP_COARSE)])
-    profile_dens = getAtmDensity_vect(lat_mean, lon_mean, profile_hts, jd)
+    if atm_table is None:
+        profile_dens = getAtmDensity_vect(lat_mean, lon_mean, profile_hts, jd)
+    else:
+        profile_dens = atmDensProfileMSIS(profile_hts, lat_mean, lon_mean, jd, *atm_table)
 
     return profile_hts, profile_dens
 
 
 
-def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method='column', return_density_ratio=False):
+def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method='column', return_density_ratio=False, \
+    atm_table=None):
     """ Given observed heights, rescale them from the real MSIS atmosphere to the simplified exponential
         atmosphere model used by the Alpha-Beta procedure (see exponentialAtmosphereHeights()).
 
@@ -292,6 +300,8 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method='column',
         return_density_ratio: [bool] Also return the real density over the model density at the points (see
             exponentialAtmosphereDensityRatio()), for fitAlphaBetaLightCurve(lc_density_ratio=...). False by
             default.
+        atm_table: [tuple] Density table of an atmosphere profile used instead of the MSIS model, see
+            airDensityProfile(). None by default.
 
     Return:
         ht_rescaled: [ndarray] Rescaled heights (m).
@@ -303,12 +313,15 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method='column',
 
     # Map the heights by the local density
     if method == 'density':
-        atm_dens = getAtmDensity_vect(lat, lon, ht_data, jd)
+        if atm_table is None:
+            atm_dens = getAtmDensity_vect(lat, lon, ht_data, jd)
+        else:
+            atm_dens = atmDensProfileMSIS(ht_data, lat, lon, jd, *atm_table)
         ht_rescaled = HT_NORM_CONST*np.log(RHO_ATM_0/atm_dens)
         return (ht_rescaled, np.ones_like(ht_rescaled)) if return_density_ratio else ht_rescaled
 
     # Take the density profile at the mean location of the points
-    profile_hts, profile_dens = airDensityProfile(lat, lon, ht_data, jd)
+    profile_hts, profile_dens = airDensityProfile(lat, lon, ht_data, jd, atm_table=atm_table)
 
     # Map the heights by the air column above them
     ht_rescaled = exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method=method)
@@ -8142,6 +8155,14 @@ if __name__ == "__main__":
         "and 'density' to the height with the same local density, which biases alpha and beta where the " \
         "scale height is not 7.16 km.")
 
+    arg_parser.add_argument('--atm_profile', metavar='PROFILE_PATH', type=str, default=None, \
+        help="Take the air density from an atmosphere profile instead of the MSIS model, as DynamicMassFit " \
+        "does, e.g. the ERA5 profile of the event that OpenDarkflight downloads. It is a CSV file in the " \
+        "format OpenDarkflight writes for model profiles (its wrf type), of which the height (m) and " \
+        "density (kg/m^3) columns are used. Above the top of the profile, the MSIS density scaled to join " \
+        "it there is used. A profile that does not reach down to the lowest point is refused. The winds " \
+        "are not used.")
+
     arg_parser.add_argument('-x', '--hideplots', action="store_true", \
         help="Don't show the plots on the screen. Combine with --saveplots to only write them to disk.")
 
@@ -8158,6 +8179,11 @@ if __name__ == "__main__":
     # Apply the atmosphere model options
     setAtmosphere(cml_args)
 
+    # Load the air density table of the atmosphere profile, if given
+    atm_table = None
+    if cml_args.atm_profile is not None:
+        atm_table = loadAtmosphereProfile(cml_args.atm_profile)
+
     #########################
 
 
@@ -8166,6 +8192,16 @@ if __name__ == "__main__":
 
         # Load the trajectory pickle
         traj = loadPickle(*os.path.split(cml_args.traj_path))
+
+        def airDensity(lat, lon, ht):
+            """ Air density at the given points, from the atmosphere profile with MSIS above it
+                (--atm_profile), or from the MSIS model.
+            """
+
+            if atm_table is None:
+                return getAtmDensity_vect(lat, lon, ht, traj.jdt_ref)
+
+            return atmDensProfileMSIS(ht, lat, lon, traj.jdt_ref, *atm_table)
 
         # Plots are saved next to the trajectory pickle
         dir_path = os.path.dirname(cml_args.traj_path)
@@ -8225,6 +8261,23 @@ if __name__ == "__main__":
         lag_data = np.array(lag_data)
         length_data = np.array(length_data)
         station_data = np.array(station_data)
+
+        # Check that the profile reaches down to the lowest point
+        if (atm_table is not None) and (np.min(ht_data) < atm_table[0][0]):
+            print()
+            print("ERROR: The atmosphere profile starts at {:.2f} km, above the lowest point at {:.2f} km" \
+                .format(atm_table[0][0]/1000, np.min(ht_data)/1000))
+            sys.exit(1)
+
+        # Print the height and the factor of the join to MSIS
+        if atm_table is not None:
+            join_factor = atmProfileJoinFactor(meanAngle(lat_data), meanAngle(lon_data), traj.jdt_ref, \
+                *atm_table)
+            print()
+            print("NOTE: The air density is taken from the atmosphere profile {:s} from {:.1f} to {:.1f} " \
+                "km, and above {:.1f} km from {:s} scaled by {:.3f} to join it there".format( \
+                cml_args.atm_profile, atm_table[0][0]/1000, atm_table[0][-1]/1000, atm_table[0][-1]/1000, \
+                msisModelName(), join_factor))
 
         # Use the colors of the stations in the trajectory plots
         obs_ht_sorted = sorted(traj.observations, key=lambda x: x.model_ht[0])
@@ -8308,7 +8361,7 @@ if __name__ == "__main__":
                 #   density profile of the event down to the lowest height of the plots, and alpha in the unit
                 #   of the slope of the masses
                 profile_hts, profile_dens = airDensityProfile(lat_data, lon_data, ht_data, traj.jdt_ref, \
-                    ht_min=min(10000.0, np.min(ht_data) - RESCALE_STEP_FINE))
+                    ht_min=min(10000.0, np.min(ht_data) - RESCALE_STEP_FINE), atm_table=atm_table)
                 air_speed = airSpeedAlongPath(traj.state_vect_mini, traj.radiant_eci_mini)
                 slant_column, length_air = slantColumnFromPoints(time_data, length_data_line, ht_data, \
                     profile_hts, profile_dens, np.sin(slope), air_speed=air_speed)
@@ -8340,7 +8393,7 @@ if __name__ == "__main__":
 
             # Rescale the heights to the exponential atmosphere used by alpha-beta
             ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, \
-                traj.jdt_ref, method=cml_args.atmrescale)
+                traj.jdt_ref, method=cml_args.atmrescale, atm_table=atm_table)
 
         # Fit alpha-beta directly to the lag, starting also from the Q4 fit of the observed velocities
         print("Fitting alpha-beta to the lag...")
@@ -8390,7 +8443,7 @@ if __name__ == "__main__":
                 print("NOTE: {:s}, so the simple fit of the lag is used (--lagfit simple)".format(str(e)))
                 cml_args.lagfit = 'simple'
                 ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, \
-                    traj.jdt_ref, method=cml_args.atmrescale)
+                    traj.jdt_ref, method=cml_args.atmrescale, atm_table=atm_table)
                 x0_alpha_beta = [fitAlphaBeta(vel_data_nograv, ht_data_rescaled, v_init=traj.v_init)[1:]]
 
         if cml_args.lagfit == 'simple':
@@ -8528,6 +8581,9 @@ if __name__ == "__main__":
 
         print("Alpha-beta fit to the lag of {:d} points, {:.1f} to {:.1f} km".format(len(ht_data), \
             ht_first/1000, np.min(ht_data)/1000))
+        if atm_table is not None:
+            print("  Air density from the atmosphere profile {:s}, joined to {:s} at {:.1f} km (factor " \
+                "{:.3f})".format(cml_args.atm_profile, msisModelName(), atm_table[0][-1]/1000, join_factor))
         if cml_args.lagfit == 'full':
             print("  Full fit of the entry lag against the slant air column along the path (--lagfit " \
                 "full), with an offset and a noise level for every station")
@@ -8690,8 +8746,10 @@ if __name__ == "__main__":
         ht_dyn = ht_data[end_index]
 
         # Compute the dynamic mass, which is not defined if the model does not decelerate at the end
+        atm_dens_dyn = airDensity(traj.rend_lat, traj.rend_lon, ht_dyn)
         dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
-            vel_dyn, decel_dyn, gamma=1.0, shape_factor=cml_args.ga) if decel_dyn > 0 else np.nan
+            vel_dyn, decel_dyn, gamma=1.0, shape_factor=cml_args.ga, \
+            atm_dens=atm_dens_dyn) if decel_dyn > 0 else np.nan
 
         print()
         print("Alpha-beta dynamic mass at the end:")
@@ -8713,7 +8771,8 @@ if __name__ == "__main__":
                 no_decel = True
                 continue
             interval_dyn_masses.append(dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, \
-                traj.jdt_ref, vel_model_end, decel_model_end, gamma=1.0, shape_factor=cml_args.ga))
+                traj.jdt_ref, vel_model_end, decel_model_end, gamma=1.0, shape_factor=cml_args.ga, \
+                atm_dens=atm_dens_dyn))
 
         # Print the dynamic masses in the scientific notation if they are large
         dyn_values = np.array(interval_dyn_masses + ([dyn_mass] if np.isfinite(dyn_mass) else []))
@@ -8931,7 +8990,8 @@ if __name__ == "__main__":
                     # Dynamic mass with the air-relative velocity, as for the alpha-beta model
                     dyn_mass_smooth = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, \
                         ht_dyn_smooth, traj.jdt_ref, v_dyn_smooth - air_offset, 1000*abs(decel), \
-                        gamma=1.0, shape_factor=cml_args.ga)
+                        gamma=1.0, shape_factor=cml_args.ga, atm_dens=airDensity(traj.rend_lat, \
+                        traj.rend_lon, ht_dyn_smooth))
 
                     # Plot the point where the dynamic mass is estimated
                     ax_vel.scatter([v_dyn_smooth/1000], [ht_dyn_smooth/1000], color='r', marker='s', \
@@ -9036,7 +9096,7 @@ if __name__ == "__main__":
             n = len(ht_real)
 
             return rescaleHeightToExponentialAtmosphere(np.full(n, lat_mean), np.full(n, lon_mean), ht_real, \
-                traj.jdt_ref, method=cml_args.atmrescale)
+                traj.jdt_ref, method=cml_args.atmrescale, atm_table=atm_table)
 
 
         def modelVelocityAtRealHeights(ht_real):
@@ -9047,7 +9107,8 @@ if __name__ == "__main__":
         # Compute the dynamic pressure using alpha and beta, with the real density at real heights, and the
         #   model velocity at those heights rescaled to its atmosphere
         vel_arr_real = modelVelocityAtRealHeights(ht_arr)
-        dyn_pressure = dynamicPressure(lat_mean, lon_mean, ht_arr, traj.jdt_ref, vel_arr_real)
+        dyn_pressure = dynamicPressure(lat_mean, lon_mean, ht_arr, traj.jdt_ref, vel_arr_real, \
+            atm_dens=airDensity(lat_mean, lon_mean, ht_arr))
         def findPeakDynPressure(dyn_pressure, ht_arr):
             """ Find the peak dynamic pressure.
 
@@ -9093,7 +9154,8 @@ if __name__ == "__main__":
             # Air-relative velocities of the lag smoothing, as for the alpha-beta model
             vel_data_smooth_air = vel_data_smooth - air_offset
 
-            dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data, traj.jdt_ref, vel_data_smooth_air)
+            dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data, traj.jdt_ref, \
+                vel_data_smooth_air, atm_dens=airDensity(lat_mean, lon_mean, ht_data))
 
             peak_dyn_pressure_index_lag, peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = \
                 findPeakDynPressure(dyn_pressure_lag, ht_data)
@@ -9115,7 +9177,7 @@ if __name__ == "__main__":
         interval_peaks = []
         interval_pressures = []
         if interval_models:
-            atm_dens = getAtmDensity_vect(lat_mean, lon_mean, ht_arr, traj.jdt_ref)
+            atm_dens = airDensity(lat_mean, lon_mean, ht_arr)
             ht_arr_rescaled = rescaleRealHeights(ht_arr)
             for a, b, v0 in interval_models:
                 dyn_pressure_model = atm_dens*alphaBetaVelocityInterp(ht_arr_rescaled, a, b, v0)**2

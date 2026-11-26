@@ -38,7 +38,7 @@ LUM_EFF_MODELS = {
 }
 
 
-def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
+def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0, atm_dens=None):
     """ Calculate dynamic pressure at the given point on meteor's trajectory. 
 
     Either a single set of values can be given (i.e. every argument is a float number), or all arguments 
@@ -53,6 +53,8 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
 
     Keyword arguments:
         gamma: [flot] Drag coefficient. 1 by default.
+        atm_dens: [float or ndarray] Air density at the points (kg/m^3), e.g. from an atmosphere profile. If
+            None, the density of the MSIS model is used. None by default.
 
 
     Return:
@@ -60,8 +62,9 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
 
     """
 
-    # Get the atmospheric densities at every heights
-    atm_dens = getAtmDensity_vect(lat, lon, height, jd)
+    # Get the atmospheric densities at every heights, unless they are given
+    if atm_dens is None:
+        atm_dens = getAtmDensity_vect(lat, lon, height, jd)
 
     # Calculate the dynamic pressure
     dyn_pressure = atm_dens*gamma*velocity**2
