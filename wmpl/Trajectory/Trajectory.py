@@ -64,7 +64,8 @@ from wmpl.Utils.PlotOrbits import plotOrbits
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import GroundMap
 from wmpl.Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, \
-    cartesian2Geo, altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
+    cartesian2Geo, altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, \
+    datetime2JD, derotatedRadiantAltAz
 from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 
 
@@ -3294,6 +3295,10 @@ DRAG_TRAJ_PRE_ATM_MIN_DV_FRAC = 0.03
 DRAG_TRAJ_PRE_ATM_MAX_LOG_K_STD = 1.5
 DRAG_TRAJ_PRE_ATM_MAX_DV_FRAC = 0.15
 
+# Thresholds for reporting dark-flight initial conditions at the terminal point (height < 35 km, mass > 10 g)
+DRAG_TRAJ_DARKFLIGHT_MAX_HT = 35000.0
+DRAG_TRAJ_DARKFLIGHT_MIN_MASS = 0.01
+
 
 
 def _formatPressure(dyn_pres_pa):
@@ -3730,6 +3735,13 @@ class DragTimingFit(object):
         eci_grid = self.state_vect[None, :] - self.len_grid[:, None]*self.radiant_eci[None, :]
         if drop_grid is not None:
             eci_grid = eci_grid + np.asarray(drop_grid, dtype=np.float64)
+
+        # Save terminal ECI position and local radiant tangent for dark-flight initialization
+        self.eci_end = eci_grid[-1].copy()
+        if (len(eci_grid) >= 2) and (vectMag(eci_grid[-2] - eci_grid[-1]) > 0.0):
+            self.radiant_eci_end = vectNorm(eci_grid[-2] - eci_grid[-1])
+        else:
+            self.radiant_eci_end = self.radiant_eci.copy()
 
         # Scale MSIS sample count with path length for long shallow trajectories
         span = float(self.len_grid[-1] - self.len_grid[0])
@@ -4734,6 +4746,77 @@ class DragTimingFit(object):
         result['mass_hi'] = float(mass*np.exp(3.0*log_k_std_tot))
 
         return result
+
+
+
+    def terminalDarkFlightState(self, stations_fixed=False, gamma_a=GAMMA_A, \
+        bulk_density=DRAG_TRAJ_BULK_DENSITY):
+        """ Compute dark-flight initial conditions at the terminal point when the terminal height is below
+            DRAG_TRAJ_DARKFLIGHT_MAX_HT (35 km) and the terminal dynamic mass exceeds
+            DRAG_TRAJ_DARKFLIGHT_MIN_MASS (10 g).
+
+        The local radiant azimuth and altitude and the terminal speed relative to the ground are evaluated
+        at the terminal position along the gravity-dropped tangent using
+        wmpl.Utils.TrajConversions.derotatedRadiantAltAz.
+
+        Keyword arguments:
+            stations_fixed: [bool] True if the trajectory was solved with fixed stations (radiant and speed
+                already ground-fixed). False by default.
+            gamma_a: [float] Product of drag coefficient Gamma and shape factor A. GAMMA_A by default.
+            bulk_density: [float] Assumed meteoroid bulk density (kg/m^3). DRAG_TRAJ_BULK_DENSITY by default.
+
+        Return:
+            [dict or None] Dictionary with keys 'jd', 'time' (s), 'lat' (rad), 'lon' (rad, -pi..pi),
+                'ht' (m MSL), 'azim' (rad, +E of N), 'elev' (rad), 'vel' (m/s inertial), 'vel_gnd' (m/s
+                ground-relative), 'mass' (kg), 'mass_lo' (kg), 'mass_hi' (kg), 'gamma_a', 'bulk_density' and
+                'ablation_active' (bool), or None if the height or mass criteria are not met.
+        """
+
+        # Require a constrained terminal dynamic mass above the dark-flight threshold
+        term_mass = self.terminalDynamicMass(gamma_a=gamma_a, bulk_density=bulk_density)
+        if (term_mass['mass'] is None) or (term_mass['mass'] <= DRAG_TRAJ_DARKFLIGHT_MIN_MASS):
+            return None
+
+        # Evaluate terminal time, ECI position and local radiant tangent
+        t_end = float(self.time_grid[-1])
+        jd_end = float(self.jd + t_end/86400.0)
+        vel_end = float(self.vel_grid[-1])
+        eci_end = getattr(self, 'eci_end', self.state_vect - self.len_grid[-1]*self.radiant_eci)
+        rad_end = getattr(self, 'radiant_eci_end', self.radiant_eci)
+
+        # Convert terminal ECI position to geodetic coordinates and enforce the terminal height cutoff
+        lat_end, lon_end, ht_end = cartesian2Geo(jd_end, *eci_end)
+        if ht_end >= DRAG_TRAJ_DARKFLIGHT_MAX_HT:
+            return None
+
+        # Compute local ground-fixed radiant alt/az and terminal speed at the terminal position
+        if stations_fixed:
+            ra_end, dec_end = eci2RaDec(rad_end)
+            azim_end, elev_end = raDec2AltAz(ra_end, dec_end, jd_end, lat_end, lon_end)
+            vel_gnd = vel_end
+        else:
+            azim_end, elev_end, vel_gnd = derotatedRadiantAltAz(vel_end*rad_end, eci_end, jd_end, lat_end, \
+                lon_end)
+
+        lon_wrap = float((lon_end + np.pi)%(2.0*np.pi) - np.pi)
+
+        return {
+            'jd': jd_end,
+            'time': t_end,
+            'lat': float(lat_end),
+            'lon': lon_wrap,
+            'ht': float(ht_end),
+            'azim': float(azim_end),
+            'elev': float(elev_end),
+            'vel': vel_end,
+            'vel_gnd': float(vel_gnd),
+            'mass': float(term_mass['mass']),
+            'mass_lo': float(term_mass['mass_lo']),
+            'mass_hi': float(term_mass['mass_hi']),
+            'gamma_a': float(term_mass['gamma_a']),
+            'bulk_density': float(term_mass['bulk_density']),
+            'ablation_active': bool(term_mass['ablation_active']),
+        }
 
 
 
@@ -7872,6 +7955,28 @@ class Trajectory(object):
                         + "jump timing bound = +/-{:.1f} ms\n").format(idx_g + 1, gap['ht_beg']/1000.0, \
                         gap['ht_end']/1000.0, gap_km, gap['time_beg'], gap['time_end'], \
                         gap['log_k_growth'], 0.5*dt_ms)
+
+            # Report dark-flight initial conditions for potential meteorite falls (h_end < 35 km, m > 10 g)
+            stations_fixed = getattr(self, 'orbit_los_success', True) is False
+            df_state = drag_fit.terminalDarkFlightState(stations_fixed=stations_fixed)
+            if df_state is not None:
+                out_str += "\n"
+                out_str += "Dark-flight initial state (terminal height < 35 km, terminal mass > 10 g):\n"
+                out_str += "  Time            = {:s} UTC (t = {:.3f} s)\n".format( \
+                    str(jd2Date(df_state['jd'], dt_obj=True)), df_state['time'])
+                out_str += "  Lat (+N)        = {:>11.6f} deg\n".format(np.degrees(df_state['lat']))
+                out_str += "  Lon (+E)        = {:>11.6f} deg\n".format(np.degrees(df_state['lon']))
+                out_str += "  Ht MSL          = {:>11.2f} m ({:.2f} km)\n".format(df_state['ht'], \
+                    df_state['ht']/1000.0)
+                out_str += "  Radiant azim    = {:>10.5f} deg (+E of due N, ground-fixed)\n".format( \
+                    np.degrees(df_state['azim']))
+                out_str += "  Radiant alt     = {:>10.5f} deg (above horizon, ground-fixed)\n".format( \
+                    np.degrees(df_state['elev']))
+                out_str += "  Terminal speed  = {:>8.3f} km/s (ground-relative; inertial = {:.3f} km/s)\n" \
+                    .format(df_state['vel_gnd']/1000.0, df_state['vel']/1000.0)
+                out_str += ("  Terminal mass   = {:.3g} kg ({:.3g} - {:.3g} kg, 1 sigma; " \
+                    + "Gamma*A = {:.2f}, rho_m = {:.0f} kg/m^3)\n").format(df_state['mass'], \
+                    df_state['mass_lo'], df_state['mass_hi'], df_state['gamma_a'], df_state['bulk_density'])
 
             out_str += "\n"
 

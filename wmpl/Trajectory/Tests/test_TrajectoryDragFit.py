@@ -461,6 +461,19 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     assert 'not estimated' not in report_txt
     assert 'single-body m end/beg' not in report_txt
 
+    # Meteorite-dropping fireball (h_end < 35 km, m > 10 g) reports full dark-flight initial state
+    df_state = traj_fall.drag_timing_fit.terminalDarkFlightState()
+    assert df_state is not None
+    assert df_state['ht'] < 35000.0
+    assert df_state['mass'] > 0.01
+    assert 0.0 <= np.degrees(df_state['azim']) < 360.0
+    assert 0.0 < np.degrees(df_state['elev']) < 90.0
+    assert 1000.0 < df_state['vel_gnd'] < 15000.0
+    assert 'Dark-flight initial state (terminal height < 35 km, terminal mass > 10 g):' in report_txt
+    assert 'Radiant azim    =' in report_txt
+    assert 'Radiant alt     =' in report_txt
+    assert 'Terminal speed  =' in report_txt
+
     peak_p = traj_fall.drag_timing_fit.peakDynamicPressure()
     assert peak_p['dyn_pres'] > 1e5
     assert 15000.0 < peak_p['ht'] < 55000.0
@@ -512,11 +525,13 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     pre_small = fit_small.preAtmosphericVelocity()
     assert not pre_small['applied']
 
-    # Verify saveReport writes the gated-out status cleanly in the native Drag fit section
+    # Verify saveReport writes the gated-out status cleanly and omits dark-flight initial state
+    assert fit_small.terminalDarkFlightState() is None
     traj_fall.drag_timing_fit = fit_small
     traj_fall.pre_atm_info = pre_small
     report_small = traj_fall.saveReport(str(tmp_path), 'small_report.txt', verbose=False, save_results=False)
     assert 'Terminal mass   = not estimated' in report_small
+    assert 'Dark-flight initial state' not in report_small
 
     # 3. Verify Monte Carlo runs on meastype=1 (RA/Dec) inputs convert noise-free observations cleanly
     meteor_ra = DragMeteor(18000.0, 60.0, 45.0, 1e-3, 3e-3, 2.0, 5.0)
