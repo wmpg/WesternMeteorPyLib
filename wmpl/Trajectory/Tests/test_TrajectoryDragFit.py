@@ -362,3 +362,53 @@ def testSuppliedFixedOffsetsPreservedInTimeDiffsFinal():
     assert abs(raw_offs['B'] + 0.80) < 0.015
     assert abs(raw_offs['C'] - 0.0) < 0.015
     assert abs(traj.stations_time_dict_copy['A'] - 0.35) < 1e-6
+
+
+
+def testReportSummaryAndTerminalMassGating(tmp_path):
+    """ Verify that the drag fit summary is appended to *_report.txt, terminal dynamic mass is reported for
+        deeply decelerating meteorite-dropping fireballs, and safely suppressed for high-altitude small
+        meteors.
+    """
+
+    import os
+    from wmpl.Utils.TrajConversions import geo2Cartesian
+
+    # 1. Deep meteorite-dropping fireball (14.5 km/s, K = 0.002 -> 0.004 m^2/kg, penetrates below 30 km)
+    meteor_fall = DragMeteor(14500.0, 120.0, 45.0, 0.002, 0.004, 3.0, 11.0)
+    traj_fall = observeMeteor(meteor_fall, noise=4.0, stations=STATIONS, gravity_correction=False, \
+        max_toffset=5.0)
+    traj_fall.output_dir = str(tmp_path)
+    traj_fall.save_results = True
+    traj_fall.show_plots = False
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj_fall = solveTrajectoryDragFit(traj_fall)
+
+    assert traj_fall is not None
+    tm_fall = traj_fall.drag_timing_fit.terminalDynamicMass()
+    assert tm_fall['mass'] is not None
+    assert tm_fall['mass_lo'] <= tm_fall['mass'] <= tm_fall['mass_hi']
+    assert 0.05 < tm_fall['mass'] < 50.0
+
+    report_path = os.path.join(str(tmp_path), traj_fall.file_name + '_report.txt')
+    assert os.path.isfile(report_path)
+    report_txt = open(report_path, 'r').read()
+    assert 'Drag fit summary' in report_txt
+    assert 'Terminal dynamic mass:' in report_txt
+    assert 'not estimated' not in report_txt
+
+    # 2. Small high-altitude meteor (100 -> 88 km, 35 km/s): terminal mass must NOT be estimated
+    jd = 2460000.5
+    state_vect = np.array(geo2Cartesian(np.radians(45.0), np.radians(15.0), 100000.0, jd))
+    rad_eci = np.array([0.3, 0.4, 0.8660254])
+    rad_eci = rad_eci/np.linalg.norm(rad_eci)
+    t_small = np.linspace(0.0, 0.4, 15)
+    l_small = 35000.0*t_small
+    fit_small = DragTimingFit([t_small[:10], t_small[5:]], [l_small[:10], l_small[5:]], [1.0, 1.0], \
+        [False, True], state_vect, rad_eci, jd)
+    tm_small = fit_small.terminalDynamicMass()
+    assert tm_small['mass'] is None
+    assert 'non-meteorite-dropping' in tm_small['reason']
+    summary_small = fit_small.formatReportSummary()
+    assert 'Terminal dynamic mass: not estimated' in summary_small

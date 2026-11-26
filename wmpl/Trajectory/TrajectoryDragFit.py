@@ -52,7 +52,7 @@ from wmpl.Utils.DragVelocity import DRAG_VEL_ATM_POINTS, DRAG_VEL_GRID_POINTS, D
     DRAG_VEL_LOG_K_SCAN, DRAG_VEL_PHI_MAX, DRAG_VEL_RAMP_MAX, DRAG_VEL_V_BOUNDS, cumulativeTrapz
 from wmpl.Utils.Math import lineFunc, vectNorm
 from wmpl.Utils.OSTools import mkdirP
-from wmpl.Utils.Physics import earthRotationVelocity
+from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationVelocity
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import savePlot, stationColors
 from wmpl.Utils.TrajConversions import EARTH, G, altAz2RADec_vect, cartesian2Geo, jd2Date
@@ -90,6 +90,15 @@ DRAG_TRAJ_MAX_K0 = 10.0
 DRAG_TRAJ_EXPLORE_MAX_NFEV = 80
 DRAG_TRAJ_REFINE_MAX_NFEV = 250
 DRAG_TRAJ_WARM_MAX_NFEV = 100
+
+# Default bulk density (kg/m^3) and physical gating thresholds for terminal dynamic mass reporting
+DRAG_TRAJ_BULK_DENSITY = 3500.0
+DRAG_TRAJ_TERM_MASS_MAX_HT = 50000.0
+DRAG_TRAJ_TERM_MASS_MAX_VEL = 10000.0
+DRAG_TRAJ_TERM_MASS_ABLATION_VEL = 4000.0
+DRAG_TRAJ_TERM_MASS_MIN_DV = 500.0
+DRAG_TRAJ_TERM_MASS_MIN_DV_FRAC = 0.05
+DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD = 1.0
 
 
 
@@ -432,6 +441,7 @@ class DragTimingFit(object):
         self.n_free = len(self.free_indices)
         self.max_toffset = float(max_toffset)
         self.gravity_factor = float(gravity_factor)
+        self.penalty = float(penalty)
         self.air_rotation = bool(air_rotation)
         self.v_rotation = computeVRotation(state_vect, radiant_eci) if self.air_rotation else 0.0
         self.max_k0 = float(max_k0) if max_k0 is not None else None
@@ -1203,6 +1213,207 @@ class DragTimingFit(object):
 
 
 
+    def terminalDynamicMass(self, gamma_a=GAMMA_A, bulk_density=DRAG_TRAJ_BULK_DENSITY):
+        """ Estimate the terminal dynamic mass at the last observed point when the trajectory is in a
+            constrained, meteorite-dropping regime.
+
+        Small or high-altitude meteors that do not decelerate deeply (or whose end ballistic coefficient K
+        is unconstrained or pinned at parameter bounds) return mass=None with an explanatory reason so
+        unphysical masses are never reported.
+
+        Keyword arguments:
+            gamma_a: [float] Product of drag coefficient Gamma and shape factor A. GAMMA_A by default.
+            bulk_density: [float] Assumed meteoroid bulk density (kg/m^3). DRAG_TRAJ_BULK_DENSITY by default.
+
+        Return:
+            [dict] Dictionary with keys 'mass', 'mass_lo', 'mass_hi' (kg or None), 'k_end' (m^2/kg),
+                'log_k_std', 'gamma_a', 'bulk_density', 'ablation_active' (bool) and 'reason' (str or None).
+        """
+
+        ht_end = float(self.ht_grid[-1])
+        vel_beg = float(self.vel_grid[0])
+        vel_end = float(self.vel_grid[-1])
+        dv = vel_beg - vel_end
+        dv_frac = dv/max(vel_beg, 1.0)
+        log_k_end = float(self.log_k_grid[-1])
+        k_end = float(np.exp(log_k_end))
+        log_k_std_fit = float(self.log_k_std_grid[-1]) \
+            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
+
+        result = {
+            'mass': None,
+            'mass_lo': None,
+            'mass_hi': None,
+            'k_end': k_end,
+            'log_k_std': log_k_std_fit,
+            'gamma_a': float(gamma_a),
+            'bulk_density': float(bulk_density),
+            'ablation_active': bool(vel_end > DRAG_TRAJ_TERM_MASS_ABLATION_VEL),
+            'reason': None,
+        }
+
+        # Exclude high-altitude or fast-ending meteors (small meteors / active vaporization regime)
+        if (ht_end >= DRAG_TRAJ_TERM_MASS_MAX_HT) or (vel_end >= DRAG_TRAJ_TERM_MASS_MAX_VEL):
+            parts = []
+            if ht_end >= DRAG_TRAJ_TERM_MASS_MAX_HT:
+                parts.append("end height {:.1f} km >= {:.1f} km".format(ht_end/1000.0, \
+                    DRAG_TRAJ_TERM_MASS_MAX_HT/1000.0))
+            if vel_end >= DRAG_TRAJ_TERM_MASS_MAX_VEL:
+                parts.append("end velocity {:.2f} km/s >= {:.1f} km/s".format(vel_end/1000.0, \
+                    DRAG_TRAJ_TERM_MASS_MAX_VEL/1000.0))
+            result['reason'] = "{:s}; non-meteorite-dropping regime".format(" and ".join(parts))
+            return result
+
+        # Require measurable deceleration over the observed track
+        if (dv < DRAG_TRAJ_TERM_MASS_MIN_DV) or (dv_frac < DRAG_TRAJ_TERM_MASS_MIN_DV_FRAC):
+            result['reason'] = "insufficient deceleration (dv = {:.2f} km/s, {:.1f}%)".format(dv/1000.0, \
+                100.0*dv_frac)
+            return result
+
+        # Reject K pinned at the lower bound or capped at max_k0 without ramp growth
+        if (k_end <= 1e-6) or (log_k_end <= DRAG_VEL_LOG_K_BOUNDS[0] + 1.0):
+            result['reason'] = "end ballistic coefficient K at lower bound"
+            return result
+
+        max_k0 = getattr(self, 'max_k0', None)
+        max_log_k0 = getattr(self, 'max_log_k0', DRAG_VEL_LOG_K_BOUNDS[1])
+        if (max_k0 is not None) and (log_k_end >= max_log_k0 - 1e-3) \
+            and (float(np.sum(self.drag_params[3:])) < 1e-3):
+            result['reason'] = "ballistic coefficient K pinned at max_k0 = {:.1f} m^2/kg".format(max_k0)
+            return result
+
+        # Reject poorly constrained K at the end of the trajectory
+        if (not np.isfinite(log_k_std_fit)) or (log_k_std_fit > DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD):
+            result['reason'] = "end K poorly constrained (sigma ln K = {:.2f})".format(log_k_std_fit)
+            return result
+
+        # Combine drag-fit Jacobian uncertainty and MC ensemble spread in quadrature
+        log_k_std_tot = log_k_std_fit
+        if (self.mc_k_lo is not None) and (self.mc_k_hi is not None) and (self.mc_k_lo[-1] > 0.0) \
+            and (self.mc_k_hi[-1] >= self.mc_k_lo[-1]):
+            log_k_std_mc = 0.5*float(np.log(self.mc_k_hi[-1]/self.mc_k_lo[-1]))
+            log_k_std_tot = float(np.hypot(log_k_std_fit, log_k_std_mc))
+
+        mass = float(ballisticCoeffMass(k_end, bulk_density, gamma_a))
+        result['mass'] = mass
+        result['mass_lo'] = float(mass*np.exp(-3.0*log_k_std_tot))
+        result['mass_hi'] = float(mass*np.exp(3.0*log_k_std_tot))
+        result['log_k_std'] = log_k_std_tot
+
+        return result
+
+
+
+    def formatReportSummary(self, traj=None, gamma_a=GAMMA_A, bulk_density=DRAG_TRAJ_BULK_DENSITY):
+        """ Format a plain-text summary of the drag fit, segment K profile, unobserved gaps and gated
+            terminal dynamic mass for appending to the trajectory report file.
+
+        Keyword arguments:
+            traj: [Trajectory object] Optional parent trajectory for per-station MC timing uncertainties.
+                None by default.
+            gamma_a: [float] Assumed Gamma*A for terminal dynamic mass. GAMMA_A by default.
+            bulk_density: [float] Assumed bulk density (kg/m^3) for terminal dynamic mass.
+                DRAG_TRAJ_BULK_DENSITY by default.
+
+        Return:
+            [str] Formatted ASCII report section.
+        """
+
+        k_beg = float(np.exp(self.log_k_grid[0]))
+        k_end = float(np.exp(self.log_k_grid[-1]))
+        k_ratio = k_end/max(k_beg, 1e-30)
+        mass_ratio = k_ratio**(-3.0)
+        max_k0 = getattr(self, 'max_k0', None)
+        max_k0_str = "{:.1f} m^2/kg".format(max_k0) if max_k0 is not None else "none"
+
+        out = []
+        out.append("")
+        out.append("Drag fit summary")
+        out.append("----------------")
+        out.append(("Model: dv/dt = -K*rho*v_air^2 + g_along (air_rotation={:s}, gravity_factor={:.2f}, " \
+            + "penalty={:.2f}, max_k0={:s})").format(str(self.air_rotation), self.gravity_factor, \
+            getattr(self, 'penalty', 1.0), max_k0_str))
+        out.append(("Points: {:d}, segments of K: {:d}, along-track RMS = {:.1f} m (scale = {:.1f} m), " \
+            + "timing RMS = {:.2f} ms").format(self.n_data, self.n_knots, self.res_rms_m, self.res_scale_m, \
+            1000.0*self.res_rms_s))
+
+        if (self.mc_k_lo is not None) and (self.mc_k_hi is not None):
+            k_beg_mc = " (MC 1 sigma {:.2e} - {:.2e})".format(self.mc_k_lo[0], self.mc_k_hi[0])
+            k_end_mc = " (MC 1 sigma {:.2e} - {:.2e})".format(self.mc_k_lo[-1], self.mc_k_hi[-1])
+        else:
+            k_beg_mc = ""
+            k_end_mc = ""
+
+        out.append("Begin: h = {:6.2f} km, v = {:6.3f} km/s, K = {:.2e} m^2/kg{:s}".format( \
+            self.ht_grid[0]/1000.0, self.vel_grid[0]/1000.0, k_beg, k_beg_mc))
+        out.append("End:   h = {:6.2f} km, v = {:6.3f} km/s, K = {:.2e} m^2/kg{:s}".format( \
+            self.ht_grid[-1]/1000.0, self.vel_grid[-1]/1000.0, k_end, k_end_mc))
+        out.append("K end/beg = {:.2f}, single-body m end/beg = {:.3g}".format(k_ratio, mass_ratio))
+
+        # Gated terminal dynamic mass estimate
+        tm = self.terminalDynamicMass(gamma_a=gamma_a, bulk_density=bulk_density)
+        if tm['mass'] is not None:
+            out.append(("Terminal dynamic mass: {:.3g} kg (1 sigma {:.3g} - {:.3g} kg) for Gamma*A = {:.2f}" \
+                + ", bulk density = {:.0f} kg/m^3").format(tm['mass'], tm['mass_lo'], tm['mass_hi'], \
+                tm['gamma_a'], tm['bulk_density']))
+            if tm['ablation_active']:
+                out.append(("  Note: end velocity ({:.2f} km/s) > {:.1f} km/s; ablation may still be active" \
+                    + " below the last observed point.").format(self.vel_grid[-1]/1000.0, \
+                    DRAG_TRAJ_TERM_MASS_ABLATION_VEL/1000.0))
+        else:
+            out.append("Terminal dynamic mass: not estimated ({:s})".format(tm['reason']))
+
+        # Per-segment K profile table
+        out.append("")
+        out.append(" Seg, Ht beg, Ht end, Time beg, Vel beg, Dyn pres,     K beg,     K end, K std, Gap")
+        out.append("    ,   (km),   (km),      (s),  (km/s),    (kPa),  (m^2/kg),  (m^2/kg),   (%),")
+
+        for idx in range(self.n_knots):
+            l_beg = float(self.ramp_beg[idx])
+            l_end = min(float(self.ramp_beg[idx] + self.ramp_len[idx]), self.len_last)
+            ht_beg = float(self.heightAtLength(l_beg)[0])/1000.0
+            ht_end = float(self.heightAtLength(l_end)[0])/1000.0
+            t_beg = float(self.timeAtLength(l_beg)[0])
+            v_beg = float(self.velocityAtLength(l_beg)[0])
+            rho_beg = float(np.interp(l_beg, self.len_grid, self.rho))
+            dyn_pres_kpa = rho_beg*v_beg**2/1000.0
+            k_s_beg = float(self.ballisticCoeffAtLength(l_beg)[0])
+            k_s_end = float(self.ballisticCoeffAtLength(l_end)[0])
+            if self.log_k_std_grid is not None:
+                end_grid_idx = int(np.argmin(np.abs(self.len_grid - l_end)))
+                std_end = float(self.log_k_std_grid[end_grid_idx])
+            else:
+                std_end = np.nan
+            std_str = "{:5.0f}".format(100.0*std_end) if np.isfinite(std_end) else "  inf"
+            gap_str = "yes" if self.is_gap_ramp[idx] else "no"
+            out.append(("{:4d}, {:6.2f}, {:6.2f}, {:8.3f}, {:7.3f}, {:8.1f}, {:9.2e}, {:9.2e}, {:s}, " \
+                + "{:>3s}").format(idx + 1, ht_beg, ht_end, t_beg, v_beg/1000.0, dyn_pres_kpa, k_s_beg, \
+                k_s_end, std_str, gap_str))
+
+        if self.gap_uncertainties:
+            out.append("")
+            out.append("Unobserved gaps bridged by drag model:")
+            for i, gap in enumerate(self.gap_uncertainties):
+                out.append(("  Gap {:d}: L = {:.2f} - {:.2f} km (ht {:.2f} - {:.2f} km), dt = {:.3f} s, " \
+                    + "d(ln K) = {:.2f}, early/late jump dt span = {:.1f} ms").format(i + 1, \
+                    gap['len_beg']/1000.0, gap['len_end']/1000.0, gap['ht_beg']/1000.0, \
+                    gap['ht_end']/1000.0, gap['dt_nom'], gap['log_k_growth'], 1000.0*gap['dt_span']))
+
+        if (traj is not None) and (self.mc_time_diffs_std is not None) \
+            and (len(self.mc_time_diffs_std) == len(traj.observations)):
+            out.append("")
+            out.append("MC timing offset uncertainties (1 sigma):")
+            for obs, dt_std in zip(traj.observations, self.mc_time_diffs_std):
+                if obs.ignore_station:
+                    continue
+                out.append("{:>14s}: {:.6f} s".format(str(obs.station_id), float(dt_std)))
+
+        out.append("")
+
+        return "\n".join(out)
+
+
+
 def _buildStationsTimeDict(traj):
     """ Build the station timing status dictionary following the Trajectory.py convention.
 
@@ -1950,35 +2161,24 @@ def solveTrajectoryDragFit(traj, max_iter=DRAG_TRAJ_MAX_ITER, dt_tol=DRAG_TRAJ_D
         traj = copyUncertainties(traj_best, traj)
 
 
-    # Print coverage and gap summary when verbose
-    if traj.verbose:
-        if drag_fit.single_station_spans:
-            print("Single-station (no overlap) spans:")
-            for i, (s_beg, s_end) in enumerate(drag_fit.single_station_spans):
-                print("  Span {:d}: L = {:.2f} - {:.2f} km (ht {:.2f} - {:.2f} km)".format(i + 1, \
-                    s_beg/1000.0, s_end/1000.0, drag_fit.heightAtLength(s_beg)[0]/1000.0, \
-                    drag_fit.heightAtLength(s_end)[0]/1000.0))
-
-        if drag_fit.gap_uncertainties:
-            print("Unobserved gaps bridged by the drag model:")
-            for i, gap in enumerate(drag_fit.gap_uncertainties):
-                print(("  Gap {:d}: L = {:.2f} - {:.2f} km (ht {:.2f} - {:.2f} km), dt = {:.3f} s, " \
-                    + "assumed d(ln K) = {:.2f}, early/late jump dt span = {:.1f} ms").format(i + 1, \
-                    gap['len_beg']/1000.0, gap['len_end']/1000.0, gap['ht_beg']/1000.0, \
-                    gap['ht_end']/1000.0, gap['dt_nom'], gap['log_k_growth'], 1000.0*gap['dt_span']))
-
-
-    # Save report, pickle, KML and plots if requested
+    # Save report (with appended drag fit summary), pickle, KML and plots if requested
+    drag_summary = drag_fit.formatReportSummary(traj=traj)
     if traj.save_results:
         mkdirP(traj.output_dir)
-        traj.saveReport(traj.output_dir, traj.file_name + '_report.txt', uncertainties=traj.uncertainties, \
+        report_name = traj.file_name + '_report.txt'
+        traj.saveReport(traj.output_dir, report_name, uncertainties=traj.uncertainties, \
             verbose=traj.verbose, save_results=True)
+        with open(os.path.join(traj.output_dir, report_name), 'a') as f_rep:
+            f_rep.write(drag_summary)
         savePickle(traj, traj.output_dir, traj.file_name + '_trajectory.pickle')
 
         if getattr(traj, 'save_kml', False):
             from wmpl.Utils.TrajectoryKML import trajectoryToKML
             kml_path = os.path.join(traj.output_dir, traj.file_name + '_3D.kml')
             trajectoryToKML(traj, kml_path, measured=getattr(traj, 'kml_measured', False))
+
+    if traj.verbose:
+        print(drag_summary)
 
     if traj.save_results or traj.show_plots:
         traj.savePlots(traj.output_dir, traj.file_name, show_plots=traj.show_plots)
