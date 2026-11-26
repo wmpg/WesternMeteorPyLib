@@ -8928,10 +8928,10 @@ if __name__ == "__main__":
                     t_dyn = time_data[midpoint_index]
                     v_dyn_smooth = expLinearVelocity(t_dyn, traj.v_init, *lag_fit_params)
 
-                    # Compute the dynamic mass
+                    # Dynamic mass with the air-relative velocity, as for the alpha-beta model
                     dyn_mass_smooth = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, \
-                        ht_dyn_smooth, traj.jdt_ref, v_dyn_smooth, 1000*abs(decel), gamma=1.0, \
-                        shape_factor=cml_args.ga)
+                        ht_dyn_smooth, traj.jdt_ref, v_dyn_smooth - air_offset, 1000*abs(decel), \
+                        gamma=1.0, shape_factor=cml_args.ga)
 
                     # Plot the point where the dynamic mass is estimated
                     ax_vel.scatter([v_dyn_smooth/1000], [ht_dyn_smooth/1000], color='r', marker='s', \
@@ -8943,7 +8943,8 @@ if __name__ == "__main__":
                         print("---------------------------")
                         print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
                         print("Height       = {:5.2f} km".format(ht_dyn_smooth/1000))
-                        print("Velocity     = {:5.2f} km/s".format(v_dyn_smooth/1000))
+                        print("Velocity     = {:5.2f} km/s{:s}".format((v_dyn_smooth - air_offset)/1000, \
+                            " (relative to the air)" if (cml_args.lagfit == 'full') else ""))
                         print("Deceleration = {:5.2f} km/s^2".format(abs(decel)))
                         print("Gamma*A      = {:5.2f}".format(cml_args.ga))
                         print()
@@ -9089,20 +9090,25 @@ if __name__ == "__main__":
         #   peak
         if cml_args.lagsmooth:
 
-            dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data, traj.jdt_ref, vel_data_smooth)
+            # Air-relative velocities of the lag smoothing, as for the alpha-beta model
+            vel_data_smooth_air = vel_data_smooth - air_offset
+
+            dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data, traj.jdt_ref, vel_data_smooth_air)
 
             peak_dyn_pressure_index_lag, peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = \
                 findPeakDynPressure(dyn_pressure_lag, ht_data)
 
             print()
             print("Lag smoothing:")
+            if cml_args.lagfit == 'full':
+                print("Velocities relative to the air")
             print("Height (km)  Vel (km/s)  DynPress (MPa)")
             for i in range(len(ht_data)):
 
                 # Compute the index from reverse
                 i_rev = len(ht_data) - i - 1
-                print("{:11.2f}  {:10.4f}  {:14.5f}".format(ht_data[i_rev]/1000, vel_data_smooth[i_rev]/1000, \
-                    dyn_pressure_lag[i_rev]/1e6))
+                print("{:11.2f}  {:10.4f}  {:14.5f}".format(ht_data[i_rev]/1000, \
+                    vel_data_smooth_air[i_rev]/1000, dyn_pressure_lag[i_rev]/1e6))
 
         # Peak dynamic pressures and their heights of the models within the 95% interval, with the density
         #   computed once as the dynamic pressure is proportional to the squared velocity
@@ -9128,9 +9134,9 @@ if __name__ == "__main__":
                 np.min(interval_peaks[:, 0]), np.max(interval_peaks[:, 0]), np.min(interval_peaks[:, 1]), \
                 np.max(interval_peaks[:, 1])))
         if cml_args.lagsmooth:
-            print("Lag smoothing   = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
-                peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag,
-                vel_data_smooth[peak_dyn_pressure_index_lag]/1000))
+            print("Lag smoothing   = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format( \
+                peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, \
+                vel_data_smooth_air[peak_dyn_pressure_index_lag]/1000))
         print("----------------------")
 
 
