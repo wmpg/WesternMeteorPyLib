@@ -106,6 +106,9 @@ class Orbit(object):
         # Velocity at infinity
         self.v_inf = None
 
+        # Pre-atmospheric air-column drag velocity correction added to v_init to obtain v_inf (m/s)
+        self.dv_pre_atm = 0.0
+
         # Geocentric velocity (m/s)
         self.v_g = None
 
@@ -270,8 +273,15 @@ class Orbit(object):
                 uncertainties, 'dec_g', deg=True))
             out_str += "  Vg     = {:s} km/s\n".format(valueFormat("{:>9.5f}", self.v_g, '{:.5f}', \
                 uncertainties, 'v_g', multi=1.0/1000))
-            out_str += "  Vinf   = {:s} km/s\n".format(valueFormat("{:>9.5f}", self.v_inf, '{:.5f}', \
-                uncertainties, 'v_inf', multi=1.0/1000))
+            # Append the pre-atmospheric air-column drag correction to Vinf when applied
+            dv_pre_atm = getattr(self, 'dv_pre_atm', 0.0)
+            if (dv_pre_atm is not None) and (abs(dv_pre_atm) > 0.0):
+                v_inf_corr_str = ' ({:+.4f} km/s pre-atm drag corr)'.format(dv_pre_atm/1000.0)
+            else:
+                v_inf_corr_str = ''
+
+            out_str += "  Vinf   = {:s} km/s{:s}\n".format(valueFormat("{:>9.5f}", self.v_inf, '{:.5f}', \
+                uncertainties, 'v_inf', multi=1.0/1000), v_inf_corr_str)
             out_str += "  Zc     = {:s} deg\n".format(valueFormat("{:>9.5f}", self.zc, '{:.5f}', \
                 uncertainties, 'zc', deg=True))
             out_str += "  Zg     = {:s} deg\n".format(valueFormat("{:>9.5f}", self.zg, '{:.5f}', \
@@ -588,7 +598,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
 
 
 def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False, reference_init=True, \
-    rotation_correction=False, v_init_stddev_direct=None):
+    rotation_correction=False, v_init_stddev_direct=None, dv_pre_atm=0.0):
     """ Calculate the meteor's orbit from the given meteor trajectory. The orbit of the meteoroid is defined 
         relative to the centre of the Sun (heliocentric).
 
@@ -626,6 +636,8 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             even if fixed station coordinates were used in the ECI coordinate system!
         v_init_stddev_direct: [float] Standard deviation of the direct velocity fit derived without Monte
             Carlo. None by default.
+        dv_pre_atm: [float] Pre-atmospheric air-column drag deceleration correction added to v_init to obtain
+            v_inf before subtracting Earth's escape velocity (m/s). 0.0 by default.
 
     Return:
         orb: [Orbit object] Object containing the calculated orbit.
@@ -799,8 +811,11 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     orb.ht_ref_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(orb.lat_ref, orb.lon_ref, orb.ht_ref)
     orb.lat_geocentric = lat_geocentric
 
-    # Assume that the velocity in infinity is the same as the initial velocity (after rotation correction, if
-    # it was needed)
+    # Apply optional pre-atmospheric air-column drag correction to obtain pre-entry speed at r_beg before
+    #   removing Earth's gravity (escape velocity and zenith attraction)
+    dv_pre_atm_val = float(dv_pre_atm) if (dv_pre_atm is not None) and np.isfinite(dv_pre_atm) else 0.0
+    orb.dv_pre_atm = dv_pre_atm_val
+    v_init_corr = v_init_corr + dv_pre_atm_val
     orb.v_inf = v_init_corr
 
 
@@ -986,6 +1001,11 @@ if __name__ == "__main__":
     arg_parser.add_argument('-m', '--milig', \
         help="MILIG input mode, i.e. the trajectory was estimated with fixed stations and reference average position on the trajectory. This replaces calling both options --refavg and --statfixed.", \
         action="store_true")
+
+    arg_parser.add_argument('--dvpreatm', metavar='DV_PRE_ATM', type=float, default=None, \
+        help="Pre-atmospheric air-column drag velocity correction added to v_init to obtain v_inf (m/s). " \
+        + "When a trajectory pickle is given without overriding -v or --ele, the saved correction is " \
+        + "preserved by default.")
 
 
     # Parse the command line arguments
@@ -1176,9 +1196,18 @@ if __name__ == "__main__":
     # eci_ref     =  np.array([3757410.98, -2762153.20, 4463901.73])
     # jd_ref      = 2457955.794670294970
 
+    # Preserve the saved pre-atmospheric correction when recomputing from a pickle without overriding the
+    #   initial velocity or reference height, unless explicitly specified via --dvpreatm
+    if cml_args.dvpreatm is not None:
+        dv_pre_atm = cml_args.dvpreatm
+    elif (traj is not None) and (cml_args.vinit is None) and (cml_args.ele is None):
+        dv_pre_atm = float(getattr(traj.orbit, 'dv_pre_atm', getattr(traj, 'dv_pre_atm', 0.0)))
+    else:
+        dv_pre_atm = 0.0
+
     # Compute the orbit
     orb = calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, reference_init=reference_init, \
-        rotation_correction=rotation_correction, stations_fixed=stations_fixed)
+        rotation_correction=rotation_correction, stations_fixed=stations_fixed, dv_pre_atm=dv_pre_atm)
 
     # Print the results
     print('Ref JD:', jd_ref)

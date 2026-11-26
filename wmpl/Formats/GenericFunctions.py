@@ -463,6 +463,14 @@ def addSolverOptions(arg_parser, skip_velpart=False):
         help="Keep the air at rest when computing the drop of the meteor across the path, i.e. do not take the drag against the air which rotates with the Earth into account.", \
         action="store_true")
 
+    arg_parser.add_argument('--disabledragfit', \
+        help="Disable the drag-coupled timing and velocity solver and use the legacy pairwise overlap " \
+        + "solver instead.", action="store_true")
+
+    arg_parser.add_argument('--disablepreatm', \
+        help="Disable the pre-atmospheric air-column drag velocity correction applied to v_inf in the " \
+        + "orbit calculation.", action="store_true")
+
     arg_parser.add_argument('--gfact', metavar='GRAVITY_FACTOR', \
         help='Gravity correction factor. 1.0 by default (full correction). Can be between 0 - 1. Lower values used for lift compensation.', 
         type=float, default=1.0)
