@@ -1101,7 +1101,7 @@ class CandidateDatabase():
             self.dbhandle = None
         return 
 
-    def checkAndAddCand(self, cand_id:str, ref_dt:float, obs_ids:list, verbose=False):
+    def checkAndAddCand(self, cand_id, ref_dt, obs_ids, verbose=False):
         """
         Check and add a candidate if its not already there
 
@@ -1512,46 +1512,74 @@ if __name__ == '__main__':
             trajdb.copyTrajJsonRecords(jsondb.trajectories, dt_range, failed=False)
             trajdb.closeTrajDatabase()
     else:
-        if dbname == 'candidates':
-            canddb = CandidateDatabase(cml_args.dir_path)
+        if dbname.startswith('candidates'):
+            canddb = CandidateDatabase(cml_args.dir_path, dbname)
             if action == 'describe':
                 res = canddb.dbhandle.execute('pragma table_info(candidates)').fetchall()
                 print('candidates\n==========')
                 for rw in res:
                     print(rw)
             if action == 'status':
-                res = canddb.dbhandle.execute('select * from candidates where status=1').fetchall()
+                res = canddb.dbhandle.execute('select count(*) from candidates where status=1').fetchall()
                 print(f'there are {res[0][0] if res else 0} candidates')
-                res = canddb.dbhandle.execute('select (*) from candidates where status=0').fetchall()
+                res = canddb.dbhandle.execute('select count(*) from candidates where status=0').fetchall()
                 print(f'and       {res[0][0] if res else 0} deleted candidates')
             if action == 'execute':
                 print(stmt)
                 cur = canddb.dbhandle.execute(stmt)
                 for rw in cur.fetchall():
                     print(rw)
+            if action == 'purge':
+                if dt_range is None:
+                    log.info('Date range must be provided for purge operation')
+                else:
+                    ts_beg = dt_range[0].timestamp()
+                    ts_end = dt_range[1].timestamp()
+                    res = canddb.dbhandle.execute('select count(*) from candidates').fetchone()
+                    orig_count = res[0]
+                    res = canddb.dbhandle.execute('delete from candidates where ref_dt >= ? and ref_dt <= ?', (ts_beg, ts_end))
+                    res = canddb.dbhandle.execute('select count(*) from candidates').fetchone()
+                    final_count = res[0]
+                    print(f'removed {orig_count - final_count} candidates')
+
             canddb.closeCandDatabase()
 
-        elif dbname == 'observations':
-            obsdb = ObservationsDatabase(cml_args.dir_path)
+        elif dbname.startswith('observations'):
+            obsdb = ObservationsDatabase(cml_args.dir_path, dbname)
             if action == 'describe':
                 res = obsdb.dbhandle.execute('pragma table_info(paired_obs)').fetchall()
                 print('paired_obs\n==========')
                 for rw in res:
                     print(rw)
             if action == 'status':
-                res = obsdb.dbhandle.execute('select * from paired_obs where status=1').fetchall()
+                res = obsdb.dbhandle.execute('select count(*) from paired_obs where status=1').fetchall()
                 print(f'there are {res[0][0] if res else 0} paired obs')
-                res = obsdb.dbhandle.execute('select (*) from paired_obs where status=0').fetchall()
+                res = obsdb.dbhandle.execute('select count(*) from paired_obs where status=0').fetchall()
                 print(f'and       {res[0][0] if res else 0} unpaired obs')
             if action == 'execute':
                 print(stmt)
                 cur = obsdb.dbhandle.execute(stmt)
                 for rw in cur.fetchall():
                     print(rw)
+            if action == 'purge':
+                if dt_range is None:
+                    log.info('Date range must be provided for purge operation')
+                else:
+                    jdt_beg = datetime2JD(dt_range[0])
+                    jdt_end = datetime2JD(dt_range[1])
+                    res = obsdb.dbhandle.execute('select count(*) from paired_obs').fetchone()
+                    orig_count = res[0]
+                    res = obsdb.dbhandle.execute('delete from paired_obs where obs_dt >= ? and obs_dt <= ?', 
+                                                  (jdt_beg, jdt_end))
+                    res = obsdb.dbhandle.execute('select count(*) from paired_obs').fetchone()
+                    final_count = res[0]
+                    print(f'removed {orig_count - final_count} observations')
+                    obsdb._commitObsDatabase()
+
             obsdb.closeObsDatabase()
 
-        elif dbname == 'trajectories':
-            trajdb = TrajectoryDatabase(cml_args.dir_path)
+        elif dbname.startswith('trajectories'):
+            trajdb = TrajectoryDatabase(cml_args.dir_path, dbname)
             if action == 'describe':
                 res = trajdb.dbhandle.execute('pragma table_info(trajectories)').fetchall()
                 print('trajectories\n============')
