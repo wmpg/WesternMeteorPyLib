@@ -501,7 +501,7 @@ class DragFit(object):
 
             res = scipy.optimize.least_squares(lambda p: self._residuals(np.concatenate([p, \
                 np.zeros(self.n_knots)]), 0.0)[:len(self.len_data)], p0[:3], bounds=(lower[:3], upper[:3]), \
-                loss='soft_l1', f_scale=50.0, x_scale='jac', ftol=1e-6, xtol=1e-6)
+                loss='soft_l1', f_scale=50.0, x_scale='jac', ftol=1e-8, xtol=1e-9)
 
             if (best is None) or (res.cost < best.cost):
                 best = res
@@ -525,7 +525,7 @@ class DragFit(object):
             p0 = np.clip(p0, lower + 1e-9, upper - 1e-9)
 
             res = scipy.optimize.least_squares(self._residuals, p0, args=(w_pen,), bounds=(lower, upper), \
-                loss='soft_l1', f_scale=f_scale, x_scale='jac', ftol=1e-6, xtol=1e-6, max_nfev=1000)
+                loss='soft_l1', f_scale=f_scale, x_scale='jac', ftol=1e-8, xtol=1e-9, max_nfev=1000)
 
             if (best_full is None) or (res.cost < best_full.cost):
                 best_full = res
@@ -551,7 +551,7 @@ class DragFit(object):
         w_pen = np.sqrt(penalty)*f_scale
 
         res = scipy.optimize.least_squares(self._residuals, params, args=(w_pen,), bounds=(lower, upper), \
-            loss='soft_l1', f_scale=f_scale, x_scale='jac', ftol=1e-6, xtol=1e-6, max_nfev=1000)
+            loss='soft_l1', f_scale=f_scale, x_scale='jac', ftol=1e-8, xtol=1e-9, max_nfev=1000)
 
         self.params = res.x
 
