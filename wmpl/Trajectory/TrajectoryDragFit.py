@@ -102,6 +102,23 @@ DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD = 1.0
 
 
 
+def _formatPressure(dyn_pres_pa):
+    """ Format dynamic pressure in MPa when >= 100 kPa, otherwise in kPa.
+
+    Arguments:
+        dyn_pres_pa: [float] Dynamic pressure (Pa).
+
+    Return:
+        [str] Human-readable ASCII pressure string.
+    """
+
+    if dyn_pres_pa >= 1e5:
+        return "{:.2f} MPa".format(dyn_pres_pa/1e6)
+
+    return "{:.1f} kPa".format(dyn_pres_pa/1e3)
+
+
+
 def _stationSubIntervals(len_arr, gap_factor=DRAG_TRAJ_GAP_FACTOR, min_gap_m=DRAG_TRAJ_MIN_GAP):
     """ Split one station's length array into contiguous observed sub-intervals at large internal gaps.
 
@@ -1308,9 +1325,193 @@ class DragTimingFit(object):
 
 
 
+    def dynamicPressureOnGrid(self):
+        """ Compute dynamic pressure rho*v_air^2 along len_grid.
+
+        Return:
+            [ndarray] Dynamic pressure on len_grid (Pa).
+        """
+
+        v_air = np.maximum(self.vel_grid - getattr(self, 'v_rotation', 0.0), 0.0)
+
+        return self.rho*v_air**2
+
+
+
+    def peakDynamicPressure(self):
+        """ Find the peak dynamic pressure along the observed trajectory and its height, speed and time.
+
+        Return:
+            [dict] Dictionary with keys 'dyn_pres' (Pa), 'ht' (m), 'vel' (m/s), 'vel_air' (m/s),
+                'time' (s) and 'length' (m).
+        """
+
+        p_dyn = self.dynamicPressureOnGrid()
+        i_max = int(np.argmax(p_dyn))
+        v_max = float(self.vel_grid[i_max])
+        v_air_max = max(v_max - getattr(self, 'v_rotation', 0.0), 0.0)
+
+        return {
+            'dyn_pres': float(p_dyn[i_max]),
+            'ht': float(self.ht_grid[i_max]),
+            'vel': v_max,
+            'vel_air': float(v_air_max),
+            'time': float(self.time_grid[i_max]),
+            'length': float(self.len_grid[i_max]),
+        }
+
+
+
+    def effectiveAblationCoeff(self):
+        """ Estimate the effective ablation coefficient sigma_eff = 6*ln(K_end/K_beg)/(v_beg^2 - v_end^2)
+            in s^2/km^2 when deceleration and K are constrained.
+
+        This combines smooth thermal ablation and any mechanical fragmentation along the decelerating part of
+        the trajectory.
+
+        Return:
+            [dict] Dictionary with keys 'sigma_eff' (s^2/km^2 or None), 'sigma_eff_std' (s^2/km^2 or None)
+                and 'reason' (str or None).
+        """
+
+        vel_beg = float(self.vel_grid[0])
+        vel_end = float(self.vel_grid[-1])
+        dv = vel_beg - vel_end
+        dv_frac = dv/max(vel_beg, 1.0)
+        log_k_beg = float(self.log_k_grid[0])
+        log_k_end = float(self.log_k_grid[-1])
+        k_end = float(np.exp(log_k_end))
+
+        result = {'sigma_eff': None, 'sigma_eff_std': None, 'reason': None}
+
+        if (dv < DRAG_TRAJ_TERM_MASS_MIN_DV) or (dv_frac < DRAG_TRAJ_TERM_MASS_MIN_DV_FRAC):
+            result['reason'] = "insufficient deceleration (dv = {:.2f} km/s, {:.1f}%)".format(dv/1000.0, \
+                100.0*dv_frac)
+            return result
+
+        if (k_end <= 1e-6) or (log_k_end <= DRAG_VEL_LOG_K_BOUNDS[0] + 1.0):
+            result['reason'] = "K at lower bound"
+            return result
+
+        max_k0 = getattr(self, 'max_k0', None)
+        max_log_k0 = getattr(self, 'max_log_k0', DRAG_VEL_LOG_K_BOUNDS[1])
+        if (max_k0 is not None) and (log_k_end >= max_log_k0 - 1e-3) \
+            and (float(np.sum(self.drag_params[3:])) < 1e-3):
+            result['reason'] = "K pinned at max_k0 cap"
+            return result
+
+        log_k_std_end = float(self.log_k_std_grid[-1]) \
+            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
+        if (not np.isfinite(log_k_std_end)) or (log_k_std_end > DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD):
+            result['reason'] = "K poorly constrained at end"
+            return result
+
+        dv2_kms2 = (vel_beg/1000.0)**2 - (vel_end/1000.0)**2
+        if dv2_kms2 <= 1e-6:
+            result['reason'] = "insufficient deceleration"
+            return result
+
+        dlog_k = max(log_k_end - log_k_beg, 0.0)
+        sigma_eff = 6.0*dlog_k/dv2_kms2
+
+        sigma_std = None
+        if self.params_cov is not None:
+            grad = np.zeros(len(self.params), dtype=np.float64)
+            grad[3:3 + self.n_knots] = 1.0
+            var_dlog_k = float(grad.dot(self.params_cov).dot(grad))
+            if np.isfinite(var_dlog_k) and (var_dlog_k >= 0.0):
+                sigma_std = float(6.0*np.sqrt(var_dlog_k)/dv2_kms2)
+
+        result['sigma_eff'] = float(sigma_eff)
+        result['sigma_eff_std'] = sigma_std
+
+        return result
+
+
+
+    def detectDragChanges(self, min_ratio=1.10, min_signif=1.5):
+        """ Detect sudden increases in the ballistic coefficient K across contiguous observed segments
+            (dynamic signatures of fragmentation or major shedding events).
+
+        Keyword arguments:
+            min_ratio: [float] Minimum K_after / K_before ratio across an active episode. 1.10 by default.
+            min_signif: [float] Minimum covariance significance (sigma) required for a standalone jump.
+                1.5 by default.
+
+        Return:
+            [list] List of dictionaries describing each detected change episode, sorted by descending height.
+        """
+
+        p_dyn = self.dynamicPressureOnGrid()
+        active = [i for i in range(self.n_knots) \
+            if (not self.is_gap_ramp[i]) and (float(self.drag_params[3 + i]) > 0.03)]
+        if not active:
+            return []
+
+        episodes = []
+        for idx in active:
+            if episodes and (idx == episodes[-1][-1] + 1):
+                episodes[-1].append(idx)
+            else:
+                episodes.append([idx])
+
+        log_k_std_end = float(self.log_k_std_grid[-1]) \
+            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
+
+        changes = []
+        for idxs in episodes:
+            deltas = np.array([float(self.drag_params[3 + i]) for i in idxs], dtype=np.float64)
+            tot_dlog_k = float(np.sum(deltas))
+            k_ratio = float(np.exp(tot_dlog_k))
+            if k_ratio < min_ratio:
+                continue
+
+            signif = 0.0
+            if self.params_cov is not None:
+                grad = np.zeros(len(self.params), dtype=np.float64)
+                for i in idxs:
+                    grad[3 + i] = 1.0
+                var = float(grad.dot(self.params_cov).dot(grad))
+                if np.isfinite(var) and (var > 0.0):
+                    signif = tot_dlog_k/float(np.sqrt(var))
+
+            # Accept statistically significant jumps, or well-constrained >= 15% local steps on multi-segment
+            #   tracks where adjacent ramps share variance with K_0
+            well_constrained_step = (self.n_knots >= 3) and np.isfinite(log_k_std_end) \
+                and (log_k_std_end < 0.35) and (k_ratio >= 1.15)
+            if (signif < min_signif) and (not well_constrained_step):
+                continue
+
+            l_mids = np.array([float(self.ramp_beg[i]) + 0.5*float(self.ramp_len[i]) for i in idxs], \
+                dtype=np.float64)
+            l_cent = float(np.clip(np.sum(deltas*l_mids)/tot_dlog_k, self.len_first, self.len_last))
+            l_beg = float(self.ramp_beg[idxs[0]])
+            l_end = min(float(self.ramp_beg[idxs[-1]] + self.ramp_len[idxs[-1]]), self.len_last)
+
+            changes.append({
+                'length': l_cent,
+                'ht': float(self.heightAtLength(l_cent)[0]),
+                'ht_beg': float(self.heightAtLength(l_beg)[0]),
+                'ht_end': float(self.heightAtLength(l_end)[0]),
+                'time': float(self.timeAtLength(l_cent)[0]),
+                'dyn_pres': float(np.interp(l_cent, self.len_grid, p_dyn)),
+                'dyn_pres_beg': float(np.interp(l_beg, self.len_grid, p_dyn)),
+                'dyn_pres_end': float(np.interp(l_end, self.len_grid, p_dyn)),
+                'k_at_change': float(self.ballisticCoeffAtLength(l_cent)[0]),
+                'k_ratio': k_ratio,
+                'dlog_k': tot_dlog_k,
+                'signif': float(signif),
+                'segments': [i + 1 for i in idxs],
+            })
+
+        return changes
+
+
+
     def formatReportSummary(self, traj=None, gamma_a=GAMMA_A, bulk_density=DRAG_TRAJ_BULK_DENSITY):
-        """ Format a plain-text summary of the drag fit, segment K profile, unobserved gaps and gated
-            terminal dynamic mass for appending to the trajectory report file.
+        """ Format a plain-text summary of the drag fit, effective ablation coefficient, peak dynamic
+            pressure, detected sudden K changes, unobserved gaps and gated terminal dynamic mass for
+            appending to the trajectory report file.
 
         Keyword arguments:
             traj: [Trajectory object] Optional parent trajectory for per-station MC timing uncertainties.
@@ -1326,9 +1527,11 @@ class DragTimingFit(object):
         k_beg = float(np.exp(self.log_k_grid[0]))
         k_end = float(np.exp(self.log_k_grid[-1]))
         k_ratio = k_end/max(k_beg, 1e-30)
-        mass_ratio = k_ratio**(-3.0)
         max_k0 = getattr(self, 'max_k0', None)
         max_k0_str = "{:.1f} m^2/kg".format(max_k0) if max_k0 is not None else "none"
+        peak_p = self.peakDynamicPressure()
+        abl = self.effectiveAblationCoeff()
+        drag_changes = self.detectDragChanges()
 
         out = []
         out.append("")
@@ -1352,7 +1555,17 @@ class DragTimingFit(object):
             self.ht_grid[0]/1000.0, self.vel_grid[0]/1000.0, k_beg, k_beg_mc))
         out.append("End:   h = {:6.2f} km, v = {:6.3f} km/s, K = {:.2e} m^2/kg{:s}".format( \
             self.ht_grid[-1]/1000.0, self.vel_grid[-1]/1000.0, k_end, k_end_mc))
-        out.append("K end/beg = {:.2f}, single-body m end/beg = {:.3g}".format(k_ratio, mass_ratio))
+        out.append("K end/beg = {:.2f}".format(k_ratio))
+        out.append(("Peak dynamic pressure: {:s} ({:.1f} kPa) at h = {:.2f} km, v = {:.2f} km/s, " \
+            + "t = {:.3f} s").format(_formatPressure(peak_p['dyn_pres']), peak_p['dyn_pres']/1000.0, \
+            peak_p['ht']/1000.0, peak_p['vel']/1000.0, peak_p['time']))
+
+        if abl['sigma_eff'] is not None:
+            std_s = " +/- {:.4f}".format(abl['sigma_eff_std']) if abl['sigma_eff_std'] is not None else ""
+            out.append(("Effective ablation coeff (sigma_eff): {:.4f}{:s} s^2/km^2 " \
+                + "(combines thermal ablation and fragmentation)").format(abl['sigma_eff'], std_s))
+        else:
+            out.append("Effective ablation coeff (sigma_eff): not constrained ({:s})".format(abl['reason']))
 
         # Gated terminal dynamic mass estimate
         tm = self.terminalDynamicMass(gamma_a=gamma_a, bulk_density=bulk_density)
@@ -1367,11 +1580,21 @@ class DragTimingFit(object):
         else:
             out.append("Terminal dynamic mass: not estimated ({:s})".format(tm['reason']))
 
+        if drag_changes:
+            out.append("")
+            out.append("Drag coefficient changes (potential fragmentations):")
+            for idx_ev, ev in enumerate(drag_changes):
+                out.append(("  Change {:d}: K x{:.2f} at h = {:.2f} km ({:.2f} - {:.2f} km), " \
+                    + "P_dyn = {:s} ({:.1f} kPa), signif = {:.1f} sigma").format(idx_ev + 1, ev['k_ratio'], \
+                    ev['ht']/1000.0, ev['ht_beg']/1000.0, ev['ht_end']/1000.0, \
+                    _formatPressure(ev['dyn_pres']), ev['dyn_pres']/1000.0, ev['signif']))
+
         # Per-segment K profile table
         out.append("")
         out.append(" Seg, Ht beg, Ht end, Time beg, Vel beg, Dyn pres,     K beg,     K end, K std, Gap")
         out.append("    ,   (km),   (km),      (s),  (km/s),    (kPa),  (m^2/kg),  (m^2/kg),   (%),")
 
+        p_dyn_grid = self.dynamicPressureOnGrid()
         for idx in range(self.n_knots):
             l_beg = float(self.ramp_beg[idx])
             l_end = min(float(self.ramp_beg[idx] + self.ramp_len[idx]), self.len_last)
@@ -1379,8 +1602,7 @@ class DragTimingFit(object):
             ht_end = float(self.heightAtLength(l_end)[0])/1000.0
             t_beg = float(self.timeAtLength(l_beg)[0])
             v_beg = float(self.velocityAtLength(l_beg)[0])
-            rho_beg = float(np.interp(l_beg, self.len_grid, self.rho))
-            dyn_pres_kpa = rho_beg*v_beg**2/1000.0
+            dyn_pres_kpa = float(np.interp(l_beg, self.len_grid, p_dyn_grid))/1000.0
             k_s_beg = float(self.ballisticCoeffAtLength(l_beg)[0])
             k_s_end = float(self.ballisticCoeffAtLength(l_end)[0])
             if self.log_k_std_grid is not None:
@@ -2522,6 +2744,34 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
             gap_txt = "Gap {:.1f} km".format(gap_km)
         ax_ht.text(t_mid, h_top_band, gap_txt, fontsize=8, ha='center', va='top', \
             bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.8))
+
+
+    # Mark peak dynamic pressure on the velocity and K panels
+    peak_p = drag_fit.peakDynamicPressure()
+    peak_ht_km = peak_p['ht']/1000.0
+    peak_lbl = "Peak P_dyn: {:s} ({:.1f} km)".format(_formatPressure(peak_p['dyn_pres']), peak_ht_km)
+    ax_vel.axhline(peak_ht_km, color='crimson', linestyle='--', linewidth=1.1, alpha=0.85, label=peak_lbl, \
+        zorder=3)
+    ax_k.axhline(peak_ht_km, color='crimson', linestyle='--', linewidth=1.1, alpha=0.85, label=peak_lbl, \
+        zorder=3)
+
+    # Mark detected sudden K changes (potential fragmentations) with their dynamic pressure on the K panel
+    drag_changes = drag_fit.detectDragChanges()
+    k_mid_log = np.sqrt(k_lo_lim*k_hi_lim)
+    for idx_ev, ev in enumerate(drag_changes):
+        h_ev_km = ev['ht']/1000.0
+        k_ev = float(np.clip(ev['k_at_change'], k_lo_lim, k_hi_lim))
+        ev_lbl = 'K change (P_dyn)' if idx_ev == 0 else None
+        ax_k.axhline(h_ev_km, color='tab:blue', linestyle=':', linewidth=1.1, alpha=0.8, zorder=3)
+        ax_k.scatter([k_ev], [h_ev_km], color='tab:blue', s=24, zorder=5, label=ev_lbl)
+        ev_txt = "x{:.2f} @ {:s} ({:.1f} km)".format(ev['k_ratio'], _formatPressure(ev['dyn_pres']), h_ev_km)
+        if k_ev <= k_mid_log:
+            xy_off, h_align, v_align = (8, 4), 'left', 'bottom'
+        else:
+            xy_off, h_align, v_align = (-8, -4), 'right', 'top'
+        ax_k.annotate(ev_txt, xy=(k_ev, h_ev_km), xytext=xy_off, textcoords='offset points', fontsize=7, \
+            ha=h_align, va=v_align, color='tab:blue', \
+            bbox=dict(boxstyle='round,pad=0.18', fc='white', ec='tab:blue', alpha=0.88))
 
 
     ax_ht.set_xlabel('Time (s)')

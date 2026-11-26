@@ -395,8 +395,19 @@ def testReportSummaryAndTerminalMassGating(tmp_path):
     assert os.path.isfile(report_path)
     report_txt = open(report_path, 'r').read()
     assert 'Drag fit summary' in report_txt
+    assert 'Peak dynamic pressure:' in report_txt
+    assert 'Effective ablation coeff (sigma_eff):' in report_txt
     assert 'Terminal dynamic mass:' in report_txt
     assert 'not estimated' not in report_txt
+    assert 'single-body m end/beg' not in report_txt
+
+    peak_p = traj_fall.drag_timing_fit.peakDynamicPressure()
+    assert peak_p['dyn_pres'] > 1e5
+    assert 15000.0 < peak_p['ht'] < 55000.0
+
+    abl = traj_fall.drag_timing_fit.effectiveAblationCoeff()
+    assert abl['sigma_eff'] is not None
+    assert 0.001 < abl['sigma_eff'] < 0.2
 
     # Wide MC ensemble spread on K_end must also suppress the terminal dynamic mass estimate
     df_fall = traj_fall.drag_timing_fit
