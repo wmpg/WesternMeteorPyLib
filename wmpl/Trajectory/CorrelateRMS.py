@@ -2063,7 +2063,7 @@ class RMSDataHandle(object):
         ctry_list = list(set([met_obs.station_code[:2] for _, met_obs, _ in matched_observations]))
         ctry_list.sort()
         ctries = '_'.join(ctry_list)
-        cand_id = f'{ref_dt.timestamp():.6f}_{ctries}'
+        cand_id = f"{ref_dt.strftime('%Y%m%d_%H%M%S_%f')}_{ctries}_c"
         return cand_id
 
     def saveCandidates(self, candidate_trajectories, verbose=False):
