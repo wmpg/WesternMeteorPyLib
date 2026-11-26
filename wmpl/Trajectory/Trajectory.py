@@ -57,7 +57,7 @@ from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, fin
     confidenceInterval, medianStddev, isGraphConnected
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
-from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationVelocity, trajectoryLightCurve
+from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationVelocity
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot, stationColors
 from wmpl.Utils.PlotOrbits import plotOrbits
@@ -5056,13 +5056,13 @@ def _annotateDragPlot(ax, drag_fit, axis='y', coord='height', mark_events=False)
 def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, save_results=False, \
     ret_fig=False):
     """ Plot the drag-coupled trajectory diagnostic figure with unobserved zero-station gaps hatched and
-        shaded, peak dynamic pressure and fragmentation markers, and a light curve overlay on the K panel.
+        shaded, plus peak dynamic pressure and fragmentation markers.
 
     Panels:
         1. Height vs. Time (observations colored by station, solid/dashed drag model, hatched gaps).
         2. Velocity vs. Height (raw velocities, drag model, MC 1-sigma band, gap jump bounds).
         3. Lag vs. Time (raw lags and drag model lag with hatched gaps).
-        4. Ballistic coefficient K vs. Height (log scale, 1-sigma band, P_dyn markers, light curve overlay).
+        4. Ballistic coefficient K vs. Height (log scale, 1-sigma band, P_dyn markers).
 
     Arguments:
         traj: [Trajectory object] Solved trajectory with traj.drag_timing_fit attached.
@@ -5183,26 +5183,15 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
             label='1 sigma (fit)', zorder=2)
 
 
-    ### Annotate gaps, peak dynamic pressure and sudden K changes ###
+    ### Annotate gap bounds, peak dynamic pressure and sudden K changes ###
 
+    # Shade early/late jump velocity envelopes inside unobserved gaps
     for idx, gap in enumerate(drag_fit.gap_uncertainties):
 
-        # Shade early/late jump velocity envelope inside the gap
         if (len(gap['ht_gap_grid']) > 1) and (gap['dt_span'] > 1e-6):
             env_lbl = 'Gap jump bound' if idx == 0 else None
             ax_vel.fill_betweenx(gap['ht_gap_grid']/1000.0, gap['vel_lo']/1000.0, gap['vel_hi']/1000.0, \
                 color='tab:orange', alpha=0.35, label=env_lbl, zorder=2)
-
-        # Label each gap on the height-time panel, staggering adjacent boxes vertically
-        t_mid = 0.5*(gap['time_beg'] + gap['time_end'])
-        h_span = float(np.max(ht_grid_km)) - float(np.min(ht_grid_km))
-        h_top_band = float(np.max(ht_grid_km)) - (0.06 + 0.10*(idx%2))*h_span
-        gap_km = (gap['len_end'] - gap['len_beg'])/1000.0
-        dt_ms = 1000.0*gap['dt_span']
-        gap_txt = "Gap {:.1f} km\n+/-{:.0f} ms".format(gap_km, 0.5*dt_ms) if dt_ms >= 0.5 \
-            else "Gap {:.1f} km".format(gap_km)
-        ax_ht.text(t_mid, h_top_band, gap_txt, fontsize=8, ha='center', va='top', \
-            bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.8))
 
     # Mark peak dynamic pressure on the velocity and K panels
     peak_p = drag_fit.peakDynamicPressure()
@@ -5235,7 +5224,7 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
             bbox=dict(boxstyle='round,pad=0.18', fc='white', ec='tab:blue', alpha=0.88))
 
 
-    ### Configure panel labels and overlay photometry light curve on K panel ###
+    ### Configure panel labels and layout ###
 
     ax_ht.set_xlabel('Time (s)')
     ax_ht.set_ylabel('Height (km)')
@@ -5264,34 +5253,6 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
     ax_k.set_title('Fitted ballistic coefficient K')
     ax_k.grid(which='both', alpha=0.5)
     ax_k.legend(fontsize=7)
-
-    # Overlay the merged absolute-magnitude light curve from wmpl.Utils.Physics.trajectoryLightCurve
-    _, mag_lc, ht_lc = trajectoryLightCurve(traj)
-    if (mag_lc is not None) and (len(mag_lc) >= 4):
-
-        order = np.argsort(ht_lc)
-        ht_lc_km = ht_lc[order]/1000.0
-        mag_lc_sorted = mag_lc[order]
-
-        # Bin magnitudes by height into a smooth median envelope so optical flares stand out cleanly
-        n_bins = int(np.clip(len(ht_lc_km)//3, 6, 40))
-        edges = np.linspace(ht_lc_km[0], ht_lc_km[-1], n_bins + 1)
-        bin_h, bin_m = [], []
-        for b_i in range(n_bins):
-            sel = (ht_lc_km >= edges[b_i]) & (ht_lc_km <= edges[b_i + 1] if b_i == n_bins - 1 \
-                else ht_lc_km < edges[b_i + 1])
-            if np.any(sel):
-                bin_h.append(float(np.median(ht_lc_km[sel])))
-                bin_m.append(float(np.median(mag_lc_sorted[sel])))
-
-        if len(bin_h) >= 3:
-            ax_lc = ax_k.twiny()
-            ax_lc.plot(bin_m, bin_h, color='0.45', linestyle='-', linewidth=1.0, alpha=0.55, zorder=1)
-            ax_lc.invert_xaxis()
-            ax_lc.set_xlabel('Absolute magnitude (brighter right)', color='0.40', fontsize=8)
-            ax_lc.tick_params(axis='x', colors='0.40', labelsize=7)
-            ax_k.set_zorder(ax_lc.get_zorder() + 1)
-            ax_k.patch.set_visible(False)
 
     plt.tight_layout()
 

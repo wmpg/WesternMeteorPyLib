@@ -15,6 +15,7 @@ import sys
 
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import numpy as np
 
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, GravityDragMeteor, JDT_REF, STATIONS, \
@@ -23,6 +24,7 @@ from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, _updateDragMCR
     computeStationCoverage, findObservedWindows, plotDragTrajectory
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.Math import angleBetweenVectors
+from wmpl.Utils.Physics import trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.TrajConversions import geo2Cartesian
@@ -214,12 +216,19 @@ def testDisconnectedGroupsWithMonteCarloAndPlots(tmp_path):
     assert os.path.isfile(os.path.join(str(tmp_path), traj.file_name + '_abs_mag_ht.png'))
     assert os.path.isfile(os.path.join(str(tmp_path), traj.file_name + '_drag_fit.png'))
 
-    # Verify plotDragTrajectory handles stations with partially missing (None) photometry
+    # Verify plotDragTrajectory keeps 4 clean panels (no gap text inserts or twin magnitude axis) and
+    #   trajectoryLightCurve handles partially missing (None) photometry
     obs0 = traj.observations[0]
     obs0.absolute_magnitudes = np.array([None if (k%3 == 0) else -2.0 for k in range(obs0.kmeas)], \
         dtype=object)
-    fig_drag = plotDragTrajectory(traj, show_plots=False, save_results=False)
+    t_lc, mag_lc, _ = trajectoryLightCurve(traj)
+    assert (t_lc is not None) and (len(mag_lc) > 0)
+
+    fig_drag = plotDragTrajectory(traj, show_plots=False, save_results=False, ret_fig=True)
     assert fig_drag is not None
+    assert len(fig_drag.axes) == 4
+    assert len(fig_drag.axes[0].texts) == 0
+    plt.close(fig_drag)
 
 
 
