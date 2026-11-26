@@ -662,7 +662,10 @@ def atmDensProfileMSIS(ht, lat, lon, jd, table_ht, table_log10_rho):
     # Above the top, scale the MSIS density to join the profile
     above = ht_arr > table_ht[-1]
     if np.any(above):
-        join_factor = atmProfileJoinFactor(lat_arr[above], lon_arr[above], jd, table_ht, table_log10_rho)
+        if (np.ndim(lat) == 0) and (np.ndim(lon) == 0):
+            join_factor = atmProfileJoinFactor(float(lat), float(lon), jd, table_ht, table_log10_rho)
+        else:
+            join_factor = atmProfileJoinFactor(lat_arr[above], lon_arr[above], jd, table_ht, table_log10_rho)
         atm_dens[above] = join_factor*getAtmDensity(lat_arr[above], lon_arr[above], ht_arr[above], jd)
 
     return atm_dens if np.ndim(ht) else float(atm_dens[0])

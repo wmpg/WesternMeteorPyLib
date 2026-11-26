@@ -8196,8 +8196,8 @@ if __name__ == "__main__":
 
         # Print the height and the factor of the join to MSIS
         if atm_table is not None:
-            join_factor = atmProfileJoinFactor(np.arctan2(np.mean(np.sin(lat_data)), \
-                np.mean(np.cos(lat_data))), meanAngle(lon_data), traj.jdt_ref, *atm_table)
+            join_factor = atmProfileJoinFactor(meanAngle(lat_data), meanAngle(lon_data), traj.jdt_ref, \
+                *atm_table)
             print()
             print("NOTE: The air density is taken from the atmosphere profile {:s} from {:.1f} to {:.1f} " \
                 "km, and above {:.1f} km from {:s} scaled by {:.3f} to join it there".format( \
@@ -8636,9 +8636,10 @@ if __name__ == "__main__":
         ht_dyn = ht_data[end_index]
 
         # Compute the dynamic mass, which is not defined if the model does not decelerate at the end
+        atm_dens_dyn = airDensity(traj.rend_lat, traj.rend_lon, ht_dyn)
         dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
             vel_dyn, decel_dyn, gamma=1.0, shape_factor=cml_args.ga, \
-            atm_dens=airDensity(traj.rend_lat, traj.rend_lon, ht_dyn)) if decel_dyn > 0 else np.nan
+            atm_dens=atm_dens_dyn) if decel_dyn > 0 else np.nan
 
         print()
         print("Alpha-beta dynamic mass at the end:")
@@ -8661,7 +8662,7 @@ if __name__ == "__main__":
                 continue
             interval_dyn_masses.append(dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, \
                 traj.jdt_ref, vel_model_end, decel_model_end, gamma=1.0, shape_factor=cml_args.ga, \
-                atm_dens=airDensity(traj.rend_lat, traj.rend_lon, ht_dyn)))
+                atm_dens=atm_dens_dyn))
 
         # Print the dynamic masses in the scientific notation if they are large
         dyn_values = np.array(interval_dyn_masses + ([dyn_mass] if np.isfinite(dyn_mass) else []))

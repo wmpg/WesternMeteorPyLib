@@ -7,13 +7,22 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import contextlib
+import io
+import os
+import re
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
+from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
 from wmpl.Utils.AtmosphereDensity import loadAtmosphereProfile, atmDensProfileMSIS, atmProfileJoinFactor, \
     getAtmDensity
 from wmpl.Utils.AlphaBeta import airDensityProfile, rescaleHeightToExponentialAtmosphere, HT_NORM_CONST
 from wmpl.Utils.Physics import dynamicPressure
+from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Tests.AtmosphereProfileSynthetic import LAT, LON, JD, DENSER, PROFILE_HT, writeProfile, \
     msisProfile
 
@@ -104,6 +113,57 @@ def testDynamicPressureTakesTheGivenDensity():
         dens_arr*vel_arr**2, rel=1e-12)
     assert dynamicPressure(LAT_RAD, LON_RAD, ht_arr, JD, vel_arr) == pytest.approx( \
         getAtmDensity(LAT_RAD, LON_RAD, ht_arr, JD)*vel_arr**2, rel=1e-12)
+
+
+
+def testCommandLineAtmProfile(tmp_path):
+    """ Check that the AlphaBeta CLI scales dynamic mass and peak dynamic pressure with --atm_profile and
+        refuses a profile that does not reach down to the lowest point.
+
+    Arguments:
+        tmp_path: [Path] Temporary directory of pytest.
+    """
+
+    meteor = DragMeteor(15000.0, 90.0, 45.0, 0.005, 0.005, 2.7, 10.0, ground_drag=True)
+    traj = observeMeteor(meteor, noise=0.0, fps=10.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj = traj.run()
+
+    savePickle(traj, str(tmp_path), 'profile_trajectory.pickle')
+    pkl_path = os.path.join(str(tmp_path), 'profile_trajectory.pickle')
+
+    # Write a synthetic profile scaled by DENSER at the fireball mean location
+    lat_m = 0.5*(traj.rbeg_lat + traj.rend_lat)
+    lon_m = 0.5*(traj.rbeg_lon + traj.rend_lon)
+    prof_path = str(tmp_path/'era5_scaled.csv')
+    writeProfile(prof_path, PROFILE_HT, DENSER*getAtmDensity(lat_m, lon_m, PROFILE_HT, traj.jdt_ref))
+
+    # Write a profile that starts above the lowest point of the fireball
+    high_ht = np.arange(50000.0, 60000.0, 100.0)
+    high_path = str(tmp_path/'era5_too_high.csv')
+    writeProfile(high_path, high_ht, getAtmDensity(lat_m, lon_m, high_ht, traj.jdt_ref))
+
+    res_msis = subprocess.run([sys.executable, '-m', 'wmpl.Utils.AlphaBeta', pkl_path, '--hideplots'], \
+        capture_output=True, text=True, timeout=300)
+    assert res_msis.returncode == 0, res_msis.stderr
+
+    res_prof = subprocess.run([sys.executable, '-m', 'wmpl.Utils.AlphaBeta', pkl_path, '--hideplots', \
+        '--atm_profile', prof_path], capture_output=True, text=True, timeout=300)
+    assert res_prof.returncode == 0, res_prof.stderr
+
+    res_high = subprocess.run([sys.executable, '-m', 'wmpl.Utils.AlphaBeta', pkl_path, '--hideplots', \
+        '--atm_profile', high_path], capture_output=True, text=True, timeout=300)
+    assert res_high.returncode != 0
+    assert "ERROR:" in res_high.stdout
+
+    # Dynamic mass scales as DENSER^3 and peak dynamic pressure as DENSER
+    m_dyn_msis = float(re.search(r"Dynamic mass\s*=\s*([\d.eE+-]+)\s*kg", res_msis.stdout).group(1))
+    m_dyn_prof = float(re.search(r"Dynamic mass\s*=\s*([\d.eE+-]+)\s*kg", res_prof.stdout).group(1))
+    p_msis = float(re.search(r"AlphaBeta model\s*=\s*([\d.eE+-]+)\s*MPa", res_msis.stdout).group(1))
+    p_prof = float(re.search(r"AlphaBeta model\s*=\s*([\d.eE+-]+)\s*MPa", res_prof.stdout).group(1))
+
+    assert m_dyn_prof/m_dyn_msis == pytest.approx(DENSER**3, rel=0.01)
+    assert p_prof/p_msis == pytest.approx(DENSER, rel=0.01)
 
 
 
