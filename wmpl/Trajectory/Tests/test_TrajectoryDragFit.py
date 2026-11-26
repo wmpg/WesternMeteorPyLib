@@ -10,6 +10,8 @@ from __future__ import print_function, division, absolute_import
 import contextlib
 import io
 import os
+import subprocess
+import sys
 
 import matplotlib
 matplotlib.use('Agg')
@@ -17,8 +19,8 @@ import numpy as np
 
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, GravityDragMeteor, JDT_REF, STATIONS, \
     observeMeteor, timingOffsets
-from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, computeStationCoverage, \
-    findObservedWindows, plotDragTrajectory
+from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, _refreshPreAtmAfterMC, \
+    computeStationCoverage, findObservedWindows, plotDragTrajectory
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -411,6 +413,19 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     assert abs(traj_fall.orbit.v_inf - (traj_fall.v_init + traj_fall.dv_pre_atm)) < 1e-6
     assert abs(traj_fall.orbit.v_inf - 14500.0) < abs(traj_fall.v_init - 14500.0)
 
+    # Recomputing the orbit from the saved pickle via Orbit CLI preserves dv_pre_atm when -v is not given,
+    #   and resets it when -v overrides the initial velocity
+    pkl_path = os.path.join(str(tmp_path), traj_fall.file_name + '_trajectory.pickle')
+    out_orb = subprocess.check_output([sys.executable, '-m', 'wmpl.Trajectory.Orbit', pkl_path], \
+        text=True, stderr=subprocess.STDOUT)
+    assert 'pre-atm drag corr' in out_orb
+    assert "{:.5f} km/s".format(traj_fall.orbit.v_inf/1000.0) in out_orb
+
+    out_orb_v = subprocess.check_output([sys.executable, '-m', 'wmpl.Trajectory.Orbit', pkl_path, \
+        '-v', '14.5'], text=True, stderr=subprocess.STDOUT)
+    assert 'pre-atm drag corr' not in out_orb_v
+    assert "14.50000 km/s" in out_orb_v
+
     # Disabling pre_atm_correction leaves orbit.v_inf equal to v_init
     traj_no_pre = observeMeteor(meteor_fall, noise=4.0, stations=STATIONS, gravity_correction=False, \
         max_toffset=5.0, calc_orbit=True, pre_atm_correction=False)
@@ -461,6 +476,12 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     pre_wide_mc = df_fall.preAtmosphericVelocity()
     assert not pre_wide_mc['applied']
     assert 'poorly constrained' in pre_wide_mc['reason']
+
+    # Reapplying the pre-atm gate after attaching wide MC uncertainty must revoke dv_pre_atm on the orbit
+    _refreshPreAtmAfterMC(traj_fall, traj_fall, [traj_fall])
+    assert traj_fall.dv_pre_atm == 0.0
+    assert abs(traj_fall.orbit.v_inf - traj_fall.v_init) < 1e-6
+    assert not traj_fall.pre_atm_info['applied']
 
     # 2. Small high-altitude meteor (100 -> 88 km, 35 km/s): terminal mass and pre-atm must NOT be applied
     jd = 2460000.5

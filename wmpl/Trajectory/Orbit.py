@@ -1001,6 +1001,11 @@ if __name__ == "__main__":
         help="MILIG input mode, i.e. the trajectory was estimated with fixed stations and reference average position on the trajectory. This replaces calling both options --refavg and --statfixed.", \
         action="store_true")
 
+    arg_parser.add_argument('--dvpreatm', metavar='DV_PRE_ATM', type=float, default=None, \
+        help="Pre-atmospheric air-column drag velocity correction added to v_init to obtain v_inf (m/s). " \
+        + "When a trajectory pickle is given without overriding -v or --ele, the saved correction is " \
+        + "preserved by default.")
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1190,9 +1195,18 @@ if __name__ == "__main__":
     # eci_ref     =  np.array([3757410.98, -2762153.20, 4463901.73])
     # jd_ref      = 2457955.794670294970
 
+    # Preserve the saved pre-atmospheric correction when recomputing from a pickle without overriding the
+    #   initial velocity or reference height, unless explicitly specified via --dvpreatm
+    if cml_args.dvpreatm is not None:
+        dv_pre_atm = cml_args.dvpreatm
+    elif (traj is not None) and (cml_args.vinit is None) and (cml_args.ele is None):
+        dv_pre_atm = float(getattr(traj.orbit, 'dv_pre_atm', getattr(traj, 'dv_pre_atm', 0.0)))
+    else:
+        dv_pre_atm = 0.0
+
     # Compute the orbit
     orb = calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, reference_init=reference_init, \
-        rotation_correction=rotation_correction, stations_fixed=stations_fixed)
+        rotation_correction=rotation_correction, stations_fixed=stations_fixed, dv_pre_atm=dv_pre_atm)
 
     # Print the results
     print('Ref JD:', jd_ref)

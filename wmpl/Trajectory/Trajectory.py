@@ -2701,6 +2701,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         _attachDragMCUncertainties(traj, mc_results)
         if traj_best is not traj:
             _attachDragMCUncertainties(traj_best, mc_results)
+        _refreshPreAtmAfterMC(traj, traj_best, mc_results)
 
     # Without timing estimation the noise does not change the velocity, so sample it within its uncertainty
     if not traj.estimate_timing_vel:
@@ -5524,6 +5525,48 @@ def _attachDragMCUncertainties(traj, mc_traj_list):
     if len(td_list) >= 2:
         drag_fit.mc_time_diffs_std = np.std(np.array(td_list), axis=0)
 
+
+
+def _refreshPreAtmAfterMC(traj, traj_best, mc_traj_list):
+    """ Re-evaluate the pre-atmospheric air-column gate after attaching Monte Carlo ensemble uncertainties
+        on K_0, revoking the orbit correction and recomputing affected orbits if combined uncertainty fails
+        the gate.
+
+    Arguments:
+        traj: [Trajectory object] Nominal solved trajectory.
+        traj_best: [Trajectory object] Best Monte Carlo trajectory.
+        mc_traj_list: [list] Successful Monte Carlo Trajectory objects (including traj).
+    """
+
+    revoke = False
+    for t_obj in ([traj] if traj_best is traj else [traj, traj_best]):
+        df = getattr(t_obj, 'drag_timing_fit', None)
+        if df is None:
+            continue
+        info = df.preAtmosphericVelocity()
+        t_obj.pre_atm_info = info
+        if (not info['applied']) and (getattr(t_obj, 'dv_pre_atm', 0.0) != 0.0):
+            revoke = True
+
+    if not revoke:
+        return
+
+    seen = set()
+    for t_obj in [traj, traj_best] + list(mc_traj_list):
+        if id(t_obj) in seen:
+            continue
+        seen.add(id(t_obj))
+        if getattr(t_obj, 'dv_pre_atm', 0.0) == 0.0:
+            continue
+        t_obj.dv_pre_atm = 0.0
+        if getattr(t_obj, 'pre_atm_info', None) is not None and t_obj.pre_atm_info.get('applied'):
+            t_obj.pre_atm_info = dict(t_obj.pre_atm_info, applied=False, \
+                reason='K_0 poorly constrained after MC')
+        if getattr(t_obj, 'orbit', None) is not None:
+            los_ok = bool(getattr(t_obj, 'orbit_los_success', t_obj.los_mini_status))
+            t_obj.orbit = calcOrbit(t_obj.radiant_eci_mini, t_obj.v_init, t_obj.v_avg, \
+                t_obj.state_vect_mini, t_obj.rbeg_jd, stations_fixed=(not los_ok), reference_init=los_ok, \
+                v_init_stddev_direct=t_obj.v_init_stddev, dv_pre_atm=0.0)
 
 
 
