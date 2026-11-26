@@ -4902,23 +4902,22 @@ class DragTimingFit(object):
             if (signif < min_signif) and (not well_constrained_step):
                 continue
 
-            # Locate the weighted centroid and height span of the episode
-            l_mids = np.array([float(self.ramp_beg[i]) + 0.5*float(self.ramp_len[i]) for i in idxs], \
-                dtype=np.float64)
-            l_cent = float(np.clip(np.sum(deltas*l_mids)/tot_dlog_k, self.len_first, self.len_last))
-            l_beg = float(self.ramp_beg[idxs[0]])
+            # Mark the episode at its onset (l_beg), where K begins rising as fragmentation starts
+            l_beg = float(np.clip(self.ramp_beg[idxs[0]], self.len_first, self.len_last))
             l_end = min(float(self.ramp_beg[idxs[-1]] + self.ramp_len[idxs[-1]]), self.len_last)
+            ht_beg = float(self.heightAtLength(l_beg)[0])
+            dyn_pres_beg = float(np.interp(l_beg, self.len_grid, p_dyn))
 
             changes.append({
-                'length': l_cent,
-                'ht': float(self.heightAtLength(l_cent)[0]),
-                'ht_beg': float(self.heightAtLength(l_beg)[0]),
+                'length': l_beg,
+                'ht': ht_beg,
+                'ht_beg': ht_beg,
                 'ht_end': float(self.heightAtLength(l_end)[0]),
-                'time': float(self.timeAtLength(l_cent)[0]),
-                'dyn_pres': float(np.interp(l_cent, self.len_grid, p_dyn)),
-                'dyn_pres_beg': float(np.interp(l_beg, self.len_grid, p_dyn)),
+                'time': float(self.timeAtLength(l_beg)[0]),
+                'dyn_pres': dyn_pres_beg,
+                'dyn_pres_beg': dyn_pres_beg,
                 'dyn_pres_end': float(np.interp(l_end, self.len_grid, p_dyn)),
-                'k_at_change': float(self.ballisticCoeffAtLength(l_cent)[0]),
+                'k_at_change': float(self.ballisticCoeffAtLength(l_beg)[0]),
                 'k_ratio': k_ratio,
                 'dlog_k': tot_dlog_k,
                 'signif': float(signif),
@@ -9811,6 +9810,8 @@ class Trajectory(object):
         st_lens = [obs.state_vect_dist[obs.ignore_list == 0] if not obs.ignore_station else np.array([]) \
             for obs in self.observations]
 
+        # Always pass self.gravity_factor for along-track gravity in the drag model (matching DragFit and
+        #   fitDragVelocity), since gravity_correction controls cross-track path bending only
         try:
             drag_fit = DragTimingFit(st_times, st_lens, weights, free_mask, self.state_vect_mini, \
                 self.radiant_eci_mini, self.jdt_ref, gravity_factor=self.gravity_factor, \
