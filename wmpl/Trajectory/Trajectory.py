@@ -9716,7 +9716,8 @@ class Trajectory(object):
 
         self.observations = []
         for obs in temp_obs:
-            self.infillWithObs(obs)
+            conv_type = self.meastype if getattr(obs, 'meastype', self.meastype) != self.meastype else None
+            self.infillWithObs(obs, meastype=conv_type)
 
         # Zero working fixed offsets so they are not re-applied on subsequent passes
         for station in self.fixed_time_offsets:
@@ -9972,7 +9973,7 @@ class Trajectory(object):
         # Shift earliest observation to t = 0 and update reference JD
         self._normalizeTimes()
 
-        # Keep an aligned working copy of noise-free observations during MC runs
+        # Keep an aligned working copy of noise-free observations during MC runs, converted to self.meastype
         orig_obs_work = None
         if _mc_run and (_orig_obs is not None):
             orig_obs_work = copy.deepcopy(_orig_obs)
@@ -9981,6 +9982,11 @@ class Trajectory(object):
                 obs_o.JD_data = self.jdt_ref + obs_o.time_data/86400.0
                 obs_o.ignore_station = obs_n.ignore_station
                 obs_o.ignore_list = np.copy(obs_n.ignore_list)
+                if (self.meastype == 2) and (getattr(obs_o, 'meastype', 2) != 2):
+                    obs_o.meas1 = np.copy(obs_o.azim_data)
+                    obs_o.meas2 = np.copy(obs_o.elev_data)
+                    obs_o.meastype = 2
+                    obs_o.radec_jd = None
 
         # Compute intersecting-planes seed geometry and statistical station weights
         weights = self._solveIntersectingPlanes()

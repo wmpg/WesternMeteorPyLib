@@ -27,7 +27,7 @@ from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.Physics import trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
-from wmpl.Utils.TrajConversions import geo2Cartesian
+from wmpl.Utils.TrajConversions import altAz2RADec_vect, geo2Cartesian
 
 
 # Four stations split into two completely non-overlapping groups with a 20% middle gap
@@ -517,3 +517,19 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     traj_fall.pre_atm_info = pre_small
     report_small = traj_fall.saveReport(str(tmp_path), 'small_report.txt', verbose=False, save_results=False)
     assert 'Terminal mass   = not estimated' in report_small
+
+    # 3. Verify Monte Carlo runs on meastype=1 (RA/Dec) inputs convert noise-free observations cleanly
+    meteor_ra = DragMeteor(18000.0, 60.0, 45.0, 1e-3, 3e-3, 2.0, 5.0)
+    traj_az = observeMeteor(meteor_ra, noise=10.0, stations=STATIONS, clock_offsets={'B': 0.25, 'C': -0.15}, \
+        max_toffset=5.0)
+    traj_ra = Trajectory(traj_az.jdt_ref, meastype=1, max_toffset=5.0, gravity_correction=False, \
+        monte_carlo=True, mc_runs=4, mc_cores=1, show_plots=False, save_results=False, verbose=False)
+    for obs in traj_az.observations:
+        ra_arr, dec_arr = altAz2RADec_vect(obs.azim_data, obs.elev_data, traj_az.jdt_ref, obs.lat, obs.lon)
+        traj_ra.infillTrajectory(ra_arr, dec_arr, obs.time_data, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj_ra = traj_ra.run()
+    assert traj_ra is not None
+    assert traj_ra.uncertainties is not None
+    assert abs(traj_ra.v_init - meteor_ra.velocityAtTime(0.0)[0]) < 150.0
