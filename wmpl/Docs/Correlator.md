@@ -31,21 +31,21 @@ server, or spread across several servers. This page covers all three arrangement
 
 Run every stage in one pass over a data directory:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS /path/to/rms_data
 ```
 
 That is the form to use for a one-off analysis. To keep a live archive up to date, run it
 continuously over the last few days of data:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS /path/to/rms_data -a 5 --autofreq 60
 ```
 
 For a busy archive, split the stages into three processes that run at their own cadences. Each one
 needs its own log file, which is what `--addlogsuffix` is for:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS /path/to/rms_data --mcmode 4 -a 3 --autofreq 15 --addlogsuffix
 python -m wmpl.Trajectory.CorrelateRMS /path/to/rms_data --mcmode 1 -a 3 --autofreq 30 --addlogsuffix
 python -m wmpl.Trajectory.CorrelateRMS /path/to/rms_data --mcmode 2 -a 3 --autofreq 30 --addlogsuffix
@@ -84,7 +84,7 @@ stages separable across processes and servers.
 The data directory holds one folder per station, each containing one folder per night, and each of
 those an RMS `FTPdetectinfo` file together with the recalibrated plate solutions:
 
-```
+``` bash
 rms_data/
 ├── UK002F/
 │   └── UK002F_20260712_210544_527636/
@@ -107,7 +107,7 @@ pass, so stations and nights can be added while it is running.
 
 Under `--outdir`, which defaults to the data directory:
 
-```
+``` bash
 trajectories/
 └── 2026/
     └── 202607/
@@ -148,7 +148,7 @@ file:
 
 ## Command line reference
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS --help
 ```
 
@@ -212,7 +212,7 @@ account on the parent, and the parent hands out work simply by writing files int
 home directory on its own file system. The child logs in over SFTP, pulls the work, and pushes the
 results back into the same place:
 
-```
+``` bash
 parent  --writes-->  /home/node1/files/candidates/   --child pulls-->  child solves
 child   --pushes-->  /home/node1/files/{phase1,trajectories}/ and its own *.db  --parent merges-->  parent
 ```
@@ -229,7 +229,7 @@ can also run on Windows, either natively or under WSL2.
 
 On the child machine, create a key pair and copy the public half to the parent:
 
-```
+``` bash
 ssh-keygen -t ed25519 -f ~/.ssh/wmpl -C "wmpl node1"
 scp ~/.ssh/wmpl.pub parent:/tmp/node1.pub
 ```
@@ -238,7 +238,7 @@ scp ~/.ssh/wmpl.pub parent:/tmp/node1.pub
 
 Give every child its own account, so nodes cannot see each other's work:
 
-```
+``` bash
 sudo groupadd wmpl
 sudo useradd -m -g wmpl -s /bin/bash node1
 sudo mkdir -p ~node1/files/candidates/processed ~node1/files/phase1/processed ~node1/files/trajectories
@@ -248,7 +248,7 @@ sudo chmod -R 775 ~node1/files
 
 The resulting layout is what the parent and child agree on:
 
-```
+``` bash
 /home/node1/
 └── files/
     ├── candidates/        work assigned to this node
@@ -265,7 +265,7 @@ The account that runs the correlator must be able to read and write inside the c
 Group membership alone is not enough, because the home directory itself is owned by the child. Use a
 POSIX ACL, substituting the account the correlator runs as:
 
-```
+``` bash
 sudo setfacl -R -m u:ubuntu:rwx ~node1
 sudo setfacl -R -d -m u:ubuntu:rwx ~node1
 ```
@@ -277,7 +277,7 @@ The solver sets its own permissions on the files it creates. Do not change them.
 Install the child's public key, then create the `stop` file so the parent does not start assigning
 work before the child is ready:
 
-```
+``` bash
 sudo -u node1 mkdir -p ~node1/.ssh
 sudo -u node1 sh -c 'cat /tmp/node1.pub >> ~/.ssh/authorized_keys'
 sudo -u node1 chmod 700 ~node1/.ssh && sudo -u node1 chmod 600 ~node1/.ssh/authorized_keys
@@ -286,7 +286,7 @@ sudo -u node1 touch ~node1/files/stop
 
 Check the login from the child before going further:
 
-```
+``` bash
 ssh -i ~/.ssh/wmpl node1@parent
 ```
 
@@ -312,7 +312,7 @@ Each child line is three comma-separated fields:
 
 On the parent:
 
-```
+``` bash
 [mode]
 mode = parent
 
@@ -324,7 +324,7 @@ node3 = /home/node3,200,2
 
 On a child:
 
-```
+``` bash
 [mode]
 mode = child
 
@@ -345,7 +345,7 @@ solutions.
 
 A child runs the same program, in a single stage, with its own log:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS /path/to/work --mcmode 1 -a 3 --autofreq 15 --addlogsuffix
 ```
 
@@ -378,7 +378,7 @@ hours old is assumed abandoned and is moved back to the parent.
 Work the child had already downloaded sits in its `processed/` folders. Move the suspect batch back
 so it is picked up again:
 
-```
+``` bash
 ls -1 ~node1/files/candidates/processed | head -100 | while read f
 do
     mv ~node1/files/candidates/processed/$f ~node1/files/candidates/
@@ -387,7 +387,7 @@ done
 
 To find out which node had a given trajectory, search the parent's log:
 
-```
+``` bash
 egrep "node1|node2" correlate_rms_*_cands.log | grep saving
 ```
 
@@ -431,7 +431,7 @@ Because only the window was copied, a run over data from before the cutover find
 observations and no failed trajectories, and reanalyses the raw data from scratch. To avoid that,
 backfill the databases for the period you are about to process:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --action copy --timerange "(20260101-000000,20260401-000000)"
 ```
 
@@ -475,7 +475,7 @@ second, better solution appears for a meteor already solved. Again the better so
 | `copy` | Backfills both databases from the legacy JSON over `--timerange`. Ignores `--database` |
 | `execute` | Runs the statement in `--stmt`. Needs `--database` |
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --database trajectories --action status
 python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --database trajectories --action execute --stmt "select count(*) from trajectories where status=2"
 ```
@@ -486,25 +486,25 @@ python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --database trajectorie
 
 **Reprocess one night.** No auto mode, one pass, everything in one process:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS rms_data -r "(20260712-120000,20260713-120000)"
 ```
 
 **A candidate finder on the parent**, looking three days back, every quarter of an hour:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS rms_data --mcmode 4 -a 3 --autofreq 15 --addlogsuffix
 ```
 
 **A simple-solution stage**, capped so a pass does not run unboundedly long:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS rms_data --mcmode 1 -a 3 --autofreq 30 --maxtrajs 500 --addlogsuffix
 ```
 
 **A Monte Carlo stage** on a dedicated machine, with plots and an archive cutover at six months:
 
-```
+``` bash
 python -m wmpl.Trajectory.CorrelateRMS rms_data --mcmode 2 -a 3 --autofreq 30 --maxtrajs 200 \
     --archivemonths 6 --saveplots --addlogsuffix
 ```
@@ -548,6 +548,30 @@ transaction SQLite is able to finish on its own.
 
 **Two instances write to the same log file.** Pass `--addlogsuffix` to every instance so each stage
 gets its own file.
+
+**Recovering from a crash.** Because of the distributed, multiphase nature of the process, it is possible
+that a crash will lose in-memory candidates andsolutions, causing a discrepancy between the database
+Sand what has been persisted to disk.
+
+To ensure a clean restart, first identify the latest time bucket that can be trusted as complete, then
+use `CorrelateDB` to purge any observations and candidates from that point onward. For example, if the system crashed
+after this log message:
+
+``` bash
+CorrelateRMS   :2602 - PROCESSING TIME BIN:
+CorrelateRMS   :2603 - 2026-11-11 19:47:58+00:00, 2026-11-12 01:47:58+00:00
+```
+
+Then you should purge everything from a little before `2026-11-11 19:47:58` to the current date
+(in this example assumed to be midnight on `2026-11-13`).
+
+```bash
+python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --database candidates.db --action purge -r "(20261111-190000,20261113-000000)"
+python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --database observations.db --action purge -r "(20261111-190000,20261113-000000)"
+```
+
+Then when the candidate-finder is restarted (with sufficient lookback via the -a parameter), it will rescan the purge period
+and create any lost candidates and solutions. These will be processed by the parent or child nodes in the normal way.
 
 ---
 
