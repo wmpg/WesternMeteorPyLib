@@ -214,6 +214,10 @@ def testDisconnectedGroupsWithMonteCarloAndPlots(tmp_path):
     assert os.path.isfile(os.path.join(str(tmp_path), traj.file_name + '_abs_mag_ht.png'))
     assert os.path.isfile(os.path.join(str(tmp_path), traj.file_name + '_drag_fit.png'))
 
+    # Verify plotDragTrajectory handles stations with partially missing (None) photometry
+    obs0 = traj.observations[0]
+    obs0.absolute_magnitudes = np.array([None if (k%3 == 0) else -2.0 for k in range(obs0.kmeas)], \
+        dtype=object)
     fig_drag = plotDragTrajectory(traj, show_plots=False, save_results=False)
     assert fig_drag is not None
 
