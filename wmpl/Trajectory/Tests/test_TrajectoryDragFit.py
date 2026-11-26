@@ -574,3 +574,60 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     fig = plt.figure()
     CelestialPlot(np.array([1.0, 1.0, 1.0]), np.array([0.5, 0.5, 0.5]), projection='stere', bgcolor='w')
     plt.close(fig)
+
+
+
+def testDragCovarianceAccountsForWeightsAndAutocorrelation(tmp_path):
+    """ Check that DragTimingFit covariance is invariant to uniform station-weight scaling and scales
+        uncertainties by the integrated autocorrelation time when along-track residuals are correlated.
+
+    Arguments:
+        tmp_path: [Path] Temporary directory provided by pytest.
+    """
+
+    # Build a synthetic fireball with known velocity and ballistic coefficient
+    meteor = DragMeteor(15000.0, 90.0, 45.0, 0.005, 0.005, 2.7, 10.0, ground_drag=True)
+    traj_clean = observeMeteor(meteor, noise=0.0, fps=25.0, stations=STATIONS)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj_clean = traj_clean.run()
+
+    # Extract clean per-station times and lengths along the solved line
+    used_obs = [o for o in traj_clean.observations if not o.ignore_station]
+    stimes = [np.asarray(o.time_data, dtype=np.float64) for o in used_obs]
+    slens_clean = [np.asarray(o.state_vect_dist, dtype=np.float64) for o in used_obs]
+    fixed = [i == 0 for i in range(len(used_obs))]
+
+    # Add white along-track noise and verify uniform station-weight scaling leaves uncertainties invariant
+    rng = np.random.default_rng(7)
+    slens_white = [l + rng.normal(0.0, 25.0, len(l)) for l in slens_clean]
+    fit_w1 = DragTimingFit(stimes, slens_white, [1.0]*len(stimes), fixed, traj_clean.state_vect_mini, \
+        traj_clean.radiant_eci_mini, traj_clean.jdt_ref, gravity_factor=0.0, air_rotation=True)
+    fit_w025 = DragTimingFit(stimes, slens_white, [0.25]*len(stimes), fixed, traj_clean.state_vect_mini, \
+        traj_clean.radiant_eci_mini, traj_clean.jdt_ref, gravity_factor=0.0, air_rotation=True)
+
+    assert fit_w1.res_tau_int < 2.0
+    assert abs(fit_w025.v_init_stddev/fit_w1.v_init_stddev - 1.0) < 0.05
+    assert abs(fit_w025.log_k_std_grid[-1]/fit_w1.log_k_std_grid[-1] - 1.0) < 0.05
+
+    # Generate AR(1) temporally correlated along-track noise with the same marginal 25 m standard deviation
+    phi = float(np.exp(-1.0/(25.0*0.3)))
+    innov = 25.0*np.sqrt(1.0 - phi**2)
+    slens_corr = []
+    for l_arr in slens_clean:
+        err = np.zeros(len(l_arr))
+        err[0] = rng.normal(0.0, 25.0)
+        for k in range(1, len(l_arr)):
+            err[k] = phi*err[k - 1] + rng.normal(0.0, innov)
+        slens_corr.append(l_arr + err)
+
+    # Correlated residuals must yield tau_int > 3 and inflate v_init_stddev relative to white noise
+    fit_corr = DragTimingFit(stimes, slens_corr, [1.0]*len(stimes), fixed, traj_clean.state_vect_mini, \
+        traj_clean.radiant_eci_mini, traj_clean.jdt_ref, gravity_factor=0.0, air_rotation=True)
+
+    assert fit_corr.res_tau_int > 3.0
+    assert fit_corr.v_init_stddev > 1.8*fit_w1.v_init_stddev
+
+    # Verify saveReport prints the residual autocorrelation time
+    traj_clean.drag_timing_fit = fit_corr
+    report_txt = traj_clean.saveReport(str(tmp_path), 'tau_report.txt', verbose=False, save_results=False)
+    assert 'tau_int =' in report_txt

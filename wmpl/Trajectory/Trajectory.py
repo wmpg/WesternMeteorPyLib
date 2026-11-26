@@ -54,7 +54,7 @@ from wmpl.Utils.DragVelocity import DRAG_VEL_ATM_POINTS, DRAG_VEL_GRID_POINTS, D
     fitDragVelocity
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, findClosestPoints_vect, \
     RMSD, angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, \
-    confidenceInterval, medianStddev, isGraphConnected
+    confidenceInterval, medianStddev, isGraphConnected, integratedAutocorrTime
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationVelocity
@@ -3689,13 +3689,19 @@ class DragTimingFit(object):
         self.vel_grid, self.time_grid = self._solve(self.drag_params)[:2]
         self.log_k_grid = self.drag_params[2] + self.ramps.dot(self.drag_params[3:])
 
-        # Compute along-track length residuals and their robust scale
+        # Compute along-track length residuals and their robust unweighted and weighted scales
         t_corr = self._correctedTimes(self.params)
         len_model = self._lenAtTime(t_corr, self.vel_grid, self.time_grid)
         self.residuals_m = len_model - self.len_data
         self.res_rms_m = float(np.sqrt(np.mean(self.residuals_m**2)))
         self.res_scale_m = float(max(1.4826*np.median(np.abs(self.residuals_m \
             - np.median(self.residuals_m))), 1.0))
+
+        # Match the weighted Jacobian scale and account for temporal correlation of residuals
+        res_w = self.sqrt_w*self.residuals_m
+        scale_w_floor = float(np.sqrt(np.mean(self.sqrt_w**2)))
+        self.res_scale_w = float(max(1.4826*np.median(np.abs(res_w - np.median(res_w))), scale_w_floor))
+        self.res_tau_int = self._residualAutocorrTime()
 
         # Compute corresponding timing residuals
         t_model = np.interp(self.len_data, self.len_grid, self.time_grid)
@@ -4213,8 +4219,47 @@ class DragTimingFit(object):
 
 
 
+    def _residualAutocorrTime(self, min_points=6):
+        """ Compute the weight-averaged integrated autocorrelation time of the along-track residuals across
+            stations so the parameter covariance reflects the effective number of independent points.
+
+        Keyword arguments:
+            min_points: [int] Minimum number of points required for a station to contribute. 6 by default.
+
+        Return:
+            [float] Integrated autocorrelation time (>= 1.0).
+        """
+
+        tau_sum = 0.0
+        w_sum = 0.0
+
+        # Accumulate the per-station autocorrelation time weighted by each station's total weight
+        for s_idx in np.unique(self.stat_idx):
+
+            mask = self.stat_idx == s_idx
+            if np.count_nonzero(mask) < min_points:
+                continue
+
+            # Evaluate the integrated autocorrelation time of this station's residuals in time order
+            order = np.argsort(self.time_data[mask])
+            tau = integratedAutocorrTime(self.residuals_m[mask][order])
+            if not np.isfinite(tau):
+                continue
+
+            w_stat = float(np.sum(self.sqrt_w[mask]**2))
+            tau_sum += w_stat*tau
+            w_sum += w_stat
+
+        if w_sum <= 0.0:
+            return 1.0
+
+        return float(max(tau_sum/w_sum, 1.0))
+
+
+
     def _estimateCovariance(self, sol):
-        """ Estimate the parameter covariance matrix and null-space directions from the final Jacobian.
+        """ Estimate the parameter covariance matrix and null-space directions from the final Jacobian,
+            scaled by the weighted residual variance and the integrated autocorrelation time.
 
         Arguments:
             sol: [OptimizeResult] Solution from scipy.optimize.least_squares.
@@ -4235,10 +4280,10 @@ class DragTimingFit(object):
         except np.linalg.LinAlgError:
             return None, np.zeros((jac.shape[1], 0))
 
-        # Invert well-conditioned singular values and isolate null-space directions
+        # Invert well-conditioned singular values and scale by weighted residual variance and tau_int
         null = sing <= 1e-8*sing[0]
         vt_good = vt[~null]/col_norm
-        cov = self.res_scale_m**2*(vt_good.T/sing[~null]**2).dot(vt_good)
+        cov = self.res_tau_int*(self.res_scale_w**2)*(vt_good.T/sing[~null]**2).dot(vt_good)
 
         params_null = (vt[null]/col_norm).T
         if params_null.size:
@@ -7868,8 +7913,8 @@ class Trajectory(object):
                 max_k0_str)
             out_str += "  Points          = {:d} ({:d} segments of K)\n".format(drag_fit.n_data, \
                 drag_fit.n_knots)
-            out_str += "  Along-track RMS = {:.1f} m (scale = {:.1f} m)\n".format(drag_fit.res_rms_m, \
-                drag_fit.res_scale_m)
+            out_str += "  Along-track RMS = {:.1f} m (scale = {:.1f} m, tau_int = {:.1f})\n".format( \
+                drag_fit.res_rms_m, drag_fit.res_scale_m, getattr(drag_fit, 'res_tau_int', 1.0))
             out_str += "  Timing RMS      = {:.2f} ms\n".format(1000.0*drag_fit.res_rms_s)
 
             # Format Monte Carlo 1-sigma bounds on K at the beginning and end when available
@@ -10079,7 +10124,7 @@ class Trajectory(object):
         prev_drag = getattr(self, 'drag_timing_fit', None)
         if _mc_run and (prev_drag is not None):
             warm_params = np.r_[prev_drag.drag_params, np.zeros(prev_drag.n_free)]
-            warm_scale = prev_drag.res_scale_m
+            warm_scale = getattr(prev_drag, 'res_scale_w', prev_drag.res_scale_m)
 
         # Shift earliest observation to t = 0 and update reference JD
         self._normalizeTimes()
@@ -10152,7 +10197,7 @@ class Trajectory(object):
             # Warm-start Pass 2+ from the previous drag parameters with zero incremental dt
             if drag_fit is not None:
                 warm_params = np.r_[drag_fit.drag_params, np.zeros(drag_fit.n_free)]
-                warm_scale = drag_fit.res_scale_m
+                warm_scale = getattr(drag_fit, 'res_scale_w', drag_fit.res_scale_m)
 
             # Build gravity drop evaluator along the length grid when gravity is active
             drop_func = None
