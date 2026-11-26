@@ -71,10 +71,10 @@ DRAG_TRAJ_MIN_GAP = 2000.0
 DRAG_TRAJ_GAP_FACTOR = 3.0
 
 # Maximum number of fixed-point iterations for the rotating-air drag scale
-DRAG_TRAJ_AIR_MAX_ITER = 4
+DRAG_TRAJ_AIR_MAX_ITER = 10
 
 # Speed convergence tolerance for the rotating-air drag scale (m/s)
-DRAG_TRAJ_AIR_TOL = 0.1
+DRAG_TRAJ_AIR_TOL = 1e-6
 
 # Default convergence tolerance on incremental station time offsets between coupled passes (s)
 DRAG_TRAJ_DT_TOL = 5e-3
@@ -626,12 +626,27 @@ class DragTimingFit(object):
         if not derivatives:
             return vel, time_arr, None, None
 
-        # Compute exact derivatives at the converged drag scale
+        # Compute exact derivatives of the converged energy ODE
         dlog_k = np.c_[np.ones(len(drag)), self.ramps]
-        dphi = cumulativeTrapz(drag[:, None]*dlog_k, self.dlen)
-        dgrav = cumulativeTrapz((self.g_along*exp_phi)[:, None]*dphi, self.dlen)
-        denergy = dgrav/exp_phi[:, None] - energy[:, None]*dphi
-        dvel = np.c_[drag_params[1]/exp_phi, denergy]/vel[:, None]
+        if self.v_rotation == 0.0:
+            dphi = cumulativeTrapz(drag[:, None]*dlog_k, self.dlen)
+            dgrav = cumulativeTrapz((self.g_along*exp_phi)[:, None]*dphi, self.dlen)
+            denergy = dgrav/exp_phi[:, None] - energy[:, None]*dphi
+            dvel = np.c_[drag_params[1]/exp_phi, denergy]/vel[:, None]
+        else:
+            # Linearize dE/dL = -2*K*rho*s(v)*E + g_along with d(s(v)*E)/dE = 1 - v_rot/v above the floor
+            vel_floor = max(50.0, abs(self.v_rotation) + 1.0)
+            vel_safe = np.maximum(vel, vel_floor)
+            ratio = 1.0 - self.v_rotation/vel_safe
+            d_scale_energy = np.where((vel > vel_floor) & (2.0*energy > 1.0), ratio, drag_scale)
+            psi = cumulativeTrapz(drag_base*d_scale_energy, self.dlen)
+            exp_psi = np.exp(np.clip(psi, -250.0, 250.0))
+            q_rhs = -(drag*energy)[:, None]*dlog_k
+            denergy_v = drag_params[1]/exp_psi
+            denergy_k = cumulativeTrapz(exp_psi[:, None]*q_rhs, self.dlen)/exp_psi[:, None]
+            dvel = np.c_[denergy_v, denergy_k]/vel[:, None]
+            dvel = np.where((2.0*energy > 1.0)[:, None], dvel, 0.0)
+
         dtime = np.c_[np.ones(len(vel)), cumulativeTrapz(-dvel/vel[:, None]**2, self.dlen)]
 
         return vel, time_arr, dvel, dtime
@@ -1195,19 +1210,25 @@ def _buildStationsTimeDict(traj):
         traj: [Trajectory object] Trajectory with initialized observations.
 
     Return:
-        (stations_time_dict, free_mask):
-            - stations_time_dict: [OrderedDict] Maps station ID string to fixed offset (float) or True.
+        (stations_time_dict, stations_time_dict_copy, free_mask):
+            - stations_time_dict: [OrderedDict] Maps station ID string to working offset (float) or True.
+            - stations_time_dict_copy: [OrderedDict] Maps station ID string to supplied offset (float) or
+                True.
             - free_mask: [ndarray] Boolean mask, True for used stations whose timing is estimated.
     """
 
     stations_time_dict = collections.OrderedDict()
+    stations_time_dict_copy = collections.OrderedDict()
+    fixed_copy = getattr(traj, 'fixed_time_offsets_copy', traj.fixed_time_offsets)
     station_ids = [str(obs.station_id) for obs in traj.observations]
 
     for obs, stat_id in zip(traj.observations, station_ids):
         if stat_id in traj.fixed_time_offsets:
             stations_time_dict[stat_id] = traj.fixed_time_offsets[stat_id]
+            stations_time_dict_copy[stat_id] = fixed_copy.get(stat_id, traj.fixed_time_offsets[stat_id])
         else:
             stations_time_dict[stat_id] = True
+            stations_time_dict_copy[stat_id] = True
 
     # Fix the used station with the most used points as the reference when no fixed times are given
     if len(traj.fixed_time_offsets) == 0:
@@ -1215,11 +1236,12 @@ def _buildStationsTimeDict(traj):
             for obs in traj.observations]
         ref_idx = int(np.argmax(counts))
         stations_time_dict[station_ids[ref_idx]] = 0.0
+        stations_time_dict_copy[station_ids[ref_idx]] = 0.0
 
     free_mask = np.array([(not obs.ignore_station) and isinstance(stations_time_dict[stat_id], bool) \
         for obs, stat_id in zip(traj.observations, station_ids)], dtype=bool)
 
-    return stations_time_dict, free_mask
+    return stations_time_dict, stations_time_dict_copy, free_mask
 
 
 
@@ -1259,9 +1281,9 @@ def estimateDragTiming(traj, weights, drop_grid_func=None, penalty=1.0, gap_pena
     """
 
     weights = checkWeights(traj.observations, weights)
-    stations_time_dict, free_mask = _buildStationsTimeDict(traj)
+    stations_time_dict, stations_time_dict_copy, free_mask = _buildStationsTimeDict(traj)
     traj.stations_time_dict = stations_time_dict
-    traj.stations_time_dict_copy = copy.deepcopy(stations_time_dict)
+    traj.stations_time_dict_copy = stations_time_dict_copy
 
     if not traj.estimate_timing_vel:
         free_mask = np.zeros(len(traj.observations), dtype=bool)
@@ -1555,6 +1577,7 @@ def _reinitObservations(traj, weights=None, incident_angles=None):
         incident_angles: [list] Optional station incident angles to restore. None by default.
     """
 
+    saved_fixed_copy = copy.deepcopy(getattr(traj, 'fixed_time_offsets_copy', {}))
     temp_obs = copy.deepcopy(traj.observations)
     traj.observations = []
     for obs in temp_obs:
@@ -1562,6 +1585,7 @@ def _reinitObservations(traj, weights=None, incident_angles=None):
 
     for station in traj.fixed_time_offsets:
         traj.fixed_time_offsets[station] = 0.0
+    traj.fixed_time_offsets_copy = saved_fixed_copy
 
     if weights is not None:
         for w, obs in zip(weights, traj.observations):
@@ -1731,13 +1755,15 @@ def solveTrajectoryDragFit(traj, max_iter=DRAG_TRAJ_MAX_ITER, dt_tol=DRAG_TRAJ_D
 
     weights = _computeIntersectingPlanes(traj)
 
-    # Preserve the cumulative input-data timing baseline across bad-pick reruns and MC runs so all MC
-    #   trajectories report time_diffs_final on the same baseline as the nominal solution
+    # Preserve supplied fixed offsets and cumulative input-data timing baselines across bad-pick reruns and
+    #   MC runs so report/pickle offsets and MC timing statistics share one consistent baseline
     if (_rerun_bad_picks or _mc_run) and (getattr(traj, 'time_diffs_final', None) is not None) \
         and (len(traj.time_diffs_final) == len(traj.observations)):
         cum_offsets = np.array(traj.time_diffs_final, dtype=np.float64)
     else:
-        cum_offsets = np.zeros(len(traj.observations), dtype=np.float64)
+        fixed_copy = getattr(traj, 'fixed_time_offsets_copy', {})
+        cum_offsets = np.array([float(fixed_copy.get(str(obs.station_id), 0.0)) \
+            for obs in traj.observations], dtype=np.float64)
 
     # Cap MC runs to 2 passes (straight + gravity) since clocks are already aligned from the main solution
     n_passes = 2 if _mc_run else max_iter

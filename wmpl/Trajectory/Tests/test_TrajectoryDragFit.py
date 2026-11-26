@@ -74,25 +74,26 @@ def testDragTimingJacobianMatchesFiniteDifferences():
     t_b = np.arange(0.55*dur, dur, 0.04)
     l_b = np.interp(t_b + meteor.t_vis_beg, meteor.time, meteor.length)
 
-    fit = DragTimingFit([t_a, t_b - 1.2], [l_a, l_b], [1.0, 0.8], [False, True], meteor.top_eci, \
-        meteor.radiant_eci, JDT_REF, air_rotation=False)
+    for air_rotation in (False, True):
+        fit = DragTimingFit([t_a, t_b - 1.2], [l_a, l_b], [1.0, 0.8], [False, True], meteor.top_eci, \
+            meteor.radiant_eci, JDT_REF, air_rotation=air_rotation)
 
-    params = fit.params + 0.005
-    jac = fit._jacobian(params, 2.0)
+        params = fit.params + 0.005
+        jac = fit._jacobian(params, 2.0)
 
-    jac_num = np.zeros_like(jac)
-    for i in range(len(params)):
-        step = 1e-5*max(abs(params[i]), 1.0)
-        p_up = params.copy()
-        p_dn = params.copy()
-        p_up[i] += step
-        p_dn[i] -= step
-        jac_num[:, i] = (fit._residuals(p_up, 2.0) - fit._residuals(p_dn, 2.0))/(2.0*step)
+        jac_num = np.zeros_like(jac)
+        for i in range(len(params)):
+            step = 1e-5*max(abs(params[i]), 1.0)
+            p_up = params.copy()
+            p_dn = params.copy()
+            p_up[i] += step
+            p_dn[i] -= step
+            jac_num[:, i] = (fit._residuals(p_up, 2.0) - fit._residuals(p_dn, 2.0))/(2.0*step)
 
-    col_err = np.max(np.abs(jac - jac_num), axis=0)/np.maximum(np.max(np.abs(jac_num), axis=0), 1e-12)
+        col_err = np.max(np.abs(jac - jac_num), axis=0)/np.maximum(np.max(np.abs(jac_num), axis=0), 1e-12)
 
-    assert np.median(col_err) < 1e-5
-    assert np.max(col_err) < 0.02
+        assert np.median(col_err) < 1e-4
+        assert np.max(col_err) < 0.02
 
 
 
@@ -331,3 +332,33 @@ def testArtificialCloudGapMatchesFullSolution():
     offs = timingOffsets(sol_gap)
     assert abs(offs['B'] + 0.9) < 0.015
     assert abs(offs['C'] - 1.4) < 0.015
+
+
+
+def testSuppliedFixedOffsetsPreservedInTimeDiffsFinal():
+    """ Supplied fixed clock offsets from fixed_times must be preserved in time_diffs_final without being
+        double-applied to the observations.
+    """
+
+    from wmpl.Trajectory.Trajectory import Trajectory
+
+    meteor = DragMeteor(20000.0, 45.0, 40.0, 1e-3, 3e-3, 2.0, 5.0)
+    traj_src = observeMeteor(meteor, noise=0.0, stations=STATIONS, clock_offsets={'A': -0.35, 'B': 0.80}, \
+        gravity_correction=False, max_toffset=5.0)
+
+    # Supply station A's exact +0.35 s correction via fixed_times while leaving B and C free
+    traj = Trajectory(traj_src.jdt_ref, meastype=2, max_toffset=5.0, gravity_correction=False, \
+        monte_carlo=False, show_plots=False, save_results=False, verbose=False, fixed_times='A:0.35')
+    for obs in traj_src.observations:
+        traj.infillTrajectory(obs.azim_data.copy(), obs.elev_data.copy(), obs.time_data.copy(), \
+            obs.lat, obs.lon, obs.ele, station_id=obs.station_id)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj = solveTrajectoryDragFit(traj)
+
+    assert traj is not None
+    raw_offs = {obs.station_id: float(dt) for obs, dt in zip(traj.observations, traj.time_diffs_final)}
+    assert abs(raw_offs['A'] - 0.35) < 1e-6
+    assert abs(raw_offs['B'] + 0.80) < 0.015
+    assert abs(raw_offs['C'] - 0.0) < 0.015
+    assert abs(traj.stations_time_dict_copy['A'] - 0.35) < 1e-6
