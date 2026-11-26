@@ -3894,7 +3894,12 @@ class ObservationData:
             traj=loadPickle(*os.path.split(curr_lag_file))
             # get the trajectory
             # v_avg = traj.v_avg
-            v_init_list.append(traj.orbit.v_init+100)
+            # Use the solver's gated pre-atmospheric velocity when applied, else keep the legacy +100 m/s seed
+            v_inf = getattr(traj.orbit, 'v_inf', None)
+            if (v_inf is not None) and (getattr(traj.orbit, 'dv_pre_atm', 0.0) > 0.0):
+                v_init_list.append(v_inf)
+            else:
+                v_init_list.append(traj.orbit.v_init + 100)
             v_rotation_list.append(earthRotationSpeed(traj))
         # do the mean of the v_init_list
         self.v_init = np.mean(v_init_list)
