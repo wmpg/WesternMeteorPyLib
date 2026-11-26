@@ -8,6 +8,7 @@ Run with pytest:
 from __future__ import print_function, division, absolute_import
 
 import contextlib
+import copy
 import io
 import os
 import subprocess
@@ -20,12 +21,13 @@ import numpy as np
 
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, GravityDragMeteor, JDT_REF, STATIONS, \
     observeMeteor, timingOffsets
-from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, _updateDragMCResults, \
-    computeStationCoverage, findObservedWindows, plotDragTrajectory
+from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, _MCTrajSolve, _updateDragMCResults, \
+    checkMCTrajectories, computeStationCoverage, findObservedWindows, plotDragTrajectory
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.Physics import trajectoryLightCurve
 from wmpl.Utils.Pickling import loadPickle, savePickle
+from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.TrajConversions import altAz2RADec_vect, geo2Cartesian
 
@@ -533,18 +535,42 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     assert 'Terminal mass   = not estimated' in report_small
     assert 'Dark-flight initial state' not in report_small
 
-    # 3. Verify Monte Carlo runs on meastype=1 (RA/Dec) inputs convert noise-free observations cleanly
+    # 3. Verify Monte Carlo runs on meastype=1 (RA/Dec) and meastype=4 (Met.py) convert noise-free
+    #   observations to alt/az cleanly and produce finite, realistic radiant and velocity uncertainties
     meteor_ra = DragMeteor(18000.0, 60.0, 45.0, 1e-3, 3e-3, 2.0, 5.0)
     traj_az = observeMeteor(meteor_ra, noise=10.0, stations=STATIONS, clock_offsets={'B': 0.25, 'C': -0.15}, \
         max_toffset=5.0)
-    traj_ra = Trajectory(traj_az.jdt_ref, meastype=1, max_toffset=5.0, gravity_correction=False, \
-        monte_carlo=True, mc_runs=4, mc_cores=1, show_plots=False, save_results=False, verbose=False)
-    for obs in traj_az.observations:
-        ra_arr, dec_arr = altAz2RADec_vect(obs.azim_data, obs.elev_data, traj_az.jdt_ref, obs.lat, obs.lon)
-        traj_ra.infillTrajectory(ra_arr, dec_arr, obs.time_data, obs.lat, obs.lon, obs.ele, \
-            station_id=obs.station_id)
+    for mtype in (1, 4):
+        mc_dir = os.path.join(str(tmp_path), 'mc_mtype_{:d}'.format(mtype))
+        traj_mt = Trajectory(traj_az.jdt_ref, output_dir=mc_dir, meastype=mtype, max_toffset=5.0, \
+            gravity_correction=True, monte_carlo=True, mc_runs=4, mc_cores=1, show_plots=False, \
+            save_results=(mtype == 4), verbose=False)
+        for obs in traj_az.observations:
+            if mtype == 1:
+                m1, m2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, traj_az.jdt_ref, obs.lat, obs.lon)
+            else:
+                m1 = (np.pi/2.0 - obs.azim_data)%(2.0*np.pi)
+                m2 = np.pi/2.0 - obs.elev_data
+            traj_mt.infillTrajectory(m1, m2, obs.time_data, obs.lat, obs.lon, obs.ele, \
+                station_id=obs.station_id)
+        with contextlib.redirect_stdout(io.StringIO()):
+            traj_mt = traj_mt.run()
+        assert traj_mt is not None
+        assert traj_mt.uncertainties is not None
+        assert traj_mt.uncertainties.ra_g > 0.0
+        assert traj_mt.uncertainties.v_init < 500.0
+        assert abs(traj_mt.v_init - meteor_ra.velocityAtTime(0.0)[0]) < 150.0
+
+    # 4. Verify a failed MC worker is rejected rather than returning a stale clone of the nominal trajectory
+    traj_fail = copy.deepcopy(traj_mt)
+    for obs in traj_fail.observations:
+        obs.ignore_station = True
     with contextlib.redirect_stdout(io.StringIO()):
-        traj_ra = traj_ra.run()
-    assert traj_ra is not None
-    assert traj_ra.uncertainties is not None
-    assert abs(traj_ra.v_init - meteor_ra.velocityAtTime(0.0)[0]) < 150.0
+        mc_failed = _MCTrajSolve([0, traj_fail, None])
+        kept_mc = checkMCTrajectories([mc_failed], timing_res=traj_mt.timing_res)
+    assert len(kept_mc) == 0
+
+    # 5. Verify stereographic CelestialPlot handles identical zero-span points without crashing
+    fig = plt.figure()
+    CelestialPlot(np.array([1.0, 1.0, 1.0]), np.array([0.5, 0.5, 0.5]), projection='stere', bgcolor='w')
+    plt.close(fig)

@@ -2564,7 +2564,8 @@ def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False):
     if not geometric_uncert:
 
         # Take only those solutions which have the timing residuals <= than the initial solution
-        mc_results = [mc_traj for mc_traj in mc_results if mc_traj.timing_res <= timing_res]
+        mc_results = [mc_traj for mc_traj in mc_results if (mc_traj.timing_res is not None) \
+            and (mc_traj.timing_res <= timing_res)]
 
     ##########
 
@@ -2572,8 +2573,8 @@ def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False):
     mc_results = [mc_traj for mc_traj in mc_results if mc_traj.los_mini_status == True]
 
     # Reject those solutions for which the orbit could not be calculated
-    mc_results = [mc_traj for mc_traj in mc_results if (mc_traj.orbit.ra_g is not None) \
-        and (mc_traj.orbit.dec_g is not None)]
+    mc_results = [mc_traj for mc_traj in mc_results if (getattr(mc_traj, 'orbit', None) is not None) \
+        and (mc_traj.orbit.ra_g is not None) and (mc_traj.orbit.dec_g is not None)]
 
     print("{:d} successful MC runs done...".format(len(mc_results)))
 
@@ -2599,6 +2600,12 @@ def _MCTrajSolve(params):
     i, traj, observations = params
 
     print('Run No.', i + 1)
+
+    # Clear nominal solution fields so a failed MC run is never mistaken for a valid clone of traj
+    traj.los_mini_status = False
+    traj.orbit = None
+    traj.timing_res = None
+    traj.timing_minimization_successful = False
 
     traj.run(_mc_run=True, _orig_obs=observations)
 
@@ -9821,8 +9828,7 @@ class Trajectory(object):
 
         self.observations = []
         for obs in temp_obs:
-            conv_type = self.meastype if getattr(obs, 'meastype', self.meastype) != self.meastype else None
-            self.infillWithObs(obs, meastype=conv_type)
+            self.infillWithObs(obs)
 
         # Zero working fixed offsets so they are not re-applied on subsequent passes
         for station in self.fixed_time_offsets:
@@ -10078,7 +10084,8 @@ class Trajectory(object):
         # Shift earliest observation to t = 0 and update reference JD
         self._normalizeTimes()
 
-        # Keep an aligned working copy of noise-free observations during MC runs, converted to self.meastype
+        # Keep an aligned working copy of noise-free observations during MC runs, converted to alt/az
+        #   (meastype 2) to match trajNoiseGenerator() regardless of the original input meastype
         orig_obs_work = None
         if _mc_run and (_orig_obs is not None):
             orig_obs_work = copy.deepcopy(_orig_obs)
@@ -10087,10 +10094,9 @@ class Trajectory(object):
                 obs_o.JD_data = self.jdt_ref + obs_o.time_data/86400.0
                 obs_o.ignore_station = obs_n.ignore_station
                 obs_o.ignore_list = np.copy(obs_n.ignore_list)
-                if (self.meastype == 2) and (getattr(obs_o, 'meastype', 2) != 2):
+                if self.meastype == 2:
                     obs_o.meas1 = np.copy(obs_o.azim_data)
                     obs_o.meas2 = np.copy(obs_o.elev_data)
-                    obs_o.meastype = 2
                     obs_o.radec_jd = None
 
         # Compute intersecting-planes seed geometry and statistical station weights
