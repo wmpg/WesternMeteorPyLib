@@ -9024,8 +9024,8 @@ if __name__ == "__main__":
                 np.min(interval_peaks[:, 0]), np.max(interval_peaks[:, 0]), np.min(interval_peaks[:, 1]), \
                 np.max(interval_peaks[:, 1])))
         if cml_args.lagsmooth:
-            print("Lag smoothing   = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
-                peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag,
+            print("Lag smoothing   = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format( \
+                peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, \
                 vel_data_smooth_air[peak_dyn_pressure_index_lag]/1000))
         print("----------------------")
 
