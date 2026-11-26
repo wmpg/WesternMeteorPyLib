@@ -42,6 +42,7 @@ the larger tools live in [wmpl/Docs](wmpl/Docs):
 
  * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
  * [Drag fit of the motion along a trajectory](wmpl/Docs/DragFit.md) - the drag model of the motion along a solved trajectory, sampling it by height or time for dark flight, and interpreting the ballistic coefficient
+ * [Correlating RMS data](wmpl/Docs/Correlator.md) - automatically pairing and solving whole archives of RMS observations, the operation modes, the databases and distributed processing across several servers
  * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
  * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
  * [Orbit dissimilarity criteria](wmpl/Docs/OrbitSimilarity.md) - measuring how similar two orbits are, which criterion to pick, and why their thresholds are not interchangeable

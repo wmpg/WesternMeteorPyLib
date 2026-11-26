@@ -11,6 +11,8 @@ and what the options are for.
   about ablation and fragmentation.
 - [Alpha-beta fit of a fireball](AlphaBeta.md) — alpha, beta and the entry velocity fitted to the lag, their
   uncertainties on the meteorite survival diagram, and when beta only has an upper limit.
+- [Correlating RMS data](Correlator.md) — finding and solving trajectories automatically across a whole
+  RMS archive, the operation modes, the databases, and distributed processing across several servers.
 - [REBOUND orbital integration](REBOUND.md) — integrating a meteoroid orbit backwards or forwards,
   close encounters and impacts, Monte Carlo clones, radiation forces, and chaos indicators.
 - [The MetSim ablation model](MetSim.md) — what the erosion simulation computes, gravity, stepping through
