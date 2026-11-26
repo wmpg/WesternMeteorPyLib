@@ -185,6 +185,8 @@ def testDisconnectedGroupsWithMonteCarloAndPlots():
     assert traj.uncertainties.v_init > 0.0
     assert traj.drag_timing_fit.mc_vel_std is not None
     assert traj.drag_timing_fit.mc_k_lo is not None
+    assert traj.drag_timing_fit.mc_time_diffs_std is not None
+    assert np.all(traj.drag_timing_fit.mc_time_diffs_std < 0.05)
 
     offs = timingOffsets(traj)
     assert abs(offs['B'] + (-0.40)) < 0.02

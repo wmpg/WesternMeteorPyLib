@@ -1731,10 +1731,13 @@ def solveTrajectoryDragFit(traj, max_iter=DRAG_TRAJ_MAX_ITER, dt_tol=DRAG_TRAJ_D
 
     weights = _computeIntersectingPlanes(traj)
 
-    if not _rerun_bad_picks:
-        cum_offsets = np.zeros(len(traj.observations), dtype=np.float64)
-    else:
+    # Preserve the cumulative input-data timing baseline across bad-pick reruns and MC runs so all MC
+    #   trajectories report time_diffs_final on the same baseline as the nominal solution
+    if (_rerun_bad_picks or _mc_run) and (getattr(traj, 'time_diffs_final', None) is not None) \
+        and (len(traj.time_diffs_final) == len(traj.observations)):
         cum_offsets = np.array(traj.time_diffs_final, dtype=np.float64)
+    else:
+        cum_offsets = np.zeros(len(traj.observations), dtype=np.float64)
 
     # Cap MC runs to 2 passes (straight + gravity) since clocks are already aligned from the main solution
     n_passes = 2 if _mc_run else max_iter
