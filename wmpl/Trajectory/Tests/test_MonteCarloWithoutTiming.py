@@ -88,10 +88,10 @@ def testMonteCarloVelocityUncertaintyWithoutTimingEstimation():
     traj.mc_runs = 10
     traj = traj.run()
 
-    # On this meteor the velocity scatters by about 15 m/s between noise realizations
-    assert 5.0 < traj_nominal.v_init_stddev < 50.0
-    assert 5.0 < traj.uncertainties.v_init < 50.0
-    assert 5.0 < traj.uncertainties.v_g < 50.0
+    # On this meteor the drag fit uses the full track (~3 m/s uncertainty vs ~15 m/s for the legacy fit)
+    assert 1.0 < traj_nominal.v_init_stddev < 50.0
+    assert 1.0 < traj.uncertainties.v_init < 50.0
+    assert 1.0 < traj.uncertainties.v_g < 50.0
 
     # The noise is not applied to the velocity of the reported solution
     assert abs(traj.v_init - traj_nominal.v_init) < 1.0

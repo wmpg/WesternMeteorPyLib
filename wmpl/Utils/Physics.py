@@ -449,22 +449,23 @@ def trajectoryLightCurve(traj, mag_limit=8.0):
     avg_t_diff_max = 0
     for obs in traj.observations:
 
-        # Skip ignored stations and stations without magnitudes
-        if obs.ignore_station or (obs.absolute_magnitudes is None):
+        # Skip ignored stations and stations without magnitudes or heights
+        if obs.ignore_station or (obs.absolute_magnitudes is None) or (obs.model_ht is None):
             continue
 
         # Compute average time difference
-        avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
+        if len(obs.time_data) >= 2:
+            avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
 
-        # Exclude the faint magnitudes
-        mag_filter = obs.absolute_magnitudes < mag_limit
+        # Convert magnitudes to floats (mapping None to NaN) before filtering missing and faint points
+        abs_mags = np.array([np.nan if mag is None else float(mag) for mag in obs.absolute_magnitudes], \
+            dtype=np.float64)
+        mag_filter = np.isfinite(abs_mags) & (abs_mags < mag_limit)
         if not np.any(mag_filter):
             continue
 
-        for t, mag, ht in zip(obs.time_data[mag_filter], obs.absolute_magnitudes[mag_filter], \
-            obs.model_ht[mag_filter]):
-
-            if (mag is not None) and (not np.isnan(mag)):
+        for t, mag, ht in zip(obs.time_data[mag_filter], abs_mags[mag_filter], obs.model_ht[mag_filter]):
+            if np.isfinite(ht):
                 time_mag_ht.append([t, mag, ht])
 
     if len(time_mag_ht) == 0:

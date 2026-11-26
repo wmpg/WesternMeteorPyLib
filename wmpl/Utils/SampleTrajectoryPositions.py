@@ -84,10 +84,12 @@ class TrajectorySamples(object):
         self.elev_norot = []
         self.vel = []
         self.vel_norot = []
+        self.in_gap = []
 
 
 
-    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel=None, vel_norot=None):
+    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel=None, vel_norot=None, \
+        in_gap=False):
 
         self.t_est.append(t_est)
         self.ht.append(ht)
@@ -98,6 +100,7 @@ class TrajectorySamples(object):
         self.elev_norot.append(elev_norot)
         self.vel.append(vel)
         self.vel_norot.append(vel_norot)
+        self.in_gap.append(bool(in_gap))
 
 
 
@@ -200,15 +203,19 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         azim_norot, elev_norot, vel_norot = derotatedRadiantAltAz(vel*drag_fit.radiantAtLength(len_val)[0], \
             height_eci, jd, lat, lon)
 
-        # Mark the samples extrapolated outside the observed part
+        # Mark the samples extrapolated outside the observed part or inside an unobserved gap
+        is_gap = any((g_beg <= len_val <= g_end) for g_beg, g_end in getattr(drag_fit, 'gaps', []))
         if (len_val < drag_fit.len_first) or (len_val > drag_fit.len_last):
             time_marker = "*"
+        elif is_gap:
+            time_marker = "g"
         else:
             time_marker = " "
 
 
         # Add point parameters
-        traj_samples.addSample(t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel, vel_norot)
+        traj_samples.addSample(t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel, vel_norot, \
+            in_gap=is_gap)
 
         if show_plots:
             print(("{:s}{:7.3f}, {:13.1f}, {:10.6f}, {:11.6f}, {:10.1f}, {:10.6f}, {:10.6f}, {:10.3f}, " \
@@ -237,6 +244,8 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
     if show_plots:
         print('The star * denotes samples extrapolated outside the observed part of the trajectory with ' \
             + 'the drag model.')
+        if any(traj_samples.in_gap):
+            print('The letter g denotes samples falling inside an unobserved gap bridged by the drag model.')
         print("The horizontal coordinates are apparent above a fixed ground, not topocentric in J2000!")
         print('Vel is the velocity in the ECI frame, Vgnd the velocity relative to the ground.')
         print()
