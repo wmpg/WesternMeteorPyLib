@@ -1,4 +1,5 @@
-""" Tests of the drag-coupled trajectory solver in wmpl.Trajectory.TrajectoryDragFit.
+""" Tests of the drag-coupled trajectory solver, pre-atmospheric air-column velocity correction, light-curve
+    drag overlays and gap-aware DragFit handoff integrated into wmpl.Trajectory.Trajectory.
 
 Run with pytest:
     python -m pytest wmpl/Trajectory/Tests/test_TrajectoryDragFit.py -v
@@ -8,6 +9,7 @@ from __future__ import print_function, division, absolute_import
 
 import contextlib
 import io
+import os
 
 import matplotlib
 matplotlib.use('Agg')
@@ -15,9 +17,13 @@ import numpy as np
 
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, GravityDragMeteor, JDT_REF, STATIONS, \
     observeMeteor, timingOffsets
-from wmpl.Trajectory.TrajectoryDragFit import DragTimingFit, TrajectoryDragFit, computeStationCoverage, \
-    findObservedWindows, plotDragTrajectory, plotDragVelocity, solveTrajectoryDragFit
+from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, computeStationCoverage, \
+    findObservedWindows, plotDragTrajectory
+from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.Math import angleBetweenVectors
+from wmpl.Utils.Pickling import loadPickle, savePickle
+from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
+from wmpl.Utils.TrajConversions import geo2Cartesian
 
 
 # Four stations split into two completely non-overlapping groups with a 20% middle gap
@@ -98,7 +104,7 @@ def testDragTimingJacobianMatchesFiniteDifferences():
 
 
 def testOverlappingMeteorMatchesTruthWithGravityAndRotation():
-    """ Check that solveTrajectoryDragFit recovers radiant, velocity and clock offsets on a decelerating
+    """ Check that default Trajectory.run() recovers radiant, velocity and clock offsets on a decelerating
         meteor with gravity drop and rotating air.
     """
 
@@ -109,7 +115,7 @@ def testOverlappingMeteorMatchesTruthWithGravityAndRotation():
         gravity_correction=True, max_toffset=5.0)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        traj = solveTrajectoryDragFit(traj)
+        traj = traj.run()
 
     assert traj is not None
     assert traj.drag_timing_fit is not None
@@ -125,25 +131,25 @@ def testOverlappingMeteorMatchesTruthWithGravityAndRotation():
 
 
 def testZeroOverlapTwoStationsRecoversClockAndTrajectory():
-    """ Two stations with zero overlap and a 20% unobserved middle gap fail in standard Trajectory.run, but
-        solveTrajectoryDragFit recovers the clock offset, radiant and initial velocity.
+    """ Two stations with zero overlap and a 20% unobserved middle gap fail in legacy pairwise mode
+        (drag_fit_timing=False), but default drag-coupled Trajectory.run() recovers clock, radiant and speed.
     """
 
     meteor = DragMeteor(18000.0, 120.0, 45.0, 0.008, 0.02, 2.7, 6.0, ground_drag=True)
     clock_offsets = {'B': 2.15}
 
-    # Verify the standard solver fails on this zero-overlap configuration
-    traj_std = observeMeteor(meteor, noise=10.0, stations=TWO_STATION_GAPPED, clock_offsets=clock_offsets, \
-        gravity_correction=False, max_toffset=5.0)
+    # Verify legacy pairwise mode fails on this zero-overlap configuration
+    traj_legacy = observeMeteor(meteor, noise=10.0, stations=TWO_STATION_GAPPED, \
+        clock_offsets=clock_offsets, gravity_correction=False, max_toffset=5.0, drag_fit_timing=False)
     with contextlib.redirect_stdout(io.StringIO()):
-        res_std = traj_std.run()
-    assert res_std is None
+        res_legacy = traj_legacy.run()
+    assert res_legacy is None
 
-    # Solve the same observations with the drag-coupled solver
+    # Solve the same observations with the default drag-coupled solver
     traj_drag = observeMeteor(meteor, noise=10.0, stations=TWO_STATION_GAPPED, clock_offsets=clock_offsets, \
         gravity_correction=False, max_toffset=5.0)
     with contextlib.redirect_stdout(io.StringIO()):
-        traj_drag = solveTrajectoryDragFit(traj_drag)
+        traj_drag = traj_drag.run()
 
     assert traj_drag is not None
     assert len(traj_drag.drag_timing_fit.gaps) == 1
@@ -159,9 +165,9 @@ def testZeroOverlapTwoStationsRecoversClockAndTrajectory():
 
 
 
-def testDisconnectedGroupsWithMonteCarloAndPlots():
-    """ Four stations in two disconnected groups with a 20% gap and clock offsets are aligned by
-        TrajectoryDragFit with Monte Carlo uncertainties enabled, and both diagnostic plots render cleanly.
+def testDisconnectedGroupsWithMonteCarloAndPlots(tmp_path):
+    """ Four stations in two disconnected groups with a 20% gap and clock offsets are aligned by Trajectory
+        with Monte Carlo uncertainties enabled, and velocity, light-curve and drag-fit plots render cleanly.
     """
 
     meteor = GravityDragMeteor(22000.0, 60.0, 35.0, 5.0, 5.0, air_rotation=True)
@@ -170,12 +176,14 @@ def testDisconnectedGroupsWithMonteCarloAndPlots():
     traj_base = observeMeteor(meteor, noise=15.0, stations=TWO_GROUP_GAPPED_STATIONS, \
         clock_offsets=clock_offsets, gravity_correction=True, max_toffset=5.0)
 
-    # Copy observations into TrajectoryDragFit with Monte Carlo enabled
-    traj = TrajectoryDragFit(traj_base.jdt_ref, meastype=2, max_toffset=5.0, gravity_correction=True, \
-        monte_carlo=True, mc_runs=8, mc_cores=2, show_plots=False, save_results=False, verbose=False, \
-        air_rotation=True)
+    # Copy observations into Trajectory with synthetic apparent magnitudes and Monte Carlo enabled
+    traj = Trajectory(traj_base.jdt_ref, output_dir=str(tmp_path), meastype=2, max_toffset=5.0, \
+        gravity_correction=True, monte_carlo=True, mc_runs=8, mc_cores=2, show_plots=False, \
+        save_results=True, verbose=False, air_rotation=True)
     for obs in traj_base.observations:
-        traj.infillWithObs(obs)
+        mags = -2.0 - 4.0*np.sin(np.linspace(0.1, np.pi - 0.1, len(obs.time_data)))
+        traj.infillTrajectory(obs.azim_data.copy(), obs.elev_data.copy(), obs.time_data.copy(), \
+            obs.lat, obs.lon, obs.ele, station_id=obs.station_id, magnitudes=mags)
 
     with contextlib.redirect_stdout(io.StringIO()):
         traj = traj.run()
@@ -186,6 +194,7 @@ def testDisconnectedGroupsWithMonteCarloAndPlots():
     assert traj.uncertainties.v_init > 0.0
     assert traj.drag_timing_fit.mc_vel_std is not None
     assert traj.drag_timing_fit.mc_k_lo is not None
+    assert traj.drag_timing_fit.mc_dlog_k_std is not None
     assert traj.drag_timing_fit.mc_time_diffs_std is not None
     assert np.all(traj.drag_timing_fit.mc_time_diffs_std < 0.05)
 
@@ -197,10 +206,13 @@ def testDisconnectedGroupsWithMonteCarloAndPlots():
     rad_err_arcsec = np.degrees(angleBetweenVectors(traj.radiant_eci_mini, meteor.radiant_eci))*3600.0
     assert rad_err_arcsec < 90.0
 
-    # Verify both the velocity overlay plot and the separate drag-fit plot render cleanly
-    fig_vel = plotDragVelocity(traj, show_plots=False, save_results=False)
+    # Verify velocity, light-curve and drag-fit diagnostic plots were saved cleanly
+    assert os.path.isfile(os.path.join(str(tmp_path), traj.file_name + '_velocities.png'))
+    assert os.path.isfile(os.path.join(str(tmp_path), traj.file_name + '_abs_mag.png'))
+    assert os.path.isfile(os.path.join(str(tmp_path), traj.file_name + '_abs_mag_ht.png'))
+    assert os.path.isfile(os.path.join(str(tmp_path), traj.file_name + '_drag_fit.png'))
+
     fig_drag = plotDragTrajectory(traj, show_plots=False, save_results=False)
-    assert fig_vel is not None
     assert fig_drag is not None
 
 
@@ -217,7 +229,7 @@ def testStationBeyondMaxToffsetIsIgnored():
         max_toffset=5.0, gravity_correction=False)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        traj = solveTrajectoryDragFit(traj)
+        traj = traj.run()
 
     assert traj is not None
     ignored = [obs.station_id for obs in traj.observations if obs.ignore_station]
@@ -229,18 +241,17 @@ def testStationBeyondMaxToffsetIsIgnored():
 
 
 
-def testPickleRoundTrip(tmp_path):
-    """ Check that a drag-coupled trajectory saved to pickle loads cleanly as a standard Trajectory. """
-
-    from wmpl.Trajectory.Trajectory import Trajectory
-    from wmpl.Utils.Pickling import loadPickle, savePickle
+def testPickleRoundTripAndGapAwareHandoff(tmp_path):
+    """ Check that a drag-coupled trajectory saved to pickle loads cleanly as a standard Trajectory, and
+        hands off unobserved gaps cleanly to DragFit and SampleTrajectoryPositions.
+    """
 
     meteor = DragMeteor(18000.0, 120.0, 45.0, 0.008, 0.02, 2.7, 6.0)
     traj = observeMeteor(meteor, noise=5.0, stations=TWO_STATION_GAPPED, clock_offsets={'B': 1.2}, \
         gravity_correction=False, max_toffset=5.0)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        traj = solveTrajectoryDragFit(traj)
+        traj = traj.run()
 
     out_dir = str(tmp_path)
     savePickle(traj, out_dir, 'test_drag_traj.pickle')
@@ -251,14 +262,23 @@ def testPickleRoundTrip(tmp_path):
     assert len(loaded.drag_timing_fit.gaps) == 1
     assert abs(loaded.v_init - traj.v_init) < 1e-6
 
+    # Gap-aware DragFit detects the gap and assigns a dedicated gap ramp
+    df_handoff = DragFit(loaded)
+    assert len(df_handoff.gaps) == 1
+    assert int(np.sum(df_handoff.is_gap_ramp)) == 1
+
+    # SampleTrajectoryPositions flags samples inside the unobserved gap
+    samples = sampleTrajectory(loaded, -1, -1, 1000.0, show_plots=False)
+    assert len(samples.ht) > 10
+    assert any(samples.in_gap)
+    assert not all(samples.in_gap)
+
 
 
 def testMaxK0PreventsHighAltitudeNoiseOverfit():
     """ Check that max_k0 bounds initial K_0 and prevents unphysical hyperbolic speed blow-up on short noisy
         high-altitude faint meteors.
     """
-
-    from wmpl.Utils.TrajConversions import geo2Cartesian
 
     # Short 0.2 s, 63 km/s meteor from 111 km to 105 km with a noisy first point mimicking faint camera bias
     jd = 2460000.5
@@ -282,7 +302,7 @@ def testMaxK0PreventsHighAltitudeNoiseOverfit():
 
 def testArtificialCloudGapMatchesFullSolution():
     """ Removing a 25% middle cloud gap from all stations still matches the full-data solution in radiant,
-        initial velocity, end velocity, mid-gap velocity and station clock offsets.
+        initial velocity, end velocity and station clock offsets.
     """
 
     meteor = DragMeteor(18000.0, 120.0, 45.0, 0.008, 0.02, 2.7, 6.0)
@@ -299,27 +319,24 @@ def testArtificialCloudGapMatchesFullSolution():
     t_beg, t_end = float(np.min(t_all)), float(np.max(t_all))
     t_cut_lo = t_beg + 0.35*(t_end - t_beg)
     t_cut_hi = t_beg + 0.60*(t_end - t_beg)
-    for obs in traj_gap.observations:
+    obs_gap_src = list(traj_gap.observations)
+    traj_gap.observations = []
+    for obs in obs_gap_src:
         sh = shifts.get(obs.station_id, 0.0)
         t_true = obs.time_data - sh
         keep = (t_true <= t_cut_lo) | (t_true >= t_cut_hi)
-        obs.time_data = obs.time_data[keep]
-        obs.azim_data = obs.azim_data[keep]
-        obs.elev_data = obs.elev_data[keep]
-        obs.meas1 = obs.meas1[keep]
-        obs.meas2 = obs.meas2[keep]
-        obs.ignore_list = obs.ignore_list[keep]
-        if obs.magnitudes is not None:
-            obs.magnitudes = obs.magnitudes[keep]
+        mags = np.asarray(obs.magnitudes)[keep] if obs.magnitudes is not None else None
+        traj_gap.infillTrajectory(obs.azim_data[keep].copy(), obs.elev_data[keep].copy(), \
+            obs.time_data[keep].copy(), obs.lat, obs.lon, obs.ele, station_id=obs.station_id, \
+            magnitudes=mags)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        sol_full = solveTrajectoryDragFit(traj_full)
-        sol_gap = solveTrajectoryDragFit(traj_gap)
+        sol_full = traj_full.run()
+        sol_gap = traj_gap.run()
 
     assert (sol_full is not None) and (sol_gap is not None)
     assert len(sol_gap.drag_timing_fit.gaps) == 1
 
-    # Compare radiant, initial/end/mid-gap velocity and clock offsets against the full solution
     rad_diff_arcsec = np.degrees(angleBetweenVectors(sol_gap.radiant_eci_mini, \
         sol_full.radiant_eci_mini))*3600.0
     assert rad_diff_arcsec < 30.0
@@ -340,8 +357,6 @@ def testSuppliedFixedOffsetsPreservedInTimeDiffsFinal():
         double-applied to the observations.
     """
 
-    from wmpl.Trajectory.Trajectory import Trajectory
-
     meteor = DragMeteor(20000.0, 45.0, 40.0, 1e-3, 3e-3, 2.0, 5.0)
     traj_src = observeMeteor(meteor, noise=0.0, stations=STATIONS, clock_offsets={'A': -0.35, 'B': 0.80}, \
         gravity_correction=False, max_toffset=5.0)
@@ -354,7 +369,7 @@ def testSuppliedFixedOffsetsPreservedInTimeDiffsFinal():
             obs.lat, obs.lon, obs.ele, station_id=obs.station_id)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        traj = solveTrajectoryDragFit(traj)
+        traj = traj.run()
 
     assert traj is not None
     raw_offs = {obs.station_id: float(dt) for obs, dt in zip(traj.observations, traj.time_diffs_final)}
@@ -365,25 +380,23 @@ def testSuppliedFixedOffsetsPreservedInTimeDiffsFinal():
 
 
 
-def testReportSummaryAndTerminalMassGating(tmp_path):
-    """ Verify that the drag fit summary is appended to *_report.txt, terminal dynamic mass is reported for
-        deeply decelerating meteorite-dropping fireballs, and safely suppressed for high-altitude small
-        meteors.
+def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
+    """ Verify that the drag fit summary is written into *_report.txt, pre-atmospheric air-column correction
+        updates orbit.v_inf on constrained fireballs (and respects pre_atm_correction=False), terminal
+        dynamic mass and sigma_eff are gated by combined fit+MC uncertainty, and high-altitude faint meteors
+        suppress both terminal dynamic mass and pre-atmospheric orbit correction.
     """
 
-    import os
-    from wmpl.Utils.TrajConversions import geo2Cartesian
-
-    # 1. Deep meteorite-dropping fireball (14.5 km/s, K = 0.002 -> 0.004 m^2/kg, penetrates below 30 km)
-    meteor_fall = DragMeteor(14500.0, 120.0, 45.0, 0.002, 0.004, 3.0, 11.0)
+    # 1. Late-detected fireball (starts ~58 km, penetrates below 30 km): measurable pre-atm correction
+    meteor_fall = DragMeteor(14500.0, 120.0, 45.0, 0.002, 0.004, 5.8, 11.0)
     traj_fall = observeMeteor(meteor_fall, noise=4.0, stations=STATIONS, gravity_correction=False, \
-        max_toffset=5.0)
+        max_toffset=5.0, calc_orbit=True)
     traj_fall.output_dir = str(tmp_path)
     traj_fall.save_results = True
     traj_fall.show_plots = False
 
     with contextlib.redirect_stdout(io.StringIO()):
-        traj_fall = solveTrajectoryDragFit(traj_fall)
+        traj_fall = traj_fall.run()
 
     assert traj_fall is not None
     tm_fall = traj_fall.drag_timing_fit.terminalDynamicMass()
@@ -391,10 +404,28 @@ def testReportSummaryAndTerminalMassGating(tmp_path):
     assert tm_fall['mass_lo'] <= tm_fall['mass'] <= tm_fall['mass_hi']
     assert 0.05 < tm_fall['mass'] < 50.0
 
+    # Pre-atmospheric air-column correction is applied to orbit.v_inf and improves agreement with 14.5 km/s
+    assert traj_fall.pre_atm_info is not None
+    assert traj_fall.pre_atm_info['applied']
+    assert traj_fall.dv_pre_atm > 10.0
+    assert abs(traj_fall.orbit.v_inf - (traj_fall.v_init + traj_fall.dv_pre_atm)) < 1e-6
+    assert abs(traj_fall.orbit.v_inf - 14500.0) < abs(traj_fall.v_init - 14500.0)
+
+    # Disabling pre_atm_correction leaves orbit.v_inf equal to v_init
+    traj_no_pre = observeMeteor(meteor_fall, noise=4.0, stations=STATIONS, gravity_correction=False, \
+        max_toffset=5.0, calc_orbit=True, pre_atm_correction=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj_no_pre = traj_no_pre.run()
+    assert traj_no_pre.dv_pre_atm == 0.0
+    assert abs(traj_no_pre.orbit.v_inf - traj_no_pre.v_init) < 1e-6
+
     report_path = os.path.join(str(tmp_path), traj_fall.file_name + '_report.txt')
     assert os.path.isfile(report_path)
     report_txt = open(report_path, 'r').read()
     assert 'Drag fit summary' in report_txt
+    assert 'Air column above beg:' in report_txt
+    assert 'Pre-atm drag correction:' in report_txt
+    assert 'applied to orbit' in report_txt
     assert 'Peak dynamic pressure:' in report_txt
     assert 'Effective ablation coeff (sigma_eff):' in report_txt
     assert 'Terminal dynamic mass:' in report_txt
@@ -417,7 +448,7 @@ def testReportSummaryAndTerminalMassGating(tmp_path):
     assert abl_mc['sigma_eff_std'] > (abl['sigma_eff_std'] or 0.0)
     df_fall.mc_dlog_k_std = None
 
-    # Wide MC ensemble spread on K_end must suppress both terminal dynamic mass and sigma_eff
+    # Wide MC ensemble spread must suppress terminal dynamic mass, sigma_eff and pre-atm correction
     k_end = float(np.exp(df_fall.log_k_grid[-1]))
     df_fall.mc_k_lo = np.full_like(df_fall.len_grid, k_end*np.exp(-2.0))
     df_fall.mc_k_hi = np.full_like(df_fall.len_grid, k_end*np.exp(2.0))
@@ -427,8 +458,11 @@ def testReportSummaryAndTerminalMassGating(tmp_path):
     abl_wide_mc = df_fall.effectiveAblationCoeff()
     assert abl_wide_mc['sigma_eff'] is None
     assert 'poorly constrained' in abl_wide_mc['reason']
+    pre_wide_mc = df_fall.preAtmosphericVelocity()
+    assert not pre_wide_mc['applied']
+    assert 'poorly constrained' in pre_wide_mc['reason']
 
-    # 2. Small high-altitude meteor (100 -> 88 km, 35 km/s): terminal mass must NOT be estimated
+    # 2. Small high-altitude meteor (100 -> 88 km, 35 km/s): terminal mass and pre-atm must NOT be applied
     jd = 2460000.5
     state_vect = np.array(geo2Cartesian(np.radians(45.0), np.radians(15.0), 100000.0, jd))
     rad_eci = np.array([0.3, 0.4, 0.8660254])
@@ -440,5 +474,7 @@ def testReportSummaryAndTerminalMassGating(tmp_path):
     tm_small = fit_small.terminalDynamicMass()
     assert tm_small['mass'] is None
     assert 'non-meteorite-dropping' in tm_small['reason']
+    pre_small = fit_small.preAtmosphericVelocity()
+    assert not pre_small['applied']
     summary_small = fit_small.formatReportSummary()
     assert 'Terminal dynamic mass: not estimated' in summary_small

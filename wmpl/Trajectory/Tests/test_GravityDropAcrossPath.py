@@ -209,7 +209,7 @@ def testNoUsedPointsGiveNoSolution():
 
     meteor = GravityDragMeteor(13000.0, 210.0, 60.0, 50.0, 10.0, ht_beg=85000.0)
     traj = observeMeteor(meteor, noise=0.0, fps=0.7, seed=0, gravity_correction=True, filter_picks=False, \
-        calc_orbit=False, estimate_timing_vel=False)
+        calc_orbit=False, estimate_timing_vel=False, drag_fit_timing=False)
     with contextlib.redirect_stdout(io.StringIO()):
         traj = traj.run()
 

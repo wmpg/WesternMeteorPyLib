@@ -68,8 +68,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
-from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MIN_VEL, applyGravityDrop, gravityDropOrigin, \
-    gravityDropVectors, solutionDropTimeOrigin
+from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MIN_VEL, applyGravityDrop, buildRampsWithGaps, \
+    findObservedWindows, gravityDropOrigin, gravityDropVectors, solutionDropTimeOrigin
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationSpeed, earthRotationVelocity
@@ -133,7 +133,7 @@ def usedPoints(traj):
 
 class DragFit(object):
     def __init__(self, traj, n_knots=None, h_top=200000.0, penalty=1.0, drag_above=False, max_bending=5.0, \
-        max_vel_growth=0.1, knot_hts=None, knot_spread=0.0):
+        max_vel_growth=0.1, knot_hts=None, knot_spread=0.0, gap_aware=True, gap_penalty_factor=5.0):
         """ Fit the drag model to the lengths and times of the used points of the given trajectory.
 
         Arguments:
@@ -161,6 +161,11 @@ class DragFit(object):
             knot_spread: [float] Height below each of knot_hts over which the ballistic coefficient grows
                 without penalty (m). 0 by default, for a jump, which takes one step of the grid of the
                 observed part (a thousandth of its length).
+            gap_aware: [bool] Detect unobserved zero-station gaps along the trajectory and place one
+                regularized ramp across each gap rather than letting uniform knots straddle gaps. True by
+                default.
+            gap_penalty_factor: [float] Relative penalty multiplier applied to gap ramps when gap_aware is
+                True and gaps exist. 5.0 by default.
         """
 
         self.traj = traj
@@ -187,13 +192,28 @@ class DragFit(object):
         self.air_vel_grid = None
         self._initLine(h_top)
 
-        # Set the ramps of the ballistic coefficient, uniformly spaced between the first and the last point
+        # Detect observed windows and unobserved gaps across stations for gap-aware ramp placement
+        station_lens = [np.asarray(obs.state_vect_dist, dtype=np.float64)[np.asarray(obs.ignore_list) == 0] \
+            for obs in traj.observations if (not obs.ignore_station) \
+            and np.any(np.asarray(obs.ignore_list) == 0)]
+        self.windows, self.gaps = findObservedWindows(station_lens) if gap_aware else \
+            ([(self.len_first, self.len_last)], [])
+
+        # Set the ramps of the ballistic coefficient (gap-aware when unobserved gaps exist, uniform otherwise)
         if n_knots is None:
             n_knots = int(np.clip(len(self.len_data)/25, 3, 15))
 
-        self.ramp_beg = np.linspace(self.len_first, self.len_last, n_knots + 1)[:-1]
-        self.ramp_len = np.full(n_knots, (self.len_last - self.len_first)/n_knots)
-        self.pen_weight = np.ones(n_knots)
+        if gap_aware and self.gaps:
+            obs_len_grid = self.len_grid[self.i_first:self.i_last + 1]
+            self.ramp_beg, self.ramp_len, self.is_gap_ramp = buildRampsWithGaps(obs_len_grid, self.windows, \
+                self.gaps, len(self.len_data), n_knots=n_knots)
+            self.pen_weight = np.where(self.is_gap_ramp, float(gap_penalty_factor), 1.0)
+            n_knots = len(self.ramp_beg)
+        else:
+            self.ramp_beg = np.linspace(self.len_first, self.len_last, n_knots + 1)[:-1]
+            self.ramp_len = np.full(n_knots, (self.len_last - self.len_first)/n_knots)
+            self.is_gap_ramp = np.zeros(n_knots, dtype=bool)
+            self.pen_weight = np.ones(n_knots)
 
         # Add a ramp without penalty below every fragmentation between the heights of the used points
         self.knot_hts = np.array([] if knot_hts is None else knot_hts, dtype=float)
@@ -208,6 +228,7 @@ class DragFit(object):
             knot_beg, knot_len = self._knotRamps()
             self.ramp_beg = np.append(self.ramp_beg, knot_beg)
             self.ramp_len = np.append(self.ramp_len, knot_len)
+            self.is_gap_ramp = np.append(self.is_gap_ramp, np.zeros(len(self.knot_hts), dtype=bool))
             self.pen_weight = np.append(self.pen_weight, np.zeros(len(self.knot_hts)))
             n_knots += len(self.knot_hts)
 
@@ -1375,6 +1396,14 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
     traj = drag_fit.traj
 
     fig, (ax_ht, ax_vel, ax_k) = plt.subplots(ncols=3, sharey=True, figsize=(14, 5))
+
+    # Shade and hatch unobserved gaps when present
+    for idx_g, (g_beg, g_end) in enumerate(getattr(drag_fit, 'gaps', [])):
+        h0, h1 = drag_fit.heightAtLength(np.array([g_beg, g_end]))/1000.0
+        lbl = 'Unobserved gap' if idx_g == 0 else None
+        for ax_g in (ax_ht, ax_vel, ax_k):
+            ax_g.axhspan(min(h0, h1), max(h0, h1), facecolor='tab:orange', edgecolor='tab:orange', \
+                hatch='xxx', alpha=0.18, linewidth=0.0, label=(lbl if ax_g is ax_ht else None), zorder=1)
 
     # Plot the station data
     for obs in traj.observations:
