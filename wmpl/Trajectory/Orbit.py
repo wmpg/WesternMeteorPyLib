@@ -273,6 +273,7 @@ class Orbit(object):
                 uncertainties, 'dec_g', deg=True))
             out_str += "  Vg     = {:s} km/s\n".format(valueFormat("{:>9.5f}", self.v_g, '{:.5f}', \
                 uncertainties, 'v_g', multi=1.0/1000))
+            # Append the pre-atmospheric air-column drag correction to Vinf when applied
             dv_pre_atm = getattr(self, 'dv_pre_atm', 0.0)
             if (dv_pre_atm is not None) and (abs(dv_pre_atm) > 0.0):
                 v_inf_corr_str = ' ({:+.4f} km/s pre-atm drag corr)'.format(dv_pre_atm/1000.0)

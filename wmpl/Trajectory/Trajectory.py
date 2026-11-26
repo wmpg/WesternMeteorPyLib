@@ -57,7 +57,7 @@ from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, fin
     confidenceInterval, medianStddev, isGraphConnected
 from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
-from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationVelocity
+from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationVelocity, trajectoryLightCurve
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot, stationColors
 from wmpl.Utils.PlotOrbits import plotOrbits
@@ -2696,12 +2696,9 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Assign geometric uncertainty flag, if it was changed
     traj_best.geometric_uncert = geometric_uncert
 
-    # Attach Monte Carlo ensemble uncertainties on the drag model velocity, K and station timings
+    # Attach Monte Carlo drag uncertainties and re-evaluate the pre-atmospheric velocity gate
     if getattr(traj, 'drag_timing_fit', None) is not None:
-        _attachDragMCUncertainties(traj, mc_results)
-        if traj_best is not traj:
-            _attachDragMCUncertainties(traj_best, mc_results)
-        _refreshPreAtmAfterMC(traj, traj_best, mc_results)
+        _updateDragMCResults(traj, traj_best, mc_results)
 
     # Without timing estimation the noise does not change the velocity, so sample it within its uncertainty
     if not traj.estimate_timing_vel:
@@ -3246,10 +3243,6 @@ def addTrajectoryID(traj):
 
 
 
-
-
-
-
 # Maximum length grid size used when solving the drag equation on very long trajectories
 DRAG_TRAJ_MAX_GRID_POINTS = 400
 
@@ -3278,7 +3271,7 @@ DRAG_TRAJ_MAX_ITER = 4
 #   on short faint meteors (ramps still allow K to grow above K_0 during fragmentation)
 DRAG_TRAJ_MAX_K0 = 10.0
 
-# Evaluation limits for exploratory cold starts and final / warm-started least-squares refinements
+# Evaluation limits for exploratory cold starts and final or warm-started least-squares refinements
 DRAG_TRAJ_EXPLORE_MAX_NFEV = 80
 DRAG_TRAJ_REFINE_MAX_NFEV = 250
 DRAG_TRAJ_WARM_MAX_NFEV = 100
@@ -3338,16 +3331,19 @@ def _stationSubIntervals(len_arr, gap_factor=DRAG_TRAJ_GAP_FACTOR, min_gap_m=DRA
     if len(len_arr) == 0:
         return []
 
+    # Sort observed lengths and handle single-point stations
     len_sorted = np.sort(np.asarray(len_arr, dtype=np.float64))
     if len(len_sorted) < 2:
         return [(float(len_sorted[0]), float(len_sorted[0]))]
 
+    # Locate internal gaps exceeding both the minimum length and the scaled median spacing
     diffs = np.diff(len_sorted)
     pos_diffs = diffs[diffs > 0]
     med_step = float(np.median(pos_diffs)) if len(pos_diffs) else 0.0
     gap_thresh = max(min_gap_m, gap_factor*med_step)
     splits = np.where(diffs > gap_thresh)[0]
 
+    # Collect contiguous sub-intervals between splits
     intervals = []
     start = 0
     for split_ind in splits:
@@ -3376,6 +3372,7 @@ def findObservedWindows(len_list, gap_factor=DRAG_TRAJ_GAP_FACTOR, min_gap_m=DRA
             - gaps: [list] Sorted list of (gap_beg, gap_end) tuples of unobserved gaps (m).
     """
 
+    # Collect all contiguous sub-intervals across stations
     intervals = []
     for len_arr in len_list:
         intervals.extend(_stationSubIntervals(len_arr, gap_factor=gap_factor, min_gap_m=min_gap_m))
@@ -3387,13 +3384,12 @@ def findObservedWindows(len_list, gap_factor=DRAG_TRAJ_GAP_FACTOR, min_gap_m=DRA
     intervals.sort()
     merged = [list(intervals[0])]
     for beg, end in intervals[1:]:
-
         if beg <= merged[-1][1] + 0.25*min_gap_m:
             merged[-1][1] = max(merged[-1][1], end)
         else:
             merged.append([beg, end])
 
-
+    # Extract observed windows and the unobserved gaps between consecutive windows
     windows = [(w[0], w[1]) for w in merged]
     gaps = [(windows[i][1], windows[i + 1][0]) for i in range(len(windows) - 1)]
 
@@ -3401,41 +3397,9 @@ def findObservedWindows(len_list, gap_factor=DRAG_TRAJ_GAP_FACTOR, min_gap_m=DRA
 
 
 
-def _extractMaskSpans(len_grid, mask, min_span_m=0.0):
-    """ Extract contiguous (len_beg, len_end) spans from a boolean mask on len_grid.
-
-    Arguments:
-        len_grid: [ndarray] Sorted length grid (m).
-        mask: [ndarray] Boolean mask on len_grid.
-
-    Keyword arguments:
-        min_span_m: [float] Discard spans shorter than this length (m). 0.0 by default.
-
-    Return:
-        [list] List of (len_beg, len_end) tuples (m).
-    """
-
-    if not np.any(mask):
-        return []
-
-    padded = np.r_[False, mask, False]
-    starts = np.where(padded[1:] & (~padded[:-1]))[0]
-    ends = np.where((~padded[1:]) & padded[:-1])[0] - 1
-
-    spans = []
-    for s_ind, e_ind in zip(starts, ends):
-        beg = float(len_grid[s_ind])
-        end = float(len_grid[e_ind])
-        if (end - beg) >= min_span_m:
-            spans.append((beg, end))
-
-    return spans
-
-
-
 def computeStationCoverage(len_grid, len_list, gap_factor=DRAG_TRAJ_GAP_FACTOR, min_gap_m=DRAG_TRAJ_MIN_GAP):
     """ Count how many stations observe every point on len_grid, and partition the track into overlapping
-        (>= 2 stations), single-station (1 station, no overlap) and unobserved gap (0 stations) spans.
+        (>= 2 stations), single-station (1 station) and unobserved gap (0 stations) spans.
 
     Arguments:
         len_grid: [ndarray] Sorted grid of lengths along the trajectory (m).
@@ -3453,6 +3417,27 @@ def computeStationCoverage(len_grid, len_list, gap_factor=DRAG_TRAJ_GAP_FACTOR, 
             - gap_spans: [list] (len_beg, len_end) spans with 0 stations (m).
     """
 
+    def _extractSpans(mask, min_span_m=0.0):
+        """ Extract contiguous (len_beg, len_end) spans from a boolean mask on len_grid. """
+
+        if not np.any(mask):
+            return []
+
+        padded = np.r_[False, mask, False]
+        starts = np.where(padded[1:] & (~padded[:-1]))[0]
+        ends = np.where((~padded[1:]) & padded[:-1])[0] - 1
+
+        spans = []
+        for s_ind, e_ind in zip(starts, ends):
+            beg = float(len_grid[s_ind])
+            end = float(len_grid[e_ind])
+            if (end - beg) >= min_span_m:
+                spans.append((beg, end))
+
+        return spans
+
+
+    # Count active stations covering each length grid node
     n_stations_grid = np.zeros(len(len_grid), dtype=np.int64)
     for len_arr in len_list:
 
@@ -3460,12 +3445,14 @@ def computeStationCoverage(len_grid, len_list, gap_factor=DRAG_TRAJ_GAP_FACTOR, 
         covered = np.zeros(len(len_grid), dtype=bool)
         for beg, end in sub_intervals:
             covered |= (len_grid >= beg) & (len_grid <= end)
+
         n_stations_grid += covered.astype(np.int64)
 
+    # Partition the grid into overlapping, single-station and unobserved gap spans
     min_single = max(0.5*min_gap_m, float(len_grid[1] - len_grid[0]) if len(len_grid) > 1 else 0.0)
-    overlap_spans = _extractMaskSpans(len_grid, n_stations_grid >= 2)
-    single_spans = _extractMaskSpans(len_grid, n_stations_grid == 1, min_span_m=min_single)
-    gap_spans = _extractMaskSpans(len_grid, n_stations_grid == 0)
+    overlap_spans = _extractSpans(n_stations_grid >= 2)
+    single_spans = _extractSpans(n_stations_grid == 1, min_span_m=min_single)
+    gap_spans = _extractSpans(n_stations_grid == 0)
 
     return n_stations_grid, overlap_spans, single_spans, gap_spans
 
@@ -3494,6 +3481,7 @@ def buildRampsWithGaps(len_grid, windows, gaps, n_points_total, n_knots=None):
     len_first = float(len_grid[0])
     len_last = float(len_grid[-1])
 
+    # Choose the default segment count from the total number of measurements
     if n_knots is None:
         n_knots = int(np.clip(n_points_total/20.0, 1, 15))
 
@@ -3501,8 +3489,8 @@ def buildRampsWithGaps(len_grid, windows, gaps, n_points_total, n_knots=None):
     if not gaps:
         ramp_beg = np.linspace(len_first, len_last, n_knots + 1)[:-1]
         ramp_len = np.full(n_knots, max((len_last - len_first)/n_knots, 1.0))
-        return ramp_beg, ramp_len, np.zeros(n_knots, dtype=bool)
 
+        return ramp_beg, ramp_len, np.zeros(n_knots, dtype=bool)
 
     # Allocate observed ramps proportionally across observed windows, with at least one per window
     total_obs_len = sum(max(end - beg, 1.0) for beg, end in windows)
@@ -3520,10 +3508,10 @@ def buildRampsWithGaps(len_grid, windows, gaps, n_points_total, n_knots=None):
         cnt = max(1, int(round(obs_knots*max(end - beg, 1.0)/total_obs_len)))
         rb = np.linspace(beg, end, cnt + 1)[:-1]
         rl = np.full(cnt, (end - beg)/cnt)
+
         ramp_beg.extend(rb.tolist())
         ramp_len.extend(rl.tolist())
         is_gap_ramp.extend([False]*cnt)
-
 
     # Add a single monotonic ramp across each unobserved gap
     for gap_beg, gap_end in gaps:
@@ -3531,81 +3519,13 @@ def buildRampsWithGaps(len_grid, windows, gaps, n_points_total, n_knots=None):
         ramp_len.append(max(gap_end - gap_beg, 1.0))
         is_gap_ramp.append(True)
 
-
+    # Sort all ramps by starting length along the trajectory
     ramp_beg = np.array(ramp_beg, dtype=np.float64)
     ramp_len = np.array(ramp_len, dtype=np.float64)
     is_gap_ramp = np.array(is_gap_ramp, dtype=bool)
-
     order = np.argsort(ramp_beg)
 
     return ramp_beg[order], ramp_len[order], is_gap_ramp[order]
-
-
-
-def lineDensityGravityDropped(state_vect, radiant_eci, len_grid, jd, drop_grid=None, gravity_factor=1.0):
-    """ Compute the air density, heights and gravity along the trajectory, optionally on the gravity-dropped
-        path. On long shallow trajectories such as Earth-grazers, the gravity drop lowers the path by several
-        kilometers, significantly increasing the air density relative to the straight tangent line.
-
-    Arguments:
-        state_vect: [ndarray] ECI coordinates of the point on the line from which lengths are measured (m).
-        radiant_eci: [ndarray] Unit vector of the radiant in ECI, opposite to the motion.
-        len_grid: [ndarray] Sorted lengths along the line in the direction of motion (m).
-        jd: [float] Julian date.
-
-    Keyword arguments:
-        drop_grid: [ndarray] ECI gravity drop vectors at each point of len_grid (m), shape (N, 3). None by
-            default, in which case the straight line is used.
-        gravity_factor: [float] Factor by which gravity is multiplied. 1.0 by default.
-
-    Return:
-        (rho, g_along, ht_grid):
-            - rho: [ndarray] Air density on len_grid (kg/m^3).
-            - g_along: [ndarray] Acceleration by gravity along the motion on len_grid (m/s^2).
-            - ht_grid: [ndarray] Heights above mean sea level on len_grid (m).
-    """
-
-    state_vect = np.asarray(state_vect, dtype=np.float64)
-    radiant_eci = vectNorm(np.asarray(radiant_eci, dtype=np.float64))
-
-    # Scale the number of MSIS samples with trajectory length for long Earth-grazers
-    span = float(len_grid[-1] - len_grid[0])
-    n_atm = int(np.clip(np.ceil(span/10000.0) + 10, DRAG_VEL_ATM_POINTS, 60))
-
-    eci_grid = state_vect[None, :] - len_grid[:, None]*radiant_eci[None, :]
-    if drop_grid is not None:
-        eci_grid = eci_grid + np.asarray(drop_grid, dtype=np.float64)
-
-    # Sample geographical coordinates along the path for MSIS air density
-    atm_ind = np.unique(np.round(np.linspace(0, len(len_grid) - 1, n_atm)).astype(int))
-    lla = np.array([cartesian2Geo(jd, *eci_grid[i]) for i in atm_ind])
-    len_atm = len_grid[atm_ind]
-
-    rho_atm = getAtmDensity_vect(lla[:, 0], lla[:, 1], np.maximum(lla[:, 2], 0.0), jd)
-    rho = np.exp(np.interp(len_grid, len_atm, np.log(rho_atm)))
-    ht_grid = np.interp(len_grid, len_atm, lla[:, 2])
-
-    # Compute the component of central gravity along the motion
-    g_along = gravity_factor*G*EARTH.MASS*eci_grid.dot(radiant_eci)/np.linalg.norm(eci_grid, axis=1)**3
-
-    return rho, g_along, ht_grid
-
-
-
-def computeVRotation(state_vect, radiant_eci):
-    """ Compute the component of the Earth's atmospheric rotation velocity along the meteor's motion.
-
-    Arguments:
-        state_vect: [ndarray] ECI position on the trajectory (m).
-        radiant_eci: [ndarray] Unit vector of the radiant in ECI, opposite to the motion.
-
-    Return:
-        [float] Speed of the co-rotating air along the direction of motion (m/s).
-    """
-
-    motion = -vectNorm(np.asarray(radiant_eci, dtype=np.float64))
-
-    return float(np.dot(earthRotationVelocity(np.asarray(state_vect, dtype=np.float64)), motion))
 
 
 
@@ -3644,34 +3564,46 @@ class DragTimingFit(object):
                 of shape (N, 3) (m) for evaluating air density on the dropped path. None by default.
             air_rotation: [bool] Account for Earth's rotating atmosphere in the drag speed v_air = v - v_rot.
                 True by default.
-            params_init: [ndarray] Optional warm-start parameter vector (e.g. from the previous pass or from
-                the main solution during Monte Carlo runs). Skips the global scan when its length matches.
-                None by default.
-            res_scale_init: [float] Optional robust residual scale (m) to use with params_init so the loss
-                and penalty scaling stays consistent across passes and Monte Carlo runs. None by default.
+            params_init: [ndarray] Optional warm-start parameter vector. Skips the global scan when its
+                length matches. None by default.
+            res_scale_init: [float] Optional robust residual scale (m) to use with params_init. None by
+                default.
             max_k0: [float] Upper bound on the initial ballistic coefficient K_0 (m^2/kg), or None to use
                 DRAG_VEL_LOG_K_BOUNDS[1]. DRAG_TRAJ_MAX_K0 by default.
         """
+
+        ### Configure geometry and parameter bounds ###
 
         self.n_stations = len(station_times)
         self.free_mask = np.asarray(free_mask, dtype=bool)
         self.free_indices = np.where(self.free_mask)[0]
         self.n_free = len(self.free_indices)
+
         self.state_vect = np.asarray(state_vect, dtype=np.float64)
         self.radiant_eci = vectNorm(np.asarray(radiant_eci, dtype=np.float64))
         self.jd = float(jd)
         self.max_toffset = float(max_toffset)
         self.gravity_factor = float(gravity_factor)
         self.penalty = float(penalty)
-        self.air_rotation = bool(air_rotation)
-        self.v_rotation = computeVRotation(state_vect, radiant_eci) if self.air_rotation else 0.0
-        self.max_k0 = float(max_k0) if max_k0 is not None else None
-        self.max_log_k0 = min(float(np.log(self.max_k0)), DRAG_VEL_LOG_K_BOUNDS[1]) \
-            if (self.max_k0 is not None) and (self.max_k0 > 0.0) else DRAG_VEL_LOG_K_BOUNDS[1]
 
-        # Stack all used points across active stations
-        t_all, l_all, w_all, s_all = [], [], [], []
-        used_lens = []
+        # Compute the component of Earth's atmospheric rotation along the direction of motion
+        self.air_rotation = bool(air_rotation)
+        if self.air_rotation:
+            self.v_rotation = float(np.dot(earthRotationVelocity(self.state_vect), -self.radiant_eci))
+        else:
+            self.v_rotation = 0.0
+
+        # Cap the initial ballistic coefficient K_0 to avoid high-altitude noise overfitting
+        self.max_k0 = float(max_k0) if max_k0 is not None else None
+        if (self.max_k0 is not None) and (self.max_k0 > 0.0):
+            self.max_log_k0 = min(float(np.log(self.max_k0)), DRAG_VEL_LOG_K_BOUNDS[1])
+        else:
+            self.max_log_k0 = DRAG_VEL_LOG_K_BOUNDS[1]
+
+
+        ### Stack measurements across active stations ###
+
+        t_all, l_all, w_all, s_all, used_lens = [], [], [], [], []
         for s_idx, (t_arr, l_arr, wt) in enumerate(zip(station_times, station_lens, station_weights)):
 
             if (len(t_arr) == 0) or (wt <= 0):
@@ -3700,7 +3632,9 @@ class DragTimingFit(object):
             self.stat_to_free[s_idx] = slot
         self.pt_free_slot = self.stat_to_free[self.stat_idx]
 
-        # Build the length grid scaled to the trajectory length
+
+        ### Build length grid, atmosphere profile and gap-aware ramps ###
+
         self.len_first = float(np.min(self.len_data))
         self.len_last = float(np.max(self.len_data))
         span = max(self.len_last - self.len_first, 1.0)
@@ -3709,16 +3643,16 @@ class DragTimingFit(object):
         self.len_grid = np.linspace(self.len_first, self.len_last, n_grid)
         self.dlen = np.diff(self.len_grid)
 
-        # Evaluate air density, gravity and heights along the trajectory (dropped path if provided)
+        # Sample air density, heights and central gravity along the straight or dropped path
         drop_grid = drop_grid_func(self.len_grid) if drop_grid_func is not None else None
-        self.rho, self.g_along, self.ht_grid = lineDensityGravityDropped(state_vect, radiant_eci, \
-            self.len_grid, jd, drop_grid=drop_grid, gravity_factor=self.gravity_factor)
+        self.rho, self.g_along, self.ht_grid = self._sampleAtmAndGravity(drop_grid=drop_grid)
 
-        # Detect observed windows, single-station no-overlap regions and unobserved gaps
+        # Detect observed windows, station coverage and unobserved gaps
         self.windows, self.gaps = findObservedWindows(used_lens)
         self.n_stations_grid, self.overlap_spans, self.single_station_spans, _ = computeStationCoverage( \
             self.len_grid, used_lens)
 
+        # Construct monotonic ln K ramps across observed windows and unobserved gaps
         self.ramp_beg, self.ramp_len, self.is_gap_ramp = buildRampsWithGaps(self.len_grid, self.windows, \
             self.gaps, self.n_data, n_knots=n_knots)
         self.n_knots = len(self.ramp_beg)
@@ -3726,20 +3660,24 @@ class DragTimingFit(object):
             0.0, 1.0)
         self.pen_weights = np.where(self.is_gap_ramp, gap_penalty_factor, 1.0)
 
-        # Run the joint fit (warm-started when params_init matches)
+
+        ### Fit the drag model and evaluate final diagnostics ###
+
         sol = self._fit(penalty, params_init=params_init, res_scale_init=res_scale_init)
         self.opt_result = sol
         self.params = sol.x
         self.drag_params = self.params[:3 + self.n_knots]
 
+        # Extract fitted station timing offsets
         self.time_offsets = np.zeros(self.n_stations, dtype=np.float64)
         if self.n_free > 0:
             self.time_offsets[self.free_indices] = self.params[3 + self.n_knots:]
 
+        # Evaluate final speed, time and ballistic coefficient profiles on the grid
         self.vel_grid, self.time_grid = self._solve(self.drag_params)[:2]
         self.log_k_grid = self.drag_params[2] + self.ramps.dot(self.drag_params[3:])
 
-        # Compute final along-track and timing residuals
+        # Compute along-track length residuals and their robust scale
         t_corr = self._correctedTimes(self.params)
         len_model = self._lenAtTime(t_corr, self.vel_grid, self.time_grid)
         self.residuals_m = len_model - self.len_data
@@ -3747,6 +3685,7 @@ class DragTimingFit(object):
         self.res_scale_m = float(max(1.4826*np.median(np.abs(self.residuals_m \
             - np.median(self.residuals_m))), 1.0))
 
+        # Compute corresponding timing residuals
         t_model = np.interp(self.len_data, self.len_grid, self.time_grid)
         self.residuals_s = t_model - t_corr
         self.res_rms_s = float(np.sqrt(np.mean(self.residuals_s**2)))
@@ -3758,7 +3697,7 @@ class DragTimingFit(object):
             if self.params_cov is not None else 0.0
         self.log_k_std_grid = self._logKStdOnGrid()
 
-        # Optional Monte Carlo ensemble uncertainty arrays, populated after MC runs
+        # Optional Monte Carlo ensemble uncertainty arrays populated after MC runs
         self.mc_vel_std = None
         self.mc_vel_lo = None
         self.mc_vel_hi = None
@@ -3769,6 +3708,47 @@ class DragTimingFit(object):
 
         # Compute systematic timing and velocity bounds across unobserved gaps
         self.gap_uncertainties = self.computeGapUncertainties()
+
+
+
+    def _sampleAtmAndGravity(self, drop_grid=None):
+        """ Sample atmospheric density, heights and along-track gravity along the trajectory grid,
+            optionally offset by gravity drop vectors.
+
+        Keyword arguments:
+            drop_grid: [ndarray] ECI gravity drop vectors at each node of len_grid (m), shape (N, 3). None
+                by default, in which case the straight line is used.
+
+        Return:
+            (rho, g_along, ht_grid):
+                - rho: [ndarray] Air density on len_grid (kg/m^3).
+                - g_along: [ndarray] Component of central gravity along the motion (m/s^2).
+                - ht_grid: [ndarray] Heights above mean sea level on len_grid (m).
+        """
+
+        # Build ECI coordinates along the straight or gravity-dropped path
+        eci_grid = self.state_vect[None, :] - self.len_grid[:, None]*self.radiant_eci[None, :]
+        if drop_grid is not None:
+            eci_grid = eci_grid + np.asarray(drop_grid, dtype=np.float64)
+
+        # Scale MSIS sample count with path length for long shallow trajectories
+        span = float(self.len_grid[-1] - self.len_grid[0])
+        n_atm = int(np.clip(np.ceil(span/10000.0) + 10, DRAG_VEL_ATM_POINTS, 60))
+
+        # Convert sampled ECI positions to geodetic coordinates and evaluate NRLMSISE-00 density
+        atm_ind = np.unique(np.round(np.linspace(0, len(self.len_grid) - 1, n_atm)).astype(int))
+        lla = np.array([cartesian2Geo(self.jd, *eci_grid[i]) for i in atm_ind])
+        len_atm = self.len_grid[atm_ind]
+
+        rho_atm = getAtmDensity_vect(lla[:, 0], lla[:, 1], np.maximum(lla[:, 2], 0.0), self.jd)
+        rho = np.exp(np.interp(self.len_grid, len_atm, np.log(rho_atm)))
+        ht_grid = np.interp(self.len_grid, len_atm, lla[:, 2])
+
+        # Project central gravitational acceleration onto the direction of motion
+        g_along = self.gravity_factor*G*EARTH.MASS*eci_grid.dot(self.radiant_eci) \
+            /np.linalg.norm(eci_grid, axis=1)**3
+
+        return rho, g_along, ht_grid
 
 
 
@@ -3812,7 +3792,7 @@ class DragTimingFit(object):
 
 
     def _solve(self, drag_params, derivatives=False):
-        """ Solve the linear energy equation along the length grid, with optional derivatives.
+        """ Solve the linear energy equation along the length grid, with optional analytical derivatives.
 
         Arguments:
             drag_params: [ndarray] Drag parameters (t_first, v_first, ln K_0, ramp heights).
@@ -3829,13 +3809,16 @@ class DragTimingFit(object):
                 - dtime: [ndarray] Derivatives of time_arr w.r.t. drag_params, or None.
         """
 
+        # Compute base drag coefficient 2*K(L)*rho(L) on the grid
         drag_base = 2.0*np.exp(drag_params[2] + self.ramps.dot(drag_params[3:]))*self.rho
         drag_scale = np.ones_like(drag_base)
         vel_prev = None
 
+        # Iterate the linear energy ODE until the rotating-air drag scaling converges
         n_iter = DRAG_TRAJ_AIR_MAX_ITER if self.v_rotation != 0.0 else 1
         for i in range(n_iter):
 
+            # Integrate drag exponent phi and gravitational work along the grid
             drag = drag_base*drag_scale
             phi = cumulativeTrapz(drag, self.dlen)
             exp_phi = np.exp(np.clip(phi, -DRAG_VEL_PHI_MAX, DRAG_VEL_PHI_MAX))
@@ -3844,41 +3827,50 @@ class DragTimingFit(object):
             energy = (0.5*drag_params[1]**2 + grav)/exp_phi
             vel = np.sqrt(np.maximum(2.0*energy, 1.0))
 
+            # Stop once the speeds have converged
             if (vel_prev is not None) and (np.max(np.abs(vel - vel_prev)) < DRAG_TRAJ_AIR_TOL):
                 break
 
             vel_prev = vel
+
+            # Update rotating-air drag scaling with damping on later iterations
             if n_iter > 1:
                 new_scale = self._airDragScale(vel)
                 drag_scale = new_scale if i < 2 else 0.5*(drag_scale + new_scale)
 
-
+        # Integrate time along the trajectory from the solved speeds
         time_arr = drag_params[0] + cumulativeTrapz(1.0/vel, self.dlen)
 
         if not derivatives:
             return vel, time_arr, None, None
 
-        # Compute exact derivatives of the converged energy ODE
+        # Differentiate the converged energy ODE with respect to v_first, ln K_0 and ramp heights
         dlog_k = np.c_[np.ones(len(drag)), self.ramps]
         if self.v_rotation == 0.0:
+
             dphi = cumulativeTrapz(drag[:, None]*dlog_k, self.dlen)
             dgrav = cumulativeTrapz((self.g_along*exp_phi)[:, None]*dphi, self.dlen)
             denergy = dgrav/exp_phi[:, None] - energy[:, None]*dphi
             dvel = np.c_[drag_params[1]/exp_phi, denergy]/vel[:, None]
+
         else:
+
             # Linearize dE/dL = -2*K*rho*s(v)*E + g_along with d(s(v)*E)/dE = 1 - v_rot/v above the floor
             vel_floor = max(50.0, abs(self.v_rotation) + 1.0)
             vel_safe = np.maximum(vel, vel_floor)
             ratio = 1.0 - self.v_rotation/vel_safe
             d_scale_energy = np.where((vel > vel_floor) & (2.0*energy > 1.0), ratio, drag_scale)
+
             psi = cumulativeTrapz(drag_base*d_scale_energy, self.dlen)
             exp_psi = np.exp(np.clip(psi, -250.0, 250.0))
             q_rhs = -(drag*energy)[:, None]*dlog_k
+
             denergy_v = drag_params[1]/exp_psi
             denergy_k = cumulativeTrapz(exp_psi[:, None]*q_rhs, self.dlen)/exp_psi[:, None]
             dvel = np.c_[denergy_v, denergy_k]/vel[:, None]
             dvel = np.where((2.0*energy > 1.0)[:, None], dvel, 0.0)
 
+        # Propagate velocity derivatives into grid times
         dtime = np.c_[np.ones(len(vel)), cumulativeTrapz(-dvel/vel[:, None]**2, self.dlen)]
 
         return vel, time_arr, dvel, dtime
@@ -3918,11 +3910,13 @@ class DragTimingFit(object):
             [ndarray] Residual vector.
         """
 
+        # Solve forward drag trajectory and evaluate predicted lengths at time-corrected points
         drag_params = params[:3 + self.n_knots]
         vel, time_grid, _, _ = self._solve(drag_params)
         t_corr = self._correctedTimes(params)
         len_model = self._lenAtTime(t_corr, vel, time_grid)
 
+        # Combine weighted data residuals with L2 penalties on ln K ramp increments
         data_res = self.sqrt_w*(len_model - self.len_data)
         pen_res = w_pen*self.pen_weights*drag_params[3:]
 
@@ -3946,23 +3940,25 @@ class DragTimingFit(object):
         vel, time_grid, dvel, dtime = self._solve(drag_params, derivatives=True)
         t_corr = self._correctedTimes(params)
 
-        # Find the grid cell containing each observation time
+        # Locate the grid segment containing each observation time
         ind = np.clip(np.searchsorted(time_grid, t_corr) - 1, 0, len(self.dlen) - 1)
         dtime_seg = time_grid[ind + 1] - time_grid[ind]
         frac = np.clip((t_corr - time_grid[ind])/dtime_seg, 0.0, 1.0)
 
+        # Interpolate length derivatives inside the grid using dL/dp = -(dt/dp)/(dt/dL)
         slope_at = self.dlen[ind]/dtime_seg
         dtime_at = dtime[ind]*(1.0 - frac)[:, None] + dtime[ind + 1]*frac[:, None]
         jac_drag = -dtime_at*slope_at[:, None]
         dlen_dt = slope_at.copy()
 
-        # Differentiate linear continuation outside the grid time span
+        # Differentiate linear continuation before the first grid time
         before = t_corr < time_grid[0]
         if np.any(before):
             jac_drag[before] = -vel[0]*dtime[0] \
                 + (t_corr[before] - time_grid[0])[:, None]*np.r_[0.0, dvel[0]]
             dlen_dt[before] = vel[0]
 
+        # Differentiate linear continuation after the last grid time
         after = t_corr > time_grid[-1]
         if np.any(after):
             jac_drag[after] = -vel[-1]*dtime[-1] \
@@ -3971,12 +3967,13 @@ class DragTimingFit(object):
 
         jac_drag *= self.sqrt_w[:, None]
 
-        # Derivatives with respect to free station timing offsets
+        # Populate derivatives with respect to free station timing offsets
         jac_dt = np.zeros((self.n_data, self.n_free), dtype=np.float64)
         if self.n_free > 0:
             free_pts = self.pt_free_slot >= 0
             jac_dt[free_pts, self.pt_free_slot[free_pts]] = self.sqrt_w[free_pts]*dlen_dt[free_pts]
 
+        # Append diagonal penalty rows for the ramp parameters
         jac_data = np.hstack([jac_drag, jac_dt])
         jac_pen = np.zeros((self.n_knots, n_drag + self.n_free), dtype=np.float64)
         jac_pen[:, 3:n_drag] = np.diag(w_pen*self.pen_weights)
@@ -3999,7 +3996,8 @@ class DragTimingFit(object):
                 - res: [ndarray] Weighted length residuals of the best constant-K fit (m).
         """
 
-        # Compute F(L) for all trial ln K values simultaneously within the allowed K_0 range
+        ### Precompute drag time-shape curves F(L) across trial K values ###
+
         log_k_scan = DRAG_VEL_LOG_K_SCAN[DRAG_VEL_LOG_K_SCAN <= self.max_log_k0 + 1e-9]
         if (len(log_k_scan) == 0) or (log_k_scan[-1] < self.max_log_k0 - 1e-6):
             log_k_scan = np.append(log_k_scan, self.max_log_k0)
@@ -4019,7 +4017,9 @@ class DragTimingFit(object):
                     v_est_list.append(dl_s/dt_s)
         vel_mean = float(np.median(v_est_list)) if v_est_list else 20000.0
 
-        # Precompute point weights and station masks for Schur elimination
+
+        ### Precompute station weights, centered times and grid interpolation weights ###
+
         w2 = self.sqrt_w**2
         fixed_mask = self.pt_free_slot < 0
         w_fixed = np.sum(w2[fixed_mask])
@@ -4030,16 +4030,19 @@ class DragTimingFit(object):
         free_t_means = [np.sum(w2[m]*self.time_data[m])/ws if ws > 0 else 0.0 \
             for m, ws in zip(free_masks, free_w_sums)]
 
-        # Precompute centered times for free stations and fixed stations
+        # Center observation times per station for closed-form Schur elimination
         t_centered = self.time_data.copy()
         if w_fixed > 0:
             t_centered[fixed_mask] -= t_fixed_mean
         for m, tm in zip(free_masks, free_t_means):
             t_centered[m] -= tm
 
-        # Interpolate grid indices of len_data once for fast evaluation across all K
+        # Compute linear interpolation indices on len_grid once for all trial K values
         grid_ind = np.clip(np.searchsorted(self.len_grid, self.len_data) - 1, 0, len(self.dlen) - 1)
         grid_frac = np.clip((self.len_data - self.len_grid[grid_ind])/self.dlen[grid_ind], 0.0, 1.0)
+
+
+        ### Evaluate every trial K and keep the minimum-cost seed ###
 
         best = None
         for i, log_k in enumerate(log_k_scan):
@@ -4047,7 +4050,7 @@ class DragTimingFit(object):
             f_col = f_grid[:, i]
             f_data = f_col[grid_ind]*(1.0 - grid_frac) + f_col[grid_ind + 1]*grid_frac
 
-            # Eliminate t_first (using fixed stations) and all free station offsets analytically
+            # Center F(L) per station to eliminate t_first and all free station offsets
             f_centered = f_data.copy()
             f_fixed_mean = np.sum(w2[fixed_mask]*f_data[fixed_mask])/w_fixed if w_fixed > 0 else 0.0
             if w_fixed > 0:
@@ -4059,6 +4062,7 @@ class DragTimingFit(object):
                 free_f_means.append(fm)
                 f_centered[m] -= fm
 
+            # Solve for slowness 1/v_first in closed form and validate physical speed bounds
             denom = float(np.sum(w2*f_centered**2))
             if denom <= 0.0:
                 continue
@@ -4071,15 +4075,16 @@ class DragTimingFit(object):
             if (v_first < DRAG_VEL_V_BOUNDS[0]) or (v_first > DRAG_VEL_V_BOUNDS[1]):
                 continue
 
+            # Back-substitute t_first and each free station's timing offset
             t_first = t_fixed_mean - slowness*f_fixed_mean
             dt_free = np.array([t_first + slowness*fm - tm for fm, tm in zip(free_f_means, free_t_means)], \
                 dtype=np.float64)
 
-            # Enforce max_toffset bounds if any free offset exceeds the limit, preserving the Schur-eliminated
-            #   (v_first, t_first) so a far-off outlier clock cannot corrupt the velocity seed
+            # Clip free offsets to max_toffset while preserving Schur-eliminated (v_first, t_first)
             if (self.n_free > 0) and np.any(np.abs(dt_free) > self.max_toffset):
                 dt_free = np.clip(dt_free, -self.max_toffset, self.max_toffset)
 
+            # Score the candidate seed by weighted length-equivalent residuals
             t_pred = t_first + slowness*f_data
             t_corr = self.time_data.copy()
             if self.n_free > 0:
@@ -4091,7 +4096,6 @@ class DragTimingFit(object):
 
             if (best is None) or (cost < best[0]):
                 best = (cost, t_first, v_first, float(log_k), dt_free, res)
-
 
         if best is None:
             raise ValueError("The drag-timing model could not be fitted, lengths do not grow with time")
@@ -4114,6 +4118,7 @@ class DragTimingFit(object):
             [OptimizeResult] Final solution from scipy.optimize.least_squares.
         """
 
+        # Build lower and upper bounds for [t_first, v_first, ln_K0, ramps, dt_free]
         n_knots = self.n_knots
         n_total = 3 + n_knots + self.n_free
         lower = np.r_[-np.inf, DRAG_VEL_V_BOUNDS[0], DRAG_VEL_LOG_K_BOUNDS[0], np.zeros(n_knots), \
@@ -4121,18 +4126,21 @@ class DragTimingFit(object):
         upper = np.r_[np.inf, DRAG_VEL_V_BOUNDS[1], self.max_log_k0, \
             np.full(n_knots, DRAG_VEL_RAMP_MAX), np.full(self.n_free, self.max_toffset)]
 
-        # Fast warm-start path for Pass 2+ and Monte Carlo runs
+        # Use the fast warm-start path on Pass 2+ and Monte Carlo runs
         if (params_init is not None) and (len(params_init) == n_total):
             p0 = np.clip(np.asarray(params_init, dtype=np.float64), lower + 1e-9, upper - 1e-9)
             if res_scale_init is not None:
                 return self._leastSquares(p0, None, penalty, lower, upper, max_nfev=DRAG_TRAJ_WARM_MAX_NFEV, \
                     res_scale=res_scale_init)
+
             res0 = self._residuals(p0, 0.0)[:self.n_data]
+
             return self._leastSquares(p0, res0, penalty, lower, upper, max_nfev=DRAG_TRAJ_WARM_MAX_NFEV)
 
+        # Find the global constant-K seed via Schur-complement scan
         t_first, v_first, log_k, dt_free, res = self._scanConstant()
 
-        # Start from both constant K and K growing by a factor of 10, capped to avoid slow stalls
+        # Explore both a nearly constant K basin and a 10x growing K basin
         best = None
         for d_init in (1e-3, np.log(10.0)/max(n_knots, 1)):
 
@@ -4142,7 +4150,6 @@ class DragTimingFit(object):
             sol = self._leastSquares(p0, res, penalty, lower, upper, max_nfev=DRAG_TRAJ_EXPLORE_MAX_NFEV)
             if (best is None) or (sol.cost < best.cost):
                 best = sol
-
 
         # Re-estimate the robust residual scale and refine the winning basin
         res_final = self._residuals(best.x, 0.0)[:self.n_data]
@@ -4171,13 +4178,16 @@ class DragTimingFit(object):
             [OptimizeResult] Solution from scipy.optimize.least_squares.
         """
 
+        # Compute robust MAD residual scale for the soft-L1 loss and ramp penalty
         if res_scale is None:
             res_scale = max(1.4826*np.median(np.abs(res - np.median(res))), 1.0)
         else:
             res_scale = max(float(res_scale), 1.0)
+
         f_scale = 2.0*res_scale
         w_pen = np.sqrt(penalty)*f_scale
 
+        # Run bounded trust-region least squares using the analytical Jacobian
         return scipy.optimize.least_squares(self._residuals, params_init, jac=self._jacobian, \
             args=(w_pen,), bounds=(lower, upper), loss='soft_l1', f_scale=f_scale, x_scale='jac', \
             ftol=1e-6, xtol=1e-9, max_nfev=max_nfev)
@@ -4196,6 +4206,7 @@ class DragTimingFit(object):
                 - params_null: [ndarray] Null-space basis vectors (unconstrained directions).
         """
 
+        # Normalize Jacobian columns before SVD to improve conditioning
         jac = sol.jac
         col_norm = np.linalg.norm(jac, axis=0)
         col_norm[col_norm == 0.0] = 1.0
@@ -4205,6 +4216,7 @@ class DragTimingFit(object):
         except np.linalg.LinAlgError:
             return None, np.zeros((jac.shape[1], 0))
 
+        # Invert well-conditioned singular values and isolate null-space directions
         null = sing <= 1e-8*sing[0]
         vt_good = vt[~null]/col_norm
         cov = self.res_scale_m**2*(vt_good.T/sing[~null]**2).dot(vt_good)
@@ -4227,6 +4239,7 @@ class DragTimingFit(object):
         if self.params_cov is None:
             return np.full(len(self.len_grid), np.nan)
 
+        # Form gradient of ln K(L) with respect to all model parameters
         n_drag = 3 + self.n_knots
         grad = np.zeros((len(self.len_grid), n_drag + self.n_free), dtype=np.float64)
         grad[:, 2] = 1.0
@@ -4234,6 +4247,7 @@ class DragTimingFit(object):
 
         std = np.sqrt(np.maximum(np.sum(grad.dot(self.params_cov)*grad, axis=1), 0.0))
 
+        # Mark grid nodes with non-zero projection onto the null space as unconstrained
         if self.params_null.size:
             grad_norm = np.linalg.norm(grad, axis=1)[:, None]
             unconstrained = np.any(np.abs(grad.dot(self.params_null)) > 1e-6*grad_norm, axis=1)
@@ -4266,27 +4280,26 @@ class DragTimingFit(object):
             r_idx = gap_ramp_indices[gap_idx] if gap_idx < len(gap_ramp_indices) else None
             dlog_k = float(self.drag_params[3 + r_idx]) if r_idx is not None else 0.0
 
-            # Nominal transit time across the gap
+            # Evaluate nominal transit time and heights at the gap boundaries
             t_beg_nom = float(self.timeAtLength(gap_beg)[0])
             t_end_nom = float(self.timeAtLength(gap_end)[0])
             dt_nom = t_end_nom - t_beg_nom
-
             ht_beg = float(self.heightAtLength(gap_beg)[0])
             ht_end = float(self.heightAtLength(gap_end)[0])
 
-            # Build the early-jump and late-jump ln K profiles across the gap
+            # Bracket the unknown location of K growth inside the gap using early and late step profiles
             sel_gap = (self.len_grid >= gap_beg) & (self.len_grid <= gap_end)
             if (dlog_k > 1e-6) and (r_idx is not None):
 
                 ramps_orig = self.ramps.copy()
 
-                # Early jump: all gap growth occurs at the start of the gap (step at gap_beg)
+                # Early jump places all gap growth at gap_beg (maximum deceleration)
                 self.ramps[:, r_idx] = np.where(self.len_grid >= gap_beg, 1.0, 0.0)
                 vel_early, time_early, _, _ = self._solve(self.drag_params)
                 dt_early = float(np.interp(gap_end, self.len_grid, time_early) \
                     - np.interp(gap_beg, self.len_grid, time_early))
 
-                # Late jump: all gap growth occurs at the end of the gap (step at gap_end)
+                # Late jump places all gap growth at gap_end (minimum deceleration)
                 self.ramps[:, r_idx] = np.where(self.len_grid >= gap_end, 1.0, 0.0)
                 vel_late, time_late, _, _ = self._solve(self.drag_params)
                 dt_late = float(np.interp(gap_end, self.len_grid, time_late) \
@@ -4320,7 +4333,6 @@ class DragTimingFit(object):
                 'vel_lo': vel_lo,
                 'vel_hi': vel_hi,
             })
-
 
         return gap_info_list
 
@@ -4414,49 +4426,95 @@ class DragTimingFit(object):
 
 
 
-    def _begLogKStd(self):
-        """ Return the combined 1-sigma uncertainty of ln K at the beginning of the trajectory, combining the
-            Jacobian fit covariance and the Monte Carlo ensemble spread (when available) in quadrature.
+    def _endpointLogKStd(self, index):
+        """ Return the combined 1-sigma uncertainty of ln K at a grid endpoint (0 or -1), combining the
+            Jacobian fit covariance and Monte Carlo ensemble spread in quadrature.
+
+        Arguments:
+            index: [int] Grid endpoint index (0 for beginning, -1 for end).
 
         Return:
-            [float] Combined 1-sigma uncertainty of ln K_beg (np.inf when unconstrained or invalid).
+            [float] Combined 1-sigma uncertainty of ln K (np.inf when unconstrained or invalid).
         """
 
-        log_k_std_fit = float(self.log_k_std_grid[0]) \
-            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
+        # Start from the analytical Jacobian fit uncertainty
+        if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0):
+            log_k_std_fit = float(self.log_k_std_grid[index])
+        else:
+            log_k_std_fit = np.inf
+
         log_k_std_tot = log_k_std_fit
 
+        # Combine with the Monte Carlo 1-sigma ensemble half-width in quadrature when available
         if (self.mc_k_lo is not None) and (self.mc_k_hi is not None):
-            if (not np.isfinite(self.mc_k_lo[0])) or (not np.isfinite(self.mc_k_hi[0])) \
-                or (self.mc_k_lo[0] <= 0.0) or (self.mc_k_hi[0] < self.mc_k_lo[0]):
+
+            k_lo = float(self.mc_k_lo[index])
+            k_hi = float(self.mc_k_hi[index])
+            if (not np.isfinite(k_lo)) or (not np.isfinite(k_hi)) or (k_lo <= 0.0) or (k_hi < k_lo):
                 return np.inf
-            log_k_std_mc = 0.5*float(np.log(self.mc_k_hi[0]/self.mc_k_lo[0]))
+
+            log_k_std_mc = 0.5*float(np.log(k_hi/k_lo))
             log_k_std_tot = float(np.hypot(log_k_std_fit, log_k_std_mc))
 
         return log_k_std_tot
 
 
 
-    def _endLogKStd(self):
-        """ Return the combined 1-sigma uncertainty of ln K at the end of the trajectory, combining the
-            Jacobian fit covariance and the Monte Carlo ensemble spread (when available) in quadrature.
+    def _checkDragConstrained(self, index, min_dv, min_dv_frac, max_log_k_std, check_flat_cap=False):
+        """ Check common physical constraints (measurable deceleration, K away from parameter bounds and
+            well-constrained uncertainty) before reporting derived physical quantities.
+
+        Arguments:
+            index: [int] Grid endpoint index (0 for beginning K_0, -1 for terminal K_end).
+            min_dv: [float] Minimum required velocity drop over the observed track (m/s).
+            min_dv_frac: [float] Minimum required fractional velocity drop.
+            max_log_k_std: [float] Maximum allowed combined 1-sigma uncertainty in ln K.
+
+        Keyword arguments:
+            check_flat_cap: [bool] Require zero ramp growth to trigger the max_k0 cap rejection. False by
+                default.
 
         Return:
-            [float] Combined 1-sigma uncertainty of ln K_end (np.inf when unconstrained or invalid).
+            (ok, reason, log_k_std):
+                - ok: [bool] True if all constraints pass.
+                - reason: [str or None] Human-readable explanation when ok is False.
+                - log_k_std: [float] Combined 1-sigma uncertainty of ln K at index.
         """
 
-        log_k_std_fit = float(self.log_k_std_grid[-1]) \
-            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
-        log_k_std_tot = log_k_std_fit
+        label = "K_0" if index == 0 else "end K"
+        vel_beg = float(self.vel_grid[0])
+        vel_end = float(self.vel_grid[-1])
+        dv = vel_beg - vel_end
+        dv_frac = dv/max(vel_beg, 1.0)
+        log_k = float(self.log_k_grid[index])
+        k_val = float(np.exp(log_k))
+        log_k_std = self._endpointLogKStd(index)
 
-        if (self.mc_k_lo is not None) and (self.mc_k_hi is not None):
-            if (not np.isfinite(self.mc_k_lo[-1])) or (not np.isfinite(self.mc_k_hi[-1])) \
-                or (self.mc_k_lo[-1] <= 0.0) or (self.mc_k_hi[-1] < self.mc_k_lo[-1]):
-                return np.inf
-            log_k_std_mc = 0.5*float(np.log(self.mc_k_hi[-1]/self.mc_k_lo[-1]))
-            log_k_std_tot = float(np.hypot(log_k_std_fit, log_k_std_mc))
+        # Require measurable deceleration across the observed track
+        if (dv < min_dv) or (dv_frac < min_dv_frac):
+            reason = "insufficient deceleration (dv = {:.2f} km/s, {:.1f}%)".format(dv/1000.0, \
+                100.0*dv_frac)
+            return False, reason, log_k_std
 
-        return log_k_std_tot
+        # Reject K pinned at the lower bound
+        if (k_val <= 1e-6) or (log_k <= DRAG_VEL_LOG_K_BOUNDS[0] + 1.0):
+            return False, "{:s} at lower bound".format(label), log_k_std
+
+        # Reject K pinned at the upper max_k0 cap
+        max_k0 = getattr(self, 'max_k0', None)
+        max_log_k0 = getattr(self, 'max_log_k0', DRAG_VEL_LOG_K_BOUNDS[1])
+        is_pinned = (max_k0 is not None) and (log_k >= max_log_k0 - 1e-3)
+        if check_flat_cap:
+            is_pinned = is_pinned and (float(np.sum(self.drag_params[3:])) < 1e-3)
+        if is_pinned:
+            return False, "{:s} pinned at max_k0 = {:.1f} m^2/kg".format(label, max_k0), log_k_std
+
+        # Reject poorly constrained K when combined fit and MC uncertainty exceeds threshold
+        if (not np.isfinite(log_k_std)) or (log_k_std > max_log_k_std):
+            reason = "{:s} poorly constrained (sigma ln K = {:.2f})".format(label, log_k_std)
+            return False, reason, log_k_std
+
+        return True, None, log_k_std
 
 
 
@@ -4468,8 +4526,8 @@ class DragTimingFit(object):
         Because K_0*Sigma_air is dimensionless (m^2/kg * kg/m^2), no meteoroid size, shape or bulk density
         assumption is needed. Only atmospheric drag is integrated backward (gravity is omitted because
         calcOrbit removes Earth's gravitational acceleration via 2*G*M/r_beg). Physical gating sets
-        applied=True only for constrained solid-body/fireball trajectories where K_0 is well-determined and
-        the extrapolated correction does not exceed DRAG_TRAJ_PRE_ATM_MAX_DV_FRAC.
+        applied=True only for constrained solid-body or fireball trajectories where K_0 is well-determined
+        and the extrapolated correction does not exceed DRAG_TRAJ_PRE_ATM_MAX_DV_FRAC.
 
         Keyword arguments:
             h_top: [float] Upper integration altitude (m). DRAG_TRAJ_PRE_ATM_TOP_HT by default.
@@ -4484,12 +4542,8 @@ class DragTimingFit(object):
         ht_beg = float(self.ht_grid[0])
         ht_end = float(self.ht_grid[-1])
         v_beg = float(self.vel_grid[0])
-        v_end = float(self.vel_grid[-1])
-        dv_obs = v_beg - v_end
-        dv_obs_frac = dv_obs/max(v_beg, 1.0)
-        log_k0 = float(self.log_k_grid[0])
-        k0 = float(np.exp(log_k0))
-        log_k0_std = self._begLogKStd()
+        k0 = float(np.exp(self.log_k_grid[0]))
+        log_k0_std = self._endpointLogKStd(0)
         v_rot = float(getattr(self, 'v_rotation', 0.0))
 
         result = {
@@ -4505,6 +4559,7 @@ class DragTimingFit(object):
             'reason': None,
         }
 
+        # Verify trajectory geometry is available and below the upper atmosphere boundary
         state_vect = getattr(self, 'state_vect', None)
         radiant_eci = getattr(self, 'radiant_eci', None)
         jd = getattr(self, 'jd', None)
@@ -4515,6 +4570,9 @@ class DragTimingFit(object):
         if ht_beg >= h_top:
             result['reason'] = "beginning height above {:.0f} km".format(h_top/1000.0)
             return result
+
+
+        ### Locate upper integration boundary and integrate air column ###
 
         # Scan backward along the straight entry line until the altitude reaches h_top
         l_scan = np.linspace(len_beg, len_beg - 2000e3, 200)
@@ -4541,7 +4599,7 @@ class DragTimingFit(object):
         rho_grid = np.exp(np.interp(l_grid, l_atm, np.log(np.maximum(rho_atm, 1e-30))))
         dl = np.diff(l_grid)
 
-        # Integrate air mass column (kg/m^2) plus exponential tail above h_top
+        # Integrate air mass column (kg/m^2) plus the exponential tail above h_top
         air_col = float(np.sum(0.5*(rho_grid[:-1] + rho_grid[1:])*dl))
         tail_col = 0.0
         if (rho_grid[0] > 0.0) and (rho_grid[1] > rho_grid[0]):
@@ -4549,24 +4607,27 @@ class DragTimingFit(object):
             tail_col = float(rho_grid[0]*scale_l)
             air_col += tail_col
 
-        # Integrate drag-only energy equation backward (g = 0) with rotating-air drag scaling
+
+        ### Integrate drag-only energy equation backward (g = 0) ###
+
         drag_scale = np.ones_like(l_grid)
         vel = np.full_like(l_grid, v_beg)
         for _ in range(DRAG_TRAJ_AIR_MAX_ITER if v_rot != 0.0 else 1):
+
             a_arr = 2.0*k0*rho_grid*drag_scale
             phi_seg = 0.5*(a_arr[:-1] + a_arr[1:])*dl
             phi_rev = np.concatenate([np.cumsum(phi_seg[::-1])[::-1], [0.0]])
             if tail_col > 0.0:
                 phi_rev = phi_rev + 2.0*k0*tail_col*drag_scale[0]
+
             vel_new = v_beg*np.exp(0.5*np.clip(phi_rev, 0.0, 5.0))
             if np.max(np.abs(vel_new - vel)) < 1e-3:
                 vel = vel_new
                 break
+
             vel = vel_new
             if v_rot != 0.0:
-                v_safe = np.maximum(vel, max(50.0, abs(v_rot) + 1.0))
-                ratio = 1.0 - v_rot/v_safe
-                drag_scale = ratio*np.abs(ratio)
+                drag_scale = self._airDragScale(vel)
 
         v_inf = float(vel[0])
         dv_pre = v_inf - v_beg
@@ -4578,7 +4639,10 @@ class DragTimingFit(object):
         result['air_col'] = air_col
         result['k0_col'] = k0*air_col
 
-        # Gate orbit application to well-constrained solid-body / fireball trajectories
+
+        ### Gate orbit application to constrained solid-body trajectories ###
+
+        # Exclude high-altitude or high-K_0 faint eroding meteors
         if (ht_end >= DRAG_TRAJ_PRE_ATM_MAX_HT_END) or (k0 >= DRAG_TRAJ_PRE_ATM_MAX_K0):
             parts = []
             if ht_end >= DRAG_TRAJ_PRE_ATM_MAX_HT_END:
@@ -4589,25 +4653,14 @@ class DragTimingFit(object):
             result['reason'] = "{:s} (faint / eroding regime)".format(" and ".join(parts))
             return result
 
-        if (k0 <= 1e-6) or (log_k0 <= DRAG_VEL_LOG_K_BOUNDS[0] + 1.0):
-            result['reason'] = "K_0 at lower bound"
+        # Verify measurable deceleration and well-constrained K_0
+        ok, reason, _ = self._checkDragConstrained(0, DRAG_TRAJ_PRE_ATM_MIN_DV, \
+            DRAG_TRAJ_PRE_ATM_MIN_DV_FRAC, DRAG_TRAJ_PRE_ATM_MAX_LOG_K_STD)
+        if not ok:
+            result['reason'] = reason
             return result
 
-        max_k0 = getattr(self, 'max_k0', None)
-        max_log_k0 = getattr(self, 'max_log_k0', DRAG_VEL_LOG_K_BOUNDS[1])
-        if (max_k0 is not None) and (log_k0 >= max_log_k0 - 1e-3):
-            result['reason'] = "K_0 pinned at max_k0 = {:.1f} m^2/kg".format(max_k0)
-            return result
-
-        if (dv_obs < DRAG_TRAJ_PRE_ATM_MIN_DV) or (dv_obs_frac < DRAG_TRAJ_PRE_ATM_MIN_DV_FRAC):
-            result['reason'] = "insufficient deceleration (dv = {:.2f} km/s, {:.1f}%)".format( \
-                dv_obs/1000.0, 100.0*dv_obs_frac)
-            return result
-
-        if (not np.isfinite(log_k0_std)) or (log_k0_std > DRAG_TRAJ_PRE_ATM_MAX_LOG_K_STD):
-            result['reason'] = "K_0 poorly constrained (sigma ln K_0 = {:.2f})".format(log_k0_std)
-            return result
-
+        # Reject extreme extrapolations characteristic of late-start post-fragmentation tracks
         if (dv_frac <= 0.0) or (dv_frac > DRAG_TRAJ_PRE_ATM_MAX_DV_FRAC):
             result['reason'] = ("extrapolated dv/v_beg = {:.1f}% exceeds {:.0f}% limit " \
                 + "(late-start / post-fragmentation track)").format(100.0*dv_frac, \
@@ -4621,8 +4674,9 @@ class DragTimingFit(object):
 
 
     def terminalDynamicMass(self, gamma_a=GAMMA_A, bulk_density=DRAG_TRAJ_BULK_DENSITY):
-        """ Estimate the terminal dynamic mass at the last observed point when the trajectory is in a
-            constrained, meteorite-dropping regime.
+        """ Estimate the terminal dynamic mass at the last observed point using
+            wmpl.Utils.Physics.ballisticCoeffMass when the trajectory is in a constrained,
+            meteorite-dropping regime.
 
         Small or high-altitude meteors that do not decelerate deeply (or whose end ballistic coefficient K
         is unconstrained or pinned at parameter bounds) return mass=None with an explanatory reason so
@@ -4638,13 +4692,9 @@ class DragTimingFit(object):
         """
 
         ht_end = float(self.ht_grid[-1])
-        vel_beg = float(self.vel_grid[0])
         vel_end = float(self.vel_grid[-1])
-        dv = vel_beg - vel_end
-        dv_frac = dv/max(vel_beg, 1.0)
-        log_k_end = float(self.log_k_grid[-1])
-        k_end = float(np.exp(log_k_end))
-        log_k_std_tot = self._endLogKStd()
+        k_end = float(np.exp(self.log_k_grid[-1]))
+        log_k_std_tot = self._endpointLogKStd(-1)
 
         result = {
             'mass': None,
@@ -4658,7 +4708,7 @@ class DragTimingFit(object):
             'reason': None,
         }
 
-        # Exclude high-altitude or fast-ending meteors (small meteors / active vaporization regime)
+        # Exclude high-altitude or fast-ending meteors outside the meteorite-dropping regime
         if (ht_end >= DRAG_TRAJ_TERM_MASS_MAX_HT) or (vel_end >= DRAG_TRAJ_TERM_MASS_MAX_VEL):
             parts = []
             if ht_end >= DRAG_TRAJ_TERM_MASS_MAX_HT:
@@ -4670,29 +4720,14 @@ class DragTimingFit(object):
             result['reason'] = "{:s}; non-meteorite-dropping regime".format(" and ".join(parts))
             return result
 
-        # Require measurable deceleration over the observed track
-        if (dv < DRAG_TRAJ_TERM_MASS_MIN_DV) or (dv_frac < DRAG_TRAJ_TERM_MASS_MIN_DV_FRAC):
-            result['reason'] = "insufficient deceleration (dv = {:.2f} km/s, {:.1f}%)".format(dv/1000.0, \
-                100.0*dv_frac)
+        # Check deceleration, parameter bounds and combined fit plus MC uncertainty
+        ok, reason, _ = self._checkDragConstrained(-1, DRAG_TRAJ_TERM_MASS_MIN_DV, \
+            DRAG_TRAJ_TERM_MASS_MIN_DV_FRAC, DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD, check_flat_cap=True)
+        if not ok:
+            result['reason'] = reason
             return result
 
-        # Reject K pinned at the lower bound or capped at max_k0 without ramp growth
-        if (k_end <= 1e-6) or (log_k_end <= DRAG_VEL_LOG_K_BOUNDS[0] + 1.0):
-            result['reason'] = "end ballistic coefficient K at lower bound"
-            return result
-
-        max_k0 = getattr(self, 'max_k0', None)
-        max_log_k0 = getattr(self, 'max_log_k0', DRAG_VEL_LOG_K_BOUNDS[1])
-        if (max_k0 is not None) and (log_k_end >= max_log_k0 - 1e-3) \
-            and (float(np.sum(self.drag_params[3:])) < 1e-3):
-            result['reason'] = "ballistic coefficient K pinned at max_k0 = {:.1f} m^2/kg".format(max_k0)
-            return result
-
-        # Reject poorly constrained K at the end of the trajectory (including MC ensemble spread)
-        if (not np.isfinite(log_k_std_tot)) or (log_k_std_tot > DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD):
-            result['reason'] = "end K poorly constrained (sigma ln K = {:.2f})".format(log_k_std_tot)
-            return result
-
+        # Compute dynamic mass via wmpl.Utils.Physics.ballisticCoeffMass and propagate 1-sigma bounds
         mass = float(ballisticCoeffMass(k_end, bulk_density, gamma_a))
         result['mass'] = mass
         result['mass_lo'] = float(mass*np.exp(-3.0*log_k_std_tot))
@@ -4703,7 +4738,7 @@ class DragTimingFit(object):
 
 
     def dynamicPressureOnGrid(self):
-        """ Compute dynamic pressure rho*v_air^2 along len_grid.
+        """ Compute dynamic pressure rho*v_air^2 along len_grid using the cached MSIS air densities.
 
         Return:
             [ndarray] Dynamic pressure on len_grid (Pa).
@@ -4751,45 +4786,27 @@ class DragTimingFit(object):
                 and 'reason' (str or None).
         """
 
-        vel_beg = float(self.vel_grid[0])
-        vel_end = float(self.vel_grid[-1])
-        dv = vel_beg - vel_end
-        dv_frac = dv/max(vel_beg, 1.0)
-        log_k_beg = float(self.log_k_grid[0])
-        log_k_end = float(self.log_k_grid[-1])
-        k_end = float(np.exp(log_k_end))
-
         result = {'sigma_eff': None, 'sigma_eff_std': None, 'reason': None}
 
-        if (dv < DRAG_TRAJ_TERM_MASS_MIN_DV) or (dv_frac < DRAG_TRAJ_TERM_MASS_MIN_DV_FRAC):
-            result['reason'] = "insufficient deceleration (dv = {:.2f} km/s, {:.1f}%)".format(dv/1000.0, \
-                100.0*dv_frac)
+        # Check deceleration, parameter bounds and end-K uncertainty
+        ok, reason, _ = self._checkDragConstrained(-1, DRAG_TRAJ_TERM_MASS_MIN_DV, \
+            DRAG_TRAJ_TERM_MASS_MIN_DV_FRAC, DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD, check_flat_cap=True)
+        if not ok:
+            result['reason'] = reason
             return result
 
-        if (k_end <= 1e-6) or (log_k_end <= DRAG_VEL_LOG_K_BOUNDS[0] + 1.0):
-            result['reason'] = "K at lower bound"
-            return result
-
-        max_k0 = getattr(self, 'max_k0', None)
-        max_log_k0 = getattr(self, 'max_log_k0', DRAG_VEL_LOG_K_BOUNDS[1])
-        if (max_k0 is not None) and (log_k_end >= max_log_k0 - 1e-3) \
-            and (float(np.sum(self.drag_params[3:])) < 1e-3):
-            result['reason'] = "K pinned at max_k0 cap"
-            return result
-
-        log_k_std_end = self._endLogKStd()
-        if (not np.isfinite(log_k_std_end)) or (log_k_std_end > DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD):
-            result['reason'] = "K poorly constrained at end (sigma ln K = {:.2f})".format(log_k_std_end)
-            return result
-
+        # Compute sigma_eff from the total ln K growth and squared velocity loss
+        vel_beg = float(self.vel_grid[0])
+        vel_end = float(self.vel_grid[-1])
         dv2_kms2 = (vel_beg/1000.0)**2 - (vel_end/1000.0)**2
         if dv2_kms2 <= 1e-6:
             result['reason'] = "insufficient deceleration"
             return result
 
-        dlog_k = max(log_k_end - log_k_beg, 0.0)
+        dlog_k = max(float(self.log_k_grid[-1] - self.log_k_grid[0]), 0.0)
         sigma_eff = 6.0*dlog_k/dv2_kms2
 
+        # Propagate Jacobian fit covariance to ln(K_end/K_beg)
         dlog_k_std_fit = None
         if self.params_cov is not None:
             grad = np.zeros(len(self.params), dtype=np.float64)
@@ -4798,10 +4815,11 @@ class DragTimingFit(object):
             if np.isfinite(var_dlog_k) and (var_dlog_k >= 0.0):
                 dlog_k_std_fit = float(np.sqrt(var_dlog_k))
 
-        # Include MC ensemble spread on ln(K_end/K_beg) when available
+        # Include Monte Carlo ensemble spread on ln(K_end/K_beg) when available
         dlog_k_std_mc = getattr(self, 'mc_dlog_k_std', None)
         if (dlog_k_std_mc is not None) and ((not np.isfinite(dlog_k_std_mc)) or (dlog_k_std_mc < 0.0)):
             dlog_k_std_mc = None
+
         if (dlog_k_std_mc is None) and (self.mc_k_lo is not None) and (self.mc_k_hi is not None) \
             and np.isfinite(self.mc_k_lo[0]) and np.isfinite(self.mc_k_hi[0]) \
             and np.isfinite(self.mc_k_lo[-1]) and np.isfinite(self.mc_k_hi[-1]) \
@@ -4811,6 +4829,7 @@ class DragTimingFit(object):
             s_end = 0.5*float(np.log(self.mc_k_hi[-1]/self.mc_k_lo[-1]))
             dlog_k_std_mc = float(np.hypot(s_beg, s_end))
 
+        # Combine fit and MC uncertainties in quadrature
         if (dlog_k_std_fit is not None) and (dlog_k_std_mc is not None):
             sigma_std = float(6.0*np.hypot(dlog_k_std_fit, dlog_k_std_mc)/dv2_kms2)
         elif dlog_k_std_fit is not None:
@@ -4841,11 +4860,14 @@ class DragTimingFit(object):
         """
 
         p_dyn = self.dynamicPressureOnGrid()
+
+        # Select observed ramps with appreciable ln K growth
         active = [i for i in range(self.n_knots) \
             if (not self.is_gap_ramp[i]) and (float(self.drag_params[3 + i]) > 0.03)]
         if not active:
             return []
 
+        # Group contiguous active ramps into fragmentation episodes
         episodes = []
         for idx in active:
             if episodes and (idx == episodes[-1][-1] + 1):
@@ -4853,16 +4875,18 @@ class DragTimingFit(object):
             else:
                 episodes.append([idx])
 
-        log_k_std_end = self._endLogKStd()
-
+        log_k_std_end = self._endpointLogKStd(-1)
         changes = []
+
         for idxs in episodes:
+
             deltas = np.array([float(self.drag_params[3 + i]) for i in idxs], dtype=np.float64)
             tot_dlog_k = float(np.sum(deltas))
             k_ratio = float(np.exp(tot_dlog_k))
             if k_ratio < min_ratio:
                 continue
 
+            # Evaluate statistical significance of the episode from parameter covariance
             signif = 0.0
             if self.params_cov is not None:
                 grad = np.zeros(len(self.params), dtype=np.float64)
@@ -4872,13 +4896,13 @@ class DragTimingFit(object):
                 if np.isfinite(var) and (var > 0.0):
                     signif = tot_dlog_k/float(np.sqrt(var))
 
-            # Accept statistically significant jumps, or well-constrained >= 15% local steps on multi-segment
-            #   tracks where adjacent ramps share variance with K_0
+            # Accept statistically significant jumps or well-constrained >= 15% steps on multi-segment tracks
             well_constrained_step = (self.n_knots >= 3) and np.isfinite(log_k_std_end) \
                 and (log_k_std_end < 0.35) and (k_ratio >= 1.15)
             if (signif < min_signif) and (not well_constrained_step):
                 continue
 
+            # Locate the weighted centroid and height span of the episode
             l_mids = np.array([float(self.ramp_beg[i]) + 0.5*float(self.ramp_len[i]) for i in idxs], \
                 dtype=np.float64)
             l_cent = float(np.clip(np.sum(deltas*l_mids)/tot_dlog_k, self.len_first, self.len_last))
@@ -4905,632 +4929,9 @@ class DragTimingFit(object):
 
 
 
-    def formatReportSummary(self, traj=None, gamma_a=GAMMA_A, bulk_density=DRAG_TRAJ_BULK_DENSITY):
-        """ Format a plain-text summary of the drag fit, effective ablation coefficient, peak dynamic
-            pressure, detected sudden K changes, unobserved gaps and gated terminal dynamic mass for
-            appending to the trajectory report file.
-
-        Keyword arguments:
-            traj: [Trajectory object] Optional parent trajectory for per-station MC timing uncertainties.
-                None by default.
-            gamma_a: [float] Assumed Gamma*A for terminal dynamic mass. GAMMA_A by default.
-            bulk_density: [float] Assumed bulk density (kg/m^3) for terminal dynamic mass.
-                DRAG_TRAJ_BULK_DENSITY by default.
-
-        Return:
-            [str] Formatted ASCII report section.
-        """
-
-        k_beg = float(np.exp(self.log_k_grid[0]))
-        k_end = float(np.exp(self.log_k_grid[-1]))
-        k_ratio = k_end/max(k_beg, 1e-30)
-        max_k0 = getattr(self, 'max_k0', None)
-        max_k0_str = "{:.1f} m^2/kg".format(max_k0) if max_k0 is not None else "none"
-        peak_p = self.peakDynamicPressure()
-        abl = self.effectiveAblationCoeff()
-        drag_changes = self.detectDragChanges()
-
-        out = []
-        out.append("")
-        out.append("Drag fit summary")
-        out.append("----------------")
-        out.append(("Model: dv/dt = -K*rho*v_air^2 + g_along (air_rotation={:s}, gravity_factor={:.2f}, " \
-            + "penalty={:.2f}, max_k0={:s})").format(str(self.air_rotation), self.gravity_factor, \
-            getattr(self, 'penalty', 1.0), max_k0_str))
-        out.append(("Points: {:d}, segments of K: {:d}, along-track RMS = {:.1f} m (scale = {:.1f} m), " \
-            + "timing RMS = {:.2f} ms").format(self.n_data, self.n_knots, self.res_rms_m, self.res_scale_m, \
-            1000.0*self.res_rms_s))
-
-        if (self.mc_k_lo is not None) and (self.mc_k_hi is not None):
-            k_beg_mc = " (MC 1 sigma {:.2e} - {:.2e})".format(self.mc_k_lo[0], self.mc_k_hi[0])
-            k_end_mc = " (MC 1 sigma {:.2e} - {:.2e})".format(self.mc_k_lo[-1], self.mc_k_hi[-1])
-        else:
-            k_beg_mc = ""
-            k_end_mc = ""
-
-        out.append("Begin: h = {:6.2f} km, v = {:6.3f} km/s, K = {:.2e} m^2/kg{:s}".format( \
-            self.ht_grid[0]/1000.0, self.vel_grid[0]/1000.0, k_beg, k_beg_mc))
-        out.append("End:   h = {:6.2f} km, v = {:6.3f} km/s, K = {:.2e} m^2/kg{:s}".format( \
-            self.ht_grid[-1]/1000.0, self.vel_grid[-1]/1000.0, k_end, k_end_mc))
-        out.append("K end/beg = {:.2f}".format(k_ratio))
-
-        # Pre-atmospheric air-column drag correction summary
-        pre_atm = getattr(traj, 'pre_atm_info', None) if traj is not None else None
-        if pre_atm is None:
-            pre_atm = self.preAtmosphericVelocity()
-        if pre_atm['air_col'] > 0.0:
-            dv_applied = float(getattr(traj, 'dv_pre_atm', 0.0)) if traj is not None else \
-                (pre_atm['dv'] if pre_atm['applied'] else 0.0)
-            out.append("Air column above beg: {:.3e} kg/m^2 (K_0*Sigma = {:.3e})".format( \
-                pre_atm['air_col'], pre_atm['k0_col']))
-            if dv_applied > 0.0:
-                out.append(("Pre-atm drag correction: {:+.1f} m/s ({:.3f}%), v_inf = {:.4f} km/s " \
-                    + "(applied to orbit)").format(dv_applied, 100.0*dv_applied/max(pre_atm['v_beg'], 1.0), \
-                    (pre_atm['v_beg'] + dv_applied)/1000.0))
-            else:
-                reason = pre_atm['reason']
-                if (reason is None) and (traj is not None) \
-                    and (not getattr(traj, 'pre_atm_correction', True)):
-                    reason = "disabled by user"
-                elif (reason is None) and (traj is not None) and (traj.v_init_ht is not None):
-                    reason = "v_init_ht override active"
-                elif reason is None:
-                    reason = "not applied"
-                out.append(("Pre-atm drag correction (upper bound): {:+.1f} m/s ({:.3f}%) " \
-                    + "(not applied to orbit: {:s})").format(pre_atm['dv'], 100.0*pre_atm['dv_frac'], \
-                    reason))
-
-        out.append(("Peak dynamic pressure: {:s} ({:.1f} kPa) at h = {:.2f} km, v = {:.2f} km/s, " \
-            + "t = {:.3f} s").format(_formatPressure(peak_p['dyn_pres']), peak_p['dyn_pres']/1000.0, \
-            peak_p['ht']/1000.0, peak_p['vel']/1000.0, peak_p['time']))
-
-        if abl['sigma_eff'] is not None:
-            std_s = " +/- {:.4f}".format(abl['sigma_eff_std']) if abl['sigma_eff_std'] is not None else ""
-            out.append(("Effective ablation coeff (sigma_eff): {:.4f}{:s} s^2/km^2 " \
-                + "(combines thermal ablation and fragmentation)").format(abl['sigma_eff'], std_s))
-        else:
-            out.append("Effective ablation coeff (sigma_eff): not constrained ({:s})".format(abl['reason']))
-
-        # Gated terminal dynamic mass estimate
-        tm = self.terminalDynamicMass(gamma_a=gamma_a, bulk_density=bulk_density)
-        if tm['mass'] is not None:
-            out.append(("Terminal dynamic mass: {:.3g} kg (1 sigma {:.3g} - {:.3g} kg) for Gamma*A = {:.2f}" \
-                + ", bulk density = {:.0f} kg/m^3").format(tm['mass'], tm['mass_lo'], tm['mass_hi'], \
-                tm['gamma_a'], tm['bulk_density']))
-            if tm['ablation_active']:
-                out.append(("  Note: end velocity ({:.2f} km/s) > {:.1f} km/s; ablation may still be active" \
-                    + " below the last observed point.").format(self.vel_grid[-1]/1000.0, \
-                    DRAG_TRAJ_TERM_MASS_ABLATION_VEL/1000.0))
-        else:
-            out.append("Terminal dynamic mass: not estimated ({:s})".format(tm['reason']))
-
-        if drag_changes:
-            out.append("")
-            out.append("Drag coefficient changes (potential fragmentations):")
-            for idx_ev, ev in enumerate(drag_changes):
-                out.append(("  Change {:d}: K x{:.2f} at h = {:.2f} km ({:.2f} - {:.2f} km), " \
-                    + "P_dyn = {:s} ({:.1f} kPa), signif = {:.1f} sigma").format(idx_ev + 1, ev['k_ratio'], \
-                    ev['ht']/1000.0, ev['ht_beg']/1000.0, ev['ht_end']/1000.0, \
-                    _formatPressure(ev['dyn_pres']), ev['dyn_pres']/1000.0, ev['signif']))
-
-        # Per-segment K profile table
-        out.append("")
-        out.append(" Seg, Ht beg, Ht end, Time beg, Vel beg, Dyn pres,     K beg,     K end, K std, Gap")
-        out.append("    ,   (km),   (km),      (s),  (km/s),    (kPa),  (m^2/kg),  (m^2/kg),   (%),")
-
-        p_dyn_grid = self.dynamicPressureOnGrid()
-        for idx in range(self.n_knots):
-            l_beg = float(self.ramp_beg[idx])
-            l_end = min(float(self.ramp_beg[idx] + self.ramp_len[idx]), self.len_last)
-            ht_beg = float(self.heightAtLength(l_beg)[0])/1000.0
-            ht_end = float(self.heightAtLength(l_end)[0])/1000.0
-            t_beg = float(self.timeAtLength(l_beg)[0])
-            v_beg = float(self.velocityAtLength(l_beg)[0])
-            dyn_pres_kpa = float(np.interp(l_beg, self.len_grid, p_dyn_grid))/1000.0
-            k_s_beg = float(self.ballisticCoeffAtLength(l_beg)[0])
-            k_s_end = float(self.ballisticCoeffAtLength(l_end)[0])
-            if self.log_k_std_grid is not None:
-                end_grid_idx = int(np.argmin(np.abs(self.len_grid - l_end)))
-                std_end = float(self.log_k_std_grid[end_grid_idx])
-            else:
-                std_end = np.nan
-            std_str = "{:5.0f}".format(100.0*std_end) if np.isfinite(std_end) else "  inf"
-            gap_str = "yes" if self.is_gap_ramp[idx] else "no"
-            out.append(("{:4d}, {:6.2f}, {:6.2f}, {:8.3f}, {:7.3f}, {:8.1f}, {:9.2e}, {:9.2e}, {:s}, " \
-                + "{:>3s}").format(idx + 1, ht_beg, ht_end, t_beg, v_beg/1000.0, dyn_pres_kpa, k_s_beg, \
-                k_s_end, std_str, gap_str))
-
-        if self.gap_uncertainties:
-            out.append("")
-            out.append("Unobserved gaps bridged by drag model:")
-            for i, gap in enumerate(self.gap_uncertainties):
-                out.append(("  Gap {:d}: L = {:.2f} - {:.2f} km (ht {:.2f} - {:.2f} km), dt = {:.3f} s, " \
-                    + "d(ln K) = {:.2f}, early/late jump dt span = {:.1f} ms").format(i + 1, \
-                    gap['len_beg']/1000.0, gap['len_end']/1000.0, gap['ht_beg']/1000.0, \
-                    gap['ht_end']/1000.0, gap['dt_nom'], gap['log_k_growth'], 1000.0*gap['dt_span']))
-
-        if (traj is not None) and (self.mc_time_diffs_std is not None) \
-            and (len(self.mc_time_diffs_std) == len(traj.observations)):
-            out.append("")
-            out.append("MC timing offset uncertainties (1 sigma):")
-            for obs, dt_std in zip(traj.observations, self.mc_time_diffs_std):
-                if obs.ignore_station:
-                    continue
-                out.append("{:>14s}: {:.6f} s".format(str(obs.station_id), float(dt_std)))
-
-        out.append("")
-
-        return "\n".join(out)
-
-
-
-def _buildStationsTimeDict(traj):
-    """ Build the station timing status dictionary following the Trajectory.py convention.
-
-    Arguments:
-        traj: [Trajectory object] Trajectory with initialized observations.
-
-    Return:
-        (stations_time_dict, stations_time_dict_copy, free_mask):
-            - stations_time_dict: [OrderedDict] Maps station ID string to working offset (float) or True.
-            - stations_time_dict_copy: [OrderedDict] Maps station ID string to supplied offset (float) or
-                True.
-            - free_mask: [ndarray] Boolean mask, True for used stations whose timing is estimated.
-    """
-
-    stations_time_dict = collections.OrderedDict()
-    stations_time_dict_copy = collections.OrderedDict()
-    fixed_copy = getattr(traj, 'fixed_time_offsets_copy', traj.fixed_time_offsets)
-    station_ids = [str(obs.station_id) for obs in traj.observations]
-
-    for obs, stat_id in zip(traj.observations, station_ids):
-        if stat_id in traj.fixed_time_offsets:
-            stations_time_dict[stat_id] = traj.fixed_time_offsets[stat_id]
-            stations_time_dict_copy[stat_id] = fixed_copy.get(stat_id, traj.fixed_time_offsets[stat_id])
-        else:
-            stations_time_dict[stat_id] = True
-            stations_time_dict_copy[stat_id] = True
-
-    # Fix the used station with the most used points as the reference when no fixed times are given
-    if len(traj.fixed_time_offsets) == 0:
-        counts = [0 if obs.ignore_station else int(np.count_nonzero(obs.ignore_list == 0)) \
-            for obs in traj.observations]
-        ref_idx = int(np.argmax(counts))
-        stations_time_dict[station_ids[ref_idx]] = 0.0
-        stations_time_dict_copy[station_ids[ref_idx]] = 0.0
-
-    free_mask = np.array([(not obs.ignore_station) and isinstance(stations_time_dict[stat_id], bool) \
-        for obs, stat_id in zip(traj.observations, station_ids)], dtype=bool)
-
-    return stations_time_dict, stations_time_dict_copy, free_mask
-
-
-
-def estimateDragTiming(traj, weights, drop_grid_func=None, penalty=1.0, gap_penalty_factor=1.0, \
-    n_knots=None, check_clock_outliers=True, params_init=None, res_scale_init=None, \
-    max_k0=DRAG_TRAJ_MAX_K0):
-    """ Estimate station timing offsets and initial velocity using the joint physical drag fit.
-
-    Unlike Trajectory.estimateTimingAndVelocity, this does not require time or length overlap between
-    stations and never drops a station for lacking pairwise overlap.
-
-    Arguments:
-        traj: [Trajectory object] Trajectory with projected lengths (obs.state_vect_dist) computed.
-        weights: [list] Statistical weights for each station.
-
-    Keyword arguments:
-        drop_grid_func: [callable] Optional callable returning gravity drop vectors on len_grid (m). None
-            by default.
-        penalty: [float] Regularization weight on ln K growth. 1.0 by default.
-        gap_penalty_factor: [float] Relative penalty weight on gap ramps. 1.0 by default.
-        n_knots: [int] Target number of observed ln K segments. None by default.
-        check_clock_outliers: [bool] If True and more than 2 used stations exist, ignore a station whose
-            clock offset hits max_toffset and exceeds 1.1*max_toffset when unconstrained. True by default.
-        params_init: [ndarray] Optional warm-start parameter vector for DragTimingFit. None by default.
-        res_scale_init: [float] Optional residual scale (m) paired with params_init. None by default.
-        max_k0: [float] Upper bound on the initial ballistic coefficient K_0 (m^2/kg), or None.
-            DRAG_TRAJ_MAX_K0 by default.
-
-    Return:
-        (success, drag_fit, time_diffs, v_init, v_init_stddev, velocity_fit):
-            - success: [bool] True if the fit succeeded.
-            - drag_fit: [DragTimingFit object] Fitted drag-timing model, or None on failure.
-            - time_diffs: [ndarray] Estimated timing offsets for all stations (s).
-            - v_init: [float] Estimated initial velocity at the beginning of the trajectory (m/s).
-            - v_init_stddev: [float] Estimated 1-sigma uncertainty of v_init (m/s).
-            - velocity_fit: [list] [v_init, intercept] linear velocity fit for lag computation.
-    """
-
-    weights = checkWeights(traj.observations, weights)
-    stations_time_dict, stations_time_dict_copy, free_mask = _buildStationsTimeDict(traj)
-    traj.stations_time_dict = stations_time_dict
-    traj.stations_time_dict_copy = stations_time_dict_copy
-
-    if not traj.estimate_timing_vel:
-        free_mask = np.zeros(len(traj.observations), dtype=bool)
-
-    st_times = [obs.time_data[obs.ignore_list == 0] if not obs.ignore_station else np.array([]) \
-        for obs in traj.observations]
-    st_lens = [obs.state_vect_dist[obs.ignore_list == 0] if not obs.ignore_station else np.array([]) \
-        for obs in traj.observations]
-
-    try:
-        drag_fit = DragTimingFit(st_times, st_lens, weights, free_mask, traj.state_vect_mini, \
-            traj.radiant_eci_mini, traj.jdt_ref, gravity_factor=traj.gravity_factor, \
-            max_toffset=traj.max_toffset, n_knots=n_knots, penalty=penalty, \
-            gap_penalty_factor=gap_penalty_factor, drop_grid_func=drop_grid_func, \
-            air_rotation=getattr(traj, 'air_rotation', True), params_init=params_init, \
-            res_scale_init=res_scale_init, max_k0=max_k0)
-    except ValueError as err:
-        if traj.verbose:
-            print("Drag timing fit failed: {:s}".format(str(err)))
-        return False, None, np.zeros(len(traj.observations)), 0.0, 0.0, [0.0, 0.0]
-
-
-    # Ignore a station whose clock needs a larger offset than max_toffset when > 2 stations are used
-    if check_clock_outliers and traj.estimate_timing_vel and (numStationsNotIgnored(traj.observations) > 2):
-
-        at_limit = np.any(np.isclose(np.abs(drag_fit.time_offsets[free_mask]), traj.max_toffset, \
-            atol=1e-4))
-        if at_limit:
-
-            # Test with twice the limit to see if an offset truly exceeds 1.1*max_toffset
-            try:
-                wide_fit = DragTimingFit(st_times, st_lens, weights, free_mask, traj.state_vect_mini, \
-                    traj.radiant_eci_mini, traj.jdt_ref, gravity_factor=traj.gravity_factor, \
-                    max_toffset=2.0*traj.max_toffset, n_knots=n_knots, penalty=penalty, \
-                    gap_penalty_factor=gap_penalty_factor, drop_grid_func=drop_grid_func, \
-                    air_rotation=getattr(traj, 'air_rotation', True), max_k0=max_k0)
-                exceeds = np.any(np.abs(wide_fit.time_offsets[free_mask]) > 1.1*traj.max_toffset)
-            except ValueError:
-                exceeds = False
-
-            if exceeds:
-
-                best_drop = None
-                best_rms = np.inf
-                for i, obs in enumerate(traj.observations):
-
-                    if obs.ignore_station or (str(obs.station_id) in traj.fixed_time_offsets):
-                        continue
-
-                    trial_weights = np.array(weights, dtype=np.float64)
-                    trial_weights[i] = 0.0
-                    trial_times = [arr if j != i else np.array([]) for j, arr in enumerate(st_times)]
-                    trial_lens = [arr if j != i else np.array([]) for j, arr in enumerate(st_lens)]
-                    trial_free = free_mask.copy()
-                    trial_free[i] = False
-
-                    # Ensure at least one remaining station is fixed as reference
-                    if np.all(trial_free[trial_weights > 0]):
-                        rem = [j for j in range(len(traj.observations)) if trial_weights[j] > 0]
-                        ref_j = max(rem, key=lambda j: len(trial_times[j]))
-                        trial_free[ref_j] = False
-
-                    try:
-                        trial_fit = DragTimingFit(trial_times, trial_lens, trial_weights, trial_free, \
-                            traj.state_vect_mini, traj.radiant_eci_mini, traj.jdt_ref, \
-                            gravity_factor=traj.gravity_factor, max_toffset=traj.max_toffset, \
-                            n_knots=n_knots, penalty=penalty, gap_penalty_factor=gap_penalty_factor, \
-                            drop_grid_func=drop_grid_func, \
-                            air_rotation=getattr(traj, 'air_rotation', True), max_k0=max_k0)
-                    except ValueError:
-                        continue
-
-                    if np.any(np.isclose(np.abs(trial_fit.time_offsets[trial_free]), traj.max_toffset, \
-                        atol=1e-4)):
-                        continue
-
-                    if trial_fit.res_rms_m < best_rms:
-                        best_rms = trial_fit.res_rms_m
-                        best_drop = i
-
-                if best_drop is not None:
-                    off_obs = traj.observations[best_drop]
-                    off_obs.ignore_station = True
-                    off_obs.ignore_list = np.ones(len(off_obs.time_data), dtype=np.uint8)
-                    if traj.verbose:
-                        print("Station {:s} ignored, its clock is off by more than {:.2f} s".format( \
-                            str(off_obs.station_id), traj.max_toffset))
-                    return estimateDragTiming(traj, weights, drop_grid_func=drop_grid_func, \
-                        penalty=penalty, gap_penalty_factor=gap_penalty_factor, n_knots=n_knots, \
-                        check_clock_outliers=True, max_k0=max_k0)
-
-
-    # Collect timing offsets and update station times
-    time_diffs = drag_fit.time_offsets.copy()
-    for obs, t_diff in zip(traj.observations, time_diffs):
-
-        if traj.verbose and traj.estimate_timing_vel:
-            print("STATION {:s} TIME OFFSET = {:.6f} s".format(str(obs.station_id), t_diff))
-
-        if np.isnan(t_diff) or np.isinf(t_diff):
-            continue
-
-        obs.time_data = obs.time_data + t_diff
-        if obs.excluded_time is not None:
-            obs.excluded_time = [ex_time + t_diff for ex_time in obs.excluded_time]
-
-
-    # Set initial velocity and linear velocity fit tangent to the beginning of the drag model
-    v_init = float(drag_fit.vel_grid[0])
-    v_init_stddev = float(drag_fit.v_init_stddev)
-    intercept = float(drag_fit.len_grid[0] - v_init*drag_fit.time_grid[0])
-    velocity_fit = [v_init, intercept]
-
-    # Compute lag relative to the initial-velocity line for every station
-    for obs in traj.observations:
-        obs.lag = obs.state_vect_dist - traj.gravityLengthAlongPath(traj.observations, obs.time_data) \
-            - lineFunc(obs.time_data, *velocity_fit)
-        obs.lag_line = list(velocity_fit)
-        obs.v_init = v_init
-        obs.v_init_stddev = v_init_stddev
-
-    # Store timing residual metrics consistent with Trajectory.py
-    traj.timing_res = drag_fit.res_mean_abs_s
-    traj.timing_stddev = drag_fit.res_rms_s
-
-    return True, drag_fit, time_diffs, v_init, v_init_stddev, velocity_fit
-
-
-
-def _normalizeTrajectoryTimes(traj):
-    """ Shift all observation times so the earliest used point starts at 0 s, updating jdt_ref and
-        meastype 1 RA/Dec measurements identically to Trajectory.run.
-
-    Arguments:
-        traj: [Trajectory object] Trajectory whose times are normalized in place.
-    """
-
-    t0 = min([obs.time_data[0] for obs in traj.observations if (not obs.ignore_station) \
-        or (not np.all(obs.ignore_list))])
-
-    if t0 != 0.0:
-
-        for obs in traj.observations:
-            obs.time_data = obs.time_data - t0
-            if getattr(obs, 'excluded_time', None) is not None:
-                obs.excluded_time = [ex_time - t0 for ex_time in obs.excluded_time]
-
-        if getattr(traj, 'gravity_vel', None) is not None:
-            traj.gravity_vel = (traj.gravity_vel[0] - t0, traj.gravity_vel[1])
-
-        traj.jdt_ref = traj.jdt_ref + t0/86400.0
-
-        if traj.meastype == 1:
-            for obs in traj.observations:
-                if getattr(obs, 'radec_jd', None) is not None:
-                    continue
-                obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, traj.jdt_ref, \
-                    obs.lat, obs.lon)
-
-    for i, obs in enumerate(traj.observations):
-        if obs.excluded_indx_range:
-            continue
-        if obs.time_data[0] == 0.0:
-            traj.t_ref_station = i
-            break
-
-
-
-def _fitLineOfSight(traj, weights, use_gravity):
-    """ Run line-of-sight angle minimization reusing the exact Nelder-Mead line solver of
-        wmpl.Trajectory.Trajectory.
-
-    Arguments:
-        traj: [Trajectory object] Trajectory being solved.
-        weights: [list] Station weights.
-        use_gravity: [bool] Apply gravity drop during the line-of-sight fit.
-
-    Return:
-        (state_vect_mini, radiant_eci_mini, los_success):
-            - state_vect_mini: [ndarray] Fitted ECI state vector at trajectory beginning (m).
-            - radiant_eci_mini: [ndarray] Fitted unit ECI radiant vector.
-            - los_success: [bool] True if minimization succeeded.
-    """
-
-    p0 = np.r_[traj.state_vect, traj.best_conv_inter.radiant_eci]
-
-    minimize_args = (traj.observations, weights, use_gravity, traj.gravity_factor, traj.v0z, \
-        traj.gravity_r0, traj.gravity_vel, traj.air_rotation)
-
-    minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
-        method=nelderMeadLine)
-
-    los_restarts = getattr(traj, 'los_restarts', 0)
-    for _ in range(los_restarts):
-        restarted = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, args=minimize_args, \
-            method=nelderMeadLine)
-        if restarted.success or (not minimize_solution.success):
-            minimize_solution = restarted
-
-    for _ in range(LOS_CONTINUE_RUNS):
-        if minimize_solution.success:
-            break
-        restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], \
-            traj.observations), vectNorm(minimize_solution.x[3:])]
-        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, \
-            method=nelderMeadLine)
-
-    # Minimize again from the previous solution if its cost is lower than the minimum found
-    if (traj.state_vect_mini is not None) and (traj.radiant_eci_mini is not None):
-        previous = np.r_[traj.state_vect_mini, traj.radiant_eci_mini]
-        if minimizeAngleCost(previous, *minimize_args) < minimize_solution.fun:
-            prev_sol = scipy.optimize.minimize(minimizeAngleCost, previous, args=minimize_args, \
-                method=nelderMeadLine)
-            if prev_sol.success or (not minimize_solution.success):
-                minimize_solution = prev_sol
-
-    unbounded_solution = minimize_solution
-    if stateVectorDiverged(minimize_solution.x[:3], traj.state_vect):
-
-        bounds = [sorted([0.9*val, 1.1*val]) for val in traj.state_vect] \
-            + [sorted([0.75*val, 1.25*val]) for val in traj.best_conv_inter.radiant_eci]
-
-        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, \
-            np.r_[traj.state_vect, traj.best_conv_inter.radiant_eci], args=minimize_args, bounds=bounds, \
-            method='SLSQP')
-
-        if unbounded_solution.success and ((not minimize_solution.success) \
-            or (unbounded_solution.fun < minimize_solution.fun)):
-            minimize_solution = unbounded_solution
-
-    if minimize_solution.success:
-        sv_mini, rad_mini = np.hsplit(minimize_solution.x, 2)
-        rad_mini = vectNorm(rad_mini)
-        sv_mini = moveStateVector(sv_mini, rad_mini, traj.observations)
-    else:
-        rad_mini = vectNorm(traj.best_conv_inter.radiant_eci)
-        sv_mini = moveStateVector(traj.state_vect, rad_mini, traj.observations)
-
-    return sv_mini, rad_mini, bool(minimize_solution.success)
-
-
-
-def _computeIntersectingPlanes(traj):
-    """ Compute all pairwise plane intersections, the best convergence seed and station weights.
-
-    Arguments:
-        traj: [Trajectory object] Trajectory being solved.
-
-    Return:
-        weights: [list] Statistical weights for each station.
-    """
-
-    traj.intersection_list = []
-    nonignored = [obs for obs in traj.observations if not obs.ignore_station]
-
-    for i, obs1 in enumerate(nonignored):
-        for obs2 in nonignored[i + 1:]:
-            traj.intersection_list.append(PlaneIntersection(obs1, obs2))
-
-    radiant_sum = np.zeros(3)
-    weights_sum = 1e-10
-    for inter in traj.intersection_list:
-        radiant_sum += inter.weight*inter.radiant_eci
-        weights_sum += inter.weight
-
-    traj.avg_radiant = vectNorm(radiant_sum/weights_sum)
-    traj.best_conv_inter = max(traj.intersection_list, key=lambda x: x.conv_angle)
-    traj.state_vect = moveStateVector(traj.best_conv_inter.cpa_eci, traj.best_conv_inter.radiant_eci, \
-        traj.observations)
-
-    traj.incident_angles = traj.calcStationIncidentAngles(traj.state_vect, \
-        traj.best_conv_inter.radiant_eci, traj.observations)
-    for obs, inc_ang in zip(traj.observations, traj.incident_angles):
-        obs.incident_angle = inc_ang
-
-    if numStationsNotIgnored(traj.observations) > 2:
-        weights = [np.sin(w)**2 if not obs.ignore_station else 0.0 \
-            for w, obs in zip(traj.incident_angles, traj.observations)]
-    else:
-        weights = [1.0 if not obs.ignore_station else 0.0 for obs in traj.observations]
-
-    for w, obs in zip(weights, traj.observations):
-        obs.weight = w
-
-    return weights
-
-
-
-def _reinitObservations(traj, weights=None, incident_angles=None):
-    """ Reinitialize all ObservedPoints in traj so JD_data, stat_eci_los and meas_eci_los reflect updated
-        station times, restoring station weights and incident angles when provided.
-
-    Arguments:
-        traj: [Trajectory object] Trajectory whose observations are reinitialized in place.
-
-    Keyword arguments:
-        weights: [list] Optional station weights to restore. None by default.
-        incident_angles: [list] Optional station incident angles to restore. None by default.
-    """
-
-    saved_fixed_copy = copy.deepcopy(getattr(traj, 'fixed_time_offsets_copy', {}))
-    temp_obs = copy.deepcopy(traj.observations)
-    traj.observations = []
-    for obs in temp_obs:
-        traj.infillWithObs(obs)
-
-    for station in traj.fixed_time_offsets:
-        traj.fixed_time_offsets[station] = 0.0
-    traj.fixed_time_offsets_copy = saved_fixed_copy
-
-    if weights is not None:
-        for w, obs in zip(weights, traj.observations):
-            obs.weight = w
-
-    if incident_angles is not None:
-        for inc_ang, obs in zip(incident_angles, traj.observations):
-            obs.incident_angle = inc_ang
-
-
-
-def _makeDropGridFunc(traj, drag_fit_prev):
-    """ Build a callable that evaluates gravity drop vectors along a length grid using the previous drag
-        model speeds.
-
-    Arguments:
-        traj: [Trajectory object] Trajectory with gravity_vel, state_vect_mini and radiant_eci_mini set.
-        drag_fit_prev: [DragTimingFit object] Previous pass drag-timing fit.
-
-    Return:
-        [callable] Function mapping len_grid (m) to ECI drop vectors (N, 3) (m), or None.
-    """
-
-    if (not traj.gravity_correction) or (traj.gravity_vel is None) or (drag_fit_prev is None):
-        return None
-
-    t0 = dropTimeOrigin(traj.observations)
-    eci0 = gravityDropOrigin(traj.observations, traj.state_vect_mini, traj.radiant_eci_mini, \
-        traj.gravity_vel, t0)
-
-    def _dropOnLenGrid(len_grid):
-        times_grid = drag_fit_prev.timeAtLength(len_grid)
-        return gravityDropVectors(eci0, traj.radiant_eci_mini, times_grid - t0, traj.gravity_vel, t0, \
-            traj.gravity_factor, air_rotation=getattr(traj, 'air_rotation', True))
-
-    return _dropOnLenGrid
-
-
-
-def _attachDragMCUncertainties(traj, mc_traj_list):
-    """ Compute Monte Carlo ensemble uncertainties on the drag model velocity, ballistic coefficient K and
-        station timing offsets, and store them on traj.drag_timing_fit.
-
-    Arguments:
-        traj: [Trajectory object] Main solved trajectory with traj.drag_timing_fit.
-        mc_traj_list: [list] Successful Monte Carlo Trajectory objects.
-    """
-
-    drag_fit = getattr(traj, 'drag_timing_fit', None)
-    if (drag_fit is None) or (not mc_traj_list):
-        return
-
-    mc_fits = [getattr(t, 'drag_timing_fit', None) for t in mc_traj_list]
-    mc_fits = [f for f in mc_fits if f is not None]
-    if len(mc_fits) < 2:
-        return
-
-    vel_samples = np.array([f.velocityAtLength(drag_fit.len_grid) for f in mc_fits])
-    k_samples = np.array([f.ballisticCoeffAtLength(drag_fit.len_grid) for f in mc_fits])
-
-    drag_fit.mc_vel_std = np.std(vel_samples, axis=0)
-    drag_fit.mc_vel_lo, drag_fit.mc_vel_hi = np.percentile(vel_samples, [15.865, 84.135], axis=0)
-    drag_fit.mc_k_lo, drag_fit.mc_k_hi = np.percentile(k_samples, [15.865, 84.135], axis=0)
-    dlog_k_samples = np.log(k_samples[:, -1]/k_samples[:, 0])
-    drag_fit.mc_dlog_k_std = float(np.std(dlog_k_samples))
-
-    td_list = [t.time_diffs_final for t in mc_traj_list \
-        if (t.time_diffs_final is not None) and (len(t.time_diffs_final) == len(traj.observations))]
-    if len(td_list) >= 2:
-        drag_fit.mc_time_diffs_std = np.std(np.array(td_list), axis=0)
-
-
-
-def _refreshPreAtmAfterMC(traj, traj_best, mc_traj_list):
-    """ Re-evaluate the pre-atmospheric air-column gate after attaching Monte Carlo ensemble uncertainties
-        on K_0, revoking the orbit correction and recomputing affected orbits if combined uncertainty fails
-        the gate.
+def _updateDragMCResults(traj, traj_best, mc_traj_list):
+    """ Attach Monte Carlo ensemble uncertainties to drag_timing_fit on the nominal and best trajectories,
+        then re-evaluate the pre-atmospheric air-column gate with the combined fit and MC uncertainty on K_0.
 
     Arguments:
         traj: [Trajectory object] Nominal solved trajectory.
@@ -5538,12 +4939,44 @@ def _refreshPreAtmAfterMC(traj, traj_best, mc_traj_list):
         mc_traj_list: [list] Successful Monte Carlo Trajectory objects (including traj).
     """
 
+    ### Attach Monte Carlo ensemble uncertainties on velocity, K and station timings ###
+
+    mc_fits = [getattr(t, 'drag_timing_fit', None) for t in mc_traj_list]
+    mc_fits = [f for f in mc_fits if f is not None]
+
+    targets = [traj] if traj_best is traj else [traj, traj_best]
+
+    if len(mc_fits) >= 2:
+        for t_obj in targets:
+
+            drag_fit = getattr(t_obj, 'drag_timing_fit', None)
+            if drag_fit is None:
+                continue
+
+            vel_samples = np.array([f.velocityAtLength(drag_fit.len_grid) for f in mc_fits])
+            k_samples = np.array([f.ballisticCoeffAtLength(drag_fit.len_grid) for f in mc_fits])
+
+            drag_fit.mc_vel_std = np.std(vel_samples, axis=0)
+            drag_fit.mc_vel_lo, drag_fit.mc_vel_hi = np.percentile(vel_samples, [15.865, 84.135], axis=0)
+            drag_fit.mc_k_lo, drag_fit.mc_k_hi = np.percentile(k_samples, [15.865, 84.135], axis=0)
+            drag_fit.mc_dlog_k_std = float(np.std(np.log(k_samples[:, -1]/k_samples[:, 0])))
+
+            td_list = [t.time_diffs_final for t in mc_traj_list \
+                if (t.time_diffs_final is not None) and (len(t.time_diffs_final) == len(t_obj.observations))]
+            if len(td_list) >= 2:
+                drag_fit.mc_time_diffs_std = np.std(np.array(td_list), axis=0)
+
+
+    ### Re-evaluate pre-atmospheric velocity gate with combined fit and MC uncertainty ###
+
     revoke = False
-    for t_obj in ([traj] if traj_best is traj else [traj, traj_best]):
-        df = getattr(t_obj, 'drag_timing_fit', None)
-        if df is None:
+    for t_obj in targets:
+
+        drag_fit = getattr(t_obj, 'drag_timing_fit', None)
+        if drag_fit is None:
             continue
-        info = df.preAtmosphericVelocity()
+
+        info = drag_fit.preAtmosphericVelocity()
         t_obj.pre_atm_info = info
         if (not info['applied']) and (getattr(t_obj, 'dv_pre_atm', 0.0) != 0.0):
             revoke = True
@@ -5551,17 +4984,22 @@ def _refreshPreAtmAfterMC(traj, traj_best, mc_traj_list):
     if not revoke:
         return
 
+    # Revoke dv_pre_atm and recompute affected orbits across the ensemble for consistent MC statistics
     seen = set()
-    for t_obj in [traj, traj_best] + list(mc_traj_list):
+    for t_obj in targets + list(mc_traj_list):
+
         if id(t_obj) in seen:
             continue
         seen.add(id(t_obj))
+
         if getattr(t_obj, 'dv_pre_atm', 0.0) == 0.0:
             continue
+
         t_obj.dv_pre_atm = 0.0
-        if getattr(t_obj, 'pre_atm_info', None) is not None and t_obj.pre_atm_info.get('applied'):
+        if (getattr(t_obj, 'pre_atm_info', None) is not None) and t_obj.pre_atm_info.get('applied'):
             t_obj.pre_atm_info = dict(t_obj.pre_atm_info, applied=False, \
                 reason='K_0 poorly constrained after MC')
+
         if getattr(t_obj, 'orbit', None) is not None:
             los_ok = bool(getattr(t_obj, 'orbit_los_success', t_obj.los_mini_status))
             t_obj.orbit = calcOrbit(t_obj.radiant_eci_mini, t_obj.v_init, t_obj.v_avg, \
@@ -5570,21 +5008,25 @@ def _refreshPreAtmAfterMC(traj, traj_best, mc_traj_list):
 
 
 
-def _shadeCoverageRegions(ax, drag_fit, axis='y', coord='height'):
-    """ Shade and hatch unobserved gap (zero-station) bands on an axis.
+def _annotateDragPlot(ax, drag_fit, axis='y', coord='height', mark_events=False):
+    """ Shade unobserved gap bands on an axis and optionally mark peak dynamic pressure and detected sudden
+        K-change episodes.
 
     Arguments:
         ax: [matplotlib Axes] Target axes.
         drag_fit: [DragTimingFit object] Fitted drag-timing model.
 
     Keyword arguments:
-        axis: [str] 'y' for horizontal bands (axhspan) or 'x' for vertical bands (axvspan). 'y' by default.
-        coord: [str] 'height' (km) or 'time' (s) coordinate of the shaded axis. 'height' by default.
+        axis: [str] 'y' for horizontal bands or 'x' for vertical bands. 'y' by default.
+        coord: [str] 'height' (km) or 'time' (s) coordinate of the annotated axis. 'height' by default.
+        mark_events: [bool] Draw reference lines for peak dynamic pressure and detected sudden K changes.
+            False by default.
     """
 
     span_fn = ax.axhspan if axis == 'y' else ax.axvspan
+    line_fn = ax.axhline if axis == 'y' else ax.axvline
 
-    # Unobserved gaps (0 stations): orange hatched bands
+    # Shade and hatch unobserved zero-station gap bands
     for idx, gap in enumerate(drag_fit.gap_uncertainties):
         c0 = gap['ht_beg']/1000.0 if coord == 'height' else gap['time_beg']
         c1 = gap['ht_end']/1000.0 if coord == 'height' else gap['time_end']
@@ -5592,108 +5034,35 @@ def _shadeCoverageRegions(ax, drag_fit, axis='y', coord='height'):
         span_fn(min(c0, c1), max(c0, c1), facecolor='tab:orange', edgecolor='tab:orange', hatch='xxx', \
             alpha=0.18, linewidth=0.0, label=lbl, zorder=1)
 
+    if not mark_events:
+        return
 
-
-def _annotateLightCurveDragEvents(ax, drag_fit, coord='time'):
-    """ Overlay unobserved gaps, peak dynamic pressure and detected sudden K-change (fragmentation) episodes
-        onto an absolute-magnitude light curve plot.
-
-    Arguments:
-        ax: [matplotlib Axes] Target light curve axes.
-        drag_fit: [DragTimingFit object] Fitted drag-timing model.
-
-    Keyword arguments:
-        coord: [str] 'time' for mag-vs-time (vertical markers) or 'height' for mag-vs-height (horizontal
-            markers). 'time' by default.
-    """
-
-    if coord == 'time':
-        _shadeCoverageRegions(ax, drag_fit, axis='x', coord='time')
-        line_fn = ax.axvline
-    else:
-        _shadeCoverageRegions(ax, drag_fit, axis='y', coord='height')
-        line_fn = ax.axhline
-
+    # Mark peak dynamic pressure along the trajectory
     peak_p = drag_fit.peakDynamicPressure()
-    peak_val = peak_p['time'] if coord == 'time' else peak_p['ht']/1000.0
+    peak_val = peak_p['ht']/1000.0 if coord == 'height' else peak_p['time']
     peak_lbl = "Peak P_dyn: {:s} ({:.1f} km)".format(_formatPressure(peak_p['dyn_pres']), \
         peak_p['ht']/1000.0)
     line_fn(peak_val, color='crimson', linestyle='--', linewidth=1.1, alpha=0.85, label=peak_lbl, zorder=2)
 
-    drag_changes = drag_fit.detectDragChanges()
-    for idx_ev, ev in enumerate(drag_changes):
-        ev_val = ev['time'] if coord == 'time' else ev['ht']/1000.0
+    # Mark detected sudden K-change (fragmentation) episodes
+    for ev in drag_fit.detectDragChanges():
+        ev_val = ev['ht']/1000.0 if coord == 'height' else ev['time']
         ev_lbl = "dK x{:.2f} @ {:s} ({:.1f} km)".format(ev['k_ratio'], _formatPressure(ev['dyn_pres']), \
             ev['ht']/1000.0)
         line_fn(ev_val, color='tab:blue', linestyle=':', linewidth=1.2, alpha=0.85, label=ev_lbl, zorder=2)
 
 
 
-def _overlayLightCurveOnKAxis(ax_k, traj):
-    """ Overlay a subtle binned absolute-magnitude light curve on a twin top axis of the K(h) panel when
-        photometry is available, so optical flares can be compared directly with sudden K changes.
-
-    Arguments:
-        ax_k: [matplotlib Axes] Ballistic coefficient K vs height axes.
-        traj: [Trajectory object] Solved trajectory with observations.
-    """
-
-    hts_all = []
-    mags_all = []
-    for obs in traj.observations:
-        if obs.ignore_station or (obs.absolute_magnitudes is None) or (obs.model_ht is None):
-            continue
-        for i, abs_mag in enumerate(obs.absolute_magnitudes):
-            if (obs.ignore_list[i] == 0) and (abs_mag is not None) and np.isfinite(abs_mag) \
-                and (abs_mag < 8.0) and np.isfinite(obs.model_ht[i]):
-                hts_all.append(float(obs.model_ht[i])/1000.0)
-                mags_all.append(float(abs_mag))
-
-    if len(hts_all) < 4:
-        return
-
-    hts_arr = np.array(hts_all, dtype=np.float64)
-    mags_arr = np.array(mags_all, dtype=np.float64)
-    order = np.argsort(hts_arr)
-    hts_arr = hts_arr[order]
-    mags_arr = mags_arr[order]
-
-    # Bin into height bands to draw a clean median light curve envelope without cluttering the K(h) panel
-    n_bins = int(np.clip(len(hts_arr)//3, 6, 40))
-    edges = np.linspace(hts_arr[0], hts_arr[-1], n_bins + 1)
-    bin_h, bin_m = [], []
-    for b_i in range(n_bins):
-        sel = (hts_arr >= edges[b_i]) & (hts_arr <= edges[b_i + 1] if b_i == n_bins - 1 \
-            else hts_arr < edges[b_i + 1])
-        if np.any(sel):
-            bin_h.append(float(np.median(hts_arr[sel])))
-            bin_m.append(float(np.median(mags_arr[sel])))
-
-    if len(bin_h) < 3:
-        return
-
-    ax_lc = ax_k.twiny()
-    ax_lc.plot(bin_m, bin_h, color='0.45', linestyle='-', linewidth=1.0, alpha=0.55, zorder=1)
-    ax_lc.invert_xaxis()
-    ax_lc.set_xlabel('Absolute magnitude (brighter right)', color='0.40', fontsize=8)
-    ax_lc.tick_params(axis='x', colors='0.40', labelsize=7)
-    ax_k.set_zorder(ax_lc.get_zorder() + 1)
-    ax_k.patch.set_visible(False)
-
-
-
-
-
 def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, save_results=False, \
     ret_fig=False):
-    """ Plot the separate drag-coupled trajectory diagnostic figure with unobserved gap (zero-station)
-        regions clearly hatched and shaded.
+    """ Plot the drag-coupled trajectory diagnostic figure with unobserved zero-station gaps hatched and
+        shaded, peak dynamic pressure and fragmentation markers, and a light curve overlay on the K panel.
 
     Panels:
         1. Height vs. Time (observations colored by station, solid/dashed drag model, hatched gaps).
         2. Velocity vs. Height (raw velocities, drag model, MC 1-sigma band, gap jump bounds).
         3. Lag vs. Time (raw lags and drag model lag with hatched gaps).
-        4. Ballistic coefficient K vs. Height (log scale, solid/dashed K with 1-sigma uncertainty band).
+        4. Ballistic coefficient K vs. Height (log scale, 1-sigma band, P_dyn markers, light curve overlay).
 
     Arguments:
         traj: [Trajectory object] Solved trajectory with traj.drag_timing_fit attached.
@@ -5703,6 +5072,7 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
         file_name: [str] Base file name for saving the plot. None by default (uses traj.file_name).
         show_plots: [bool] Display the figure interactively. True by default.
         save_results: [bool] Save the figure to disk. False by default.
+        ret_fig: [bool] Keep the figure open and return it without closing. False by default.
 
     Return:
         fig: [matplotlib Figure] Diagnostic figure, or None if traj has no drag_timing_fit.
@@ -5715,20 +5085,24 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
     if file_name is None:
         file_name = traj.file_name
 
+
+    ### Initialize four-panel diagnostic figure and shade gaps ###
+
     fig, axes = plt.subplots(2, 2, figsize=(12, 9))
     ax_ht, ax_vel = axes[0]
     ax_lag, ax_k = axes[1]
 
-    # Shade and hatch unobserved gaps on all panels
-    _shadeCoverageRegions(ax_ht, drag_fit, axis='x', coord='time')
-    _shadeCoverageRegions(ax_vel, drag_fit, axis='y', coord='height')
-    _shadeCoverageRegions(ax_lag, drag_fit, axis='y', coord='time')
-    _shadeCoverageRegions(ax_k, drag_fit, axis='y', coord='height')
+    _annotateDragPlot(ax_ht, drag_fit, axis='x', coord='time')
+    _annotateDragPlot(ax_vel, drag_fit, axis='y', coord='height')
+    _annotateDragPlot(ax_lag, drag_fit, axis='y', coord='time')
+    _annotateDragPlot(ax_k, drag_fit, axis='y', coord='height')
+
+
+    ### Plot raw per-station observations ###
 
     obs_sorted = sorted(traj.observations, key=lambda x: x.model_ht[0] if x.model_ht is not None else 0.0)
     colors, alpha = stationColors(len(obs_sorted))
 
-    # Plot raw measurements per station
     for i, obs in enumerate(obs_sorted):
 
         if obs.ignore_station:
@@ -5752,6 +5126,8 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
             label=label, zorder=3)
 
 
+    ### Plot fitted drag curves and uncertainty bands ###
+
     in_gap = drag_fit.n_stations_grid == 0
     t_grid = drag_fit.time_grid
     ht_grid_km = drag_fit.ht_grid/1000.0
@@ -5760,7 +5136,7 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
     lag_grid = drag_fit.len_grid - traj.gravityLengthAlongPath(traj.observations, t_grid) \
         - lineFunc(t_grid, *traj.velocity_fit)
 
-    # Plot solid model inside observed windows and dashed model inside unobserved gaps
+    # Draw solid curves inside observed windows and dashed curves across unobserved gaps
     for sel, ls, lbl in [(~in_gap, 'solid', 'Drag model (observed)'), \
         (in_gap, 'dashed', 'Drag model (gap)')]:
 
@@ -5778,13 +5154,12 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
         ax_lag.plot(l_p, t_p, color='k', linestyle=ls, linewidth=1.6, label=lbl, zorder=4)
         ax_k.plot(k_p, h_p, color='k', linestyle=ls, linewidth=1.6, label=lbl, zorder=4)
 
-
-    # Plot 1-sigma MC velocity uncertainty band if available
+    # Plot 1-sigma Monte Carlo velocity uncertainty band when available
     if (drag_fit.mc_vel_lo is not None) and (drag_fit.mc_vel_hi is not None):
         ax_vel.fill_betweenx(ht_grid_km, drag_fit.mc_vel_lo/1000.0, drag_fit.mc_vel_hi/1000.0, \
             color='k', alpha=0.18, label='1 sigma (MC)', zorder=3)
 
-    # Plot 1-sigma K uncertainty band (MC ensemble when available, else Jacobian fit band)
+    # Determine log-axis display bounds for K and shade 1-sigma uncertainty (MC or Jacobian fit)
     k_pos = k_grid[k_grid > 0]
     k_lo_lim = float(np.min(k_pos))*0.7 if len(k_pos) else 1e-6
     k_hi_lim = float(np.max(k_pos))*1.4 if len(k_pos) else 1.0
@@ -5797,6 +5172,7 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
         ax_k.fill_betweenx(ht_grid_km, np.clip(drag_fit.mc_k_lo, k_lo_lim, k_hi_lim), \
             np.clip(drag_fit.mc_k_hi, k_lo_lim, k_hi_lim), color='0.5', alpha=0.30, \
             label='1 sigma (MC)', zorder=2)
+
     elif drag_fit.log_k_std_grid is not None:
         log_k_all = drag_fit.log_k_grid
         log_std_all = drag_fit.log_k_std_grid
@@ -5806,26 +5182,27 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
         ax_k.fill_betweenx(ht_grid_km, k_lo, k_hi, where=(~in_gap), color='0.6', alpha=0.25, \
             label='1 sigma (fit)', zorder=2)
 
-    # Annotate unobserved gaps and show early/late jump velocity envelopes
+
+    ### Annotate gaps, peak dynamic pressure and sudden K changes ###
+
     for idx, gap in enumerate(drag_fit.gap_uncertainties):
 
+        # Shade early/late jump velocity envelope inside the gap
         if (len(gap['ht_gap_grid']) > 1) and (gap['dt_span'] > 1e-6):
             env_lbl = 'Gap jump bound' if idx == 0 else None
             ax_vel.fill_betweenx(gap['ht_gap_grid']/1000.0, gap['vel_lo']/1000.0, gap['vel_hi']/1000.0, \
                 color='tab:orange', alpha=0.35, label=env_lbl, zorder=2)
 
+        # Label each gap on the height-time panel, staggering adjacent boxes vertically
         t_mid = 0.5*(gap['time_beg'] + gap['time_end'])
         h_span = float(np.max(ht_grid_km)) - float(np.min(ht_grid_km))
         h_top_band = float(np.max(ht_grid_km)) - (0.06 + 0.10*(idx%2))*h_span
         gap_km = (gap['len_end'] - gap['len_beg'])/1000.0
         dt_ms = 1000.0*gap['dt_span']
-        if dt_ms >= 0.5:
-            gap_txt = "Gap {:.1f} km\n+/-{:.0f} ms".format(gap_km, 0.5*dt_ms)
-        else:
-            gap_txt = "Gap {:.1f} km".format(gap_km)
+        gap_txt = "Gap {:.1f} km\n+/-{:.0f} ms".format(gap_km, 0.5*dt_ms) if dt_ms >= 0.5 \
+            else "Gap {:.1f} km".format(gap_km)
         ax_ht.text(t_mid, h_top_band, gap_txt, fontsize=8, ha='center', va='top', \
             bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.8))
-
 
     # Mark peak dynamic pressure on the velocity and K panels
     peak_p = drag_fit.peakDynamicPressure()
@@ -5836,15 +5213,18 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
     ax_k.axhline(peak_ht_km, color='crimson', linestyle='--', linewidth=1.1, alpha=0.85, label=peak_lbl, \
         zorder=3)
 
-    # Mark detected sudden K changes (potential fragmentations) with their dynamic pressure on the K panel
+    # Mark detected sudden K changes (potential fragmentations) with their dynamic pressure
     drag_changes = drag_fit.detectDragChanges()
     k_mid_log = np.sqrt(k_lo_lim*k_hi_lim)
     for idx_ev, ev in enumerate(drag_changes):
+
         h_ev_km = ev['ht']/1000.0
         k_ev = float(np.clip(ev['k_at_change'], k_lo_lim, k_hi_lim))
         ev_lbl = 'K change (P_dyn)' if idx_ev == 0 else None
+
         ax_k.axhline(h_ev_km, color='tab:blue', linestyle=':', linewidth=1.1, alpha=0.8, zorder=3)
         ax_k.scatter([k_ev], [h_ev_km], color='tab:blue', s=24, zorder=5, label=ev_lbl)
+
         ev_txt = "x{:.2f} @ {:s} ({:.1f} km)".format(ev['k_ratio'], _formatPressure(ev['dyn_pres']), h_ev_km)
         if k_ev <= k_mid_log:
             xy_off, h_align, v_align = (8, 4), 'left', 'bottom'
@@ -5854,6 +5234,8 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
             ha=h_align, va=v_align, color='tab:blue', \
             bbox=dict(boxstyle='round,pad=0.18', fc='white', ec='tab:blue', alpha=0.88))
 
+
+    ### Configure panel labels and overlay photometry light curve on K panel ###
 
     ax_ht.set_xlabel('Time (s)')
     ax_ht.set_ylabel('Height (km)')
@@ -5883,8 +5265,33 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
     ax_k.grid(which='both', alpha=0.5)
     ax_k.legend(fontsize=7)
 
-    # Overlay subtle absolute-magnitude light curve on top x-axis when photometry is available
-    _overlayLightCurveOnKAxis(ax_k, traj)
+    # Overlay the merged absolute-magnitude light curve from wmpl.Utils.Physics.trajectoryLightCurve
+    _, mag_lc, ht_lc = trajectoryLightCurve(traj)
+    if (mag_lc is not None) and (len(mag_lc) >= 4):
+
+        order = np.argsort(ht_lc)
+        ht_lc_km = ht_lc[order]/1000.0
+        mag_lc_sorted = mag_lc[order]
+
+        # Bin magnitudes by height into a smooth median envelope so optical flares stand out cleanly
+        n_bins = int(np.clip(len(ht_lc_km)//3, 6, 40))
+        edges = np.linspace(ht_lc_km[0], ht_lc_km[-1], n_bins + 1)
+        bin_h, bin_m = [], []
+        for b_i in range(n_bins):
+            sel = (ht_lc_km >= edges[b_i]) & (ht_lc_km <= edges[b_i + 1] if b_i == n_bins - 1 \
+                else ht_lc_km < edges[b_i + 1])
+            if np.any(sel):
+                bin_h.append(float(np.median(ht_lc_km[sel])))
+                bin_m.append(float(np.median(mag_lc_sorted[sel])))
+
+        if len(bin_h) >= 3:
+            ax_lc = ax_k.twiny()
+            ax_lc.plot(bin_m, bin_h, color='0.45', linestyle='-', linewidth=1.0, alpha=0.55, zorder=1)
+            ax_lc.invert_xaxis()
+            ax_lc.set_xlabel('Absolute magnitude (brighter right)', color='0.40', fontsize=8)
+            ax_lc.tick_params(axis='x', colors='0.40', labelsize=7)
+            ax_k.set_zorder(ax_lc.get_zorder() + 1)
+            ax_k.patch.set_visible(False)
 
     plt.tight_layout()
 
@@ -5897,9 +5304,6 @@ def plotDragTrajectory(traj, output_dir='.', file_name=None, show_plots=True, sa
         plt.close(fig)
 
     return fig
-
-
-
 
 
 
@@ -8253,9 +7657,19 @@ class Trajectory(object):
             out_str += "\n"
 
 
+        drag_fit = getattr(self, 'drag_timing_fit', None)
+        mc_td_std = getattr(drag_fit, 'mc_time_diffs_std', None) if drag_fit is not None else None
+
         out_str += "Timing offsets (from input data):\n"
-        for stat_id, t_diff in zip([obs.station_id for obs in self.observations], self.time_diffs_final):
-            out_str += "{:>14s}: {:.6f} s\n".format(str(stat_id), t_diff)
+        for idx_s, (stat_id, t_diff) in enumerate(zip([obs.station_id for obs in self.observations], \
+            self.time_diffs_final)):
+
+            # Append 1-sigma Monte Carlo timing uncertainty when available
+            if (mc_td_std is not None) and (idx_s < len(mc_td_std)) and np.isfinite(mc_td_std[idx_s]) \
+                and (mc_td_std[idx_s] > 0.0):
+                out_str += "{:>14s}: {:.6f} +/- {:.4f} s\n".format(str(stat_id), t_diff, mc_td_std[idx_s])
+            else:
+                out_str += "{:>14s}: {:.6f} s\n".format(str(stat_id), t_diff)
 
         out_str += "\n"
 
@@ -8380,10 +7794,128 @@ class Trajectory(object):
             pass
         out_str += "\n"
 
-        # Append drag-fit diagnostics when the drag-coupled solver was used
-        drag_fit = getattr(self, 'drag_timing_fit', None)
+        ### Write drag-fit summary and derived physical quantities ###
+        ######################################################################################################
         if drag_fit is not None:
-            out_str += drag_fit.formatReportSummary(traj=self) + "\n"
+
+            k_beg = float(np.exp(drag_fit.log_k_grid[0]))
+            k_end = float(np.exp(drag_fit.log_k_grid[-1]))
+            k_ratio = k_end/max(k_beg, 1e-30)
+            max_k0 = getattr(drag_fit, 'max_k0', None)
+            max_k0_str = "{:.1f} m^2/kg".format(max_k0) if max_k0 is not None else "none"
+
+            # Compute derived physical diagnostics from the fitted drag profile
+            peak_p = drag_fit.peakDynamicPressure()
+            abl = drag_fit.effectiveAblationCoeff()
+            term_mass = drag_fit.terminalDynamicMass()
+            drag_changes = drag_fit.detectDragChanges()
+
+            out_str += "Drag fit\n"
+            out_str += "--------\n"
+            out_str += ("Model: dv/dt = -K*rho*v_air^2 + g_along (air_rotation={:s}, " \
+                + "gravity_factor={:.2f}, penalty={:.2f}, max_k0={:s})\n").format( \
+                str(drag_fit.air_rotation), drag_fit.gravity_factor, getattr(drag_fit, 'penalty', 1.0), \
+                max_k0_str)
+            out_str += "  Points          = {:d} ({:d} segments of K)\n".format(drag_fit.n_data, \
+                drag_fit.n_knots)
+            out_str += "  Along-track RMS = {:.1f} m (scale = {:.1f} m)\n".format(drag_fit.res_rms_m, \
+                drag_fit.res_scale_m)
+            out_str += "  Timing RMS      = {:.2f} ms\n".format(1000.0*drag_fit.res_rms_s)
+
+            # Format Monte Carlo 1-sigma bounds on K at the beginning and end when available
+            if (drag_fit.mc_k_lo is not None) and (drag_fit.mc_k_hi is not None):
+                k_beg_mc = " (MC 1 sigma {:.2e} - {:.2e})".format(drag_fit.mc_k_lo[0], drag_fit.mc_k_hi[0])
+                k_end_mc = " (MC 1 sigma {:.2e} - {:.2e})".format(drag_fit.mc_k_lo[-1], drag_fit.mc_k_hi[-1])
+            else:
+                k_beg_mc = ""
+                k_end_mc = ""
+
+            out_str += "  Begin           = {:6.2f} km, {:6.3f} km/s, K = {:.2e} m^2/kg{:s}\n".format( \
+                drag_fit.ht_grid[0]/1000.0, drag_fit.vel_grid[0]/1000.0, k_beg, k_beg_mc)
+            out_str += "  End             = {:6.2f} km, {:6.3f} km/s, K = {:.2e} m^2/kg{:s}\n".format( \
+                drag_fit.ht_grid[-1]/1000.0, drag_fit.vel_grid[-1]/1000.0, k_end, k_end_mc)
+            out_str += "  K end/beg       = {:.2f}\n".format(k_ratio)
+            out_str += "  Peak dyn. pres. = {:s} at {:.2f} km (v_air = {:.2f} km/s)\n".format( \
+                _formatPressure(peak_p['dyn_pres']), peak_p['ht']/1000.0, peak_p['vel_air']/1000.0)
+
+            # Format effective ablation coefficient (sigma_eff)
+            if abl['sigma_eff'] is not None:
+                if abl['sigma_eff_std'] is not None:
+                    out_str += "  Eff. ablation   = {:.4f} +/- {:.4f} s^2/km^2\n".format( \
+                        abl['sigma_eff'], abl['sigma_eff_std'])
+                else:
+                    out_str += "  Eff. ablation   = {:.4f} s^2/km^2\n".format(abl['sigma_eff'])
+            else:
+                out_str += "  Eff. ablation   = not estimated ({:s})\n".format(abl['reason'])
+
+            # Format gated terminal dynamic mass (computed via wmpl.Utils.Physics.ballisticCoeffMass)
+            if term_mass['mass'] is not None:
+                ablation_note = "; ablation still active above 4 km/s" if term_mass['ablation_active'] else ""
+                if term_mass['mass'] >= 0.01:
+                    mass_str = "{:.3g} kg ({:.3g} - {:.3g} kg, 1 sigma)".format(term_mass['mass'], \
+                        term_mass['mass_lo'], term_mass['mass_hi'])
+                else:
+                    mass_str = "{:.2f} g ({:.2f} - {:.2f} g, 1 sigma)".format(1000.0*term_mass['mass'], \
+                        1000.0*term_mass['mass_lo'], 1000.0*term_mass['mass_hi'])
+                out_str += ("  Terminal mass   = {:s} (Gamma*A = {:.2f}, " \
+                    + "rho_m = {:.0f} kg/m^3{:s})\n").format(mass_str, term_mass['gamma_a'], \
+                    term_mass['bulk_density'], ablation_note)
+            else:
+                out_str += "  Terminal mass   = not estimated ({:s})\n".format(term_mass['reason'])
+
+            # Write pre-atmospheric air-column drag correction details
+            pre_atm = getattr(self, 'pre_atm_info', None)
+            if pre_atm is None:
+                pre_atm = drag_fit.preAtmosphericVelocity()
+
+            if pre_atm['air_col'] > 0.0:
+                dv_applied = float(getattr(self, 'dv_pre_atm', 0.0))
+                out_str += "\n"
+                out_str += "Pre-atmospheric air-column drag correction:\n"
+                out_str += "  Air column      = {:.3e} kg/m^2 (K_0*Sigma = {:.3e})\n".format( \
+                    pre_atm['air_col'], pre_atm['k0_col'])
+                if dv_applied > 0.0:
+                    out_str += ("  Velocity corr.  = {:+.1f} m/s ({:.3f}%), v_inf = {:.4f} km/s " \
+                        + "(applied to orbit)\n").format(dv_applied, \
+                        100.0*dv_applied/max(pre_atm['v_beg'], 1.0), (pre_atm['v_beg'] + dv_applied)/1000.0)
+                else:
+                    reason = pre_atm['reason']
+                    if (reason is None) and (not getattr(self, 'pre_atm_correction', True)):
+                        reason = "disabled by user"
+                    elif (reason is None) and (self.v_init_ht is not None):
+                        reason = "v_init_ht override active"
+                    elif reason is None:
+                        reason = "not applied"
+                    out_str += ("  Velocity corr.  = {:+.1f} m/s ({:.3f}%) upper bound " \
+                        + "(not applied to orbit: {:s})\n").format(pre_atm['dv'], 100.0*pre_atm['dv_frac'], \
+                        reason)
+
+            # List detected sudden K changes (potential fragmentation episodes)
+            if drag_changes:
+                out_str += "\n"
+                out_str += "Detected sudden K changes (potential fragmentations):\n"
+                for idx_ev, ev in enumerate(drag_changes):
+                    signif_str = " ({:.1f} sigma)".format(ev['signif']) if ev['signif'] > 0.0 else ""
+                    out_str += ("  {:d}. h = {:6.2f} km ({:.1f} - {:.1f} km), P_dyn = {:s}, " \
+                        + "K x{:.2f}{:s}\n").format(idx_ev + 1, ev['ht']/1000.0, ev['ht_beg']/1000.0, \
+                        ev['ht_end']/1000.0, _formatPressure(ev['dyn_pres']), ev['k_ratio'], signif_str)
+
+            # List unobserved zero-station gaps and their early/late jump timing bounds
+            if drag_fit.gap_uncertainties:
+                out_str += "\n"
+                out_str += "Unobserved gaps (assumed drag, no station coverage):\n"
+                for idx_g, gap in enumerate(drag_fit.gap_uncertainties):
+                    gap_km = (gap['len_end'] - gap['len_beg'])/1000.0
+                    dt_ms = 1000.0*gap['dt_span']
+                    out_str += ("  {:d}. h = {:6.2f} -> {:6.2f} km ({:4.1f} km), " \
+                        + "t = {:5.2f} -> {:5.2f} s, d(ln K) = {:+.2f}, " \
+                        + "jump timing bound = +/-{:.1f} ms\n").format(idx_g + 1, gap['ht_beg']/1000.0, \
+                        gap['ht_end']/1000.0, gap_km, gap['time_beg'], gap['time_end'], \
+                        gap['log_k_growth'], 0.5*dt_ms)
+
+            out_str += "\n"
+
+        ######################################################################################################
 
         ### Write information about stations ###
         ######################################################################################################
@@ -8565,6 +8097,11 @@ class Trajectory(object):
         out_str += "- 'Vel prev avg' is the average velocity including all previous points up to the given point. For the first 4 points this velocity is computed as the average velocity of those 4 points. \n"
         if uncertainties is not None:
             out_str += "- The number after +/- is the 1 sigma uncertainty, and the numbers in square brackets are the 95% confidence intervals. \n"
+        if drag_fit is not None:
+            out_str += "- The drag fit solves dv/dt = -K*rho*v_air^2 + g_along with non-decreasing K(L) " \
+                + "jointly with station timing offsets.\n"
+            out_str += "- Terminal dynamic mass uses wmpl.Utils.Physics.ballisticCoeffMass and is reported " \
+                + "only when the meteor decelerates deeply and K is well constrained.\n"
 
         # Add the wmpl version and the date of the version and the date of the report
         out_str += "\n\n"
@@ -9108,7 +8645,7 @@ class Trajectory(object):
         # Shade and hatch unobserved gap bands when a drag-coupled timing fit is available
         drag_fit_vel = getattr(self, 'drag_timing_fit', None)
         if drag_fit_vel is not None:
-            _shadeCoverageRegions(ax1, drag_fit_vel, axis='y', coord='time')
+            _annotateDragPlot(ax1, drag_fit_vel, axis='y', coord='time')
 
         vel_max = -np.inf
         vel_min = np.inf
@@ -9689,7 +9226,7 @@ class Trajectory(object):
             # Overlay unobserved gaps, peak dynamic pressure and detected sudden K changes when available
             drag_fit_lc = getattr(self, 'drag_timing_fit', None)
             if drag_fit_lc is not None:
-                _annotateLightCurveDragEvents(plt.gca(), drag_fit_lc, coord='time')
+                _annotateDragPlot(plt.gca(), drag_fit_lc, axis='x', coord='time', mark_events=True)
 
             plt.xlabel('Time (s)')
             plt.ylabel('Absolute magnitude')
@@ -9764,7 +9301,7 @@ class Trajectory(object):
             # Overlay unobserved gaps, peak dynamic pressure and detected sudden K changes when available
             drag_fit_lc = getattr(self, 'drag_timing_fit', None)
             if drag_fit_lc is not None:
-                _annotateLightCurveDragEvents(plt.gca(), drag_fit_lc, coord='height')
+                _annotateDragPlot(plt.gca(), drag_fit_lc, axis='y', coord='height', mark_events=True)
 
             plt.xlabel('Absolute magnitude')
             plt.ylabel('Height (km)')
@@ -9984,6 +9521,460 @@ class Trajectory(object):
 
 
 
+    def _normalizeTimes(self):
+        """ Shift all observation times so the earliest used point starts at 0 s, updating jdt_ref,
+            meastype 1 RA/Dec measurements and t_ref_station.
+        """
+
+        # Determine the earliest relative time among active stations
+        t0 = min([obs.time_data[0] for obs in self.observations if (not obs.ignore_station) \
+            or (not np.all(obs.ignore_list))])
+
+        # Normalize all station times so the earliest observation starts at 0 s
+        if t0 != 0.0:
+
+            for obs in self.observations:
+                obs.time_data = obs.time_data - t0
+
+                # Shift excluded time ranges to match the updated time origin
+                if getattr(obs, 'excluded_time', None) is not None:
+                    obs.excluded_time = [ex_time - t0 for ex_time in obs.excluded_time]
+
+            # Shift the gravity drop velocity table to match the updated time origin
+            if getattr(self, 'gravity_vel', None) is not None:
+                self.gravity_vel = (self.gravity_vel[0] - t0, self.gravity_vel[1])
+
+            # Update the reference Julian date
+            self.jdt_ref = self.jdt_ref + t0/86400.0
+
+            # Recompute RA and Dec at the new reference JD for fixed-epoch meastype 1 inputs
+            if self.meastype == 1:
+                for obs in self.observations:
+                    if getattr(obs, 'radec_jd', None) is not None:
+                        continue
+                    obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, self.jdt_ref, \
+                        obs.lat, obs.lon)
+
+        # Record the station holding the t = 0 reference time (skipping stations with excluded points)
+        for i, obs in enumerate(self.observations):
+            if obs.excluded_indx_range:
+                continue
+            if obs.time_data[0] == 0.0:
+                self.t_ref_station = i
+                break
+
+
+
+    def _solveIntersectingPlanes(self):
+        """ Compute all pairwise plane intersections, select the best-convergence seed line and compute
+            statistical station weights for line-of-sight minimization.
+
+        Return:
+            weights: [list] Statistical weights for each station.
+        """
+
+        ### Compute pairwise plane intersections ###
+
+        self.intersection_list = []
+        nonignored_observations = [obs for obs in self.observations if not obs.ignore_station]
+
+        for i, obs1 in enumerate(nonignored_observations):
+            for obs2 in nonignored_observations[i + 1:]:
+
+                plane_intersection = PlaneIntersection(obs1, obs2)
+                if self.verbose:
+                    print('Convergence angle between stations', obs1.station_id, 'and', obs2.station_id)
+                    print(' Q =', np.degrees(plane_intersection.conv_angle), 'deg')
+
+                self.intersection_list.append(plane_intersection)
+
+        # Compute the multi-track weighted average intersecting-planes radiant
+        radiant_sum = np.zeros(shape=3)
+        weights_sum = 1e-10
+        for plane_intersection in self.intersection_list:
+            radiant_sum += plane_intersection.weight*plane_intersection.radiant_eci
+            weights_sum += plane_intersection.weight
+
+        self.avg_radiant = vectNorm(radiant_sum/weights_sum)
+        self.radiant_eq = eci2RaDec(self.avg_radiant)
+
+        if self.verbose:
+            print('Multi-Track Weighted IP radiant:', np.degrees(self.radiant_eq))
+
+
+        ### Select seed line and compute station weights ###
+
+        # Choose the pair with the largest convergence angle as the LoS seed
+        self.best_conv_inter = max(self.intersection_list, key=attrgetter('conv_angle'))
+        if self.verbose:
+            print('Best Convergence Angle IP radiant:', np.degrees(self.best_conv_inter.radiant_eq))
+
+        # Place the initial state vector at the beginning of the meteor along the seed line
+        self.state_vect = moveStateVector(self.best_conv_inter.cpa_eci, self.best_conv_inter.radiant_eci, \
+            self.observations)
+
+        # Compute incident angles between the trajectory and every station
+        self.incident_angles = self.calcStationIncidentAngles(self.state_vect, \
+            self.best_conv_inter.radiant_eci, self.observations)
+        for obs, inc_angl in zip(self.observations, self.incident_angles):
+            obs.incident_angle = inc_angl
+
+        # Weight stations by sin^2(incident angle) when > 2 stations are active, else use unity weights
+        if numStationsNotIgnored(self.observations) > 2:
+            weights = [np.sin(w)**2 for w in self.incident_angles]
+        else:
+            weights = [1.0]*len(self.observations)
+
+        weights = [w if not obs.ignore_station else 0.0 for w, obs in zip(weights, self.observations)]
+        for w, obs in zip(weights, self.observations):
+            obs.weight = w
+
+        if self.verbose:
+            print('LoS statistical weights:')
+            for obs in self.observations:
+                print("{:>12s}, {:.3f}".format(obs.station_id, obs.weight))
+            print('Intersecting planes solution:', self.state_vect)
+
+        return weights
+
+
+
+    def _solveLineOfSight(self, weights, use_gravity):
+        """ Minimize angular line-of-sight deviations using the Nelder-Mead line solver with optional
+            restarts, distant-minimum recovery and bounded SLSQP fallback.
+
+        Arguments:
+            weights: [list] Statistical weights for each station.
+            use_gravity: [bool] Apply gravity drop across the path during minimization.
+        """
+
+        if self.verbose:
+            print('Minimizing angle deviations...')
+
+            # Print the initial angular cost before minimization
+            angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
+                self.best_conv_inter.radiant_eci, weights=weights, gravity=use_gravity, \
+                gravity_factor=self.gravity_factor, v0z=self.v0z, r0=self.gravity_r0, \
+                gravity_vel=self.gravity_vel, air_rotation=self.air_rotation)
+            print('Initial angle sum:', angle_sum)
+
+        # Seed minimization from the best-convergence intersecting planes solution
+        p0 = np.r_[self.state_vect, self.best_conv_inter.radiant_eci]
+        minimize_args = (self.observations, weights, use_gravity, self.gravity_factor, self.v0z, \
+            self.gravity_r0, self.gravity_vel, self.air_rotation)
+        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
+            method=nelderMeadLine)
+
+        # Perform optional polish restarts from the converged minimum
+        for _ in range(getattr(self, 'los_restarts', 0)):
+            restarted_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
+                args=minimize_args, method=nelderMeadLine)
+            if restarted_solution.success or (not minimize_solution.success):
+                minimize_solution = restarted_solution
+
+        # Continue from the moved state vector if the simplex ran out of evaluations
+        for _ in range(LOS_CONTINUE_RUNS):
+            if minimize_solution.success:
+                break
+            restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], \
+                self.observations), vectNorm(minimize_solution.x[3:])]
+            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, \
+                method=nelderMeadLine)
+
+        # Minimize again from the previous solution if its cost is lower than the current minimum
+        if (self.state_vect_mini is not None) and (self.radiant_eci_mini is not None):
+            previous = np.r_[self.state_vect_mini, self.radiant_eci_mini]
+            if minimizeAngleCost(previous, *minimize_args) < minimize_solution.fun:
+                previous_solution = scipy.optimize.minimize(minimizeAngleCost, previous, \
+                    args=minimize_args, method=nelderMeadLine)
+                if previous_solution.success or (not minimize_solution.success):
+                    minimize_solution = previous_solution
+
+        # Fall back to bounded SLSQP minimization if the unbounded state vector diverged
+        unbounded_solution = minimize_solution
+        if stateVectorDiverged(minimize_solution.x[:3], self.state_vect):
+
+            if self.verbose:
+                print('WARNING! Unbounded state vector optimization failed!')
+                print('Trying bounded minimization to +/-10% of state vector position.')
+
+            bounds = [sorted([0.9*val, 1.1*val]) for val in self.state_vect] \
+                + [sorted([0.75*val, 1.25*val]) for val in self.best_conv_inter.radiant_eci]
+
+            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
+                bounds=bounds, method='SLSQP')
+
+            # Keep the unbounded solution if it converged and is better than the bounded attempt
+            if unbounded_solution.success and ((not minimize_solution.success) \
+                or (unbounded_solution.fun < minimize_solution.fun)):
+                minimize_solution = unbounded_solution
+
+        if self.verbose:
+            print('Minimization info:')
+            print(' Message:', minimize_solution.message)
+            print(' Iterations:', minimize_solution.nit)
+            print(' Success:', minimize_solution.success)
+            print(' Final function value:', minimize_solution.fun)
+
+        # Unpack the fitted line, or fall back to the intersecting planes seed on failure
+        self.los_mini_status = bool(minimize_solution.success)
+        if self.los_mini_status:
+            self.state_vect_mini, self.radiant_eci_mini = np.hsplit(minimize_solution.x, 2)
+            self.radiant_eci_mini = vectNorm(self.radiant_eci_mini)
+            self.state_vect_mini = moveStateVector(self.state_vect_mini, self.radiant_eci_mini, \
+                self.observations)
+            self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
+
+            if self.verbose:
+                print('Position and radiant LMS solution:')
+                print(' State vector:', self.state_vect_mini)
+                print(' Ra', np.degrees(self.radiant_eq_mini[0]), 'Dec:', np.degrees(self.radiant_eq_mini[1]))
+
+        else:
+            if self.verbose:
+                print('Angle minimization failed altogether!')
+
+            self.radiant_eci_mini = vectNorm(self.best_conv_inter.radiant_eci)
+            self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
+            self.state_vect_mini = moveStateVector(self.state_vect, self.radiant_eci_mini, \
+                self.observations)
+
+
+
+    def _reinitObservations(self, weights=None, incident_angles=None):
+        """ Reinitialize all ObservedPoints so JD_data, stat_eci_los and meas_eci_los reflect updated
+            station times, restoring station weights and incident angles when provided.
+
+        Keyword arguments:
+            weights: [list] Optional station weights to restore. None by default.
+            incident_angles: [list] Optional station incident angles to restore. None by default.
+        """
+
+        # Preserve supplied fixed offsets before re-infilling observations
+        saved_fixed_copy = copy.deepcopy(getattr(self, 'fixed_time_offsets_copy', {}))
+        temp_obs = copy.deepcopy(self.observations)
+
+        self.observations = []
+        for obs in temp_obs:
+            self.infillWithObs(obs)
+
+        # Zero working fixed offsets so they are not re-applied on subsequent passes
+        for station in self.fixed_time_offsets:
+            self.fixed_time_offsets[station] = 0.0
+        self.fixed_time_offsets_copy = saved_fixed_copy
+
+        if weights is not None:
+            for w, obs in zip(weights, self.observations):
+                obs.weight = w
+
+        if incident_angles is not None:
+            for inc_ang, obs in zip(incident_angles, self.observations):
+                obs.incident_angle = inc_ang
+
+
+
+    def estimateDragTiming(self, weights, drop_grid_func=None, penalty=1.0, gap_penalty_factor=1.0, \
+        n_knots=None, check_clock_outliers=True, params_init=None, res_scale_init=None, \
+        max_k0=DRAG_TRAJ_MAX_K0):
+        """ Estimate station timing offsets and initial velocity jointly using the physical drag fit.
+
+        Unlike estimateTimingAndVelocity, this does not require pairwise overlap between stations and handles
+        unobserved gaps smoothly via monotonic K(L) ramps.
+
+        Arguments:
+            weights: [list] Statistical weights for each station.
+
+        Keyword arguments:
+            drop_grid_func: [callable] Optional callable returning gravity drop vectors on len_grid (m).
+                None by default.
+            penalty: [float] Regularization weight on ln K growth. 1.0 by default.
+            gap_penalty_factor: [float] Relative penalty weight on gap ramps. 1.0 by default.
+            n_knots: [int] Target number of observed ln K segments. None by default.
+            check_clock_outliers: [bool] Ignore a station whose clock offset hits max_toffset and exceeds
+                1.1*max_toffset when unconstrained. True by default.
+            params_init: [ndarray] Optional warm-start parameter vector for DragTimingFit. None by default.
+            res_scale_init: [float] Optional residual scale (m) paired with params_init. None by default.
+            max_k0: [float] Upper bound on the initial ballistic coefficient K_0 (m^2/kg), or None.
+                DRAG_TRAJ_MAX_K0 by default.
+
+        Return:
+            (success, drag_fit, time_diffs, v_init, v_init_stddev, velocity_fit):
+                - success: [bool] True if the fit succeeded.
+                - drag_fit: [DragTimingFit object] Fitted drag-timing model, or None on failure.
+                - time_diffs: [ndarray] Estimated timing offsets for all stations (s).
+                - v_init: [float] Estimated initial velocity at the beginning of the trajectory (m/s).
+                - v_init_stddev: [float] Estimated 1-sigma uncertainty of v_init (m/s).
+                - velocity_fit: [list] [v_init, intercept] linear velocity fit for lag computation.
+        """
+
+        weights = checkWeights(self.observations, weights)
+
+
+        ### Determine fixed reference stations and free timing mask ###
+
+        stations_time_dict = collections.OrderedDict()
+        stations_time_dict_copy = collections.OrderedDict()
+        fixed_copy = getattr(self, 'fixed_time_offsets_copy', self.fixed_time_offsets)
+        station_ids = [str(obs.station_id) for obs in self.observations]
+
+        for obs, stat_id in zip(self.observations, station_ids):
+            if stat_id in self.fixed_time_offsets:
+                stations_time_dict[stat_id] = self.fixed_time_offsets[stat_id]
+                stations_time_dict_copy[stat_id] = fixed_copy.get(stat_id, self.fixed_time_offsets[stat_id])
+            else:
+                stations_time_dict[stat_id] = True
+                stations_time_dict_copy[stat_id] = True
+
+        # Fix the active station with the most points as timing reference when no fixed times are supplied
+        if len(self.fixed_time_offsets) == 0:
+            counts = [0 if obs.ignore_station else int(np.count_nonzero(obs.ignore_list == 0)) \
+                for obs in self.observations]
+            ref_idx = int(np.argmax(counts))
+            stations_time_dict[station_ids[ref_idx]] = 0.0
+            stations_time_dict_copy[station_ids[ref_idx]] = 0.0
+
+        self.stations_time_dict = stations_time_dict
+        self.stations_time_dict_copy = stations_time_dict_copy
+
+        if self.estimate_timing_vel:
+            free_mask = np.array([(not obs.ignore_station) and isinstance(stations_time_dict[stat_id], bool) \
+                for obs, stat_id in zip(self.observations, station_ids)], dtype=bool)
+        else:
+            free_mask = np.zeros(len(self.observations), dtype=bool)
+
+
+        ### Fit the joint drag and timing model ###
+
+        st_times = [obs.time_data[obs.ignore_list == 0] if not obs.ignore_station else np.array([]) \
+            for obs in self.observations]
+        st_lens = [obs.state_vect_dist[obs.ignore_list == 0] if not obs.ignore_station else np.array([]) \
+            for obs in self.observations]
+
+        try:
+            drag_fit = DragTimingFit(st_times, st_lens, weights, free_mask, self.state_vect_mini, \
+                self.radiant_eci_mini, self.jdt_ref, gravity_factor=self.gravity_factor, \
+                max_toffset=self.max_toffset, n_knots=n_knots, penalty=penalty, \
+                gap_penalty_factor=gap_penalty_factor, drop_grid_func=drop_grid_func, \
+                air_rotation=getattr(self, 'air_rotation', True), params_init=params_init, \
+                res_scale_init=res_scale_init, max_k0=max_k0)
+
+        except ValueError as err:
+            if self.verbose:
+                print("Drag timing fit failed: {:s}".format(str(err)))
+            return False, None, np.zeros(len(self.observations)), 0.0, 0.0, [0.0, 0.0]
+
+
+        ### Reject stations whose clocks exceed max_toffset ###
+
+        if check_clock_outliers and self.estimate_timing_vel \
+            and (numStationsNotIgnored(self.observations) > 2):
+
+            at_limit = np.any(np.isclose(np.abs(drag_fit.time_offsets[free_mask]), self.max_toffset, \
+                atol=1e-4))
+
+            if at_limit:
+
+                # Refit with twice max_toffset to confirm an offset genuinely exceeds 1.1*max_toffset
+                try:
+                    wide_fit = DragTimingFit(st_times, st_lens, weights, free_mask, self.state_vect_mini, \
+                        self.radiant_eci_mini, self.jdt_ref, gravity_factor=self.gravity_factor, \
+                        max_toffset=2.0*self.max_toffset, n_knots=n_knots, penalty=penalty, \
+                        gap_penalty_factor=gap_penalty_factor, drop_grid_func=drop_grid_func, \
+                        air_rotation=getattr(self, 'air_rotation', True), max_k0=max_k0)
+                    exceeds = np.any(np.abs(wide_fit.time_offsets[free_mask]) > 1.1*self.max_toffset)
+                except ValueError:
+                    exceeds = False
+
+                # Identify the outlier station via leave-one-out trial fits
+                if exceeds:
+
+                    best_drop = None
+                    best_rms = np.inf
+                    for i, obs in enumerate(self.observations):
+
+                        if obs.ignore_station or (str(obs.station_id) in self.fixed_time_offsets):
+                            continue
+
+                        trial_weights = np.array(weights, dtype=np.float64)
+                        trial_weights[i] = 0.0
+                        trial_times = [arr if j != i else np.array([]) for j, arr in enumerate(st_times)]
+                        trial_lens = [arr if j != i else np.array([]) for j, arr in enumerate(st_lens)]
+                        trial_free = free_mask.copy()
+                        trial_free[i] = False
+
+                        # Keep at least one remaining station fixed as the timing reference
+                        if np.all(trial_free[trial_weights > 0]):
+                            rem = [j for j in range(len(self.observations)) if trial_weights[j] > 0]
+                            ref_j = max(rem, key=lambda j: len(trial_times[j]))
+                            trial_free[ref_j] = False
+
+                        try:
+                            trial_fit = DragTimingFit(trial_times, trial_lens, trial_weights, trial_free, \
+                                self.state_vect_mini, self.radiant_eci_mini, self.jdt_ref, \
+                                gravity_factor=self.gravity_factor, max_toffset=self.max_toffset, \
+                                n_knots=n_knots, penalty=penalty, gap_penalty_factor=gap_penalty_factor, \
+                                drop_grid_func=drop_grid_func, \
+                                air_rotation=getattr(self, 'air_rotation', True), max_k0=max_k0)
+                        except ValueError:
+                            continue
+
+                        if np.any(np.isclose(np.abs(trial_fit.time_offsets[trial_free]), self.max_toffset, \
+                            atol=1e-4)):
+                            continue
+
+                        if trial_fit.res_rms_m < best_rms:
+                            best_rms = trial_fit.res_rms_m
+                            best_drop = i
+
+                    # Ignore the offending station and re-estimate timings cleanly
+                    if best_drop is not None:
+                        off_obs = self.observations[best_drop]
+                        off_obs.ignore_station = True
+                        off_obs.ignore_list = np.ones(len(off_obs.time_data), dtype=np.uint8)
+                        if self.verbose:
+                            print("Station {:s} ignored, its clock is off by more than {:.2f} s".format( \
+                                str(off_obs.station_id), self.max_toffset))
+                        return self.estimateDragTiming(weights, drop_grid_func=drop_grid_func, \
+                            penalty=penalty, gap_penalty_factor=gap_penalty_factor, n_knots=n_knots, \
+                            check_clock_outliers=True, max_k0=max_k0)
+
+
+        ### Apply estimated timing offsets and compute initial velocity and lags ###
+
+        time_diffs = drag_fit.time_offsets.copy()
+        for obs, t_diff in zip(self.observations, time_diffs):
+
+            if self.verbose and self.estimate_timing_vel:
+                print("STATION {:s} TIME OFFSET = {:.6f} s".format(str(obs.station_id), t_diff))
+
+            if np.isnan(t_diff) or np.isinf(t_diff):
+                continue
+
+            obs.time_data = obs.time_data + t_diff
+            if obs.excluded_time is not None:
+                obs.excluded_time = [ex_time + t_diff for ex_time in obs.excluded_time]
+
+        # Extract initial velocity and tangent lag line from the start of the smooth drag fit
+        v_init = float(drag_fit.vel_grid[0])
+        v_init_stddev = float(drag_fit.v_init_stddev)
+        intercept = float(drag_fit.len_grid[0] - v_init*drag_fit.time_grid[0])
+        velocity_fit = [v_init, intercept]
+
+        # Compute lags relative to the initial-velocity tangent line for every station
+        for obs in self.observations:
+            obs.lag = obs.state_vect_dist - self.gravityLengthAlongPath(self.observations, obs.time_data) \
+                - lineFunc(obs.time_data, *velocity_fit)
+            obs.lag_line = list(velocity_fit)
+            obs.v_init = v_init
+            obs.v_init_stddev = v_init_stddev
+
+        # Store timing residual metrics
+        self.timing_res = drag_fit.res_mean_abs_s
+        self.timing_stddev = drag_fit.res_rms_s
+
+        return True, drag_fit, time_diffs, v_init, v_init_stddev, velocity_fit
+
+
 
     def _runDragCoupledCore(self, _rerun_bad_picks=False, _mc_run=False, _orig_obs=None):
         """ Run the coupled line-of-sight and physical drag-timing solver up through residual calculation
@@ -9992,12 +9983,14 @@ class Trajectory(object):
         Keyword arguments:
             _rerun_bad_picks: [bool] Internal flag set on the post-outlier-rejection pass. False by default.
             _mc_run: [bool] Internal flag set during Monte Carlo runs. False by default.
-            _orig_obs: [list] Internal noise-free observations used for dynamics/timing in MC runs. None by
-                default.
+            _orig_obs: [list] Internal noise-free observations used for dynamics and timing in MC runs.
+                None by default.
 
         Return:
             [bool] True if solving succeeded, False otherwise.
         """
+
+        ### Initialize drag-coupled solver settings and baselines ###
 
         max_iter = getattr(self, 'drag_max_iter', DRAG_TRAJ_MAX_ITER)
         dt_tol = getattr(self, 'drag_dt_tol', DRAG_TRAJ_DT_TOL)
@@ -10006,7 +9999,7 @@ class Trajectory(object):
         n_knots = getattr(self, 'drag_n_knots', None)
         max_k0 = getattr(self, 'drag_max_k0', DRAG_TRAJ_MAX_K0)
 
-        # Capture warm-start drag parameters and residual scale from the main solution in MC runs
+        # Capture warm-start drag parameters and residual scale from the nominal solution during MC runs
         warm_params = None
         warm_scale = None
         prev_drag = getattr(self, 'drag_timing_fit', None)
@@ -10014,9 +10007,10 @@ class Trajectory(object):
             warm_params = np.r_[prev_drag.drag_params, np.zeros(prev_drag.n_free)]
             warm_scale = prev_drag.res_scale_m
 
-        _normalizeTrajectoryTimes(self)
+        # Shift earliest observation to t = 0 and update reference JD
+        self._normalizeTimes()
 
-        # In an MC run, keep a clean copy of the noise-free observations aligned to the current jdt_ref
+        # Keep an aligned working copy of noise-free observations during MC runs
         orig_obs_work = None
         if _mc_run and (_orig_obs is not None):
             orig_obs_work = copy.deepcopy(_orig_obs)
@@ -10026,10 +10020,10 @@ class Trajectory(object):
                 obs_o.ignore_station = obs_n.ignore_station
                 obs_o.ignore_list = np.copy(obs_n.ignore_list)
 
-        weights = _computeIntersectingPlanes(self)
+        # Compute intersecting-planes seed geometry and statistical station weights
+        weights = self._solveIntersectingPlanes()
 
-        # Preserve supplied fixed offsets and cumulative input-data timing baselines across bad-pick reruns
-        #   and MC runs so report/pickle offsets and MC timing statistics share one consistent baseline
+        # Preserve supplied fixed offsets and cumulative input-data timing baselines across reruns and MC
         if (_rerun_bad_picks or _mc_run) and (getattr(self, 'time_diffs_final', None) is not None) \
             and (len(self.time_diffs_final) == len(self.observations)):
             cum_offsets = np.array(self.time_diffs_final, dtype=np.float64)
@@ -10038,49 +10032,62 @@ class Trajectory(object):
             cum_offsets = np.array([float(fixed_copy.get(str(obs.station_id), 0.0)) \
                 for obs in self.observations], dtype=np.float64)
 
-        # Cap MC runs to 2 passes (straight + gravity) since clocks are already aligned from the main run
-        n_passes = 2 if _mc_run else max_iter
 
+        ### Iterate coupled line-of-sight and drag-timing passes ###
+
+        # Cap MC runs to 2 passes (straight and gravity) since clocks are already aligned
+        n_passes = 2 if _mc_run else max_iter
         drag_fit = None
         dt_step = np.zeros(len(self.observations), dtype=np.float64)
+
         for it in range(n_passes):
 
+            # Recompute station ECI coordinates if the previous pass shifted clocks
             if (it > 0) and (np.max(np.abs(dt_step)) > 0.0):
-                _reinitObservations(self, weights=weights, incident_angles=self.incident_angles)
+                self._reinitObservations(weights=weights, incident_angles=self.incident_angles)
 
             use_gravity = (it > 0) and self.gravity_correction
 
+            # Update gravity drop reference point and vertical entry speed on Pass 2+
             if use_gravity and (self.gravity_vel is not None):
                 eci0, self.gravity_r0 = gravityDropReference(self.observations, self.state_vect_mini, \
                     self.radiant_eci_mini, v_init=self.v_init)
                 self.calcV0z(eci0, self.radiant_eci_mini)
 
-            # Fit the 3D trajectory line (pure cross-track LoS on noisy obs in MC runs)
-            self.state_vect_mini, self.radiant_eci_mini, self.los_mini_status = _fitLineOfSight(self, \
-                weights, use_gravity)
-            self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
+            # Solve the 3D line of sight (on noisy observations during MC runs)
+            self._solveLineOfSight(weights, use_gravity)
 
-            # In MC runs, switch to noise-free observations before projecting lengths and fitting drag/timing
+            # Switch to noise-free observations before projecting lengths and fitting drag in MC runs
             noisy_obs_backup = None
             if _mc_run and (orig_obs_work is not None):
                 noisy_obs_backup = list(self.observations)
                 self.observations = orig_obs_work
                 if (it > 0) and (np.max(np.abs(dt_step)) > 0.0):
-                    _reinitObservations(self, weights=weights, incident_angles=self.incident_angles)
+                    self._reinitObservations(weights=weights, incident_angles=self.incident_angles)
                     orig_obs_work = self.observations
 
-            # Project all observations onto the fitted trajectory line
+            # Project observations onto the fitted line to obtain lengths along the trajectory
             self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights, \
                 gravity=use_gravity)
 
-            # Warm-start Pass 2+ from the previous pass's drag parameters with zero incremental dt
+            # Warm-start Pass 2+ from the previous drag parameters with zero incremental dt
             if drag_fit is not None:
                 warm_params = np.r_[drag_fit.drag_params, np.zeros(drag_fit.n_free)]
                 warm_scale = drag_fit.res_scale_m
 
-            # Fit the physical drag model and station timing offsets jointly
-            drop_func = _makeDropGridFunc(self, drag_fit) if use_gravity else None
-            success, drag_fit, dt_step, v_init, v_init_std, vel_fit = estimateDragTiming(self, weights, \
+            # Build gravity drop evaluator along the length grid when gravity is active
+            drop_func = None
+            if use_gravity and (self.gravity_vel is not None) and (drag_fit is not None):
+                t0_drop = dropTimeOrigin(self.observations)
+                eci0_drop = gravityDropOrigin(self.observations, self.state_vect_mini, \
+                    self.radiant_eci_mini, self.gravity_vel, t0_drop)
+                prev_fit = drag_fit
+                drop_func = lambda lg, pf=prev_fit, e0=eci0_drop, t0=t0_drop: gravityDropVectors(e0, \
+                    self.radiant_eci_mini, pf.timeAtLength(lg) - t0, self.gravity_vel, t0, \
+                    self.gravity_factor, air_rotation=getattr(self, 'air_rotation', True))
+
+            # Fit the physical drag model and free station timing offsets jointly
+            success, drag_fit, dt_step, v_init, v_init_std, vel_fit = self.estimateDragTiming(weights, \
                 drop_grid_func=drop_func, penalty=penalty, gap_penalty_factor=gap_penalty_factor, \
                 n_knots=n_knots, check_clock_outliers=((it == 0) and (not _mc_run)), \
                 params_init=warm_params, res_scale_init=warm_scale, max_k0=max_k0)
@@ -10091,23 +10098,24 @@ class Trajectory(object):
                     print("Unable to minimize drag-coupled timing")
                 return False
 
+            # Accumulate station timing offsets and store updated velocity parameters
             cum_offsets = cum_offsets + dt_step
             self.time_diffs = dt_step
             self.v_init = v_init
             self.v_init_stddev = v_init_std
             self.velocity_fit = vel_fit
 
-            # Update speeds for the gravity drop across the path
+            # Update speeds used by the gravity drop calculation
             t_rel = np.linspace(drag_fit.time_grid[0], drag_fit.time_grid[-1], GRAVITY_DROP_POINTS)
             v_rel = np.interp(t_rel, drag_fit.time_grid, drag_fit.vel_grid)
             self.gravity_vel = (t_rel, v_rel)
 
-            # Zero the weight of any station ignored during clock-outlier rejection
+            # Zero weights for any station ignored during clock-outlier rejection
             weights = [w if not obs.ignore_station else 0.0 for w, obs in zip(weights, self.observations)]
             for w, obs in zip(weights, self.observations):
                 obs.weight = w
 
-            # In MC runs, carry updated timings back to noisy observations for the next LoS pass
+            # Carry updated timings back to noisy observations for the next MC LoS pass
             if _mc_run and (noisy_obs_backup is not None):
                 for obs_o, obs_n in zip(self.observations, noisy_obs_backup):
                     obs_n.time_data = np.copy(obs_o.time_data)
@@ -10117,19 +10125,21 @@ class Trajectory(object):
             if numStationsNotIgnored(self.observations) < 2:
                 return False
 
-            # Stop once the gravity pass (or second pass) has run and incremental time shifts converged
+            # Stop once the required passes have run and incremental clock shifts have converged
             min_passes = 2 if (self.gravity_correction or self.estimate_timing_vel) else 1
             if (it + 1 >= min_passes) and (np.max(np.abs(dt_step)) < dt_tol):
                 break
 
 
-        # In MC runs, switch to noise-free observations for final derived quantities and orbit
+        ### Finalize derived trajectory quantities and filter outlier picks ###
+
+        # Switch to noise-free observations for final derived quantities in MC runs
         if _mc_run and (orig_obs_work is not None):
             self.observations = orig_obs_work
 
-        # Refresh ObservedPoints if the last pass shifted clocks appreciably, else sync JD_data in place
+        # Refresh station ECI coordinates if the last pass shifted clocks appreciably
         if np.max(np.abs(dt_step)) >= 1e-3:
-            _reinitObservations(self, weights=weights, incident_angles=self.incident_angles)
+            self._reinitObservations(weights=weights, incident_angles=self.incident_angles)
         else:
             for obs in self.observations:
                 obs.JD_data = self.jdt_ref + obs.time_data/86400.0
@@ -10143,13 +10153,14 @@ class Trajectory(object):
                 self.radiant_eci_mini, v_init=self.v_init)
             self.calcV0z(eci0, self.radiant_eci_mini)
 
+        # Recompute velocities, lags, Jacchia fit and geographic coordinates on the final trajectory
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights, \
             gravity=self.gravity_correction)
         self.calcLag(self.observations, velocity_fit=self.velocity_fit)
         self.jacchia_fit = self.fitJacchiaLag(self.observations)
         self.calcLLA(self.state_vect_mini, self.radiant_eci_mini, self.observations)
 
-        # Optional initial velocity override above a fixed height
+        # Apply optional initial velocity override above a user-specified height
         if self.v_init_ht is not None:
             v_ht_avg, intercept_ht_avg, v_ht_stddev = self.calcAvgVelocityAboveHt(self.observations, \
                 1000.0*self.v_init_ht, weights)
@@ -10160,11 +10171,12 @@ class Trajectory(object):
                 self.calcLag(self.observations, velocity_fit=self.velocity_fit)
                 self.jacchia_fit = self.fitJacchiaLag(self.observations)
 
+        # Compute ECI, equatorial, horizontal coordinates, residuals and absolute magnitudes
         self.calcECIEqAltAz(self.state_vect_mini, self.radiant_eci_mini, self.observations)
         self.calcAllResiduals(self.state_vect_mini, self.radiant_eci_mini, self.observations)
         self.calcAbsMagnitudes()
 
-        # Reject angular outlier picks and re-solve once, matching legacy Trajectory.run
+        # Reject angular outlier picks and re-solve once when pick filtering is enabled
         if self.filter_picks and (not _rerun_bad_picks) and (not _mc_run):
 
             picks_rejected = 0
@@ -10193,12 +10205,11 @@ class Trajectory(object):
                     print("---------------------------------------------------------------------------------")
                     print("Updating the solution after rejecting", picks_rejected, "bad picks...")
                     print("---------------------------------------------------------------------------------")
-                _reinitObservations(self)
+                self._reinitObservations()
                 return self._runDragCoupledCore(_rerun_bad_picks=True, _mc_run=False, _orig_obs=None)
 
-            else:
-                if self.verbose:
-                    print("All picks are within {:.1f} sigma...".format(self.reject_n_sigma_outliers))
+            elif self.verbose:
+                print("All picks are within {:.1f} sigma...".format(self.reject_n_sigma_outliers))
 
         return True
 
@@ -10422,317 +10433,14 @@ class Trajectory(object):
             return self._finishRun(_mc_run=_mc_run)
 
 
-        ### Recompute the reference JD and all times so that the first time starts at 0 ###
+        # Shift earliest observation to t = 0 and update reference JD
+        self._normalizeTimes()
 
-        # Determine the first relative time from reference JD
-        t0 = min([obs.time_data[0] for obs in self.observations if (not obs.ignore_station) \
-            or (not np.all(obs.ignore_list))])
+        # Compute intersecting planes seed geometry and statistical station weights
+        weights = self._solveIntersectingPlanes()
 
-        # If the first time is not 0, normalize times so that the earliest time is 0
-        if t0 != 0.0:
-
-            # Offset all times by t0
-            for obs in self.observations:
-                obs.time_data -= t0
-
-                # Offset the excluded time range too, so it still matches the times when the observations are
-                #   reinitialized for the next pass (observations pickled before it was added do not have it)
-                if getattr(obs, 'excluded_time', None) is not None:
-                    obs.excluded_time = [ex_time - t0 for ex_time in obs.excluded_time]
-
-
-            # Offset the times of the speeds of the gravity drop too
-            if self.gravity_vel is not None:
-                self.gravity_vel = (self.gravity_vel[0] - t0, self.gravity_vel[1])
-
-            # Recompute the reference JD to corresponds with t0
-            self.jdt_ref = self.jdt_ref + t0/86400.0
-
-            # Recompute the given RA and Dec for the new reference JD, as they are converted to azimuth and
-            #   elevation at the reference JD when the observations are reinitialized for the next pass
-            if self.meastype == 1:
-                for obs in self.observations:
-
-                    # R.A. and Dec. computed at each point's own time are converted at those times, not at the
-                    #   reference JD, so they stay as they are
-                    if getattr(obs, 'radec_jd', None) is not None:
-                        continue
-
-                    obs.meas1, obs.meas2 = altAz2RADec_vect(obs.azim_data, obs.elev_data, self.jdt_ref, \
-                        obs.lat, obs.lon)
-
-
-        ###################################################################################
-
-
-        # Determine which station has the reference time (the first time entry is 0 for that station, but
-        # do not take the station which has excluded points)
-        for i, obs in enumerate(self.observations):
-
-            # Do not take the station with excluded points as the reference one
-            if obs.excluded_indx_range:
-                continue
-            
-            if obs.time_data[0] == 0.0:
-                self.t_ref_station = i
-                break
-
-
-        ### INTERSECTING PLANES SOLUTION ###
-        ######################################################################################################
-
-        self.intersection_list = []
-
-        # Calculate all plane intersections in between all station pairs, only use non-ignored stations
-        nonignored_observations = [obs for obs in self.observations if not obs.ignore_station]
-        for i, obs1 in enumerate(nonignored_observations):
-            for j, obs2 in enumerate(nonignored_observations[i + 1:]):
-
-                # Perform plane intersection
-                plane_intersection = PlaneIntersection(obs1, obs2)
-
-                if self.verbose:
-                    print('Convergence angle between stations', obs1.station_id, 'and', obs2.station_id)
-                    print(' Q =', np.degrees(plane_intersection.conv_angle), 'deg')
-                
-                self.intersection_list.append(plane_intersection)
-
-
-        radiant_sum = np.zeros(shape=3)
-        weights_sum = 1e-10
-
-        # Sum all radiants ECI positions and weights
-        for plane_intersection in self.intersection_list:
-
-            # Add the calculated radiant to the radiant sum
-            radiant_sum += plane_intersection.weight*plane_intersection.radiant_eci
-
-            weights_sum += plane_intersection.weight
-
-
-        # Calculate the average radiant
-        avg_radiant = radiant_sum/weights_sum
-
-        # Normalize the radiant vector to a unit vector
-        self.avg_radiant = vectNorm(avg_radiant)
-
-        # Calculate the radiant position in RA and Dec
-        self.radiant_eq = eci2RaDec(self.avg_radiant)
-
-        if self.verbose:
-            print('Multi-Track Weighted IP radiant:', np.degrees(self.radiant_eq))
-
-
-        # Choose the intersection with the largest convergence angle as the best solution
-        # The reason why the average trajectory determined from plane intersections is not taken as the 'seed'
-        # for the LoS method is that the state vector cannot be calculated for the average radiant
-        self.best_conv_inter = max(self.intersection_list, key=attrgetter('conv_angle'))
-
-        if self.verbose:
-            print('Best Convergence Angle IP radiant:', np.degrees(self.best_conv_inter.radiant_eq))
-
-
-        # Set the 3D position of the radiant line as the state vector, at the beginning point
-        self.state_vect = moveStateVector(self.best_conv_inter.cpa_eci, self.best_conv_inter.radiant_eci,
-            self.observations)
-
-        # Calculate incident angles between the trajectory and the station
-        self.incident_angles = self.calcStationIncidentAngles(self.state_vect, \
-            self.best_conv_inter.radiant_eci, self.observations)
-
-        # Join each observation the calculated incident angle
-        for obs, inc_angl in zip(self.observations, self.incident_angles):
-            obs.incident_angle = inc_angl
-
-
-
-        # If there are more than 2 stations, use weights for fitting
-        if numStationsNotIgnored(self.observations) > 2:
-
-            # Calculate minimization weights for LoS minimization as squared sines of incident angles
-            weights = [np.sin(w)**2 for w in self.incident_angles]
-
-        else:
-
-            # Use unity weights if there are only two stations
-            weights = [1.0]*len(self.observations)
-
-
-        # Set weights to 0 for stations that are not used
-        weights = [w if (self.observations[i].ignore_station == False) else 0 for i, w in enumerate(weights)]
-
-        # Set weights to stations
-        for w, obs in zip(weights, self.observations):
-                obs.weight = w
-
-
-        # Print weights
-        if self.verbose:
-            print('LoS statistical weights:')
-
-            for obs in self.observations:
-                print("{:>12s}, {:.3f}".format(obs.station_id, obs.weight))
-
-        ######################################################################################################
-
-
-        if self.verbose:
-            print('Intersecting planes solution:', self.state_vect)
-            
-            print('Minimizing angle deviations...')
-
-
-        ### LEAST SQUARES SOLUTION ###
-        ######################################################################################################
-
-        # Calculate the initial sum and angles deviating from the radiant line
-        angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
-             self.best_conv_inter.radiant_eci, weights=weights, \
-             gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, \
-             v0z=self.v0z, r0=self.gravity_r0, gravity_vel=self.gravity_vel, air_rotation=self.air_rotation
-             )
-
-        if self.verbose:
-            print('Initial angle sum:', angle_sum)
-
-
-        # Set the initial guess for the state vector and the radiant from the intersecting plane solution
-        p0 = np.r_[self.state_vect, self.best_conv_inter.radiant_eci]
-
-        # Perform the minimization of angle deviations. The gravity will only be compensated for in the second
-        #   pass, which has the vertical velocity from the first
-        minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), \
-            self.gravity_factor, self.v0z, self.gravity_r0, self.gravity_vel, self.air_rotation)
-        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
-            method=nelderMeadLine)
-
-        # Get the number of restarts, which trajectories pickled before the option was added do not have
-        los_restarts = getattr(self, 'los_restarts', 0)
-
-        # Restart the minimization from its own solution if requested, and keep a converged solution when
-        #   its restart does not converge
-        for _ in range(los_restarts):
-
-            restarted_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
-                args=minimize_args, method=nelderMeadLine)
-
-            if restarted_solution.success or (not minimize_solution.success):
-                minimize_solution = restarted_solution
-
-        # Continue a minimization which ran out of function evaluations from the beginning of the meteor on
-        #   the line
-        for _ in range(LOS_CONTINUE_RUNS):
-
-            if minimize_solution.success:
-                break
-
-            restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], \
-                self.observations), vectNorm(minimize_solution.x[3:])]
-            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, \
-                method=nelderMeadLine)
-
-        # Minimize again from the previous solution (of the pass before the timing was estimated, or the main
-        #   solution in a Monte Carlo run) if its cost is lower than at the minimum found, as the minimization
-        #   can stop in a distant local minimum
-        if (self.state_vect_mini is not None) and (self.radiant_eci_mini is not None):
-
-            previous = np.r_[self.state_vect_mini, self.radiant_eci_mini]
-
-            if minimizeAngleCost(previous, *minimize_args) < minimize_solution.fun:
-
-                previous_solution = scipy.optimize.minimize(minimizeAngleCost, previous, \
-                    args=minimize_args, method=nelderMeadLine)
-
-                if previous_solution.success or (not minimize_solution.success):
-                    minimize_solution = previous_solution
-
-        unbounded_solution = minimize_solution
-
-        # NOTE
-        # Other minimization methods were tried as well, but all produce higher fit residuals than Nelder-Mead.
-        # Tried:
-        # - Powell, CS, BFGS - larger residuals
-        # - Least Squares - large residuals
-        # - Basinhopping with NM seed solution - long time to execute with no improvement
-
-
-        # If the minimization diverged, bound the solution to +/-10% of state vector
-        if stateVectorDiverged(minimize_solution.x[:3], self.state_vect):
-
-            print('WARNING! Unbounded state vector optimization failed!')
-            print('Trying bounded minimization to +/-10% of state vector position.')
-
-            # Limit the minimization to 10% of original estimation in the state vector
-            bounds = []
-            for val in self.state_vect:
-                bounds.append(sorted([0.9*val, 1.1*val]))
-
-            # Bound the radiant vector to +/- 25% of original vales, per each ECI coordinate
-            for val in self.best_conv_inter.radiant_eci:
-                bounds.append(sorted([0.75*val, 1.25*val]))
-
-            print('BOUNDS:', bounds)
-            print('p0:', p0)
-            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
-                weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z, \
-                self.gravity_r0, self.gravity_vel, self.air_rotation), bounds=bounds, method='SLSQP')
-
-            # Keep the unbounded solution if it converged and the bounded one did not converge or is worse
-            if unbounded_solution.success and ((not minimize_solution.success) or \
-                (unbounded_solution.fun < minimize_solution.fun)):
-                minimize_solution = unbounded_solution
-
-
-        if self.verbose:
-            print('Minimization info:')
-            print(' Message:', minimize_solution.message)
-            print(' Iterations:', minimize_solution.nit)
-            print(' Success:', minimize_solution.success)
-            print(' Final function value:', minimize_solution.fun)
-
-
-        # Set the minimization status
-        self.los_mini_status = minimize_solution.success
-
-        # If the minimization succeeded
-        if minimize_solution.success:
-        
-            # Unpack the solution
-            self.state_vect_mini, self.radiant_eci_mini = np.hsplit(minimize_solution.x, 2)
-
-            # Set the state vector to the position of the highest point projected on the radiant line
-            self.state_vect_mini = moveStateVector(self.state_vect_mini, self.radiant_eci_mini, 
-                self.observations)
-
-            # Normalize radiant direction
-            self.radiant_eci_mini = vectNorm(self.radiant_eci_mini)
-
-            # Convert the minimized radiant solution to RA and Dec
-            self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
-
-            if self.verbose:
-                print('Position and radiant LMS solution:')
-                print(' State vector:', self.state_vect_mini)
-                print(' Ra', np.degrees(self.radiant_eq_mini[0]), 'Dec:', np.degrees(self.radiant_eq_mini[1]))
-
-        else:
-
-            print('Angle minimization failed altogether!')
-
-            # If the solution did not succeed, set the values to intersecting planes solution
-            self.radiant_eci_mini = self.best_conv_inter.radiant_eci
-
-            # Normalize radiant direction
-            self.radiant_eci_mini = vectNorm(self.radiant_eci_mini)
-
-            # Convert the minimized radiant solution to RA and Dec
-            self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
-
-            # Calculate the state vector
-            self.state_vect_mini = moveStateVector(self.state_vect, self.radiant_eci_mini, 
-                self.observations)
-
-        ######################################################################################################
+        # Minimize angular line-of-sight deviations (with gravity drop on Pass 2)
+        self._solveLineOfSight(weights, (_rerun_timing and self.gravity_correction))
 
 
         # If running a Monte Carlo run, switch the observations to the original ones, so the noise does not 

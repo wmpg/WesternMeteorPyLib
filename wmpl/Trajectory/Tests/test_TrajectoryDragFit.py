@@ -19,7 +19,7 @@ import numpy as np
 
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, GravityDragMeteor, JDT_REF, STATIONS, \
     observeMeteor, timingOffsets
-from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, _refreshPreAtmAfterMC, \
+from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, _updateDragMCResults, \
     computeStationCoverage, findObservedWindows, plotDragTrajectory
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.Math import angleBetweenVectors
@@ -437,13 +437,14 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     report_path = os.path.join(str(tmp_path), traj_fall.file_name + '_report.txt')
     assert os.path.isfile(report_path)
     report_txt = open(report_path, 'r').read()
-    assert 'Drag fit summary' in report_txt
-    assert 'Air column above beg:' in report_txt
-    assert 'Pre-atm drag correction:' in report_txt
+    assert 'Drag fit\n--------' in report_txt
+    assert 'Pre-atmospheric air-column drag correction:' in report_txt
+    assert 'Air column      =' in report_txt
+    assert 'Velocity corr.  =' in report_txt
     assert 'applied to orbit' in report_txt
-    assert 'Peak dynamic pressure:' in report_txt
-    assert 'Effective ablation coeff (sigma_eff):' in report_txt
-    assert 'Terminal dynamic mass:' in report_txt
+    assert 'Peak dyn. pres. =' in report_txt
+    assert 'Eff. ablation   =' in report_txt
+    assert 'Terminal mass   =' in report_txt
     assert 'not estimated' not in report_txt
     assert 'single-body m end/beg' not in report_txt
 
@@ -478,7 +479,7 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     assert 'poorly constrained' in pre_wide_mc['reason']
 
     # Reapplying the pre-atm gate after attaching wide MC uncertainty must revoke dv_pre_atm on the orbit
-    _refreshPreAtmAfterMC(traj_fall, traj_fall, [traj_fall])
+    _updateDragMCResults(traj_fall, traj_fall, [traj_fall])
     assert traj_fall.dv_pre_atm == 0.0
     assert abs(traj_fall.orbit.v_inf - traj_fall.v_init) < 1e-6
     assert not traj_fall.pre_atm_info['applied']
@@ -497,5 +498,9 @@ def testReportSummaryPreAtmAndTerminalMassGating(tmp_path):
     assert 'non-meteorite-dropping' in tm_small['reason']
     pre_small = fit_small.preAtmosphericVelocity()
     assert not pre_small['applied']
-    summary_small = fit_small.formatReportSummary()
-    assert 'Terminal dynamic mass: not estimated' in summary_small
+
+    # Verify saveReport writes the gated-out status cleanly in the native Drag fit section
+    traj_fall.drag_timing_fit = fit_small
+    traj_fall.pre_atm_info = pre_small
+    report_small = traj_fall.saveReport(str(tmp_path), 'small_report.txt', verbose=False, save_results=False)
+    assert 'Terminal mass   = not estimated' in report_small
