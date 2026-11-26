@@ -1541,6 +1541,7 @@ if __name__ == '__main__':
                     res = canddb.dbhandle.execute('select count(*) from candidates').fetchone()
                     final_count = res[0]
                     print(f'removed {orig_count - final_count} candidates')
+                    canddb._commitCandDatabase()
 
             canddb.closeCandDatabase()
 
