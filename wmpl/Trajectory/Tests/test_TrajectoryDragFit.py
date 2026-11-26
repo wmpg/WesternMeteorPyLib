@@ -409,14 +409,24 @@ def testReportSummaryAndTerminalMassGating(tmp_path):
     assert abl['sigma_eff'] is not None
     assert 0.001 < abl['sigma_eff'] < 0.2
 
-    # Wide MC ensemble spread on K_end must also suppress the terminal dynamic mass estimate
+    # Moderate MC spread on ln(K_end/K_beg) must enlarge sigma_eff_std in quadrature
     df_fall = traj_fall.drag_timing_fit
+    df_fall.mc_dlog_k_std = 0.25
+    abl_mc = df_fall.effectiveAblationCoeff()
+    assert abl_mc['sigma_eff_std'] is not None
+    assert abl_mc['sigma_eff_std'] > (abl['sigma_eff_std'] or 0.0)
+    df_fall.mc_dlog_k_std = None
+
+    # Wide MC ensemble spread on K_end must suppress both terminal dynamic mass and sigma_eff
     k_end = float(np.exp(df_fall.log_k_grid[-1]))
     df_fall.mc_k_lo = np.full_like(df_fall.len_grid, k_end*np.exp(-2.0))
     df_fall.mc_k_hi = np.full_like(df_fall.len_grid, k_end*np.exp(2.0))
     tm_wide_mc = df_fall.terminalDynamicMass()
     assert tm_wide_mc['mass'] is None
     assert 'poorly constrained' in tm_wide_mc['reason']
+    abl_wide_mc = df_fall.effectiveAblationCoeff()
+    assert abl_wide_mc['sigma_eff'] is None
+    assert 'poorly constrained' in abl_wide_mc['reason']
 
     # 2. Small high-altitude meteor (100 -> 88 km, 35 km/s): terminal mass must NOT be estimated
     jd = 2460000.5

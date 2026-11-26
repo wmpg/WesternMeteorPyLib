@@ -560,6 +560,7 @@ class DragTimingFit(object):
         self.mc_vel_hi = None
         self.mc_k_lo = None
         self.mc_k_hi = None
+        self.mc_dlog_k_std = None
         self.mc_time_diffs_std = None
 
         # Compute systematic timing and velocity bounds across unobserved gaps
@@ -1230,6 +1231,29 @@ class DragTimingFit(object):
 
 
 
+    def _endLogKStd(self):
+        """ Return the combined 1-sigma uncertainty of ln K at the end of the trajectory, combining the
+            Jacobian fit covariance and the Monte Carlo ensemble spread (when available) in quadrature.
+
+        Return:
+            [float] Combined 1-sigma uncertainty of ln K_end (np.inf when unconstrained or invalid).
+        """
+
+        log_k_std_fit = float(self.log_k_std_grid[-1]) \
+            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
+        log_k_std_tot = log_k_std_fit
+
+        if (self.mc_k_lo is not None) and (self.mc_k_hi is not None):
+            if (not np.isfinite(self.mc_k_lo[-1])) or (not np.isfinite(self.mc_k_hi[-1])) \
+                or (self.mc_k_lo[-1] <= 0.0) or (self.mc_k_hi[-1] < self.mc_k_lo[-1]):
+                return np.inf
+            log_k_std_mc = 0.5*float(np.log(self.mc_k_hi[-1]/self.mc_k_lo[-1]))
+            log_k_std_tot = float(np.hypot(log_k_std_fit, log_k_std_mc))
+
+        return log_k_std_tot
+
+
+
     def terminalDynamicMass(self, gamma_a=GAMMA_A, bulk_density=DRAG_TRAJ_BULK_DENSITY):
         """ Estimate the terminal dynamic mass at the last observed point when the trajectory is in a
             constrained, meteorite-dropping regime.
@@ -1254,15 +1278,14 @@ class DragTimingFit(object):
         dv_frac = dv/max(vel_beg, 1.0)
         log_k_end = float(self.log_k_grid[-1])
         k_end = float(np.exp(log_k_end))
-        log_k_std_fit = float(self.log_k_std_grid[-1]) \
-            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
+        log_k_std_tot = self._endLogKStd()
 
         result = {
             'mass': None,
             'mass_lo': None,
             'mass_hi': None,
             'k_end': k_end,
-            'log_k_std': log_k_std_fit,
+            'log_k_std': log_k_std_tot,
             'gamma_a': float(gamma_a),
             'bulk_density': float(bulk_density),
             'ablation_active': bool(vel_end > DRAG_TRAJ_TERM_MASS_ABLATION_VEL),
@@ -1298,18 +1321,6 @@ class DragTimingFit(object):
             and (float(np.sum(self.drag_params[3:])) < 1e-3):
             result['reason'] = "ballistic coefficient K pinned at max_k0 = {:.1f} m^2/kg".format(max_k0)
             return result
-
-        # Combine drag-fit Jacobian uncertainty and MC ensemble spread in quadrature before gating
-        log_k_std_tot = log_k_std_fit
-        if (self.mc_k_lo is not None) and (self.mc_k_hi is not None):
-            if (not np.isfinite(self.mc_k_lo[-1])) or (not np.isfinite(self.mc_k_hi[-1])) \
-                or (self.mc_k_lo[-1] <= 0.0) or (self.mc_k_hi[-1] < self.mc_k_lo[-1]):
-                log_k_std_tot = np.inf
-            else:
-                log_k_std_mc = 0.5*float(np.log(self.mc_k_hi[-1]/self.mc_k_lo[-1]))
-                log_k_std_tot = float(np.hypot(log_k_std_fit, log_k_std_mc))
-
-        result['log_k_std'] = log_k_std_tot
 
         # Reject poorly constrained K at the end of the trajectory (including MC ensemble spread)
         if (not np.isfinite(log_k_std_tot)) or (log_k_std_tot > DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD):
@@ -1400,10 +1411,9 @@ class DragTimingFit(object):
             result['reason'] = "K pinned at max_k0 cap"
             return result
 
-        log_k_std_end = float(self.log_k_std_grid[-1]) \
-            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
+        log_k_std_end = self._endLogKStd()
         if (not np.isfinite(log_k_std_end)) or (log_k_std_end > DRAG_TRAJ_TERM_MASS_MAX_LOG_K_STD):
-            result['reason'] = "K poorly constrained at end"
+            result['reason'] = "K poorly constrained at end (sigma ln K = {:.2f})".format(log_k_std_end)
             return result
 
         dv2_kms2 = (vel_beg/1000.0)**2 - (vel_end/1000.0)**2
@@ -1414,13 +1424,35 @@ class DragTimingFit(object):
         dlog_k = max(log_k_end - log_k_beg, 0.0)
         sigma_eff = 6.0*dlog_k/dv2_kms2
 
-        sigma_std = None
+        dlog_k_std_fit = None
         if self.params_cov is not None:
             grad = np.zeros(len(self.params), dtype=np.float64)
             grad[3:3 + self.n_knots] = 1.0
             var_dlog_k = float(grad.dot(self.params_cov).dot(grad))
             if np.isfinite(var_dlog_k) and (var_dlog_k >= 0.0):
-                sigma_std = float(6.0*np.sqrt(var_dlog_k)/dv2_kms2)
+                dlog_k_std_fit = float(np.sqrt(var_dlog_k))
+
+        # Include MC ensemble spread on ln(K_end/K_beg) when available
+        dlog_k_std_mc = getattr(self, 'mc_dlog_k_std', None)
+        if (dlog_k_std_mc is not None) and ((not np.isfinite(dlog_k_std_mc)) or (dlog_k_std_mc < 0.0)):
+            dlog_k_std_mc = None
+        if (dlog_k_std_mc is None) and (self.mc_k_lo is not None) and (self.mc_k_hi is not None) \
+            and np.isfinite(self.mc_k_lo[0]) and np.isfinite(self.mc_k_hi[0]) \
+            and np.isfinite(self.mc_k_lo[-1]) and np.isfinite(self.mc_k_hi[-1]) \
+            and (self.mc_k_lo[0] > 0.0) and (self.mc_k_lo[-1] > 0.0) \
+            and (self.mc_k_hi[0] >= self.mc_k_lo[0]) and (self.mc_k_hi[-1] >= self.mc_k_lo[-1]):
+            s_beg = 0.5*float(np.log(self.mc_k_hi[0]/self.mc_k_lo[0]))
+            s_end = 0.5*float(np.log(self.mc_k_hi[-1]/self.mc_k_lo[-1]))
+            dlog_k_std_mc = float(np.hypot(s_beg, s_end))
+
+        if (dlog_k_std_fit is not None) and (dlog_k_std_mc is not None):
+            sigma_std = float(6.0*np.hypot(dlog_k_std_fit, dlog_k_std_mc)/dv2_kms2)
+        elif dlog_k_std_fit is not None:
+            sigma_std = float(6.0*dlog_k_std_fit/dv2_kms2)
+        elif dlog_k_std_mc is not None:
+            sigma_std = float(6.0*dlog_k_std_mc/dv2_kms2)
+        else:
+            sigma_std = None
 
         result['sigma_eff'] = float(sigma_eff)
         result['sigma_eff_std'] = sigma_std
@@ -1455,8 +1487,7 @@ class DragTimingFit(object):
             else:
                 episodes.append([idx])
 
-        log_k_std_end = float(self.log_k_std_grid[-1]) \
-            if (self.log_k_std_grid is not None) and (len(self.log_k_std_grid) > 0) else np.inf
+        log_k_std_end = self._endLogKStd()
 
         changes = []
         for idxs in episodes:
@@ -2086,6 +2117,8 @@ def _attachDragMCUncertainties(traj, mc_traj_list):
     drag_fit.mc_vel_std = np.std(vel_samples, axis=0)
     drag_fit.mc_vel_lo, drag_fit.mc_vel_hi = np.percentile(vel_samples, [15.865, 84.135], axis=0)
     drag_fit.mc_k_lo, drag_fit.mc_k_hi = np.percentile(k_samples, [15.865, 84.135], axis=0)
+    dlog_k_samples = np.log(k_samples[:, -1]/k_samples[:, 0])
+    drag_fit.mc_dlog_k_std = float(np.std(dlog_k_samples))
 
     td_list = [t.time_diffs_final for t in mc_traj_list \
         if (t.time_diffs_final is not None) and (len(t.time_diffs_final) == len(traj.observations))]
