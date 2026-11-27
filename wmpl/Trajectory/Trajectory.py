@@ -3662,6 +3662,9 @@ DRAG_TRAJ_PRE_ATM_MAX_DV_FRAC = 0.15
 DRAG_TRAJ_DARKFLIGHT_MAX_HT = 35000.0
 DRAG_TRAJ_DARKFLIGHT_MIN_MASS = 0.01
 
+# Minimum dynamic pressure (Pa) required to report a dynamical K-change episode
+DRAG_TRAJ_CHANGE_MIN_DYN_PRES = 2000.0
+
 
 
 def _formatPressure(dyn_pres_pa):
@@ -5337,24 +5340,46 @@ class DragTimingFit(object):
 
 
 
-    def detectDragChanges(self, min_ratio=1.10, min_signif=1.5):
-        """ Detect sudden increases in the ballistic coefficient K across contiguous observed segments
-            (dynamic signatures of fragmentation or major shedding events).
+    def detectDragChanges(self, min_ratio=1.10, min_signif=1.5, min_dyn_pres=DRAG_TRAJ_CHANGE_MIN_DYN_PRES):
+        """ Detect sudden increases in the ballistic coefficient K across contiguous descending observed
+            segments (dynamic signatures of fragmentation or major shedding events).
+
+        Ascending Earth-grazer segments and near-vacuum high-altitude segments below min_dyn_pres are
+        excluded because decreasing air density forces K to grow artificially when fitting small velocity
+        residuals.
 
         Keyword arguments:
             min_ratio: [float] Minimum K_after / K_before ratio across an active episode. 1.10 by default.
             min_signif: [float] Minimum covariance significance (sigma) required for a standalone jump.
                 1.5 by default.
+            min_dyn_pres: [float] Minimum peak dynamic pressure (Pa) across the episode required to report a
+                change. DRAG_TRAJ_CHANGE_MIN_DYN_PRES by default.
 
         Return:
             [list] List of dictionaries describing each detected change episode, sorted by descending height.
         """
 
         p_dyn = self.dynamicPressureOnGrid()
+        l_min_ht = float(self.len_grid[int(np.argmin(self.ht_grid))])
 
-        # Select observed ramps with appreciable ln K growth
-        active = [i for i in range(self.n_knots) \
-            if (not self.is_gap_ramp[i]) and (float(self.drag_params[3 + i]) > 0.03)]
+        # Select descending observed ramps before perigee with appreciable ln K growth
+        active = []
+        for i in range(self.n_knots):
+
+            if self.is_gap_ramp[i] or (float(self.drag_params[3 + i]) <= 0.03):
+                continue
+
+            l_beg_i = float(np.clip(self.ramp_beg[i], self.len_first, self.len_last))
+            l_end_i = min(float(self.ramp_beg[i] + self.ramp_len[i]), self.len_last)
+            ht_beg_i = float(self.heightAtLength(l_beg_i)[0])
+            ht_end_i = float(self.heightAtLength(l_end_i)[0])
+
+            # Exclude ascending Earth-grazer ramps where thinning air drives unphysical K blow-up
+            if (ht_end_i >= ht_beg_i) or (l_end_i > l_min_ht + 1e-6):
+                continue
+
+            active.append(i)
+
         if not active:
             return []
 
@@ -5397,17 +5422,27 @@ class DragTimingFit(object):
             l_beg = float(np.clip(self.ramp_beg[idxs[0]], self.len_first, self.len_last))
             l_end = min(float(self.ramp_beg[idxs[-1]] + self.ramp_len[idxs[-1]]), self.len_last)
             ht_beg = float(self.heightAtLength(l_beg)[0])
+            ht_end = float(self.heightAtLength(l_end)[0])
             dyn_pres_beg = float(np.interp(l_beg, self.len_grid, p_dyn))
+            dyn_pres_end = float(np.interp(l_end, self.len_grid, p_dyn))
+
+            # Require physically non-negligible dynamic pressure across the episode
+            ep_mask = (self.len_grid >= l_beg) & (self.len_grid <= l_end)
+            ep_max_dyn_pres = max(dyn_pres_beg, dyn_pres_end)
+            if np.any(ep_mask):
+                ep_max_dyn_pres = max(ep_max_dyn_pres, float(np.max(p_dyn[ep_mask])))
+            if ep_max_dyn_pres < min_dyn_pres:
+                continue
 
             changes.append({
                 'length': l_beg,
                 'ht': ht_beg,
                 'ht_beg': ht_beg,
-                'ht_end': float(self.heightAtLength(l_end)[0]),
+                'ht_end': ht_end,
                 'time': float(self.timeAtLength(l_beg)[0]),
                 'dyn_pres': dyn_pres_beg,
                 'dyn_pres_beg': dyn_pres_beg,
-                'dyn_pres_end': float(np.interp(l_end, self.len_grid, p_dyn)),
+                'dyn_pres_end': dyn_pres_end,
                 'k_at_change': float(self.ballisticCoeffAtLength(l_beg)[0]),
                 'k_ratio': k_ratio,
                 'dlog_k': tot_dlog_k,

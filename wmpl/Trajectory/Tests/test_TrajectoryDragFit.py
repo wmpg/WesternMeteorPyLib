@@ -631,3 +631,50 @@ def testDragCovarianceAccountsForWeightsAndAutocorrelation(tmp_path):
     traj_clean.drag_timing_fit = fit_corr
     report_txt = traj_clean.saveReport(str(tmp_path), 'tau_report.txt', verbose=False, save_results=False)
     assert 'tau_int =' in report_txt
+
+
+
+def testDetectDragChangesExcludesAscendingAndLowPressure():
+    """ Verify that detectDragChanges detects genuine descending fireball K increases while excluding
+        ascending Earth-grazer segments and near-vacuum high-altitude ramps.
+    """
+
+    # 1. Descending fireball with a genuine K increase in the dense atmosphere must be detected
+    meteor = DragMeteor(16000.0, 90.0, 45.0, 0.002, 0.008, 3.0, 8.0, ground_drag=True)
+    traj_desc = observeMeteor(meteor, noise=2.0, fps=25.0, stations=STATIONS)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj_desc = traj_desc.run()
+
+    desc_changes = traj_desc.drag_timing_fit.detectDragChanges()
+    assert len(desc_changes) >= 1
+    assert all(ch['ht_end'] < ch['ht_beg'] for ch in desc_changes)
+    assert all(max(ch['dyn_pres_beg'], ch['dyn_pres_end']) >= 2000.0 for ch in desc_changes)
+
+    # 2. Grazing Earth-grazer dipping from 102 km through perigee (~92 km) and ascending to 108 km with an
+    #   apparent slowdown on the ascending exit leg must not report a spurious fragmentation
+    jd = 2460000.5
+    sv = np.array(geo2Cartesian(np.radians(52.0), np.radians(6.0), 102000.0, jd), dtype=np.float64)
+    up = sv/np.linalg.norm(sv)
+    east = np.cross(np.array([0.0, 0.0, 1.0]), up)
+    east /= np.linalg.norm(east)
+
+    # Slight downward entry angle (-3.1 deg) creates a chord dipping ~10 km to perigee then climbing out
+    slope_rad = np.radians(3.1)
+    rad_eci = np.sin(slope_rad)*up - np.cos(slope_rad)*east
+
+    # Synthetic 25 s grazing flight with constant 33.8 km/s speed and a noisy slowdown on the final 0.5 s
+    t_all = np.linspace(0.0, 25.0, 251)
+    l_all = 33800.0*t_all
+    late = t_all > 24.4
+    l_all[late] -= 8000.0*(t_all[late] - 24.4)
+
+    fit_eg = DragTimingFit([t_all[:140], t_all[110:]], [l_all[:140], l_all[110:]], [1.0, 1.0], \
+        [True, False], sv, rad_eci, jd, max_toffset=5.0)
+
+    assert fit_eg.ht_grid[-1] > np.min(fit_eg.ht_grid)
+    assert fit_eg.detectDragChanges() == []
+
+    # 3. High-altitude descending ramp below min_dyn_pres must also be filtered out
+    fit_hi = copy.deepcopy(traj_desc.drag_timing_fit)
+    fit_hi.rho = np.full_like(fit_hi.rho, 1e-9)
+    assert fit_hi.detectDragChanges() == []
