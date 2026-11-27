@@ -1,6 +1,7 @@
 """ Tests of reading ECSV files with loadECSVs(). The GFE standard (Appendix 4) keeps one row per frame, with
     additional fragments in columns with a numeric suffix (e.g. azimuth1), so the main fragment columns are
-    empty on the frames on which only an additional fragment was measured.
+    empty on the frames on which only an additional fragment was measured. The azimuth and altitude of each
+    row are converted to R.A./Dec. at the time of the row, which the solver has to convert back at that time.
 
 Run with pytest:
     python -m pytest wmpl/Formats/Tests/test_ECSV.py -v
@@ -13,7 +14,13 @@ import tempfile
 
 import numpy as np
 
+import matplotlib
+matplotlib.use('Agg')
+
 from wmpl.Formats.ECSV import loadECSVs
+from wmpl.Formats.GenericFunctions import solveTrajectoryGeneric
+from wmpl.Formats.Tests.StraightMeteorECSV import writeStraightMeteorECSVs
+from wmpl.Utils.Math import angleBetweenVectors
 
 
 # Header with the station of the points
@@ -108,11 +115,53 @@ def testFilesWithoutEmptyRowsAreUnchanged():
 
 
 
+def _solveStraightMeteor(radec_per_point):
+    """ Solve the straight meteor from its ECSV files without noise.
+
+    Arguments:
+        radec_per_point: [bool] Passed to loadECSVs.
+
+    Return:
+        [float] Angle between the solved and the true radiant (arcsec).
+    """
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        paths, _, radiant_eci = writeStraightMeteorECSVs(tmp_dir)
+        jdt_ref, meteor_list = loadECSVs(paths, radec_per_point=radec_per_point)
+
+        traj = solveTrajectoryGeneric(jdt_ref, meteor_list, tmp_dir, estimate_timing_vel=False, \
+            gravity_correction=False, filter_picks=False, monte_carlo=False, calc_orbit=False, \
+            show_plots=False, save_results=False, verbose=False)
+
+    return 3600*np.degrees(angleBetweenVectors(traj.radiant_eci_mini, radiant_eci))
+
+
+
+def testTheRaDecOfEachRowAreConvertedAtItsTime():
+    """ Check that the straight meteor is recovered from its ECSV files. When the R.A./Dec. were converted to
+        azimuth and altitude at the reference time, the radiant was 52 arcsec off.
+    """
+
+    assert _solveStraightMeteor(True) < 0.05
+
+
+
+def testTheLegacyConversionAtTheReferenceTimeIsKept():
+    """ Check that the legacy and incorrect conversion at the reference time, only for reproducing older
+        solutions, still rotates the lines of sight.
+    """
+
+    assert _solveStraightMeteor(False) > 30.0
+
+
+
 
 if __name__ == "__main__":
 
     # Run all tests
-    test_list = [testRowsWithoutTheMainFragmentAreSkipped, testFilesWithoutEmptyRowsAreUnchanged]
+    test_list = [testRowsWithoutTheMainFragmentAreSkipped, testFilesWithoutEmptyRowsAreUnchanged, \
+        testTheRaDecOfEachRowAreConvertedAtItsTime, testTheLegacyConversionAtTheReferenceTimeIsKept]
 
     for test in test_list:
         test()

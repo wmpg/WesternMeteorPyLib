@@ -9,14 +9,20 @@ and what the options are for.
 - [Drag fit of the motion along a trajectory](DragFit.md) — the drag model of the motion along a solved
   trajectory, sampling it by height or time for dark flight, and what the ballistic coefficient says
   about ablation and fragmentation.
+- [Alpha-beta fit of a fireball](AlphaBeta.md) — alpha, beta and the entry velocity fitted to the lag, their
+  uncertainties on the meteorite survival diagram, and when beta only has an upper limit.
 - [REBOUND orbital integration](REBOUND.md) — integrating a meteoroid orbit backwards or forwards,
   close encounters and impacts, Monte Carlo clones, radiation forces, and chaos indicators.
+- [The MetSim ablation model](MetSim.md) — what the erosion simulation computes, gravity, stepping through
+  time, erosion into grains, the fragmentation entries, checks against an exact solution, old fits run again,
+  and how to choose the time step.
 - [DynestyMetSim](../Dynesty/README.md) — nested-sampling fits of the erosion ablation model to a
   meteor light curve and dynamics.
 - [Orbit dissimilarity criteria](OrbitSimilarity.md) — measuring how similar two orbits are, which
   criterion to pick, and why their thresholds are not interchangeable.
-- [Classifying a single orbit](OrbitClassification.md) — Tisserand, the cometary tests, and the
-  Tancredi scheme for asteroids in cometary orbits.
+- [Classifying a single orbit](OrbitClassification.md) — Tisserand, the cometary tests, the
+  meteoroid orbital classes of Borovička et al. (2005), the Atira/Aten/Apollo/Amor/Arjuna classes,
+  and the Tancredi scheme for asteroids in cometary orbits.
 - [Choosing a D-criterion threshold](DThresholds.md) — the other half of a stream search, and why
   the traditional threshold is too permissive to use.
 

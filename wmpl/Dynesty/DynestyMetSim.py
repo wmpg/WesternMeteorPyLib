@@ -58,15 +58,17 @@ except ImportError:
     print("Dynesty package not found. Install dynesty to use the Dynesty functions.")
     DYNESTY_FOUND = False
 
-from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
-from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin
+from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants, \
+    fitLagTimeOffset, lagTimeOffsetMax
+from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin, \
+    constantsRelativeToGround, constantsToInertial, atmDensityDescription, Fragment
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
-from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
+from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, atmDensityTableInfo, \
+    ATM_TABLE_HT_MIN, ATM_TABLE_HT_MAX, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
 
 
 class TimeoutException(Exception):
@@ -114,6 +116,10 @@ def jsonDefault(o):
     # sets -> lists
     if isinstance(o, set):
         return list(o)
+
+    # fragments -> dict of all their attributes, most of which are not in their __dict__
+    if isinstance(o, Fragment):
+        return o.toDict()
 
     # custom objects -> dict (best effort)
     if hasattr(o, "__dict__"):
@@ -338,8 +344,17 @@ def plotJSONDataVsObs(obs_data, out_folder, best_noise_lum=0, best_noise_lag=0):
         const_json_file = os.path.join(out_folder, const_json_name)
         try:
             # Load the constants from the JSON files
-            const_manual, _ = loadConstants(const_json_file)
+            const_manual, const_json_manual = loadConstants(const_json_file)
             const_manual.dens_co = np.array(const_manual.dens_co)
+
+            # Simulate each fit in the frame it was saved in, whatever the frame of the run
+            obs_data = copy.copy(obs_data)
+            obs_data.legacy_inertial_frame = 'v_rotation' not in const_json_manual
+
+            # Convert constants saved relative to the ground to the inertial frame of the observations
+            if not obs_data.legacy_inertial_frame:
+                const_manual.v_rotation = getattr(obs_data, 'v_rotation', 0.0)
+                constantsToInertial(const_manual)
             # # Run the simulation
             # frag_main, results_list, wake_results = runSimulation(const_manual, compute_wake=False)
             # simulation_manual_MetSim_object = SimulationResults(const_manual, frag_main, results_list, wake_results)
@@ -754,21 +769,22 @@ def plotSimVsObsResiduals(obs_data, sim_data=None, output_folder='', file_name='
                     vel_plot[1:], '.', \
                         color=station_colors[station], label=station)
 
+        # Find the simulated lengths at the observed times and the time at which the simulation passes the
+        #   first point
+        len_sim, time_offset = simulatedLengthsDynesty(sim_data, obs_data)
+
         # plot lag_arr vs leading_frag_time_arr without nan values
         sim_lag = (sim_data.leading_frag_length_arr-sim_data.leading_frag_length_arr[index])\
               - ((obs_data.v_init)*(sim_data.time_arr-sim_data.time_arr[index]))
         
-        sim_lag -= sim_lag[index]
+        # Zero the lag at the first point, and shift it by the time offset
+        sim_lag -= sim_lag[index] + obs_data.v_init*time_offset
         # plot lag_arr vs leading_frag_time_arr
-        ax3.plot(sim_data.time_arr-sim_data.time_arr[index], sim_lag, color=color_sim, label=label_sim)
+        ax3.plot(sim_data.time_arr-sim_data.time_arr[index] + time_offset, sim_lag, color=color_sim, \
+            label=label_sim)
 
-        # inerpoate the lag_arr to the leading_frag_time_arr
-        sim_lag = np.interp(obs_data.height_lag,
-                                    np.flip(sim_data.leading_frag_height_arr),
-                                    np.flip(sim_lag))
-        
-        # make the difference between the no_noise_lag and the obs_data.lag
-        sim_diff_lag = obs_data.lag - sim_lag
+        # Compute the lag residuals as in the likelihood, from the lengths at the observed times
+        sim_diff_lag = obs_data.length - len_sim
         
         # for each station in obs_data_plot
         for station in np.unique(obs_data.stations_lag):
@@ -842,6 +858,12 @@ def _compute_sim_lag(sim, obs_data):
     v0 = getattr(obs_data, 'v_init', np.nan)  # use obs_data.v_init as in your code
     lag = (L - L[idx]) - (v0*(t - t[idx]))
     lag = lag - lag[idx]  # zero at reference
+
+    # Shift the lag by the time offset at which the simulation passes the first point, as in the likelihood
+    if getattr(obs_data, 'length', None) is not None:
+        _, time_offset = simulatedLengthsDynesty(sim, obs_data)
+        lag = lag - v0*time_offset
+
     return lag
 
 
@@ -943,6 +965,31 @@ def _quantiles_from_samples(arr_2d, qs):
     for name, q in qs.items():
         out[name] = np.nanquantile(arr_2d, q, axis=0, method='linear')
     return out
+
+def weightedHistogram(x_valid, w_valid, smooth):
+    """ Compute the weighted histogram of samples, smoothed as dynesty does, to find their mode.
+
+    Arguments:
+        x_valid: [ndarray] Finite sample values.
+        w_valid: [ndarray] Weights of the samples (not necessarily normalized).
+        smooth: [float or int] Number of bins (int), or the smoothing fraction which gives round(10/smooth)
+            bins smoothed with a Gaussian kernel (float).
+
+    Return:
+        (centers, hist):
+            - centers: [ndarray] Bin centers.
+            - hist: [ndarray] Weighted histogram, smoothed for a float smooth.
+    """
+
+    lo, hi = np.min(x_valid), np.max(x_valid)
+    if isinstance(smooth, int):
+        hist, edges = np.histogram(x_valid, bins=smooth, weights=w_valid, range=(lo, hi))
+    else:
+        nbins = int(round(10./smooth))
+        hist, edges = np.histogram(x_valid, bins=nbins, weights=w_valid, range=(lo, hi))
+        hist = norm_kde(hist, 10.0)
+    centers = 0.5*(edges[1:] + edges[:-1])
+    return centers, hist
 
 def _maybe_integrate_luminosity(sim, obs_data):
     """
@@ -1619,13 +1666,17 @@ def plotObsVsHeight(obs_data, sim_data=None, output_folder='', file_name='', col
             #   - ((24710)*(sim_data.time_arr-sim_data.time_arr[index]))        
         sim_lag -= sim_lag[index]
 
+        # Shift the simulated lag by the time offset at which the simulation passes the first point
+        len_sim, time_offset = simulatedLengthsDynesty(sim_data, obs_data)
+        sim_lag -= obs_data.v_init*time_offset
+
         best_line, = ax_lag.plot(sim_lag, sim_data.leading_frag_height_arr/1000, color=color_sim, label=label_sim)
         
         # RESIDUALS (interpolated at obs heights)
         lum_res = obs_data.luminosity - np.interp(obs_data.height_lum, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.luminosity_arr))
         mag_res = np.interp(obs_data.height_lum, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.abs_magnitude)) - obs_data.absolute_magnitudes
         vel_res = (obs_data.velocities - np.interp(obs_data.height_lag, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.leading_frag_vel_arr)))/1000
-        lag_res = obs_data.lag - np.interp(obs_data.height_lag, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_lag))
+        lag_res = obs_data.length - len_sim
 
         # ax_lum_res.plot(lum_res, obs_data.height_lum/1000, '.', color=color_sim)
         # ax_mag_res.plot(mag_res, obs_data.height_lum/1000, '.', color=color_sim)
@@ -1955,9 +2006,18 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
     best_guess_obj_plot = runSimulationDynesty(best_guess, obs_data, variables, fixed_values)
 
+    # Find the time at which the best fit passes the height of the first lag point
+    _, best_guess_time_offset = simulatedLengthsDynesty(best_guess_obj_plot, obs_data)
+    print("Best fit lag time offset t0: {:+.2f} ms".format(1000*best_guess_time_offset))
+
     # find the index of m_init in variables
     i_m_init = variables.index('m_init')
-    tau = (calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), P_0m=obs_data.P_0m))*2/(samples_equal[:, i_m_init]*obs_data.velocities[0]**2)*100
+
+    # Compute the luminous efficiency of the samples with the initial speed relative to the ground
+    v_init_ground = obs_data.velocities[0] - getattr(obs_data, 'v_rotation', 0.0)
+    tau = calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), \
+        P_0m=obs_data.P_0m)*2/(samples_equal[:, i_m_init]*v_init_ground**2)*100
+
     # calculate the weights calculate the weighted median and the 95 CI for tau
     # tau_low95, tau_median, tau_high95 = _quantile(tau, [0.025, 0.5, 0.975],  weights=weights)
     tau_median, tau_low95, tau_high95 = _plot_distrib_weighted(
@@ -2095,14 +2155,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             mode_value = mode_raw[i]
 
             # mode via corner logic
-            lo, hi = np.min(x), np.max(x)
-            if isinstance(smooth, int):
-                hist, edges = np.histogram(x, bins=smooth, weights=w, range=(lo,hi))
-            else:
-                nbins = int(round(10./smooth))
-                hist, edges = np.histogram(x, bins=nbins, weights=w, range=(lo,hi))
-                hist = norm_kde(hist, 10.0)
-            centers = 0.5*(edges[1:] + edges[:-1])
+            centers, hist = weightedHistogram(x_valid, w_valid, smooth)
             mode_Ndim = centers[np.argmax(hist)]
 
             # now apply your log & unit transforms *after* computing stats
@@ -2319,7 +2372,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
                     "95_CI_upper": np.asarray(upper_95, dtype=np.float32).tolist(),
                     "rho_array": backup_data["rho_array"],
                     "rho_mass_weighted_estimate": {k: float(v) for k, v in backup_data["rho_mass_weighted_estimate"].items()},
-                    "const_backups": backup_data["const_backups"]
+                    "const_backups": backup_data["const_backups"],
+                    "ground_frame": not getattr(obs_data, 'legacy_inertial_frame', False)
                 },
 
                 "best_guess": {
@@ -2499,6 +2553,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         for i in range(len(best_guess)):
             f.write(variables[i]+':\t'+str(best_guess[i])+'\n')
         f.write('\nBest fit logL: '+str(best_guess_logL)+'\n') # dynesty_run_results.logl[sim_num])+'\n')
+        f.write("Best fit lag time offset t0: {:+.2f} ms ({:s})\n".format(1000*best_guess_time_offset, \
+            "fitted" if getattr(obs_data, 'fit_lag_time_offset', True) else "fixed"))
         if diff_logL is not None:
             f.write('REAL logL: '+str(real_logL)+'\n')
             f.write('Diff logL (Best fit - REAL): '+str(diff_logL)+'\n')
@@ -2559,15 +2615,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             continue
 
         # Compute histogram
-        lo, hi = np.min(x_valid), np.max(x_valid)
-        if isinstance(smooth, int):
-            hist, edges = np.histogram(x_valid, bins=smooth, weights=w_valid, range=(lo, hi))
-        else:
-            nbins = int(round(10./smooth))
-            hist, edges = np.histogram(x_valid, bins=nbins, weights=w_valid, range=(lo, hi))
-            hist = norm_kde(hist, 10.0)  # dynesty-style smoothing
-
-        centers = 0.5*(edges[1:] + edges[:-1])
+        centers, hist = weightedHistogram(x_valid, w_valid, smooth)
 
         # Fill under the curve
         ax.fill_between(centers, hist, color='blue', alpha=0.6)
@@ -3840,14 +3888,24 @@ class ObservationData:
         self.lag_files = lag_files
 
         v_init_list = []
+        v_rotation_list = []
         for curr_lag_file in lag_files:
             # take the v_init from the trajectory file
             traj=loadPickle(*os.path.split(curr_lag_file))
             # get the trajectory
             # v_avg = traj.v_avg
-            v_init_list.append(traj.orbit.v_init+100)
+            # Use the solver's gated pre-atmospheric velocity when applied, else keep the legacy +100 m/s seed
+            v_inf = getattr(traj.orbit, 'v_inf', None)
+            if (v_inf is not None) and (getattr(traj.orbit, 'dv_pre_atm', 0.0) > 0.0):
+                v_init_list.append(v_inf)
+            else:
+                v_init_list.append(traj.orbit.v_init + 100)
+            v_rotation_list.append(earthRotationSpeed(traj))
         # do the mean of the v_init_list
         self.v_init = np.mean(v_init_list)
+
+        # Average the Earth's rotation along the path, which constructConstants() takes off v_init
+        self.v_rotation = np.mean(v_rotation_list)
 
         # sort base on the lag_data['height'] from the biggest to the smallest
         sorted_indices_lag = np.argsort(lag_data['height'])[::-1]
@@ -3921,6 +3979,9 @@ class ObservationData:
         self.time_lag = self.time_lag-np.min(self.time_lag)
         self.time_lum = self.time_lum-np.min(self.time_lum)
 
+        # Compute the lag with the same velocity as the simulated lag, without the intercept of the solver
+        self.lag = self.length - self.v_init*self.time_lag
+
         # usually noise_lum = 2.5
         if np.isnan(self.noise_lum):
             self.noise_lum = self.fitLumNoise()
@@ -3949,8 +4010,16 @@ class ObservationData:
             lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
             jd_dat=traj.jdt_ref
 
-            # Fit the polynomail describing the density
+            # Fit the polynomial describing the density
             self.dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
+
+            # Tabulate the density over the whole simulation, used instead of the polynomial
+            atm_ht_max = max(ATM_TABLE_HT_MAX, dens_fit_ht_beg)
+            self.atm_table_ht, self.atm_table_log10_rho = getAtmDensityTable(lat_mean, lon_mean, \
+                ATM_TABLE_HT_MIN, atm_ht_max, jd_dat)
+            self.atm_density_info = atmDensityTableInfo(lat_mean, lon_mean, jd_dat, height_max=atm_ht_max)
+            self.atm_density_model = 'table'
+
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4047,7 +4116,8 @@ class ObservationData:
                             except (IndexError, ValueError):
                                 continue
 
-                if not (lum_eff_type_val == 0 and lum_eff_type_fixed):
+                # Use the default also when the constant model is fixed without a lum_eff line
+                if (not (lum_eff_type_val == 0 and lum_eff_type_fixed)) or (luminous_efficiency is None):
                     luminous_efficiency = 0.7  # fallback default
 
             else:
@@ -4058,20 +4128,21 @@ class ObservationData:
             print("NOTE: The mass was computing using a constant luminous efficiency",luminous_efficiency,"%")
 
             # Compute the photometric mass
-            photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, tau=luminous_efficiency/100, P_0m=self.P_0m)
+            photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, \
+                tau=luminous_efficiency/100, P_0m=self.P_0m)
 
-            # run in case we have a different lum_eff_type than constant luminous efficiency to better estimate the correct mass range
-            if lum_eff_type_val is not None and not (lum_eff_type_val == 0 and lum_eff_type_fixed):
-                # Get the luminous efficiency
-                tau_lum_eff_type = luminousEfficiency(lum_eff_type_val, luminous_efficiency, self.v_init, photom_mass)
-                print("NOTE: Adjusting luminous efficiency for the given lum_eff_type new luminous efficiency =", tau_lum_eff_type)
-                if tau_lum_eff_type <= 0:
-                    print("WARNING: Computed non-physical luminous efficiency. Using constant value instead.")
-                else:
-                    # Recompute the photometric mass with the new luminous efficiency
-                    photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg, tau=tau_lum_eff_type, P_0m=self.P_0m)
+            # Recompute the mass with the luminous efficiency model at the average ground-relative speed,
+            #   iterated by calcMass() to the mass it gives
+            if (lum_eff_type_val is not None) and (lum_eff_type_val != 0):
+                photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, \
+                    tau=int(lum_eff_type_val), P_0m=self.P_0m)
+                print("NOTE: Recomputed the mass with the luminous efficiency model lum_eff_type = {:d} at the " \
+                    "average speed: {:.4e} kg".format(int(lum_eff_type_val), photom_mass))
 
             m_init_list.append(photom_mass)
+
+        # Print the atmosphere the simulations use
+        print(atmDensityDescription(self))
 
         # do the mean of the zenith_angle_list and m_init_list
         self.zenith_angle = np.mean(zenith_angle_list)
@@ -4190,12 +4261,22 @@ class ObservationData:
 
             return lag_funct
         
+        def lagPolyResiduals(params, t_time, l_data):
+            """ Residuals of the lag after the fitted deceleration and a straight line are taken out. The
+                line is free because the lag is computed with a velocity which differs from the initial one,
+                so its linear trend is not noise.
+            """
+
+            res = l_data - lagPoly(t_time, *params)
+
+            return res - np.polyval(np.polyfit(t_time, res, 1), t_time)
+
         def lagPolyRes(params, t_time, l_data):
             """
             Residual function for the optimization.
             """
 
-            return np.sum((l_data - lagPoly(t_time, *params))**2)
+            return np.sum(lagPolyResiduals(params, t_time, l_data)**2)
 
         # initial guess of deceleration decel equal to linear fit of velocity
         p0 = [np.mean(self.lag), 0, 0, np.mean(self.time_lag)]
@@ -4203,9 +4284,7 @@ class ObservationData:
         opt_res = minimize(lagPolyRes, p0, args=(np.array(self.time_lag), np.array(self.lag)), method='Nelder-Mead')
 
         # sample the fit for the velocity and acceleration
-        a_t0, b_t0, c_t0, t0 = opt_res.x
-        fitted_lag_t0 = lagPoly(self.time_lag, a_t0, b_t0, c_t0, t0)
-        residuals_t0 = self.lag - fitted_lag_t0
+        residuals_t0 = lagPolyResiduals(opt_res.x, np.array(self.time_lag), np.array(self.lag))
         # avg_residual = np.mean(abs(residuals))
         rmsd_lag_polyn = np.sqrt(np.mean(residuals_t0**2))
 
@@ -4427,6 +4506,9 @@ class ObservationData:
             const, _ = loadConstants(self.file_name)
             const.dens_co = np.array(const.dens_co)
 
+            # Simulate a synthetic meteor on a non-rotating Earth
+            const.v_rotation = 0.0
+
             # const_nominal.P_0m = 935
 
             # const.disruption_on = False
@@ -4493,6 +4575,13 @@ class ObservationData:
             self.m_init = self.const.m_init
 
             self.dens_co = np.array(self.const.dens_co) 
+            self.atm_table_ht = getattr(self.const, 'atm_table_ht', None)
+            self.atm_table_log10_rho = getattr(self.const, 'atm_table_log10_rho', None)
+            self.atm_density_info = getattr(self.const, 'atm_density_info', None)
+            self.atm_density_model = getattr(self.const, 'atm_density_model', 'polynomial')
+
+            # Print the atmosphere the simulations use
+            print(atmDensityDescription(self))
 
             # Compute absolute magnitudes
             absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)
@@ -4674,6 +4763,8 @@ class ObservationData:
                 return {k: convertToSerializable(v) for k, v in obj.items()}
             elif isinstance(obj, list):
                 return [convertToSerializable(v) for v in obj]
+            elif isinstance(obj, Fragment):
+                return convertToSerializable(obj.toDict())
             elif hasattr(obj, '__dict__'):  # Convert objects with __dict__
                 return convertToSerializable(obj.__dict__)
             else:
@@ -4708,7 +4799,8 @@ class ObservationData:
 ###############################################################################
 
 def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_all_cameras=True, 
-    only_plot=True, cores=None, pool_MPI=None, pick_position=0, extraprior_file='', save_backup=True):
+    only_plot=True, cores=None, pool_MPI=None, pick_position=0, extraprior_file='', save_backup=True, \
+    fit_lag_time_offset=True):
     """ Create the output folder if it doesn't exist and run the Dynesty simulation.
 
     Arguments:
@@ -4725,6 +4817,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
         pick_position: [int] Index to pick specific position/station data. 0 by default.
         extraprior_file: [str] Path to an extra prior file. Empty string by default.
         save_backup: [bool] Flag to save a backup of the results. True by default.
+        fit_lag_time_offset: [bool] Fit the time at which the simulation passes the height of the first lag
+            point to the lengths of every simulation, instead of fixing it to the time of that point. True by
+            default.
 
     Return:
         None
@@ -4817,6 +4912,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
 
             obs_data.lum_eff_type = 5
 
+            # Fit the time offset of the simulation from the first lag point
+            obs_data.fit_lag_time_offset = fit_lag_time_offset
+
             obs_data.h_kill = np.min([np.min(obs_data.height_lum),np.min(obs_data.height_lag)])-1000
             # check if the h_kill is smaller than 0
             if obs_data.h_kill < 0:
@@ -4858,6 +4956,8 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                     try:
                         dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                         dsampler_results = dsampler.results
+                        ground_frame = os.path.isfile(groundFrameMarkerPath(dynesty_file))
+                        restored_file = dynesty_file
                         
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
@@ -4868,7 +4968,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         backup_dynesty_file = os.path.join(out_folder, f"{base_name}_posterior_backup.pkl.gz")
                         if os.path.isfile(backup_dynesty_file):
                             try:
-                                dsampler_results, _ , _ = restoreBackupDynesty(backup_dynesty_file)
+                                dsampler_results, _ , backup_small = restoreBackupDynesty(backup_dynesty_file)
+                                ground_frame = backup_small['dynesty'].get('ground_frame', False)
+                                restored_file = backup_dynesty_file
                                 print(f"Loaded backup dynesty file: {backup_dynesty_file}")
                             except Exception as e:
                                 with open(log_file_path, "a") as log_file:
@@ -4878,6 +4980,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                             print(f"No backup dynesty file found at: {backup_dynesty_file}\n")
                         
                     try:
+                        replayInTheFrameOfTheRun(obs_data, ground_frame, restored_file)
                         plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
@@ -4915,6 +5018,8 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                 try:
                     dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                     dsampler_results = dsampler.results
+                    ground_frame = os.path.isfile(groundFrameMarkerPath(dynesty_file))
+                    restored_file = dynesty_file
 
                 except Exception as e:
                     with open(log_file_path, "a") as log_file:
@@ -4925,7 +5030,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                     backup_dynesty_file = os.path.join(out_folder, f"{base_name}_posterior_backup.pkl.gz")
                     if os.path.isfile(backup_dynesty_file):
                         try:
-                            dsampler_results, _ , _ = restoreBackupDynesty(backup_dynesty_file)
+                            dsampler_results, _ , backup_small = restoreBackupDynesty(backup_dynesty_file)
+                            ground_frame = backup_small['dynesty'].get('ground_frame', False)
+                            restored_file = backup_dynesty_file
                             print(f"Loaded backup dynesty file: {backup_dynesty_file}")
                         except Exception as e:
                             with open(log_file_path, "a") as log_file:
@@ -4935,6 +5042,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         print(f"No backup dynesty file found at: {backup_dynesty_file}")
 
                 # dsampler = dynesty oad DynamicNestedSampler by restore(dynesty_file)
+                replayInTheFrameOfTheRun(obs_data, ground_frame, restored_file)
                 plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
 
             else:
@@ -5103,6 +5211,10 @@ def setupDynestyOutputDir(out_folder, obs_data, bounds, flags_dict, fixed_values
     if not os.path.exists(dynesty_file_in_output_path) and os.path.isfile(dynesty_file):
         shutil.copy(dynesty_file, out_folder)
         print("dynesty file copied to output folder:", dynesty_file_in_output_path)
+
+        # Copy the ground-frame marker with the checkpoint
+        if os.path.isfile(groundFrameMarkerPath(dynesty_file)):
+            shutil.copy(groundFrameMarkerPath(dynesty_file), out_folder)
 
     if os.path.isfile(report_txt):
         # copy the report file to the output folder if not already there
@@ -5806,6 +5918,12 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
     # Assign the density coefficients
     const_nominal.dens_co = dens_co
 
+    # Assign the density model and table, where observations saved without them use the legacy polynomial
+    const_nominal.atm_density_model = getattr(real_event, 'atm_density_model', 'polynomial')
+    const_nominal.atm_table_ht = getattr(real_event, 'atm_table_ht', None)
+    const_nominal.atm_table_log10_rho = getattr(real_event, 'atm_table_log10_rho', None)
+    const_nominal.atm_density_info = getattr(real_event, 'atm_density_info', None)
+
     # # Turn on plotting of LCs of individual fragments 
     # const_nominal.fragmentation_show_individual_lcs = True
 
@@ -5869,8 +5987,20 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
         # use the function thaht add them in the const_nominal
         const_nominal = addFragToConst(const_nominal, combined_frag_dic)
 
+    # Convert the sampled inertial v_init and zenith angle to the ground, unless replaying an older run
+    if not getattr(real_event, 'legacy_inertial_frame', False):
+        constantsRelativeToGround(const_nominal, getattr(real_event, 'v_rotation', 0.0))
+
     if dir_path!="" and file_name!="":
-        _, _, _ = runSimulation(const_nominal, compute_wake=False) # completes the some fields in const_nominal that will be saved
+        # Run the simulation, which completes some fields of the constants that are saved
+        frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
+
+        # Save the time offset of the simulation from the first lag point with the constants
+        const_nominal.fit_lag_time_offset = getattr(real_event, 'fit_lag_time_offset', True)
+        if getattr(real_event, 'length', None) is not None:
+            _, const_nominal.lag_time_offset = simulatedLengthsDynesty(SimulationResults(const_nominal, \
+                frag_main, results_list, wake_results), real_event)
+
         saveConstants(const_nominal, dir_path, file_name)
 
     return const_nominal
@@ -5889,20 +6019,12 @@ def runSimulationDynesty(parameter_guess, real_event, var_names, fix_var):
 
     """
 
-    # build the const to run the 
+    # build the const to run the
     const_nominal = constructConstants(parameter_guess, real_event, var_names, fix_var)
 
-    try:
-        # Run the simulation
-        frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
-        simulation_MetSim_object = SimulationResults(const_nominal, frag_main, results_list, wake_results)
-    except ZeroDivisionError as e:
-        print(f"Error during simulation: {e}")
-        # run again with the nominal values to avoid the error
-        const_nominal = Constants()
-        # Run the simulation
-        frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
-        simulation_MetSim_object = SimulationResults(const_nominal, frag_main, results_list, wake_results)
+    # Run the simulation, leaving a ZeroDivisionError of an unphysical draw to the caller to reject
+    frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
+    simulation_MetSim_object = SimulationResults(const_nominal, frag_main, results_list, wake_results)
 
     return simulation_MetSim_object
 
@@ -6084,6 +6206,63 @@ def addFragToConst(const_nominal, var_frag_dic):
 # Function: dynesty
 ###############################################################################
 
+def simulatedLengthsDynesty(simulation_results, obs_metsim_obj):
+    """ Compute the simulated lengths of the leading fragment at the times of the observed lag points. The
+        simulation passes the height of the first lag point, where the observed length is zero, at the time
+        offset t0 fitted to all lengths with the squared residuals of the likelihood (see
+        wmpl.MetSim.GUI.fitLagTimeOffset), or at t = 0 if the offset is not fitted.
+
+    Arguments:
+        simulation_results: [SimulationResults object] Simulation results.
+        obs_metsim_obj: [ObservationData object] Observations, with the lengths (m), times (s), heights (m)
+            and stations of the lag points.
+
+    Return:
+        (len_sim, time_offset):
+            - len_sim: [ndarray] Simulated length from the first lag point at the time of every lag point
+                (m), NaN outside of the simulation.
+            - time_offset: [float] Time at which the simulation passes the height of the first lag point (s).
+    """
+
+    ht_arr = np.asarray(simulation_results.leading_frag_height_arr, dtype=np.float64)
+    len_arr = np.asarray(simulation_results.leading_frag_length_arr, dtype=np.float64)
+    time_arr = np.asarray(simulation_results.time_arr, dtype=np.float64)
+    vel_arr = np.asarray(simulation_results.leading_frag_vel_arr, dtype=np.float64)
+
+    time_data = np.asarray(obs_metsim_obj.time_lag, dtype=np.float64)
+    len_data = np.asarray(obs_metsim_obj.length, dtype=np.float64)
+
+    # Find the simulated length and time at the height of the first lag point
+    len_beg = np.interp(obs_metsim_obj.height_lag[0], np.flip(ht_arr), np.flip(len_arr), left=np.nan, \
+        right=np.nan)
+    time_beg = np.interp(obs_metsim_obj.height_lag[0], np.flip(ht_arr), np.flip(time_arr), left=np.nan, \
+        right=np.nan)
+
+    # The simulation does not reach the first point
+    if np.isnan(len_beg) or (len(time_arr) < 2):
+        return np.zeros_like(len_data) + np.nan, 0.0
+
+    # Take the simulated length and time from the first point
+    norm_sim_time = time_arr - time_beg
+    norm_sim_len = len_arr - len_beg
+
+    # Fit the time at which the simulation passes the height of the first point, bounded by the intervals
+    #   between the points of every station
+    time_offset = 0.0
+    if getattr(obs_metsim_obj, 'fit_lag_time_offset', True):
+        stations_lag = np.asarray(obs_metsim_obj.stations_lag)
+        time_offset_max = lagTimeOffsetMax([time_data[stations_lag == station] \
+            for station in np.unique(stations_lag)])
+        time_offset = fitLagTimeOffset(norm_sim_time, norm_sim_len, vel_arr, time_data, len_data, \
+            time_offset_max=time_offset_max)
+
+    # Sample the simulated length at the observed times, shifted by the offset
+    len_sim = np.interp(time_data - time_offset, norm_sim_time, norm_sim_len, left=np.nan, right=np.nan)
+
+    return len_sim, time_offset
+
+
+
 def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout=20):
     """ Calculate the log-likelihood for Dynesty.
 
@@ -6143,7 +6322,12 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
     # check if the OS is not Linux
     if os.name != 'posix':
         # If not Linux, run the simulation without timeout
-        simulation_results = runSimulationDynesty(guess_var, obs_metsim_obj, var_names, fix_var)
+        try:
+            simulation_results = runSimulationDynesty(guess_var, obs_metsim_obj, var_names, fix_var)
+
+        # Reject an unphysical draw
+        except ZeroDivisionError:
+            return -np.inf
     else:
         # Set timeout handler
         signal.signal(signal.SIGALRM, timeout_handler)
@@ -6154,14 +6338,20 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
         except TimeoutException:
             print('timeout')
             return -np.inf  # immediately return -np.inf if times out
+
+        # Reject an unphysical draw
+        except ZeroDivisionError:
+            return -np.inf
+
         finally:
             signal.alarm(0)  # Cancel alarm
         
     ### LUM CALC ###
 
-    simulated_time = np.interp(obs_metsim_obj.height_lum, 
-                                       np.flip(simulation_results.leading_frag_height_arr), 
-                                       np.flip(simulation_results.time_arr))
+    simulated_time = np.interp(obs_metsim_obj.height_lum,
+                                       np.flip(simulation_results.leading_frag_height_arr),
+                                       np.flip(simulation_results.time_arr),
+                                       left=np.nan, right=np.nan)
     # check if the length of the lag_sim is the same as the length of the obs_metsim_obj.lag
     if np.sum(~np.isnan(simulated_time)) != np.sum(~np.isnan(obs_metsim_obj.time_lum)):
         return -np.inf
@@ -6171,54 +6361,36 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
     # find the integral of the luminosity in time in between FPS but not valid for CAMO narrowfield cameras as there is no smearing because it follows the meteor
     if (1/obs_metsim_obj.fps_lum > simulation_results.const.dt): # and (not any('1T' in station for station in obs_metsim_obj.stations_lum) or not any('2T' in station for station in obs_metsim_obj.stations_lum)): # FPS is lower than the simulation time step need to integrate the luminosity
         simulated_lc_intensity, _ = integrateLuminosity(all_simulated_time,obs_metsim_obj.time_lum,simulation_results.luminosity_arr,simulation_results.const.dt,obs_metsim_obj.fps_lum,obs_metsim_obj.P_0m)
+
+        # Reject the simulation if it does not cover all observed frames
+        if np.sum(~np.isnan(simulated_lc_intensity)) != np.sum(~np.isnan(obs_metsim_obj.luminosity)):
+            return -np.inf
     else:
         # too high frame rate, just interpolate the luminosity
-        simulated_lc_intensity = np.interp(obs_metsim_obj.height_lum, 
-                                           np.flip(simulation_results.leading_frag_height_arr), 
-                                           np.flip(simulation_results.luminosity_arr))
+        simulated_lc_intensity = np.interp(obs_metsim_obj.height_lum,
+                                           np.flip(simulation_results.leading_frag_height_arr),
+                                           np.flip(simulation_results.luminosity_arr),
+                                           left=np.nan, right=np.nan)
         # check if the length of the simulated_lc_intensity is the same as the length of the obs_metsim_obj.luminosity
         if np.sum(~np.isnan(simulated_lc_intensity)) != np.sum(~np.isnan(obs_metsim_obj.luminosity)):
             return -np.inf
 
     ### LAG CALC ###
 
-    lag_sim = simulation_results.leading_frag_length_arr - (obs_metsim_obj.v_init*simulation_results.time_arr)
+    # Compare the lengths at the observed times, with the simulation passing the first point at the fitted
+    #   time offset, which is equal to comparing the lags computed with the same velocity
+    len_sim, _ = simulatedLengthsDynesty(simulation_results, obs_metsim_obj)
 
-    simulated_lag = np.interp(obs_metsim_obj.height_lag, 
-                              np.flip(simulation_results.leading_frag_height_arr), 
-                              np.flip(lag_sim))
-
-    lag_sim = simulated_lag - simulated_lag[0]
-
-    # check if the length of the lag_sim is the same as the length of the obs_metsim_obj.lag
-    if np.sum(~np.isnan(lag_sim)) != np.sum(~np.isnan(obs_metsim_obj.lag)):
+    # Reject the simulation if it does not cover all observed lag points
+    if np.sum(~np.isnan(len_sim)) != np.sum(~np.isnan(obs_metsim_obj.length)):
         return -np.inf
-
-    # # create a plot with the obs_metsim_obj.luminosity and simulated_lc_intensity
-    # plt.figure(figsize=(12,5))
-    # plt.subplot(1,2,1)
-    # plt.title("Luminosity")
-    # plt.plot(obs_metsim_obj.height_lum, obs_metsim_obj.luminosity, 'o', label='Observed', markersize=4)
-    # plt.plot(obs_metsim_obj.height_lum, simulated_lc_intensity, '-', label='Interpolated')
-    # plt.plot(obs_metsim_obj.height_lum, np.interp(obs_metsim_obj.height_lum,np.flip(simulation_results.leading_frag_height_arr),np.flip(simulation_results.luminosity_arr)), 'r--', label='Not Integrated', markersize=4)
-    # plt.xlabel("Height (m)")
-    # plt.ylabel("Luminosity (J/s)")
-    # plt.legend()
-    # plt.subplot(1,2,2)
-    # plt.title("Lag")
-    # plt.plot(obs_metsim_obj.height_lag, obs_metsim_obj.lag, 'o', label='Observed', markersize=4)
-    # plt.plot(obs_metsim_obj.height_lag, lag_sim, '-', label='Interpolated')
-    # plt.xlabel("Height (m)")
-    # plt.ylabel("Lag (m)")
-    # plt.legend()
-    # plt.tight_layout()
-    # plt.show()
 
     ### Log Likelihood ###
 
     log_likelihood_lum = np.nansum(-0.5*np.log(2*np.pi*obs_metsim_obj.noise_lum**2) - 0.5/(obs_metsim_obj.noise_lum**2)*(obs_metsim_obj.luminosity - simulated_lc_intensity) ** 2)
     # print("log_likelihood_lum:", log_likelihood_lum)
-    log_likelihood_lag = np.nansum(-0.5*np.log(2*np.pi*obs_metsim_obj.noise_lag**2) - 0.5/(obs_metsim_obj.noise_lag**2)*(obs_metsim_obj.lag - lag_sim) ** 2)
+    log_likelihood_lag = np.nansum(-0.5*np.log(2*np.pi*obs_metsim_obj.noise_lag**2) \
+        - 0.5/(obs_metsim_obj.noise_lag**2)*(obs_metsim_obj.length - len_sim)**2)
     # print("log_likelihood_lag:", log_likelihood_lag)
 
     log_likelihood_tot = log_likelihood_lum + log_likelihood_lag
@@ -6261,6 +6433,44 @@ def priorDynesty(cube, bounds, flags_dict):
     return x
 
 
+
+def groundFrameMarkerPath(dynesty_file):
+    """ Compute the path of the file that marks a dynesty run as simulated relative to the ground.
+
+    Arguments:
+        dynesty_file: [str] Path to the dynesty checkpoint file.
+
+    Return:
+        [str] Path of the marker file.
+    """
+
+    return dynesty_file + '.ground_frame'
+
+
+
+def replayInTheFrameOfTheRun(obs_data, ground_frame, source):
+    """ Select the model with which the samples of a restored dynesty run are replayed. Runs made before
+        MetSim was simulated relative to the ground are replayed with the inertial speed, and the constants
+        of their replay keep the inertial values without v_rotation, as they were saved before.
+
+    Arguments:
+        obs_data: [ObservationData object] Observations, changed in place.
+        ground_frame: [bool] The run was simulated relative to the ground.
+        source: [str] Path of the restored checkpoint or backup, for the note.
+
+    Return:
+        None
+    """
+
+    obs_data.legacy_inertial_frame = not ground_frame
+
+    if not ground_frame:
+        print("NOTE: {:s} was made before MetSim was simulated relative to the ground, so its samples are " \
+            "replayed with the inertial speed. Start a new run for results relative to the ground." \
+            "".format(source))
+
+
+
 def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_core=1, output_folder="", 
                     base_name="",log_file_path="", pool_MPI=None, save_backup=True):
     """ Main function to run the Dynesty nested sampling.
@@ -6285,6 +6495,19 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
     """
 
     print("Starting dynesty run...")  
+
+    # Refuse to resume a run made before MetSim was simulated relative to the ground
+    marker_file = groundFrameMarkerPath(dynesty_file)
+    if os.path.exists(dynesty_file) and (not os.path.isfile(marker_file)) \
+        and getattr(obs_data, 'v_rotation', 0.0):
+
+        raise ValueError("{:s} was made before MetSim was simulated relative to the ground and cannot be " \
+            "resumed. Start a new run.".format(dynesty_file))
+
+    # Mark the run as simulated relative to the ground
+    with open(marker_file, 'w') as f:
+        f.write("MetSim simulated relative to the ground\n")
+
     # get variable names
     var_names = list(flags_dict.keys())
     # get the number of parameters
@@ -6373,6 +6596,7 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
     if output_folder != os.path.dirname(dynesty_file):
         print("Copying dynesty file to output folder...")
         shutil.copy(dynesty_file, output_folder)
+        shutil.copy(marker_file, output_folder)
         print("dynesty file copied to:", output_folder)
     
     plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, output_folder, base_name, log_file_path, n_core, save_backup=save_backup, finish_run=True)
@@ -6436,16 +6660,27 @@ if __name__ == "__main__":
     arg_parser.add_argument('--cores', metavar='CORES', type=int, default=None,
         help="Number of cores to use. Default = all available.")
 
+    arg_parser.add_argument('--notimeoffset', dest='fit_lag_time_offset', action="store_false",
+        help="Fix the simulation to the time of the first lag point, instead of fitting the time at " \
+        "which it passes the height of that point to the lengths of every simulation.")
+
     # Optional: suppress warnings
     # warnings.filterwarnings('ignore')
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     # check if the pick position is between 0 and 1
     if cml_args.pick_pos < 0 or cml_args.pick_pos > 1:
         raise ValueError("pick_position must be between 0 and 1, 0 leading edge, 0.5 centroid full meteor, 1 trailing edge.")
 
-    setupDirAndRunDynesty(cml_args.input_dir, output_dir=cml_args.output_dir, prior=cml_args.prior, resume=cml_args.new_dynesty, use_all_cameras=cml_args.all_cameras, only_plot=cml_args.only_plot, cores=cml_args.cores, pick_position=cml_args.pick_pos, extraprior_file=cml_args.extraprior, save_backup=cml_args.save_backup)
+    setupDirAndRunDynesty(cml_args.input_dir, output_dir=cml_args.output_dir, prior=cml_args.prior, resume=cml_args.new_dynesty, use_all_cameras=cml_args.all_cameras, only_plot=cml_args.only_plot, cores=cml_args.cores, pick_position=cml_args.pick_pos, extraprior_file=cml_args.extraprior, save_backup=cml_args.save_backup, \
+        fit_lag_time_offset=cml_args.fit_lag_time_offset)
 
     print("\nDONE: Completed processing of all files in the input directory.\n")

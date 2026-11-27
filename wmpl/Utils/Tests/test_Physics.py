@@ -6,12 +6,15 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import inspect
+import os
 import warnings
 
 import numpy as np
 
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
-from wmpl.Utils.Physics import ballisticCoeffMass, dynamicMass, calcMass, LUM_EFF_MODELS
+from wmpl.Utils.Physics import ballisticCoeffMass, dynamicMass, calcMass, calcRadiatedEnergy, LUM_EFF_MODELS, \
+    GAMMA_A
 
 
 # A synthetic light curve: a 2 s meteor peaking at -2 mag, decelerating from 20 to 15 km/s
@@ -152,13 +155,63 @@ def testCalcMassConstantCodeIsAlways0p7Percent():
 
 
 
+def testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy():
+    """ Check that a flare of -5 mag between two closely spaced frames, after 1 s gaps, gives the energy of
+        the trapezoidal rule. Simpson's rule gave a negative energy of -288 J there, and so a negative mass.
+    """
+
+    time = np.array([0.0, 1.0, 1.1, 1.2, 2.2])
+    mag_abs = np.array([0.0, 0.0, -5.0, 0.0, 0.0])
+
+    # Sum the trapezoids of the intensities 1, 1, 100, 1 and 1 W
+    energy = 1.0*(1 + 1)/2 + 0.1*(1 + 100)/2 + 0.1*(100 + 1)/2 + 1.0*(1 + 1)/2
+
+    assert np.isclose(calcRadiatedEnergy(time, mag_abs, P_0m=1.0), energy, rtol=1e-12)
+
+    # Check the mass with a constant and a varying velocity
+    assert np.isclose(calcMass(time, mag_abs, 20000.0, P_0m=1.0), 2*energy/(0.007*20000.0**2), rtol=1e-12)
+    assert np.isclose(calcMass(time, mag_abs, np.full(5, 20000.0), P_0m=1.0), \
+        2*energy/(0.007*20000.0**2), rtol=1e-12)
+
+
+
+def testAllFireballMassesUseTheSameGammaA():
+    """ Check that the dynamic and the alpha-beta masses of fireballs and their command lines use the same
+        Gamma*A by default, and that the dynamic mass of faint meteors keeps Gamma = 1 and A = 1.21.
+    """
+
+    from wmpl.Utils.AlphaBeta import alphaBetaMasses, fitAlphaBetaMass, plotAlphaBetaMassDiagram, \
+        plotAlphaBetaSurvivalDiagram, alphaBetaLuminousEfficiency
+    from wmpl.Utils.DragFit import DragFit
+
+    assert GAMMA_A == 0.78
+
+    # Defaults of the functions
+    assert inspect.signature(dynamicMass).parameters['gamma'].default == 1.0
+    assert inspect.signature(dynamicMass).parameters['shape_factor'].default == 1.21
+    for func in [alphaBetaMasses, fitAlphaBetaMass, plotAlphaBetaMassDiagram, plotAlphaBetaSurvivalDiagram, \
+        alphaBetaLuminousEfficiency]:
+        assert inspect.signature(func).parameters['shape_coeff'].default == GAMMA_A, func.__name__
+
+    assert inspect.signature(DragFit.dynamicMassAtLength).parameters['gamma_a'].default == GAMMA_A
+
+    # Defaults of the command lines
+    for module in ['AlphaBeta', 'DynamicMassFit', 'DragFit']:
+        with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), module + '.py')) as f:
+            source = f.read()
+
+        assert "default=GAMMA_A" in source, module
+
+
 
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testBallisticCoeffMass, testCalcMassTakesNumpyIntegersAsModelCodes, \
         testCalcMassWarnsAboutP0mForThe1500WModels, testCalcMassAtZeroLumEffMassIsTheSmallMassLimit, \
-        testCalcMassConstantCodeIsAlways0p7Percent]
+        testCalcMassConstantCodeIsAlways0p7Percent, \
+        testUnevenlySpacedLightCurveGivesThePositiveTrapezoidalEnergy, \
+        testAllFireballMassesUseTheSameGammaA]
 
     for test in test_list:
         test()

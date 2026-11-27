@@ -415,6 +415,23 @@ def calcTrueObliquity(jd):
 
 
 
+def calcEquationOfEquinoxes(julian_date):
+    """ Calculate the equation of the equinoxes, the apparent minus the mean sidereal time.
+
+    Arguments:
+        julian_date: [float] Julian date.
+
+    Return:
+        [float] Equation of the equinoxes (radians).
+    """
+
+    # Calculate Earth's nutation components
+    delta_psi, _ = calcNutationComponents(wmpl.Utils.TrajConversions.jd2DynamicalTimeJD(julian_date))
+
+    return delta_psi*np.cos(calcTrueObliquity(julian_date))
+
+
+
 
 def calcApparentSiderealEarthRotation(julian_date):
     """ Calculate apparent sidereal rotation GST of the Earth. 

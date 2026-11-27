@@ -1,0 +1,71 @@
+# Run the test suite on every pull request and on every push to master
+
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel a run of a pull request when a newer commit is pushed to it
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      MPLBACKEND: Agg
+      QT_QPA_PLATFORM: offscreen
+      PYTHONPATH: ${{ github.workspace }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # Libraries which PyQt5 needs to load without a display
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3
+
+      # Install the requirements and the map packages as the README does (it takes basemap and cartopy
+      #   from conda-forge, as they are not in requirements.txt), plus the packages which only the tests
+      #   and the Dynesty fits use
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install "numpy<2.0" cython
+          python -m pip install -r requirements.txt
+          python -m pip install basemap basemap-data-hires cartopy
+          python -m pip install pytest dynesty
+
+      # The JPL DE430 ephemeris is 114 MB, so it is downloaded once and kept in the cache
+      - name: Restore the DE430 ephemeris
+        id: de430
+        uses: actions/cache@v4
+        with:
+          path: wmpl/share/de430.bsp
+          key: de430-v1
+
+      - name: Download the DE430 ephemeris
+        if: steps.de430.outputs.cache-hit != 'true'
+        run: >
+          curl -fsSL --retry 3 -o wmpl/share/de430.bsp
+          https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de430.bsp
+
+      # The Cython modules are compiled by pyximport on the first import of wmpl
+      - name: Run the tests
+        run: python -m pytest -q -p no:cacheprovider wmpl

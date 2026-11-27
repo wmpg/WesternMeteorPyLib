@@ -20,7 +20,8 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.SampleTrajectoryPositions import SAMPLE_ATTRIBUTES, TrajectorySamples
 from wmpl.Utils.Physics import dynamicPressure
-from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, observeMeteor
+from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
+from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, GravityDragMeteor, observeMeteor
 
 
 # Directory and the file name of the example trajectory
@@ -243,6 +244,7 @@ def testSaveCSV():
     assert np.allclose(getColumn('Dyn pres (Pa)'), arrays['dyn_pressure'], rtol=1e-6)
     assert np.allclose(getColumn('Z ECI (m)'), arrays['eci'][:, 2], atol=0.01)
     assert np.array_equal(getColumn('Extrapolated'), arrays['extrapolated'].astype(int))
+    assert np.array_equal(getColumn('In gap'), arrays['in_gap'].astype(int))
 
 
 
@@ -281,6 +283,36 @@ def testGroundFixedRadiantDoesNotTurnWithDrag():
 
 
 
+def testGroundFixedRadiantMatchesGravityAirRotationTruth():
+    """ Check that with gravity and rotating-air drag enabled, the sampled ground-fixed radiant matches the
+        true 3D ground-fixed direction down to low dark-flight speeds.
+    """
+
+    meteor = GravityDragMeteor(18000.0, 120.0, 45.0, 1.0, 5.0, air_rotation=True)
+    traj = observeMeteor(meteor, noise=2.0, gravity_correction=True, air_rotation=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj = traj.run()
+
+    arrays = sampleTrajectory(traj, 0.0, 4.8, 0.4, by_time=True).toArrays()
+    assert arrays['vel'][-1] < 6000.0
+
+    # Compare every sampled ground-fixed radiant with the true 3D velocity vector
+    dt = 1e-3
+    for i, t_rel in enumerate(arrays['t_est']):
+        jd = traj.jdt_ref + t_rel/86400.0
+        p0 = meteor.eciAtTime(t_rel)[0]
+        v_true = (meteor.eciAtTime(t_rel + dt)[0] - meteor.eciAtTime(t_rel - dt)[0])/(2.0*dt)
+        lat_t, lon_t, _ = cartesian2Geo(jd, *p0)
+        az_t, el_t, _ = derotatedRadiantAltAz(-v_true, p0, jd, lat_t, lon_t)
+
+        az_s, el_s = arrays['azim_norot'][i], arrays['elev_norot'][i]
+        u_t = np.array([np.cos(el_t)*np.sin(az_t), np.cos(el_t)*np.cos(az_t), np.sin(el_t)])
+        u_s = np.array([np.cos(el_s)*np.sin(az_s), np.cos(el_s)*np.cos(az_s), np.sin(el_s)])
+        ang_err = np.degrees(np.arccos(np.clip(np.dot(u_t, u_s), -1.0, 1.0)))
+        assert ang_err < 0.05
+
+
+
 def testSamplesWithOnlyThePositions():
     """ Check that samples added only with the positions give NaN for the other quantities. """
 
@@ -305,7 +337,7 @@ if __name__ == "__main__":
         testTimeModeMatchesTheHeightMode, testVelocitiesArePhysical, testSkippedSamplesAreReported, \
         testSamplesHaveTheMotionAndTheDynamics, testTimeModeUncertainties, \
         testDynamicPressureIsRelativeToTheGround, testSaveCSV, testGroundFixedRadiantDoesNotTurnWithDrag, \
-        testSamplesWithOnlyThePositions]
+        testGroundFixedRadiantMatchesGravityAirRotationTruth, testSamplesWithOnlyThePositions]
 
     for test in test_list:
         test()

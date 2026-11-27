@@ -230,6 +230,7 @@ if __name__ == '__main__':
     from wmpl.Trajectory.Trajectory import jacchiaLengthFunc
     from wmpl.Utils.Math import meanAngle
     from wmpl.Utils.Physics import dynamicPressure
+    from wmpl.Utils.AtmosphereDensity import addAtmosphereArguments, setAtmosphere
 
     
     ### COMMAND LINE ARGUMENTS
@@ -256,7 +257,13 @@ if __name__ == '__main__':
     arg_parser.add_argument('--cutoff_fraction', type=float, default=0.25, \
         help="Fraction of samples to use for initial process noise. Default: 0.25.")
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     ### ###
     

@@ -133,6 +133,39 @@ def getRotMatrix(v1, v2):
     return R
 
 
+
+def rotationMatrixX(angle):
+    """ Rotation matrix of the coordinate frame about the X axis.
+
+    Arguments:
+        angle: [float] Angle of rotation of the frame (radians).
+
+    Return:
+        [3x3 ndarray] Rotation matrix, applied to column vectors.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+
+    return np.array([[1, 0, 0], [0, c, s], [0, -s, c]])
+
+
+
+def rotationMatrixZ(angle):
+    """ Rotation matrix of the coordinate frame about the Z axis.
+
+    Arguments:
+        angle: [float] Angle of rotation of the frame (radians).
+
+    Return:
+        [3x3 ndarray] Rotation matrix, applied to column vectors.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+
+    return np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+
+
+
 def angleBetweenVectors(a, b):
     """Compute the angle between two vectors.
 
@@ -144,7 +177,8 @@ def angleBetweenVectors(a, b):
         [float] Angle between a and b (radians).
     """
 
-    return np.arccos(np.dot(a, b) / (vectMag(a) * vectMag(b)))
+    # Clip the cosine, which can be slightly above 1 for parallel vectors due to rounding
+    return np.arccos(np.clip(np.dot(a, b) / (vectMag(a) * vectMag(b)), -1.0, 1.0))
 
 
 def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
@@ -488,6 +522,54 @@ def findClosestPoints(P, u, Q, v):
     d = np.linalg.norm(S - T)
 
     return S, T, d
+
+
+def findClosestPoints_vect(P, u, Q, v):
+    """ Calculate the closest points of approach between pairs of lines, as findClosestPoints does for one
+        pair. Each argument is either one vector, used for all pairs, or an array with one vector per row.
+
+    Arguments:
+        P: [ndarray] Points on the 1st lines.
+        u: [ndarray] Direction vectors of the 1st lines.
+        Q: [ndarray] Points on the 2nd lines.
+        v: [ndarray] Direction vectors of the 2nd lines.
+
+    Return:
+        (S, T, d):
+            - S: [ndarray] Points on the 1st lines closest to the 2nd lines, one per row.
+            - T: [ndarray] Points on the 2nd lines closest to the 1st lines, one per row.
+            - d: [ndarray] Distances between the points. The points and the distances of parallel lines are
+                infinite.
+    """
+
+    # Calculate the difference in position between the points on the lines
+    w = P - Q
+
+    # Calculate cosines of angles between various vectors
+    a = np.einsum('...j,...j->...', u, u)
+    b = np.einsum('...j,...j->...', u, v)
+    c = np.einsum('...j,...j->...', v, v)
+    d = np.einsum('...j,...j->...', u, w)
+    e = np.einsum('...j,...j->...', v, w)
+
+    # Calculate the denominator, close to zero for parallel lines
+    denom = a*c - b**2
+    parallel = np.atleast_1d(np.abs(denom) < 1e-10)
+    denom = np.where(np.abs(denom) < 1e-10, 1.0, denom)
+
+    # Points on the lines closest to the other lines
+    S = np.atleast_2d(P + u*np.reshape((b*e - c*d)/denom, (-1, 1)))
+    T = np.atleast_2d(Q + v*np.reshape((a*e - b*d)/denom, (-1, 1)))
+
+    # Calculate the distances between the points
+    dist = np.linalg.norm(S - T, axis=1)
+
+    # Return infinite points and distances for parallel lines
+    S[parallel] = np.inf
+    T[parallel] = np.inf
+    dist[parallel] = np.inf
+
+    return S, T, dist
 
 
 def lineAndSphereIntersections(centre, radius, origin, direction):
@@ -842,6 +924,78 @@ def medianStddev(stddev_list, n_samples=100000):
 
 
 
+def weightedMedian(x, weights):
+    """ Compute the weighted median, the value which minimizes the weighted sum of absolute deviations.
+
+    Arguments:
+        x: [ndarray] Values.
+        weights: [ndarray] Non-negative weights of the values.
+
+    Return:
+        [float] Weighted median. If the weights of the values on both sides of a value are equal, it is the
+            mean of the two middle values.
+    """
+
+    x = np.asarray(x, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+
+    # Sort the values and accumulate their weights
+    sort_ind = np.argsort(x)
+    x = x[sort_ind]
+    weights_cum = np.cumsum(weights[sort_ind])
+    weight_half = 0.5*weights_cum[-1]
+
+    # Take the first value at which the accumulated weight reaches one half
+    i = np.searchsorted(weights_cum, weight_half)
+
+    # Take the mean with the next value if the weights are split exactly at this value
+    if np.isclose(weights_cum[i], weight_half) and (i + 1 < len(x)):
+        return 0.5*(x[i] + x[i + 1])
+
+    return x[i]
+
+
+
+def integratedAutocorrTime(data, max_lag=None):
+    """ Compute the integrated autocorrelation time of a series, 1 plus twice the sum of its
+        autocorrelations at the lags 1, 2, ... up to the first one which is not positive. It is about 1 for
+        independent values. For values correlated in time it is the factor by which the variance of their
+        mean, and of a parameter fitted to them with a smooth model, exceeds that of independent values.
+
+    Arguments:
+        data: [ndarray] Values of the series, in time order.
+
+    Keyword arguments:
+        max_lag: [int] The sum runs over the lags below max_lag. A third of the number of values by default.
+
+    Return:
+        [float] Integrated autocorrelation time, NaN if all values are the same.
+    """
+
+    data = np.asarray(data, dtype=np.float64)
+    data = data - np.mean(data)
+    variance = np.sum(data**2)
+
+    if variance <= 0:
+        return np.nan
+
+    if max_lag is None:
+        max_lag = len(data)//3
+
+    # Add the autocorrelations until the first one which is not positive
+    tau = 1.0
+    for lag in range(1, max_lag):
+
+        rho = np.sum(data[lag:]*data[:-lag])/variance
+        if rho <= 0:
+            break
+
+        tau += 2*rho
+
+    return tau
+
+
+
 def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method="avg"):
     """Finds if points have similar sample values on the independent axis x (if they are within delta) and
         averages all y values.
@@ -1004,6 +1158,41 @@ def checkContinuity(sequence):
             return True, first[0] + 1, last[0]
 
     return False, 0, 0
+
+
+def isGraphConnected(nodes, edges):
+    """ Check if every node of an undirected graph can be reached from every other node.
+
+    Arguments:
+        nodes: [list] Nodes of the graph.
+        edges: [list] Pairs of nodes joined by an edge. Edges with a node not in the list are not used.
+
+    Return:
+        [bool] True if the graph is connected, also when it has one node or none.
+    """
+
+    nodes = set(nodes)
+    if len(nodes) < 2:
+        return True
+
+    # Collect the neighbours of every node
+    neighbours = {node: set() for node in nodes}
+    for node1, node2 in edges:
+        if (node1 in nodes) and (node2 in nodes):
+            neighbours[node1].add(node2)
+            neighbours[node2].add(node1)
+
+    # Walk the graph from one node
+    first_node = next(iter(nodes))
+    reached = {first_node}
+    to_visit = [first_node]
+    while to_visit:
+        for neighbour in neighbours[to_visit.pop()] - reached:
+            reached.add(neighbour)
+            to_visit.append(neighbour)
+
+
+    return reached == nodes
 
 
 def histogramEdgesEqualDataNumber(x, nbins):
@@ -1213,6 +1402,27 @@ def generateMonthyTimeBins(dt_beg, dt_end):
 
 
 ##############################################################################################################
+
+
+
+def expSegmentIntegral(rho_0, scale, dh):
+    """ Integrate rho_0*exp(scale*x) for x from 0 to dh, stably when scale*dh is near 0.
+
+    Arguments:
+        rho_0: [float or ndarray] Density at the bottom of the segment (kg/m^3).
+        scale: [float or ndarray] Exponential scale of the segment (1/m).
+        dh: [float or ndarray] Height above the bottom of the segment (m).
+
+    Return:
+        [float or ndarray] Air column (kg/m^2).
+    """
+
+    x = np.asarray(scale*dh, dtype=np.float64)
+    x_safe = np.where(x == 0, 1.0, x)
+
+    return rho_0*dh*np.where(x == 0, 1.0, np.expm1(x_safe)/x_safe)
+
+
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from wmpl.CMN.CMNFormats import loadINF
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 
 from wmpl.Trajectory.Trajectory import Trajectory
-from wmpl.Utils.TrajConversions import equatorialCoordPrecession_vect, J2000_JD
+from wmpl.Utils.TrajConversions import equatorialCoordPrecession_vect, equatorialCoordJ2000ToDate_vect, J2000_JD
 
 
 if __name__ == "__main__":
@@ -103,9 +103,8 @@ if __name__ == "__main__":
 		print('INF time:', time_data)
 		print('INF ra, dec:', np.degrees(inf_met.ra_data), np.degrees(inf_met.dec_data))
 
-		# Precess RA/Dec from J2000 to epoch of date
-		ra_data, dec_data = equatorialCoordPrecession_vect(J2000_JD.days, inf_met.jd_data, inf_met.ra_data, \
-			inf_met.dec_data)
+		# Precess and nutate RA/Dec from J2000 to epoch of date
+		ra_data, dec_data = equatorialCoordJ2000ToDate_vect(inf_met.jd_data, inf_met.ra_data, inf_met.dec_data)
 		#ra_data, dec_data = inf_met.ra_data, inf_met.dec_data
 
 		traj.infillTrajectory(ra_data, dec_data, time_data, inf_met.lat, inf_met.lon, inf_met.ele, \

@@ -68,6 +68,15 @@ def calcAngDataLimits(ra_data, dec_data, border_ratio=0.1):
     ##########################################################################################################
 
 
+    # Guard against degenerate zero-span inputs (e.g. multiple identical points) so stereographic grid
+    #   spacing remains finite
+    if delta_largest <= 0.0:
+        delta_largest = 2.0
+        ra_min -= 1.0
+        ra_max += 1.0
+        dec_min -= 1.0
+        dec_max += 1.0
+
     ### Add a 'buffer' to the limits ###
     ##########################################################################################################
 

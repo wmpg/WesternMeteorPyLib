@@ -12,7 +12,7 @@ import argparse
 
 import numpy as np
 
-from wmpl.Utils.DragFit import DragFit, plotDragFit
+from wmpl.Utils.DragFit import DragFit, plotDragFit, spreadScan
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Math import lineAndSphereIntersections
 from wmpl.Utils.Pickling import loadPickle
@@ -64,7 +64,7 @@ def _plotSphereAndArrow(centre, radius, origin, direction, intersection_list):
 # Names of the quantities stored for every sample
 SAMPLE_ATTRIBUTES = ('t_est', 'ht', 'lat', 'lon', 'ele_geo', 'azim_norot', 'elev_norot', 'vel', 'vel_norot', \
     'length', 'eci', 'radiant_eci', 'vel_std', 'time_std', 'len_std', 'decel', 'dyn_pressure', 'k', \
-    'log_k_std', 'extrapolated')
+    'log_k_std', 'extrapolated', 'in_gap')
 
 
 
@@ -92,6 +92,7 @@ class TrajectorySamples(object):
         self.elev_norot = []
         self.vel = []
         self.vel_norot = []
+        self.in_gap = []
 
         # Position along the trajectory and the direction of the radiant
         self.length = []
@@ -113,10 +114,9 @@ class TrajectorySamples(object):
         self.extrapolated = []
 
 
-
     def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel=None, vel_norot=None, \
         length=None, eci=None, radiant_eci=None, vel_std=None, time_std=None, len_std=None, decel=None, \
-        dyn_pressure=None, k=None, log_k_std=None, extrapolated=None):
+        dyn_pressure=None, k=None, log_k_std=None, extrapolated=None, in_gap=False):
         """ Add a sample to the container.
 
         Arguments:
@@ -148,6 +148,8 @@ class TrajectorySamples(object):
                 by default.
             extrapolated: [bool] True if the sample is outside the observed part of the trajectory. None by
                 default.
+            in_gap: [bool] True if the sample falls inside an unobserved gap bridged by the drag model.
+                False by default.
         """
 
         self.t_est.append(t_est)
@@ -159,6 +161,7 @@ class TrajectorySamples(object):
         self.elev_norot.append(elev_norot)
         self.vel.append(vel)
         self.vel_norot.append(vel_norot)
+        self.in_gap.append(bool(in_gap))
 
         self.length.append(length)
         self.eci.append(eci)
@@ -192,7 +195,7 @@ class TrajectorySamples(object):
                 values = [np.full(3, np.nan) if val is None else val for val in values]
                 arrays[name] = np.array(values, dtype=np.float64).reshape(-1, 3)
 
-            elif name == 'extrapolated':
+            elif name in ('extrapolated', 'in_gap'):
                 arrays[name] = np.array(values, dtype=bool)
 
             else:
@@ -233,7 +236,8 @@ class TrajectorySamples(object):
             ('Dyn pres (Pa)', arrays['dyn_pressure'], "{:.6e}"), \
             ('K (m^2/kg)', arrays['k'], "{:.6e}"), \
             ('ln K std', arrays['log_k_std'], "{:.4f}"), \
-            ('Extrapolated', arrays['extrapolated'].astype(int), "{:d}")]
+            ('Extrapolated', arrays['extrapolated'].astype(int), "{:d}"), \
+            ('In gap', arrays['in_gap'].astype(int), "{:d}")]
 
         with open(file_path, 'w') as f:
 
@@ -251,7 +255,8 @@ class TrajectorySamples(object):
 
 
 
-def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_time=False, drag_above=False):
+def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_time=False, drag_above=False, \
+    knot_hts=None):
     """ Given the trajectory, beginning, end and step in meters, this function will sample the positions on
         the trajectory and compute the geographical coordinates, the ground-fixed azimuth and elevation of the
         radiant, the velocity with its uncertainty, the deceleration, the dynamic pressure and the ballistic
@@ -271,13 +276,20 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
             instead of heights, and -1 does not mean the observed beginning and end. False by default.
         drag_above: [bool] If True, the drag above the beginning is computed with the ballistic coefficient
             at the beginning. If False, the meteor moves without drag above the beginning. False by default.
+        knot_hts: [list] Heights of the fragmentations (m), e.g. those of the flares, where the ballistic
+            coefficient can jump, with the uncertainty from their spread (see wmpl.Utils.DragFit.spreadScan).
+            None by default.
 
     Return:
         traj_samples: [TrajectorySamples object] Sampled positions.
     """
 
-    # Fit the drag model of the motion along the trajectory
-    drag_fit = DragFit(traj, drag_above=drag_above)
+    # Fit the drag model of the motion along the trajectory, with the fragmentations if their heights are
+    #   given
+    if knot_hts is None:
+        drag_fit = DragFit(traj, drag_above=drag_above)
+    else:
+        drag_fit = spreadScan(traj, knot_hts, drag_above=drag_above)[0]
 
     if by_time:
 
@@ -353,19 +365,25 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         jd = traj.jdt_ref + t_est/86400.0
         lat, lon, ele_geo = cartesian2Geo(jd, *height_eci)
 
-        # Compute the ground-fixed alt/az of the radiant with the initial velocity, along the path bent by
-        #   the gravity drop (ECI coordinates of date, no precession)
+        # Derotate the radiant with the instantaneous speed when rotating-air drift is modelled, or v_init
         radiant_eci = drag_fit.radiantAtLength(len_val)[0]
-        azim_norot, elev_norot, _ = derotatedRadiantAltAz(traj.v_init*radiant_eci, height_eci, jd, lat, lon)
+        if drag_fit.gravity_correction and getattr(traj, 'air_rotation', False):
+            vel_derot = vel
+        else:
+            vel_derot = traj.v_init
+        azim_norot, elev_norot, _ = derotatedRadiantAltAz(vel_derot*radiant_eci, height_eci, jd, lat, lon)
 
         # Compute the dynamic pressure with the velocity relative to the ground
         vel_norot = vel_norot_array[i]
         dyn_pressure = rho_array[i]*vel_norot**2
 
-        # Mark the samples extrapolated outside the observed part
+        # Mark the samples extrapolated outside the observed part or inside an unobserved gap
         extrapolated = (len_val < drag_fit.len_first) or (len_val > drag_fit.len_last)
+        is_gap = any((g_beg <= len_val <= g_end) for g_beg, g_end in getattr(drag_fit, 'gaps', []))
         if extrapolated:
             time_marker = "*"
+        elif is_gap:
+            time_marker = "g"
         else:
             time_marker = " "
 
@@ -374,7 +392,8 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         traj_samples.addSample(t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel, vel_norot, \
             length=len_val, eci=height_eci, radiant_eci=radiant_eci, vel_std=vel_std_array[i], \
             time_std=time_std_array[i], len_std=len_std_array[i], decel=decel_array[i], \
-            dyn_pressure=dyn_pressure, k=k_array[i], log_k_std=log_k_std_array[i], extrapolated=extrapolated)
+            dyn_pressure=dyn_pressure, k=k_array[i], log_k_std=log_k_std_array[i], \
+            extrapolated=extrapolated, in_gap=is_gap)
 
         if show_plots:
             print(("{:s}{:7.3f}, {:13.1f}, {:10.6f}, {:11.6f}, {:10.1f}, {:10.6f}, {:10.6f}, {:10.3f}, " \
@@ -404,6 +423,8 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
     if show_plots:
         print('The star * denotes samples extrapolated outside the observed part of the trajectory with ' \
             + 'the drag model.')
+        if any(traj_samples.in_gap):
+            print('The letter g denotes samples falling inside an unobserved gap bridged by the drag model.')
         print("The horizontal coordinates are apparent above a fixed ground, not topocentric in J2000!")
         print('Vel is the velocity in the ECI frame, Vgnd the velocity relative to the ground.')
         print("Vstd is the 1 sigma uncertainty of Vel from the noise of the points, without the " \
@@ -415,9 +436,11 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
         if traj_samples.t_est:
 
             arrays = traj_samples.toArrays()
-            i_peak = np.nanargmax(arrays['dyn_pressure'])
-            print("Peak dynamic pressure of the samples: {:.3f} kPa at {:.3f} km, t = {:.3f} s".format( \
-                arrays['dyn_pressure'][i_peak]/1000, arrays['ht'][i_peak]/1000, arrays['t_est'][i_peak]))
+            if np.any(np.isfinite(arrays['dyn_pressure'])):
+                i_peak = np.nanargmax(arrays['dyn_pressure'])
+                print("Peak dynamic pressure of the samples: {:.3f} kPa at {:.3f} km, t = {:.3f} s".format( \
+                    arrays['dyn_pressure'][i_peak]/1000, arrays['ht'][i_peak]/1000, \
+                    arrays['t_est'][i_peak]))
 
         print()
         print('End coordinates (observed):')

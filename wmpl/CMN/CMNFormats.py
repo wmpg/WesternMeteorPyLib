@@ -1,6 +1,6 @@
 import numpy as np
 
-from wmpl.Utils.TrajConversions import J2000_JD, equatorialCoordPrecession
+from wmpl.Utils.TrajConversions import equatorialCoordJ2000ToDate
 
 class InfData(object):
 
@@ -63,8 +63,8 @@ def loadINF(file_name):
 			# Extract declination
 			dec = np.radians(line[2])
 
-			# Precess ra and dec to epoch of date (from J2000.0 epoch)
-			ra, dec = equatorialCoordPrecession(J2000_JD.days, jd, ra, dec)
+			# Precess and nutate ra and dec to epoch of date (from J2000.0 epoch)
+			ra, dec = equatorialCoordJ2000ToDate(jd, ra, dec)
 
 			jd_data.append(jd)
 			ra_data.append(ra)

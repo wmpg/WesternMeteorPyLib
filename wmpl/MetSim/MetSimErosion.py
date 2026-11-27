@@ -13,17 +13,22 @@ from __future__ import print_function, division, absolute_import
 
 
 import math
+import sys
 
 import numpy as np
 import scipy.stats
 import scipy.integrate
 
+from wmpl.Utils.AtmosphereDensity import atmColumnTable
+from wmpl.Utils.Physics import earthRotationSpeed
+
 
 # Cython init
 from wmpl.Utils.CythonBuild import installPyximport
 installPyximport()
-from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
-    ionizationEfficiency, atmDensityPoly
+from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency, \
+    ionizationEfficiency, atmDensityPoly, atmDensityTable, AtmDensityTableCy, ablationStepRK4, Fragment, \
+    ablateAllCy
 
 
 ### DEFINE CONSTANTS
@@ -68,9 +73,18 @@ class Constants(object):
         # Power of a 0 magnitude meteor
         self.P_0m = 840
 
-        # Atmosphere density coefficients
+        # Atmosphere density coefficients of the 6th degree polynomial, used only without the density table
         self.dens_co = np.array([6.96795507e+01, -4.14779163e+03, 9.64506379e+04, -1.16695944e+06, \
             7.62346229e+06, -2.55529460e+07, 3.45163318e+07])
+
+        # Atmosphere density model, 'table' or the legacy 'polynomial' of constants saved without this flag,
+        #   which is inaccurate by up to tens of percent at 80 to 120 km
+        self.atm_density_model = 'table'
+
+        # Tabulated atmosphere density, heights (m) and log10 of the density (kg/m^3), and its provenance
+        self.atm_table_ht = None
+        self.atm_table_log10_rho = None
+        self.atm_density_info = None
         
         # Radius of the Earth (m)
         self.r_earth = 6_371_008.7714
@@ -232,6 +246,18 @@ class Constants(object):
         ### ###
 
 
+        ### Comparison with the observed lengths ###
+
+        # Fit the time at which the simulation passes the height of the first observed point, instead of
+        #   fixing it to the time of that point
+        self.fit_lag_time_offset = True
+
+        # Fitted time at which the simulation passes the height of the first observed point (s)
+        self.lag_time_offset = 0.0
+
+        ### ###
+
+
         
         ### OUTPUT PARAMETERS ###
 
@@ -264,138 +290,6 @@ class Constants(object):
         self.main_bottom_ht = self.h_init
 
         ### ###
-
-
-class Fragment(object):
-    def __init__(self):
-
-        self.id = 0
-
-        self.const = None
-
-        # Shape-density coeff
-        self.K = 0
-
-        # Initial fragment mass
-        self.m_init = 0
-
-        # Instantaneous fragment mass Mass (kg)
-        self.m = 0
-
-        # Density (kg/m^3)
-        self.rho = 0
-
-        # Ablation coefficient (s^2/m^2)
-        self.sigma = 0
-
-        # Velocity (m/s)
-        self.v = 0
-
-        # Velocity components (vertical and horizontal)
-        self.vv = 0
-        self.vh = 0
-
-        # Total drop due to gravity (m)
-        self.h_grav_drop_total = 0
-
-        # Length along the trajectory
-        self.length = 0
-
-        # Luminous intensity (Watts)
-        self.lum = 0
-
-        # Electron line density
-        self.q = 0
-
-        # Dynamic pressure (Gamma = 1.0, Pa)
-        self.dyn_press = 0
-
-        # Erosion coefficient value
-        self.erosion_coeff = 0
-
-        # Indicates that this fragment was born from a disruption event and uses a fixed, disruption-
-        #   specific erosion coefficient (const.disruption_erosion_coeff) instead of the ordinary height-
-        #   dependent one, so it's excluded from the height-based erosion_coeff recompute below
-        self.disruption_child = False
-
-        # Indicates that the one-time density/ablation coeff change at erosion_height_change has already
-        #   been applied to this (main) fragment, so it isn't silently re-applied (and doesn't clobber a
-        #   later manual sigma change, e.g. from a complex fragmentation "A" event) on every subsequent tick
-        self.erosion_height_change_applied = False
-
-        # Grain mass distribution index
-        self.erosion_mass_index = 2.5
-
-        # Mass range for grains (kg)
-        self.erosion_mass_min = 1.0e-11
-        self.erosion_mass_max = 5.0e-10
-
-
-        self.erosion_enabled = False
-
-        self.disruption_enabled = False
-
-        self.active = False
-        self.n_grains = 1
-
-        # Indicate that this is the main fragment
-        self.main = False
-
-        # Indicate that the fragment is a grain
-        self.grain = False
-
-        # Indicate that this is born out of complex fragmentation
-        self.complex = False
-
-        # Identifier of the complex fragmentation entry
-        self.complex_id = None
-
-
-    def init(self, const, m, rho, v_init, sigma, gamma, zenith_angle, erosion_mass_index, erosion_mass_min, \
-        erosion_mass_max):
-
-        self.const = const
-
-        self.m = m
-        self.m_init = m
-        self.h = const.h_init
-        self.rho = rho
-        self.v = v_init
-        self.sigma = sigma
-        self.gamma = gamma
-        self.zenith_angle = zenith_angle
-
-        # Compute shape-density coeff
-        self.updateShapeDensityCoeff()
-
-        self.erosion_mass_index = erosion_mass_index
-        self.erosion_mass_min = erosion_mass_min
-        self.erosion_mass_max = erosion_mass_max
-
-        # Compute velocity components
-        self.vv = -v_init*math.cos(zenith_angle)
-        self.vh = v_init*math.sin(zenith_angle)
-
-        self.active = True
-        self.n_grains = 1
-
-    def updateShapeDensityCoeff(self):
-        """ Update the value of the shape-density coefficient. """
-
-        self.K = self.gamma*self.const.shape_factor*self.rho**(-2/3.0)
-
-    def spawn_child(self):
-        """ Create a child of the Fragment instance. Copy over the reference to the shared 'const' object 
-        and copy values of all other attributes. Note: if a mutable attribute that is not shared across 
-        Fragment instances is added, this function will need to be revised. 
-        """
-        
-        cls = self.__class__
-        child = cls.__new__(cls)
-                
-        child.__dict__.update(self.__dict__)
-    
-        return child
 
 
 class Wake(object):
@@ -432,16 +326,15 @@ class Wake(object):
         # Evaluate the Gaussian at every fragment an add to the estimated wake
         self.wake_luminosity_profile = np.zeros_like(length_array)
 
-        # If there is not entry for the wake PSF weights, initialize it
-        if not hasattr(self.const, 'wake_psf_weights'):
-            self.const.wake_psf_weights = np.ones_like(self.const.wake_psf)
+        # Take the weights of the wake PSFs, equal if not given, normalized so they sum to 1, without changing
+        #   the constants, which are saved to JSON
+        psf_weights = np.array(getattr(self.const, 'wake_psf_weights', np.ones(len(self.const.wake_psf))), \
+            dtype=np.float64)
+        psf_weights = psf_weights/np.sum(psf_weights)
 
-        # Normalize the wake weights so they sum to 1
-        self.const.wake_psf_weights = self.const.wake_psf_weights/np.sum(self.const.wake_psf_weights)
-        
         for frag_lum, frag_len in zip(self.luminosity_points, self.length_points):
 
-            for psf_m, psf_weight in zip(self.const.wake_psf, self.const.wake_psf_weights):
+            for psf_m, psf_weight in zip(self.const.wake_psf, psf_weights):
                 self.wake_luminosity_profile += psf_weight*frag_lum*scipy.stats.norm.pdf(self.length_array, loc=frag_len, \
                     scale=psf_m)
 
@@ -482,8 +375,87 @@ def heightCurvature(h0, zc, l, r_earth):
     return math.sqrt((h0 + r_earth)**2 - 2*l*math.cos(zc)*(h0 + r_earth) + l**2) - r_earth
 
 
+
+def constantsRelativeToGround(const, v_rotation):
+    """ Convert the initial speed and the zenith angle of the constants from the inertial frame of the
+        trajectory solver to the ground, as MetSim simulates the motion relative to the air.
+
+    The Earth's rotation is horizontal, so the zenith angle is converted keeping the vertical speed.
+    v_rotation is kept in the constants, and SimulationResults adds it back to the simulated lengths and
+    speeds to compare them with the observations.
+
+    Arguments:
+        const: [Constants object] Constants with the inertial v_init and zenith_angle, changed in place.
+        v_rotation: [float] Speed of the Earth's rotation along the path, see Physics.earthRotationSpeed()
+            (m/s).
+
+    Return:
+        const: [Constants object] Constants relative to the ground.
+    """
+
+    v_ground = const.v_init - v_rotation
+    const.zenith_angle = np.arccos(np.clip(const.v_init*np.cos(const.zenith_angle)/v_ground, -1.0, 1.0))
+    const.v_init = v_ground
+    const.v_rotation = v_rotation
+
+    return const
+
+
+
+def constantsToInertial(const):
+    """ Convert the initial speed and the zenith angle of constants relative to the ground back to the
+        inertial frame of the trajectory solver, the inverse of constantsRelativeToGround().
+
+    Arguments:
+        const: [Constants object] Constants relative to the ground with their v_rotation, changed in place.
+
+    Return:
+        const: [Constants object] Constants with the inertial v_init and zenith_angle, and v_rotation 0.
+    """
+
+    v_rotation = getattr(const, 'v_rotation', 0.0)
+    v_inertial = const.v_init + v_rotation
+    const.zenith_angle = np.arccos(np.clip(const.v_init*np.cos(const.zenith_angle)/v_inertial, -1.0, 1.0))
+    const.v_init = v_inertial
+    const.v_rotation = 0.0
+
+    return const
+
+
+
+def loadedConstantsRelativeToGround(const, const_json, traj):
+    """ Convert constants loaded from a JSON file to the ground of the given trajectory.
+
+    Files without v_rotation were saved before MetSim was run relative to the ground, with the inertial
+    v_init and zenith angle of the trajectory, and are converted. Files with v_rotation keep their ground
+    values and take the rotation of the given trajectory.
+
+    Arguments:
+        const: [Constants object] Loaded constants, changed in place.
+        const_json: [dict] Loaded JSON file.
+        traj: [Trajectory object] Trajectory the constants were fitted to.
+
+    Return:
+        const: [Constants object] Constants relative to the ground.
+    """
+
+    v_rotation = earthRotationSpeed(traj)
+
+    # Keep the ground values of constants already relative to the ground, with the rotation of this trajectory
+    if ('v_rotation' in const_json) or ('v_rotation' in const_json.get('const', {})):
+        const.v_rotation = v_rotation
+        return const
+
+    if v_rotation:
+        print("NOTE: The constants file has no v_rotation, so its v_init and zenith angle are taken as " \
+            "inertial and converted to the ground (v_rotation = {:.2f} m/s).".format(v_rotation))
+
+    return constantsRelativeToGround(const, v_rotation)
+
+
+
 def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, 
-                      keep_eroding=False, disruption=False, mass_model='powerlaw'):
+                      keep_eroding=False, disruption=False, mass_model='powerlaw', bin_counts=None):
     """ Given the parent fragment, fragment it into daughter fragments using either:
         - a power law mass distribution - appropriate for fragmentation of rock;
         - a gamma distribution - appropriate for spraying of droplets (iron meteoroids).
@@ -506,6 +478,10 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
         mass_model: [bool] Fragment mass distribution model to use. Options: 
             - 'powerlaw' (default) - a power law mass distribution, appropriate for fragmentation of rock.
             - 'gamma' - a gamma size distribution, appropriate for spraying of droplets (iron meteoroids).
+        bin_counts: [list] Fractions of a grain in every mass bin, kept from the previous calls of an eroding
+            fragment and updated in place, so that a bin releases a grain once it has gathered a whole one.
+            None by default, when the fraction left in a bin goes to the next smaller bin and what is left
+            after the smallest bin is not released.
 
     Return:
         frag_children: [list] A list of Fragment instances - these are the generated daughter fragments.
@@ -605,11 +581,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
             m_grain = mass_bins[i]
 
             # Compute the number of grains in the bin
-            n_grains_bin = n_m_scaled[i]*bin_widths[i] + leftover_mass/m_grain
-            n_grains_bin_round = int(math.floor(n_grains_bin)) # int(expected_count)
-
-            # Compute the leftover mass
-            leftover_mass = (n_grains_bin - n_grains_bin_round)*m_grain
+            n_grains_bin = n_m_scaled[i]*bin_widths[i]
 
         # Power-law mass distribution
         else:
@@ -617,62 +589,168 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
             m_grain = mass_max*mass_bin_coeff**i
 
             # Compute the number of grains in the bin
-            n_grains_bin = n0*(mass_max/m_grain)**(mass_index - 1) + leftover_mass/m_grain
-            n_grains_bin_round = int(math.floor(n_grains_bin))
+            n_grains_bin = n0*(mass_max/m_grain)**(mass_index - 1)
 
-            # Compute the leftover mass
+        # Keep the fraction of a grain in the bin for the next call of an eroding fragment, as the eroded mass
+        #   of one time step can be smaller than one grain
+        if bin_counts is not None:
+            n_grains_bin += bin_counts[i]
+            n_grains_bin_round = int(math.floor(n_grains_bin))
+            bin_counts[i] = n_grains_bin - n_grains_bin_round
+
+        # Otherwise move the fraction of a grain to the next smaller bin
+        else:
+            n_grains_bin += leftover_mass/m_grain
+            n_grains_bin_round = int(math.floor(n_grains_bin))
             leftover_mass = (n_grains_bin - n_grains_bin_round)*m_grain
 
         # If there are any grains to erode, erode them
         if n_grains_bin_round > 0:
-
-            # Init the new fragment with params of the parent
-            frag_child = frag_parent.spawn_child()
-
-            # Assign the number of grains this fragment stands for (make sure to preserve the previous value
-            #   if erosion is done for more fragments)
-            frag_child.n_grains *= n_grains_bin_round
-
-            # Assign the grain mass
-            frag_child.m = m_grain
-            frag_child.m_init = m_grain
-
-            frag_child.active = True
-            frag_child.main = False
-            frag_child.disruption_enabled = False
-
-            # Indicate that the fragment is a grain
-            if (not keep_eroding) and (not disruption):
-                frag_child.grain = True
-
-            # Set the erosion coefficient value (disable in grain, only larger fragments)
-            if keep_eroding:
-                frag_child.erosion_enabled = True
-
-                # If the disruption occurred, use a different erosion coefficient for daughter fragments
-                if disruption:
-                    frag_child.erosion_coeff = const.disruption_erosion_coeff
-                    frag_child.disruption_child = True
-                else:
-                    frag_child.erosion_coeff = getErosionCoeff(const, frag_parent.h)
-
-            else:
-                # Compute the grain density and shape-density coeff
-                frag_child.rho = const.rho_grain
-                frag_child.updateShapeDensityCoeff()
-
-                frag_child.erosion_enabled = False
-                frag_child.erosion_coeff = 0
-
-
-            # Give every fragment a unique ID
-            frag_child.id = const.total_fragments
-            const.total_fragments += 1
-
-            frag_children.append(frag_child)
+            frag_children.append(spawnGrains(const, frag_parent, m_grain, n_grains_bin_round, \
+                keep_eroding=keep_eroding, disruption=disruption))
 
 
     return frag_children, const
+
+
+
+def spawnGrains(const, frag_parent, m_grain, n_grains, keep_eroding=False, disruption=False):
+    """ Make a daughter fragment of the parent, which stands for a number of grains of the same mass.
+
+    Arguments:
+        const: [object] Constants instance.
+        frag_parent: [object] Fragment instance, the parent fragment.
+        m_grain: [float] Mass of one grain (kg).
+        n_grains: [float] Number of grains the daughter stands for, which can be a fraction.
+
+    Keyword arguments:
+        keep_eroding: [bool] Whether the daughter fragment should keep eroding.
+        disruption: [bool] Indicates that the disruption occurred, uses a separate erosion parameter for
+            disrupted daughter fragments.
+
+    Return:
+        frag_child: [object] Fragment instance, the daughter fragment.
+    """
+
+    # Init the new fragment with params of the parent
+    frag_child = frag_parent.spawn_child()
+
+    # Assign the number of grains this fragment stands for (make sure to preserve the previous value
+    #   if erosion is done for more fragments)
+    frag_child.n_grains *= n_grains
+
+    # Assign the grain mass
+    frag_child.m = m_grain
+    frag_child.m_init = m_grain
+
+    frag_child.active = True
+    frag_child.main = False
+    frag_child.disruption_enabled = False
+
+    # Indicate that the fragment is a grain
+    if (not keep_eroding) and (not disruption):
+        frag_child.grain = True
+
+    # Set the erosion coefficient value (disable in grain, only larger fragments)
+    if keep_eroding:
+        frag_child.erosion_enabled = True
+
+        # If the disruption occurred, use a different erosion coefficient for daughter fragments
+        if disruption:
+            frag_child.erosion_coeff = const.disruption_erosion_coeff
+            frag_child.disruption_child = True
+        else:
+            frag_child.erosion_coeff = getErosionCoeff(const, frag_parent.h)
+
+    else:
+        # Compute the grain density and shape-density coeff
+        frag_child.rho = const.rho_grain
+        frag_child.updateShapeDensityCoeff()
+
+        frag_child.erosion_enabled = False
+        frag_child.erosion_coeff = 0
+
+
+    # Give every fragment a unique ID
+    frag_child.id = const.total_fragments
+    const.total_fragments += 1
+
+
+    return frag_child
+
+
+
+def erosionBinParams(const, frag):
+    """ Return the parameters which set the mass bins of the grains an eroding fragment releases. """
+
+    return (frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
+        const.erosion_grain_distribution, const.erosion_bins_per_10mass)
+
+
+
+def erodeIntoGrains(const, frag, eroded_mass):
+    """ Erode the given mass of a fragment into grains. Each mass bin of the fragment gathers fractions of a
+        grain over the time steps and releases a grain once it has a whole one, so that the distribution of
+        the grains does not depend on the time step.
+
+    Arguments:
+        const: [object] Constants instance.
+        frag: [object] Fragment instance, the eroding fragment.
+        eroded_mass: [float] Eroded mass (kg).
+
+    Return:
+        frag_children: [list] Released grains.
+    """
+
+    frag_children = []
+
+    # Release what is left in the bins if the bins have changed, e.g. with a new mass index
+    if (frag.erosion_bin_counts is not None) and (frag.erosion_bin_params != erosionBinParams(const, frag)):
+        frag_children += releaseGrainRemainder(const, frag)
+
+    # Start the bins of the fragment
+    if frag.erosion_bin_counts is None:
+        frag.erosion_bin_params = erosionBinParams(const, frag)
+        n_bins = int(1 + math.log10(frag.erosion_mass_min/frag.erosion_mass_max) \
+            /math.log10(10**(-1.0/const.erosion_bins_per_10mass)))
+        frag.erosion_bin_counts = [0.0]*n_bins
+
+    grain_children, const = generateFragments(const, frag, eroded_mass, frag.erosion_mass_index, \
+        frag.erosion_mass_min, frag.erosion_mass_max, keep_eroding=False, \
+        mass_model=const.erosion_grain_distribution, bin_counts=frag.erosion_bin_counts)
+
+    return frag_children + grain_children
+
+
+
+def releaseGrainRemainder(const, frag):
+    """ Release the fractions of a grain left in the mass bins of an eroding fragment, as daughter fragments
+        which stand for a fraction of a grain, so that all of the eroded mass is released.
+
+    Arguments:
+        const: [object] Constants instance.
+        frag: [object] Fragment instance, the eroding fragment.
+
+    Return:
+        frag_children: [list] Released grains.
+    """
+
+    frag_children = []
+
+    if frag.erosion_bin_counts is not None:
+
+        _, _, mass_max, _, bins_per_10mass = frag.erosion_bin_params
+        mass_bin_coeff = 10**(-1.0/bins_per_10mass)
+
+        for i, n_grains in enumerate(frag.erosion_bin_counts):
+            if n_grains > 0:
+                frag_children.append(spawnGrains(const, frag, mass_max*mass_bin_coeff**i, n_grains))
+
+        frag.erosion_bin_counts = None
+        frag.erosion_bin_params = None
+
+
+    return frag_children
 
 
 def getErosionCoeff(const, h):
@@ -691,8 +769,196 @@ def getErosionCoeff(const, h):
         return 0
 
 
-def killFragment(const, frag):
-    """ Deactivate the given fragment and keep track of the stats. """
+def usesAtmDensityTable(const):
+    """ Check whether the simulation takes the atmosphere density from the table of the constants, which it
+        does if the density model is 'table' and the table is given. Constants without the model are legacy
+        ones and use the polynomial.
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+
+    Return:
+        [bool] True if the table is used.
+    """
+
+    return (getattr(const, 'atm_density_model', 'polynomial') == 'table') \
+        and (getattr(const, 'atm_table_ht', None) is not None)
+
+
+
+def atmDensity(ht, const):
+    """ Compute the atmosphere density from the tabulated profile of the constants if they use it, or from
+        the density polynomial otherwise (see usesAtmDensityTable()).
+
+    Arguments:
+        ht: [float] Height (m).
+        const: [Constants object] Simulation constants.
+
+    Return:
+        [float] Atmosphere density (kg/m^3).
+    """
+
+    if not usesAtmDensityTable(const):
+        return atmDensityPoly(ht, const.dens_co)
+
+    return atmDensityTable(ht, *atmDensityTableArrays(const))
+
+
+
+def atmDensityDescription(const):
+    """ Describe the atmosphere density model of the constants for the terminal.
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+
+    Return:
+        [str] Description of the model, with its inputs for a table.
+    """
+
+    if not usesAtmDensityTable(const):
+        return "Atmosphere density: legacy 6th degree polynomial, inaccurate by up to tens of percent at " \
+            "80 to 120 km"
+
+    info = getattr(const, 'atm_density_info', None)
+    if not info:
+        return "Atmosphere density: table of {:d} points, {:.1f} to {:.1f} km".format( \
+            len(const.atm_table_ht), const.atm_table_ht[0]/1000, const.atm_table_ht[-1]/1000)
+
+    return "Atmosphere density: {:s} table, {:.1f} to {:.1f} km every {:.0f} m, lat {:.4f} deg, " \
+        "lon {:.4f} deg, JD {:.6f}, F10.7 {:g}, F10.7A {:g}, Ap {:g} ({:s} space weather)".format( \
+        info['model'], info['ht_min']/1000, info['ht_max']/1000, info['step'], info['lat'], info['lon'], \
+        info['jd'], info['f107'], info['f107a'], info['ap'], info.get('space_weather', 'constant'))
+
+
+
+def atmDensityTableArrays(const):
+    """ Convert the atmosphere density table of the constants to the contiguous arrays of the Cython
+        interpolator (MetSimErosionCyTools.atmDensityTable()).
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+
+    Return:
+        (table_ht, table_log10_rho): [tuple] Arrays of the heights (m) and log10 of the densities, or None if
+            the constants do not use the table.
+    """
+
+    if not usesAtmDensityTable(const):
+        return None
+
+    return np.ascontiguousarray(const.atm_table_ht, dtype=np.float64), \
+        np.ascontiguousarray(const.atm_table_log10_rho, dtype=np.float64)
+
+
+
+def atmDensityTableCy(const):
+    """ Make the Cython density table of the constants for the simulation loop (AtmDensityTableCy).
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+
+    Return:
+        [AtmDensityTableCy object] Density table, or None if the constants do not use the table.
+    """
+
+    atm_table = atmDensityTableArrays(const)
+    if atm_table is None:
+        return None
+
+    return AtmDensityTableCy(*atm_table)
+
+
+def prepareAtmDensityTable(const):
+    """ Check the atmosphere density model and the tabulated profile of the constants, if any, and store the
+        table as lists of floats, which can be saved to JSON. Constants without a table get the 'polynomial'
+        model, which they run on.
+
+    Arguments:
+        const: [Constants object] Simulation constants, changed in place.
+
+    Return:
+        None
+    """
+
+    atm_density_model = getattr(const, 'atm_density_model', 'polynomial')
+    if atm_density_model not in ('table', 'polynomial'):
+        raise ValueError("atm_density_model must be 'table' or 'polynomial', not {:s}".format( \
+            repr(atm_density_model)))
+
+    # Record the polynomial as the model of constants without a table, which run on it
+    if getattr(const, 'atm_table_ht', None) is None:
+        const.atm_density_model = 'polynomial'
+
+    if not usesAtmDensityTable(const):
+        return
+
+    if getattr(const, 'atm_table_log10_rho', None) is None:
+        raise ValueError("atm_table_ht is given without atm_table_log10_rho")
+
+    table_ht = [float(ht) for ht in const.atm_table_ht]
+    table_log10_rho = [float(lr) for lr in const.atm_table_log10_rho]
+
+    if not (np.all(np.isfinite(table_ht)) and np.all(np.isfinite(table_log10_rho))):
+        raise ValueError("The atmosphere density table has non-finite values")
+
+    if len(table_ht) < 2:
+        raise ValueError("The atmosphere density table needs at least 2 points, got {:d}".format( \
+            len(table_ht)))
+
+    if len(table_ht) != len(table_log10_rho):
+        raise ValueError("atm_table_ht and atm_table_log10_rho have different lengths ({:d} vs {:d})" \
+            "".format(len(table_ht), len(table_log10_rho)))
+
+    if any(ht_next <= ht_prev for ht_prev, ht_next in zip(table_ht[:-1], table_ht[1:])):
+        raise ValueError("atm_table_ht must be strictly ascending")
+
+    const.atm_table_ht = table_ht
+    const.atm_table_log10_rho = table_log10_rho
+
+
+def erosionBinMass(frag):
+    """ Compute the mass which an eroding fragment has eroded into its mass bins but not released as grains
+        yet, for all of the grains the fragment stands for.
+
+    Arguments:
+        frag: [object] Fragment instance.
+
+    Return:
+        [float] Mass in the mass bins (kg).
+    """
+
+    if frag.erosion_bin_counts is None:
+        return 0.0
+
+    _, _, mass_max, _, bins_per_10mass = frag.erosion_bin_params
+    mass_bin_coeff = 10**(-1.0/bins_per_10mass)
+
+    bin_mass = sum([n_grains*mass_max*mass_bin_coeff**i for i, n_grains \
+        in enumerate(frag.erosion_bin_counts)])
+
+
+    return frag.n_grains*bin_mass
+
+
+
+def killFragment(const, frag, release_grains=True):
+    """ Deactivate the given fragment and keep track of the stats.
+
+    Arguments:
+        const: [object] Constants instance.
+        frag: [object] Fragment instance.
+
+    Keyword arguments:
+        release_grains: [bool] Release the fractions of grains left in the mass bins of the fragment. True by
+            default. If False, they are dropped with the fragment.
+
+    Return:
+        frag_children: [list] Grains released from what the fragment eroded but did not release yet.
+    """
+
+    # A fragment which is already deactivated, e.g. a disrupted one, is not counted again
+    if not frag.active:
+        return []
 
     frag.active = False
     const.n_active -= 1
@@ -701,630 +967,292 @@ def killFragment(const, frag):
     if frag.main:
         const.main_mass_exhaustion_ht = frag.h
 
+    # Release the fractions of grains left in the mass bins
+    if release_grains:
+        frag_children = releaseGrainRemainder(const, frag)
+        const.n_active += len(frag_children)
 
-def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
-    """ Perform single body ablation of all fragments using the 4th order Runge-Kutta method. 
+    else:
+        frag_children = []
+        frag.erosion_bin_counts = None
+        frag.erosion_bin_params = None
+
+
+    return frag_children
+
+
+
+def disruptFragment(const, frag):
+    """ Disrupt a fragment whose dynamic pressure exceeds its strength into fragments and grains, and
+        deactivate it.
 
     Arguments:
-        fragments: [list] A list of Fragment instances.
-        const: [object] Constants instance.
-
-    Keyword arguments:
-        compute_wake: [bool] If True, the wake profile will be computed. False by default.
-        wake_heights_queue: [list] A list of heights at which the wake should be computed. None by default.
+        const: [Constants object] Simulation constants.
+        frag: [Fragment object] Fragment to disrupt.
 
     Return:
-        ...
-
-    Note:
-        const.dt is fixed for every fragment, including grains. Near erosion_mass_min this single-step
-        RK4 is under-resolved (a single step can overshoot the grain's true velocity by tens of percent
-        vs. a finely-substepped mirror) - a known accuracy limitation of the fixed-step scheme, not
-        (currently) compensated for with adaptive/sub-stepping.
+        frag_children_all: [list] Fragments and grains made by the disruption.
     """
 
-    # Keep track of the total luminosity
-    luminosity_total = 0.0
-
-    # Keep track of the total luminosity weighted lum eff
-    tau_total = 0.0
-
-    # Keep track of the luminosity of the main fragment
-    luminosity_main = 0.0
-
-    # Keep track of the luminosity weighted lum eff of the main fragment
-    tau_main = 0.0
-
-    # Keep track of the luminosity of eroded and disrupted fragments
-    luminosity_eroded = 0.0
-
-    # Keep track of the luminosity weighted lum eff of eroded and disrupted fragments
-    tau_eroded = 0.0
-
-    # Keep track of the total electron density
-    electron_density_total = 0.0
-
-    # Keep track of parameters of the brightest fragment
-    brightest_height = 0.0
-    brightest_length = 0.0
-    brightest_lum    = 0.0
-    brightest_vel    = 0.0
-
-    # Keep track of the the main fragment parameters
-    main_mass = 0.0
-    main_height = 0.0
-    main_length = 0.0
-    main_vel = 0.0
-    main_dyn_press = 0.0
-
+    # Fragments and grains made by the disruption
     frag_children_all = []
 
-    # Snapshot which fragments were active at the start of this tick, before any of them can be killed
-    # below - used for the leading fragment candidacy check further down, so a fragment that dies partway
-    # through this very tick (and so is no longer frag.active by the time we get there) still counts with
-    # its just-computed, physically valid position for the tick it died on
-    fragments_active_at_tick_start = [frag for frag in fragments if frag.active]
+    # Compute the mass that should be disrupted into fragments
+    mass_frag_disruption = frag.m*(1 - const.disruption_mass_grain_ratio)
 
-    # Index the complex fragmentation entries by id once, so the per-grain lookup below is O(1) instead
-    #   of a linear scan of all entries for every complex grain on every tick
-    fragmentation_entry_by_id = {frag_entry.id: frag_entry for frag_entry in const.fragmentation_entries}
+    fragments_total_mass = 0
+    if mass_frag_disruption > 0:
 
-    # Total active mass (grain-weighted), accumulated inside the loop below instead of a separate
-    #   post-loop scan of the whole fragment list
-    mass_total_active = 0.0
+        # Disrupt the meteoroid into fragments
+        disruption_mass_min = const.disruption_mass_min_ratio*mass_frag_disruption
+        disruption_mass_max = const.disruption_mass_max_ratio*mass_frag_disruption
 
-    # Go through all active fragments
-    for frag in fragments:
+        # Generate larger fragments, possibly assign them a separate erosion coefficient
+        frag_children, const = generateFragments(const, frag, mass_frag_disruption, \
+            const.disruption_mass_index, disruption_mass_min, disruption_mass_max, \
+            keep_eroding=const.erosion_on, disruption=True, \
+            mass_model=const.erosion_grain_distribution)
 
-        # Skip the fragment if it's not active
-        if not frag.active:
-            continue
+        frag_children_all += frag_children
+        const.n_active += len(frag_children)
 
-        # Get atmosphere density for the given height
-        rho_atm = atmDensityPoly(frag.h, const.dens_co)
+        # Compute the mass that went into fragments
+        fragments_total_mass = sum([f.n_grains*f.m for f in frag_children])
 
-        # Compute the mass loss of the fragment due to ablation
-        mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
+        # Assign the height of disruption
+        const.disruption_height = frag.h
 
-        # Compute the mass loss due to erosion
-        if frag.erosion_enabled and (frag.erosion_coeff > 0):
-            mass_loss_erosion = massLossRK4(const.dt, frag.K, frag.erosion_coeff, frag.m, rho_atm, frag.v)
-        else:
-            mass_loss_erosion = 0
+        # Print the masses of the fragments made by the disruption
+        print('Disrupting id', frag.id)
+        print('Height: {:.3f} km'.format(const.disruption_height/1000))
+        print('Disrupted mass: {:e}'.format(mass_frag_disruption))
+        print('Mass distribution:')
+        for f in frag_children:
+            print('{:4d}: {:e} kg'.format(f.n_grains, f.m))
+        print('Disrupted total mass: {:e}'.format(fragments_total_mass))
 
-        # Compute the total mass loss
-        mass_loss_total = mass_loss_ablation + mass_loss_erosion
+    # Disrupt a portion of the leftover mass into grains
+    mass_grain_disruption = frag.m - fragments_total_mass
+    if mass_grain_disruption > 0:
+        grain_children, const = generateFragments(const, frag, mass_grain_disruption, \
+            frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
+            keep_eroding=False, mass_model=const.erosion_grain_distribution)
 
-        # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
-        # (i.e. land exactly on m_new = 0, not some arbitrary leftover - see m_new below)
-        if (frag.m + mass_loss_total) < 0:
-            mass_loss_total = -frag.m
+        frag_children_all += grain_children
+        const.n_active += len(grain_children)
 
-        # Compute new mass
-        m_new = frag.m + mass_loss_total
+    # Deactivate the disrupted fragment, which releases the grains it has not released yet
+    frag.m = 0
+    frag_children_all += killFragment(const, frag)
 
-        # Compute change in velocity
-        deceleration_total = decelerationRK4(const.dt, frag.K, frag.m, rho_atm, frag.v)
 
-        # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
-        if deceleration_total > 0:
-            frag.vv = frag.vh = frag.v = 0
-            deceleration_total = 0
+    return frag_children_all
 
-        # Otherwise update the velocity
-        else:
 
-            # Compute g at given height
-            gv = G0/((1 + frag.h/const.r_earth)**2)
 
-            # ### Add velocity change due to Earth's gravity ###
+def applyFragmentationEntries(const, frag, fragments, frag_children_all, dyn_press):
+    """ Apply the fragmentation entries whose height the main fragment has passed.
 
-            # # Vertical component of a
-            # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
+    Arguments:
+        const: [Constants object] Simulation constants.
+        frag: [Fragment object] Main fragment.
+        fragments: [list] Fragments at the beginning of the time step.
+        frag_children_all: [list] Fragments made in this time step, to which the fragments made by the entries
+            are added.
+        dyn_press: [float] Dynamic pressure on the main fragment in this time step (Pa).
 
-            # # Horizontal component of a
-            # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
+    Return:
+        None
+    """
 
-            # ### ###
+    # Get a list of complex fragmentations that are still to do
+    frags_to_do = [frag_entry for frag_entry in const.fragmentation_entries if not frag_entry.done]
 
-            ### Compute deceleration without the effects of gravity (to reconstruct the initial velocity
-            # without the gravity component)
+    if len(frags_to_do):
 
-            # Vertical component of a
-            av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
+        # Go through all fragmentations that needs to be performed
+        for frag_entry in frags_to_do:
 
-            # Horizontal component of a
-            ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
+            # Check if the height of the main fragment is right to perform the operation.
+            # Run if:
+            # (a) If the fireball is going down and the fragmentation is for the downward direction
+            # (b) If the fireball is going up and the fragmentation is for the upward direction
+            #     And the fireball started going up
+            if ( (not frag_entry.upward_only) and (frag.h < frag_entry.height) ) \
+            or (
+                frag_entry.upward_only
+                and (frag.h > frag_entry.height)
+                and (frag.h > const.main_bottom_ht)
+                ):
 
-            ###
+                parent_initial_mass = frag.m
 
-            # Compute the drop due to gravity
-            h_grav_drop = 0.5*gv*const.dt**2
+                # Change parameters of all fragments
+                if frag_entry.frag_type == "A":
 
-            # Track the total drop due to gravity
-            frag.h_grav_drop_total += h_grav_drop
+                    for frag_tmp in (fragments + frag_children_all + [frag]):
 
-            # Update the velocity
-            frag.vv -= av*const.dt
-            frag.vh -= ah*const.dt
-            frag.v = math.sqrt(frag.vh**2 + frag.vv**2)
+                        # Update the ablation coefficient
+                        if frag_entry.sigma is not None:
+                            frag_tmp.sigma = frag_entry.sigma
 
-            # Only allow the meteoroid to go down, and stop the ablation if it stars going up
-            if frag.vv > 0:
+                        # Update the drag coefficient
+                        if frag_entry.gamma is not None:
+                            frag_tmp.gamma = frag_entry.gamma
+                            frag_tmp.updateShapeDensityCoeff()
 
-                frag.vv = 0
+                # Change the parameters of the main fragment
+                if frag_entry.frag_type == "M":
 
-                # Setting the height to zero will stop the ablation during the if catch below
-                frag.h = 0
+                    if frag_entry.sigma is not None:
+                        frag.sigma = frag_entry.sigma
 
-        # Update length along the track
-        frag.length += frag.v*const.dt
+                    # Keep the erosion coefficient of the entry, which the height no longer changes
+                    if frag_entry.erosion_coeff is not None:
+                        frag.erosion_coeff = frag_entry.erosion_coeff
+                        frag.erosion_coeff_fixed = True
 
-        # Update the mass
-        frag.m = m_new
+                    if frag_entry.mass_index is not None:
+                        frag.erosion_mass_index = frag_entry.mass_index
 
-        # Old way of computing height which did not include the curvature of the Earth
-        # frag.h = frag.h + frag.vv*const.dt
+                    if frag_entry.grain_mass_min is not None:
+                        frag.erosion_mass_min = frag_entry.grain_mass_min
 
-        # Compute the height taking the curvature of the Earth and the gravity drop into account
-        frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
-        frag.h -= frag.h_grav_drop_total
+                    if frag_entry.grain_mass_max is not None:
+                        frag.erosion_mass_max = frag_entry.grain_mass_max
 
-        # Get the luminous efficiency
-        # NOTE: frag.v/frag.m here are already this tick's post-step values, while mass_loss_ablation/
-        # deceleration_total above were computed from last tick's pre-step state - a small (~1.6% in
-        # total luminosity) but systematic inconsistency between the state used for the rate terms and
-        # the state used for the efficiency factors converting them to lum/q. Left as-is (not clearly
-        # wrong, no evidence it's an accidental regression) - see beta below for the same pattern.
-        tau = luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m)
+                # Create a new single-body or eroding fragment
+                if (frag_entry.frag_type == "F") or (frag_entry.frag_type == "EF"):
 
-        # # Compute luminosity for one grain/fragment (without the deceleration term)
-        # lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2)
+                    # Go through all new fragments
+                    for frag_num in range(frag_entry.number):
 
-        # Compute luminosity for one grain/fragment (with the deceleration term)
-        # NOTE: The deceleration term can sometimes be numerically unstable for some reason...
-        lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2 + frag.m*frag.v*deceleration_total)
+                        # Mass of the new fragment
+                        new_frag_mass = parent_initial_mass*(frag_entry.mass_percent/100.0)/frag_entry.number
+                        frag_entry.mass = new_frag_mass*frag_entry.number
 
-        # Compute the electron line density
-        beta = ionizationEfficiency(frag.v)
-        q = -beta*(mass_loss_ablation/const.dt)/(const.mu*frag.v)
+                        # Decrease the parent mass
+                        frag.m -= new_frag_mass
 
-        # Compute the total luminosity
-        frag.lum = lum*frag.n_grains
+                        # Create the new fragment
+                        frag_new = frag.spawn_child()
+                        frag_new.active = True
+                        frag_new.main = False
+                        frag_new.disruption_enabled = False
 
-        # Compute the total electron line density
-        frag.q = q*frag.n_grains
+                        # Indicate that the fragments are born out of complex fragmentation
+                        frag_new.complex = True
 
-        # Keep track of the total luminosity across all fragments
-        luminosity_total += frag.lum
+                        # Assign the complex fragmentation ID
+                        frag_new.complex_id = frag_entry.id
 
-        # Keep track of the total number of produced electrons
-        electron_density_total += frag.q
+                        # Assign the mass to the new fragment
+                        frag_new.m = new_frag_mass
 
-        # Keep track of the total luminosity weighted lum eff
-        tau_total += tau*frag.lum
+                        # Assign possible new ablation coeff to this fragment
+                        if frag_entry.sigma is not None:
+                            frag_new.sigma = frag_entry.sigma
 
-        # Compute aerodynamic loading on the grain (always assume Gamma = 1.0)
-        # dyn_press = frag.gamma*rho_atm*frag.v**2
-        dyn_press = 1.0*rho_atm*frag.v**2
-        frag.dyn_press = dyn_press
+                        # If the fragment is eroding, set erosion parameters
+                        if frag_entry.frag_type == "EF":
+                            frag_new.erosion_enabled = True
 
-        # if frag.id == 0:
-        #     print('----- id:', frag.id)
-        #     print('t:', const.total_time)
-        #     print('V:', frag.v/1000)
-        #     print('H:', frag.h/1000)
-        #     print('m:', frag.m)
-        #     print('DynPress:', dyn_press/1000, 'kPa')
+                            frag_new.erosion_coeff = frag_entry.erosion_coeff
 
-        # Keep track of the parameters of the main fragment
-        if frag.main:
-            luminosity_main = frag.lum
-            tau_main = tau
-            main_mass = frag.m
-            main_height = frag.h
-            main_length = frag.length
-            main_vel = frag.v
-            main_dyn_press = dyn_press
+                            frag_new.erosion_mass_index = frag_entry.mass_index
+                            frag_new.erosion_mass_min = frag_entry.grain_mass_min
+                            frag_new.erosion_mass_max = frag_entry.grain_mass_max
 
-        # Keep track of the brightest fragment (checked before the kill-check below so a fragment's own
-        #   death tick - where m/v/h/lum first cross a kill threshold - still counts as a valid candidate,
-        #   instead of silently vanishing from brightest_* for the tick it actually died on)
-        if frag.lum > brightest_lum:
-            brightest_lum = frag.lum
-            brightest_height = frag.h
-            brightest_length = frag.length
-            brightest_vel = frag.v
-
-        # If the fragment is done, stop ablating
-        if  (
-            (frag.m <= const.m_kill)
-            or (frag.v < const.v_kill)
-            or (frag.h < const.h_kill)
-            or (frag.lum < 0)
-            or ((const.len_kill > 0) and (frag.length > const.len_kill))
-            ):
-
-            killFragment(const, frag)
-
-            # print('Killing', frag.id)
-            continue
-
-        # For fragments born out of complex fragmentation, keep track of their luminosity and height
-        if not frag.main:
-
-            # Keep track of magnitudes of complex fragmentation fragments (the per-entry breakdown below is
-            #   only computed if explicitly requested, since it's an O(entries) lookup per grain per tick -
-            #   this must NOT gate the cheap eroded/disrupted totals below, which are tracked unconditionally)
-            if frag.complex:
-
-                if const.fragmentation_show_individual_lcs:
-
-                    # Find the corresponding fragmentation entry (O(1) via the id index built above)
-                    frag_entry = fragmentation_entry_by_id.get(frag.complex_id)
-
-                    if frag_entry is not None:
-
-                        # Store luminosity of grains
-                        if frag.grain:
-
-                            add_new_entry = False
-
-                            # Check if the last time entry corresponds to the current time, and add to it
-                            if not len(frag_entry.grains_time_data):
-                                add_new_entry = True
-                            elif const.total_time != frag_entry.grains_time_data[-1]:
-                                add_new_entry = True
-
-                            # Add the current integration time
-                            if add_new_entry:
-                                frag_entry.grains_time_data.append(const.total_time)
-                                frag_entry.grains_luminosity.append(frag.lum)
-                                frag_entry.grains_tau_over_lum.append(tau*frag.lum)
-
-                            # Add to the total luminosity at the current time step that's already been added
-                            else:
-                                frag_entry.grains_luminosity[-1] += frag.lum
-                                frag_entry.grains_tau_over_lum[-1] += tau*frag.lum
-
-                        # Store parameters of the main fragment
                         else:
+                            # Disable erosion for single-body fragments
+                            frag_new.erosion_enabled = False
 
-                            add_new_entry = False
+                        # Add the new fragment to the list of children
+                        frag_children_all.append(frag_new)
+                        const.n_active += 1
 
-                            # Check if the last time entry corresponds to the current time, and add to it
-                            if not len(frag_entry.main_time_data):
-                                add_new_entry = True
-                            elif const.total_time != frag_entry.main_time_data[-1]:
-                                add_new_entry = True
+                # Release dust
+                if frag_entry.frag_type == "D":
 
-                            # Add the current integration time
-                            if add_new_entry:
-                                frag_entry.main_time_data.append(const.total_time)
-                                frag_entry.main_luminosity.append(frag.lum)
-                                frag_entry.main_tau_over_lum.append(tau*frag.lum)
+                    # Compute the mass of the dust
+                    dust_mass = frag.m*(frag_entry.mass_percent/100.0)
+                    frag_entry.mass = dust_mass
 
-                            # Add to the total luminosity at the current time step that's already been added
-                            else:
-                                frag_entry.main_luminosity[-1] += frag.lum
-                                frag_entry.main_tau_over_lum[-1] += tau*frag.lum
+                    # Subtract from the parent mass
+                    frag.m -= dust_mass
 
-            # Keep track of luminosity of eroded and disrupted fragments ejected directly from the main
-            #   fragment (always tracked, regardless of fragmentation_show_individual_lcs - see above)
-            else:
+                    # Create the new fragment
+                    frag_new = frag.spawn_child()
+                    frag_new.active = True
+                    frag_new.main = False
+                    frag_new.disruption_enabled = False
 
-                luminosity_eroded += frag.lum
-                tau_eroded += tau*frag.lum
+                    # Indicate that the fragments are born out of complex fragmentation
+                    frag_new.complex = True
 
-        # For non-complex fragmentation only: Check if the erosion should start, given the height,
-        #   and create grains
-        if (not frag.complex) and (frag.h < const.erosion_height_start) and frag.erosion_enabled \
-            and const.erosion_on:
+                    # Assign the complex fragmentation ID
+                    frag_new.complex_id = frag_entry.id
 
-            # Turn on the erosion of the fragment (disruption daughters keep the fixed, disruption-specific
-            #   erosion coefficient they were assigned at birth instead - see disruption_child's docstring -
-            #   otherwise this would silently overwrite it with the ordinary height-dependent one)
-            if not frag.disruption_child:
-                frag.erosion_coeff = getErosionCoeff(const, frag.h)
-
-            # Update the main fragment physical parameters if it is changed after erosion coefficient change
-            # (only once - otherwise this would silently re-apply every tick and clobber any later manual
-            # sigma change, e.g. from a complex fragmentation "A" event)
-            if frag.main and (not frag.erosion_height_change_applied) and (const.erosion_height_change >= frag.h):
-
-                # Update the density
-                frag.rho = const.erosion_rho_change
-                frag.updateShapeDensityCoeff()
-
-                # Update the ablation coeff
-                frag.sigma = const.erosion_sigma_change
-
-                frag.erosion_height_change_applied = True
-
-        # Create grains for erosion-enabled fragments
-        if frag.erosion_enabled:
-
-            # Generate new grains if there is some mass to distribute
-            if abs(mass_loss_erosion) > 0:
-
-                grain_children, const = generateFragments(const, frag, abs(mass_loss_erosion), \
-                    frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
-                    keep_eroding=False, mass_model=const.erosion_grain_distribution)
-
-                const.n_active += len(grain_children)
-                frag_children_all += grain_children
-
-                # print('Eroding id', frag.id)
-                # print('Eroded mass: {:e}'.format(abs(mass_loss_erosion)))
-                # print('Mass distribution:')
-                # grain_mass_sum = 0
-                # for f in frag_children:
-                #     print('    {:d}: {:e} kg'.format(f.n_grains, f.m))
-                #     grain_mass_sum += f.n_grains*f.m
-                # print('Grain total mass: {:e}'.format(grain_mass_sum))
-
-                # Record physical parameters at the beginning of erosion for the main fragment
-                if frag.main:
-                    if const.erosion_beg_vel is None:
-
-                        const.erosion_beg_vel = frag.v
-                        const.erosion_beg_mass = frag.m
-                        const.erosion_beg_dyn_press = dyn_press
-
-                    # Record the mass when erosion is changed
-                    elif (const.erosion_height_change >= frag.h) and (const.mass_at_erosion_change is None):
-                        const.mass_at_erosion_change = frag.m
-
-        # Disrupt the fragment if the dynamic pressure exceeds its strength
-        if frag.disruption_enabled and const.disruption_on:
-            if dyn_press > const.compressive_strength:
-
-                # Compute the mass that should be disrupted into fragments
-                mass_frag_disruption = frag.m*(1 - const.disruption_mass_grain_ratio)
-
-                fragments_total_mass = 0
-                if mass_frag_disruption > 0:
-
-                    # Disrupt the meteoroid into fragments
-                    disruption_mass_min = const.disruption_mass_min_ratio*mass_frag_disruption
-                    disruption_mass_max = const.disruption_mass_max_ratio*mass_frag_disruption
-
-                    # Generate larger fragments, possibly assign them a separate erosion coefficient
-                    frag_children, const = generateFragments(const, frag, mass_frag_disruption, \
-                        const.disruption_mass_index, disruption_mass_min, disruption_mass_max, \
-                        keep_eroding=const.erosion_on, disruption=True, 
-                        mass_model=const.erosion_grain_distribution)
-
-                    frag_children_all += frag_children
-                    const.n_active += len(frag_children)
-
-                    # Compute the mass that went into fragments
-                    fragments_total_mass = sum([f.n_grains*f.m for f in frag_children])
-
-                    # Assign the height of disruption
-                    const.disruption_height = frag.h
-
-                    print('Disrupting id', frag.id)
-                    print('Height: {:.3f} km'.format(const.disruption_height/1000))
-                    print('Disrupted mass: {:e}'.format(mass_frag_disruption))
-                    print('Mass distribution:')
-                    for f in frag_children:
-                        print('{:4d}: {:e} kg'.format(f.n_grains, f.m))
-                    print('Disrupted total mass: {:e}'.format(fragments_total_mass))
-
-                # Disrupt a portion of the leftover mass into grains
-                mass_grain_disruption = frag.m - fragments_total_mass
-                if mass_grain_disruption > 0:
-                    grain_children, const = generateFragments(const, frag, mass_grain_disruption, 
-                        frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
+                    # Generate dust grains
+                    grain_children, const = generateFragments(const, frag_new, dust_mass, \
+                        frag_entry.mass_index, frag_entry.grain_mass_min, frag_entry.grain_mass_max, \
                         keep_eroding=False, mass_model=const.erosion_grain_distribution)
 
+                    # Add fragments to the list
                     frag_children_all += grain_children
                     const.n_active += len(grain_children)
 
-                # Deactivate the disrupted fragment
-                frag.m = 0
-                killFragment(const, frag)
+                # Set the fragmentation as finished
+                frag_entry.done = True
 
-        # Handle complex fragmentation and status changes of the main fragment
-        if frag.main and const.fragmentation_on:
+                # Set physical conditions at the moment of fragmentation
+                frag_entry.time = const.total_time
+                frag_entry.dyn_pressure = dyn_press
+                frag_entry.velocity = frag.v
+                frag_entry.parent_mass = parent_initial_mass
 
-            # Get a list of complex fragmentations that are still to do
-            frags_to_do = [frag_entry for frag_entry in const.fragmentation_entries if not frag_entry.done]
 
-            if len(frags_to_do):
 
-                # Go through all fragmentations that needs to be performed
-                for frag_entry in frags_to_do:
+def computeWake(const, fragments, leading_frag_length, leading_frag_height, compute_wake, \
+    wake_heights_queue):
+    """ Compute the wake of the active fragments around the leading fragment, at every time step or when the
+        leading fragment passes one of the given heights.
 
-                    # Check if the height of the main fragment is right to perform the operation.
-                    # Run if:
-                    # (a) If the fireball is going down and the fragmentation is for the downward direction
-                    # (b) If the fireball is going up and the fragmentation is for the upward direction
-                    #     And the fireball started going up
-                    if ( (not frag_entry.upward_only) and (frag.h < frag_entry.height) ) \
-                    or ( 
-                        frag_entry.upward_only 
-                        and (frag.h > frag_entry.height) 
-                        and (frag.h > const.main_bottom_ht)
-                        ):
-                        
-                        parent_initial_mass = frag.m
+    Arguments:
+        const: [Constants object] Simulation constants.
+        fragments: [list] Fragments.
+        leading_frag_length: [float] Length of the leading fragment (m), None if no fragment is active.
+        leading_frag_height: [float] Height of the leading fragment (m), None if no fragment is active.
+        compute_wake: [bool] Compute the wake at every time step.
+        wake_heights_queue: [list] Heights at which the wake is computed, descending (m). The heights the
+            leading fragment has passed are removed from it. None to use compute_wake.
 
-                        # Change parameters of all fragments
-                        if frag_entry.frag_type == "A":
+    Return:
+        wake: [Wake object] The wake, None if it is not computed in this time step.
+    """
 
-                            for frag_tmp in (fragments + frag_children_all + [frag]):
-
-                                # Update the ablation coefficient
-                                if frag_entry.sigma is not None:
-                                    frag_tmp.sigma = frag_entry.sigma
-
-                                # Update the drag coefficient
-                                if frag_entry.gamma is not None:
-                                    frag_tmp.gamma = frag_entry.gamma
-                                    frag_tmp.updateShapeDensityCoeff()
-
-                        # Change the parameters of the main fragment
-                        if frag_entry.frag_type == "M":
-
-                            if frag_entry.sigma is not None:
-                                frag.sigma = frag_entry.sigma
-
-                            if frag_entry.erosion_coeff is not None:
-                                frag.erosion_coeff = frag_entry.erosion_coeff
-
-                            if frag_entry.mass_index is not None:
-                                frag.erosion_mass_index = frag_entry.mass_index
-
-                            if frag_entry.grain_mass_min is not None:
-                                frag.erosion_mass_min = frag_entry.grain_mass_min
-
-                            if frag_entry.grain_mass_max is not None:
-                                frag.erosion_mass_max = frag_entry.grain_mass_max
-
-                        # Create a new single-body or eroding fragment
-                        if (frag_entry.frag_type == "F") or (frag_entry.frag_type == "EF"):
-
-                            # Go through all new fragments
-                            for frag_num in range(frag_entry.number):
-
-                                # Mass of the new fragment
-                                new_frag_mass = parent_initial_mass*(frag_entry.mass_percent/100.0)/frag_entry.number
-                                frag_entry.mass = new_frag_mass*frag_entry.number
-
-                                # Decrease the parent mass
-                                frag.m -= new_frag_mass
-
-                                # Create the new fragment
-                                frag_new = frag.spawn_child()
-                                frag_new.active = True
-                                frag_new.main = False
-                                frag_new.disruption_enabled = False
-
-                                # Indicate that the fragments are born out of complex fragmentation
-                                frag_new.complex = True
-
-                                # Assign the complex fragmentation ID
-                                frag_new.complex_id = frag_entry.id
-
-                                # Assign the mass to the new fragment
-                                frag_new.m = new_frag_mass
-
-                                # Assign possible new ablation coeff to this fragment
-                                if frag_entry.sigma is not None:
-                                    frag_new.sigma = frag_entry.sigma
-
-                                # If the fragment is eroding, set erosion parameters
-                                if frag_entry.frag_type == "EF":
-                                    frag_new.erosion_enabled = True
-
-                                    frag_new.erosion_coeff = frag_entry.erosion_coeff
-
-                                    frag_new.erosion_mass_index = frag_entry.mass_index
-                                    frag_new.erosion_mass_min = frag_entry.grain_mass_min
-                                    frag_new.erosion_mass_max = frag_entry.grain_mass_max
-
-                                else:
-                                    # Disable erosion for single-body fragments
-                                    frag_new.erosion_enabled = False
-
-                                # Add the new fragment to the list of children
-                                frag_children_all.append(frag_new)
-                                const.n_active += 1
-
-                        # Release dust
-                        if frag_entry.frag_type == "D":
-
-                            # Compute the mass of the dust
-                            dust_mass = frag.m*(frag_entry.mass_percent/100.0)
-                            frag_entry.mass = dust_mass
-
-                            # Subtract from the parent mass
-                            frag.m -= dust_mass
-
-                            # Create the new fragment
-                            frag_new = frag.spawn_child()
-                            frag_new.active = True
-                            frag_new.main = False
-                            frag_new.disruption_enabled = False
-
-                            # Indicate that the fragments are born out of complex fragmentation
-                            frag_new.complex = True
-
-                            # Assign the complex fragmentation ID
-                            frag_new.complex_id = frag_entry.id
-
-                            # Generate dust grains
-                            grain_children, const = generateFragments(const, frag_new, dust_mass, \
-                                frag_entry.mass_index, frag_entry.grain_mass_min, frag_entry.grain_mass_max, \
-                                keep_eroding=False, mass_model=const.erosion_grain_distribution)
-
-                            # Add fragments to the list
-                            frag_children_all += grain_children
-                            const.n_active += len(grain_children)
-
-                        # Set the fragmentation as finished
-                        frag_entry.done = True
-
-                        # Set physical conditions at the moment of fragmentation
-                        frag_entry.time = const.total_time
-                        frag_entry.dyn_pressure = dyn_press
-                        frag_entry.velocity = frag.v
-                        frag_entry.parent_mass = parent_initial_mass
-
-        # If the fragment is done, stop ablating
-        if (frag.m <= const.m_kill):
-
-            killFragment(const, frag)
-            # print('Killing', frag.id)
-
-            continue
-
-        # Fragment survived this tick - add its grain-weighted mass to the total active mass. Only
-        #   fragments still active at the end of the tick reach here (killed/disrupted ones hit a
-        #   'continue' above), matching the old post-loop "active only" scan exactly
-        mass_total_active += frag.m*frag.n_grains
-
-    # Track the leading fragment length (use the tick-start snapshot, not a fresh frag.active filter, so a
-    #   fragment that died partway through this tick is still a candidate for it - see the snapshot's own
-    #   comment above)
-    if len(fragments_active_at_tick_start):
-        leading_frag = max(fragments_active_at_tick_start, key=lambda x: x.length)
-        leading_frag_length    = leading_frag.length
-        leading_frag_height    = leading_frag.h
-        leading_frag_vel       = leading_frag.v
-        leading_frag_dyn_press = leading_frag.dyn_press
-    else:
-        leading_frag_length    = None
-        leading_frag_height    = None
-        leading_frag_vel       = None
-        leading_frag_dyn_press = None
-
-    ### Compute the wake profile ###
-    
     # If the specific wake heights are given, check if the current height is below the next wake height
     if (wake_heights_queue is not None) and (leading_frag_height is not None):
 
         # If there are any heights left in the queue
         if len(wake_heights_queue):
-            
+
             # If the current height is below the next wake height, compute the wake
             if leading_frag_height <= wake_heights_queue[0]:
                 compute_wake = True
-                
+
                 # Pop all heights that are above the current height (including the one we just passed)
                 while len(wake_heights_queue) and (leading_frag_height <= wake_heights_queue[0]):
                     wake_heights_queue.pop(0)
 
             else:
                 compute_wake = False
-        
+
         else:
             compute_wake = False
 
 
-
+    # Compute the wake at this time step
     if compute_wake and (leading_frag_length is not None):
 
         # Evaluate the Gaussian from +3 sigma in front of the leading fragment to behind
@@ -1352,41 +1280,86 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     else:
         wake = None
 
-    ### ###
 
-    # Add generated fragment children to the list of fragments
-    fragments += frag_children_all
+    return wake
 
-    # Fragments/grains created this tick are all active - add their grain-weighted mass to the running
-    #   total accumulated in the loop above (completes the "all active fragments" sum). Same n_grains
-    #   convention already used for lum/q.
-    for frag_child in frag_children_all:
-        mass_total_active += frag_child.m*frag_child.n_grains
 
-    # Drop fully-ablated grains from the fragment list so subsequent ticks don't keep re-scanning them
-    #   (the list otherwise grows monotonically - dead grains are never needed again). Dead non-grains
-    #   (the main fragment, complex-fragmentation daughters) are KEPT: runSimulation() still scans them
-    #   after the run to find the main fragment and to aggregate per-fragmentation final masses.
-    fragments = [frag for frag in fragments if frag.active or (not frag.grain)]
 
-    # Increment the running time
-    const.total_time += const.dt
+def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None, atm_table=None):
+    """ Perform single body ablation of all fragments using the 4th order Runge-Kutta method. 
 
-    # Weigh the tau by luminosity
-    if luminosity_total > 0:
-        tau_total /= luminosity_total
+    Arguments:
+        fragments: [list] A list of Fragment instances.
+        const: [object] Constants instance.
+
+    Keyword arguments:
+        compute_wake: [bool] If True, the wake profile will be computed. False by default.
+        wake_heights_queue: [list] A list of heights at which the wake should be computed. None by default.
+        atm_table: [AtmDensityTableCy object] Atmosphere density table from atmDensityTableCy(), to avoid
+            converting the table on every time step. None by default, in which case it is made from the
+            constants.
+
+    Return:
+        (fragments, const, luminosity_total, luminosity_main, luminosity_eroded, electron_density_total,
+            tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel,
+            leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press,
+            mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, wake):
+            - fragments: [list] Fragments after the step, with the new ones and without the dead grains.
+            - const: [Constants object] Simulation constants, with the time of the step added.
+            - luminosity_total: [float] Luminosity of all fragments (W).
+            - luminosity_main: [float] Luminosity of the main fragment (W).
+            - luminosity_eroded: [float] Luminosity of the eroded and disrupted fragments (W).
+            - electron_density_total: [float] Electron line density of all fragments (1/m).
+            - tau_total: [float] Luminous efficiency of all fragments, weighted by their luminosity.
+            - tau_main: [float] Luminous efficiency of the main fragment.
+            - tau_eroded: [float] Luminous efficiency of the eroded and disrupted fragments, weighted by their
+                luminosity.
+            - brightest_height: [float] Height of the brightest fragment (m).
+            - brightest_length: [float] Length of the brightest fragment along the path (m).
+            - brightest_vel: [float] Velocity of the brightest fragment (m/s).
+            - leading_frag_height: [float] Height of the leading fragment (m), None if no fragment was
+                active.
+            - leading_frag_length: [float] Length of the leading fragment along the path (m), None if no
+                fragment was active.
+            - leading_frag_vel: [float] Velocity of the leading fragment (m/s), None if no fragment was
+                active.
+            - leading_frag_dyn_press: [float] Dynamic pressure on the leading fragment (Pa), None if no
+                fragment was active.
+            - mass_total_active: [float] Mass of all active fragments, also in their mass bins (kg).
+            - main_mass: [float] Mass of the main fragment (kg).
+            - main_height: [float] Height of the main fragment (m).
+            - main_length: [float] Length of the main fragment along the path (m).
+            - main_vel: [float] Velocity of the main fragment (m/s).
+            - main_dyn_press: [float] Dynamic pressure on the main fragment (Pa).
+            - wake: [Wake object] The wake, None if it was not computed in this step.
+
+    Note:
+        const.dt is fixed for every fragment, including grains. A small grain deep in the atmosphere whose
+        mass or speed changes within a fraction of a step is integrated in substeps (see ablationStepRK4).
+
+        The loop over the fragments is ablateAllCy() in MetSimErosionCyTools.pyx. It calls the functions of
+        this module for the rare events: the erosion into grains, the disruption, the fragmentation entries,
+        the end of a fragment and the wake.
+    """
+
+    # Take the atmosphere density table once, not for every fragment
+    if atm_table is None:
+        atm_table = atmDensityTableCy(const)
+
+    # Take the density polynomial as a contiguous array of its 7 coefficients, used without the table
+    if atm_table is None:
+        dens_co = np.ascontiguousarray(const.dens_co, dtype=np.float64)
+        if len(dens_co) != 7:
+            raise ValueError("The density polynomial needs 7 coefficients, got {:d}".format(len(dens_co)))
+
     else:
-        tau_total = 0
+        dens_co = np.zeros(7)
 
-    if luminosity_eroded > 0:
-        tau_eroded /= luminosity_eroded
-    else:
-        tau_eroded = 0
+    # Ablate all fragments over the step in the loop in Cython, which takes the functions of the rare events
+    #   from this module
+    return ablateAllCy(fragments, const, compute_wake, wake_heights_queue, atm_table, dens_co, \
+        sys.modules[__name__])
 
-    return fragments, const, luminosity_total, luminosity_main, luminosity_eroded, electron_density_total, \
-        tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel, \
-        leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press, \
-        mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, wake
 
 
 def runSimulation(const, compute_wake=False):
@@ -1395,6 +1368,10 @@ def runSimulation(const, compute_wake=False):
     # Ensure that the grain mass min is smaller than the grain mass max
     if const.erosion_mass_min > const.erosion_mass_max:
         const.erosion_mass_min, const.erosion_mass_max = const.erosion_mass_max, const.erosion_mass_min
+
+    # Check the atmosphere density table, and convert it once to the arrays of the Cython interpolator
+    prepareAtmDensityTable(const)
+    atm_table = atmDensityTableCy(const)
 
     ###
 
@@ -1407,6 +1384,9 @@ def runSimulation(const, compute_wake=False):
 
             # Reset output parameters for every fragmentation entry
             frag_entry.resetOutputParameters()
+
+            # Perform every fragmentation again, as the entries keep their status from the previous run
+            frag_entry.done = False
 
 
     fragments = []
@@ -1460,7 +1440,8 @@ def runSimulation(const, compute_wake=False):
             tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel, \
             leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press, \
             mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, \
-            wake = ablateAll(fragments, const, compute_wake=compute_wake, wake_heights_queue=wake_heights_queue)
+            wake = ablateAll(fragments, const, compute_wake=compute_wake, \
+            wake_heights_queue=wake_heights_queue, atm_table=atm_table)
         
         # Track the bottom height of the main fragment
         if main_height > 0:
@@ -1535,9 +1516,16 @@ def energyReceivedBeforeErosion(const, lam=1.0):
 
     """
 
-    # Integrate atmosphere density from the beginning of simulation to beginning of erosion.
-    dens_integ = scipy.integrate.quad(atmDensityPoly, const.erosion_height_start, const.h_init, \
-        args=(const.dens_co))[0]
+    # Integrate atmosphere density from the beginning of simulation to beginning of erosion, exactly with the
+    #   table
+    prepareAtmDensityTable(const)
+    if usesAtmDensityTable(const):
+        dens_integ = float(atmColumnTable(const.erosion_height_start, const.h_init, const.atm_table_ht, \
+            const.atm_table_log10_rho))
+
+    else:
+        dens_integ = scipy.integrate.quad(atmDensityPoly, const.erosion_height_start, const.h_init, \
+            args=(const.dens_co,))[0]
 
     # Compute the energy per unit cross-section
     es = 1/2*lam*(const.v_init**2)*dens_integ/np.cos(const.zenith_angle)
@@ -1553,11 +1541,32 @@ def energyReceivedBeforeErosion(const, lam=1.0):
 
 if __name__ == "__main__":
 
+    import argparse
+
     import matplotlib.pyplot as plt
 
 
-    from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+    from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensityTable, addAtmosphereArguments, \
+        setAtmosphere
     from wmpl.Utils.TrajConversions import date2JD
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Run the ablation simulation using the meteoroid " \
+        "parameters hardcoded in this file.")
+
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
+
+    #########################
 
 
     # Show wake
@@ -1576,6 +1585,10 @@ if __name__ == "__main__":
         180000, # height_max in m (this needs to be the same as the beginning of simulation)
         date2JD(2020, 4, 20, 16, 15, 0) # Julian date
         )
+
+    # Tabulate the atmosphere density for the same location, time and heights
+    const.atm_table_ht, const.atm_table_log10_rho = getAtmDensityTable(np.radians(45.3), np.radians(18.1), \
+        70000, 180000, date2JD(2020, 4, 20, 16, 15, 0))
 
 
     ### Set some physical parameters of the meteoroid ###
