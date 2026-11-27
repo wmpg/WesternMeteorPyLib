@@ -471,6 +471,12 @@ def addSolverOptions(arg_parser, skip_velpart=False):
         help="Disable the pre-atmospheric air-column drag velocity correction applied to v_inf in the " \
         + "orbit calculation.", action="store_true")
 
+    arg_parser.add_argument('--losfit', metavar='LOS_FIT', default='huber', \
+        choices=['huber', 'least_squares', 'angles'], \
+        help="Cost function of the line-of-sight fit. 'huber' (default) fits signed across-track angles " \
+        + "with a Huber loss seeded by smooth L1 and reports formal line uncertainties. 'least_squares' " \
+        + "uses unweighted-tail L2 on signed angles. 'angles' uses the legacy Nelder-Mead sum of angles.")
+
     arg_parser.add_argument('--gfact', metavar='GRAVITY_FACTOR', \
         help='Gravity correction factor. 1.0 by default (full correction). Can be between 0 - 1. Lower values used for lift compensation.', 
         type=float, default=1.0)
