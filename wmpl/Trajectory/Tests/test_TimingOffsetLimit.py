@@ -166,7 +166,7 @@ def testBridgeBetweenTwoGroupsIsNotIgnored():
     """
 
     traj = observeMeteor(METEOR, noise=0.0, stations=TWO_GROUP_STATIONS, \
-        clock_offsets={'B': 20.0, 'D': 3.0, 'E': 3.0}, max_toffset=5.0)
+        clock_offsets={'B': 20.0, 'D': 3.0, 'E': 3.0}, max_toffset=5.0, drag_fit_timing=False)
     traj.run()
 
     assert 'B' not in ignoredStations(traj)
@@ -180,7 +180,7 @@ def testBridgeAcrossAnExcludedRangeIsNotIgnored():
     """
 
     traj = observeMeteor(METEOR, noise=0.0, stations=EXCLUDED_MIDDLE_STATIONS, \
-        clock_offsets={'B': 20.0, 'D': 3.0, 'E': 3.0}, max_toffset=5.0)
+        clock_offsets={'B': 20.0, 'D': 3.0, 'E': 3.0}, max_toffset=5.0, drag_fit_timing=False)
 
     # Ignore and exclude the middle 60% of A and C
     duration = METEOR.t_vis_end - METEOR.t_vis_beg

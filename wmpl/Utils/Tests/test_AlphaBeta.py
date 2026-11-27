@@ -38,7 +38,7 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     getDefaultInverseEiLUT, fitAlphaBetaLag, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 from wmpl.Utils.AlphaBeta import profileAlphaBetaLag, profileIntervalText, plotAlphaBetaLagProfile, \
     AlphaBetaPath, profileRegionAlphaBetaLag, plotAlphaBetaMassDiagram, plotAlphaBetaMasses, _formatMass, \
-    _formatMu, profileMassesAlphaBetaLag
+    _formatMu, expLinearLag, expLinearVelocity, profileMassesAlphaBetaLag
 from wmpl.Utils.Tests.AlphaBetaSynthetic import integrateAlphaBetaPath
 
 
@@ -636,6 +636,31 @@ def _syntheticLag(v_init_true, noise_std, seed, alpha_true=ALPHA_TRUE, beta_true
     length_data = length_true[keep] + rng.normal(0, noise_std, np.sum(keep))
 
     return time_data[keep], length_data, ht_data[keep]
+
+
+
+def testSmoothLagModelIsContinuous():
+    """ The smooth model of the lag (expLinearLag()) is continuous where the deceleration becomes
+        constant, and its time derivative is the velocity of expLinearVelocity() minus v0 on both sides.
+    """
+
+    v0 = 15000.0
+
+    for a1, a2, t0, decel in [(20.0, 1.5, 3.6, 6.0), (500.0, 0.7, 2.0, 3.0)]:
+
+        # The lag just before the transition and at it
+        lag_before, lag_at = expLinearLag(np.array([t0 - 1e-9, t0]), a1, a2, t0, decel)
+
+        assert abs(lag_at - lag_before) < 1e-3, "The lag jumps by {:.3f} m at t0 = {:.1f} s".format( \
+            lag_at - lag_before, t0)
+
+        # Central differences of the lag before and after the transition
+        time_arr = np.array([0.5*t0, t0 + 0.5])
+        dt = 1e-6
+        lag_rate = (expLinearLag(time_arr + dt, a1, a2, t0, decel) \
+            - expLinearLag(time_arr - dt, a1, a2, t0, decel))/(2*dt)
+
+        assert np.allclose(lag_rate, expLinearVelocity(time_arr, v0, a1, a2, t0, decel) - v0, atol=1e-3)
 
 
 
@@ -2294,6 +2319,7 @@ if __name__ == "__main__":
         testFastPipelineSpeedup,
         testFitAlphaBetaRobust,
         testFitAlphaBetaSmoothedVelocities,
+        testSmoothLagModelIsContinuous,
         testFitAlphaBetaLag,
         testFitAlphaBetaLagGravity,
         testFitAlphaBetaLagErrors,

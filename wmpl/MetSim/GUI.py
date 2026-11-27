@@ -3205,8 +3205,9 @@ class MetSimGUI(QMainWindow):
             )
             
 
-            # Set the constants value from the trajectory
-            self.const.v_init = self.traj.orbit.v_init
+            # Seed the simulation entry speed from the pre-atmospheric velocity when available
+            v_inf = getattr(self.traj.orbit, 'v_inf', None)
+            self.const.v_init = v_inf if (v_inf is not None) else self.traj.orbit.v_init
 
             # Set kill height to the observed end height
             self.const.h_kill = self.traj.rend_ele - 3000
@@ -4310,6 +4311,41 @@ class MetSimGUI(QMainWindow):
 
 
 
+        # Overlay drag-fit unobserved gaps, peak dynamic pressure and detected sudden K changes when present
+        drag_fit = getattr(self.traj, 'drag_timing_fit', None)
+        if drag_fit is not None:
+
+            y_lo, y_hi = min(y_min, y_max), max(y_min, y_max)
+
+            # Shade unobserved zero-station gap bands lightly
+            for g_beg, g_end in getattr(drag_fit, 'gaps', []):
+                h0, h1 = drag_fit.heightAtLength(np.array([g_beg, g_end]))/1000.0
+                plt_handle.axhspan(min(h0, h1), max(h0, h1), facecolor='tab:orange', alpha=0.08, zorder=0)
+
+            # Mark peak dynamic pressure height from the drag fit
+            peak_p = drag_fit.peakDynamicPressure()
+            h_pk = peak_p['ht']/1000.0
+            if (h_pk >= y_lo) and (h_pk <= y_hi):
+                plt_handle.plot(x_arr, np.full_like(x_arr, h_pk), linestyle='-.', color='tab:purple', \
+                    alpha=0.35, linewidth=0.9)
+                if plot_text:
+                    plt_handle.text(x_max, TEXT_LABEL_HT_PAD + h_pk, \
+                        "Peak P_dyn ({:.2f} MPa)".format(peak_p['dyn_pres']/1e6), size=7, \
+                        color='tab:purple', alpha=0.7, ha='right')
+
+            # Mark detected sudden K-change onset heights (fragmentation candidates)
+            for ch in drag_fit.detectDragChanges():
+                h_ch = ch.get('ht_beg', ch['ht'])/1000.0
+                if (h_ch >= y_lo) and (h_ch <= y_hi):
+                    plt_handle.plot(x_arr, np.full_like(x_arr, h_ch), linestyle=':', color='tab:blue', \
+                        alpha=0.45, linewidth=0.9)
+                    if plot_text:
+                        plt_handle.text(x_max, TEXT_LABEL_HT_PAD + h_ch, \
+                            "dK x{:.1f}".format(ch['k_ratio']), size=7, color='tab:blue', alpha=0.75, \
+                            ha='right')
+
+
+
         # Force the plot X limits back
         plt_handle.set_xlim([x_min, x_max])
 
@@ -4738,6 +4774,29 @@ class MetSimGUI(QMainWindow):
         self.velocityPlot.canvas.axes.plot(np.zeros_like(avg_vel_ht_plot_arr) \
             + self.traj.orbit.v_avg/1000, avg_vel_ht_plot_arr, label="Vavg obs", linestyle='dashed', \
             color='k', alpha=0.5)
+
+
+
+        # Overlay the smooth drag-fit velocity curve when available on the trajectory
+        drag_fit = getattr(self.traj, 'drag_timing_fit', None)
+        if drag_fit is not None:
+
+            ht_drag_m = drag_fit.ht_grid
+            if (sr is not None) and (getattr(self, 'sim_norm_ht_interp', None) is not None):
+                ht_mapped = self.sim_norm_ht_interp(drag_fit.len_grid)
+                if np.all(np.isfinite(ht_mapped)):
+                    ht_drag_m = ht_mapped
+
+            ht_drag_km = ht_drag_m/1000.0
+            vel_drag_kms = drag_fit.vel_grid/1000.0
+            in_gap = getattr(drag_fit, 'n_stations_grid', np.ones(len(ht_drag_km))) == 0
+
+            # Draw observed segments solid and unobserved gap spans dashed
+            self.velocityPlot.canvas.axes.plot(np.where(in_gap, np.nan, vel_drag_kms), ht_drag_km, \
+                color='tab:blue', alpha=0.65, linewidth=1.2, label='Drag fit')
+            if np.any(in_gap):
+                self.velocityPlot.canvas.axes.plot(np.where(in_gap, vel_drag_kms, np.nan), ht_drag_km, \
+                    color='tab:blue', linestyle='dashed', alpha=0.5, linewidth=1.0)
 
 
 
@@ -6484,6 +6543,13 @@ class MetSimGUI(QMainWindow):
         #   the printed state vector reproduces the recorded orbit.
         traj_updated.v_init = orb.v_init
         traj_updated.v_avg = orb.v_avg
+
+        # Clear any prior air-column pre-atm correction now that MetSim supplies the entry speed directly
+        traj_updated.dv_pre_atm = 0.0
+        if (getattr(traj_updated, 'pre_atm_info', None) is not None) \
+            and traj_updated.pre_atm_info.get('applied'):
+            traj_updated.pre_atm_info = dict(traj_updated.pre_atm_info, applied=False, \
+                reason='replaced by MetSim simulation velocity')
         dir_path, file_name = os.path.split(self.traj_path)
         report_file_name = file_name.replace('trajectory.pickle', '') + 'report_sim.txt'
 

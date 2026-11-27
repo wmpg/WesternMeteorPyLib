@@ -399,6 +399,9 @@ if __name__ == '__main__':
         monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, geometric_uncert=cml_args.uncertgeom, \
         gravity_correction=(not cml_args.disablegravity), plot_all_spatial_residuals=cml_args.plotallspatial,
         air_rotation=(not cml_args.disableairrot), \
+        drag_fit_timing=(not cml_args.disabledragfit), \
+        pre_atm_correction=(not cml_args.disablepreatm), \
+        los_fit=cml_args.losfit, \
         plot_file_type=cml_args.imgformat, show_plots=(not cml_args.hideplots), v_init_part=velpart, \
         v_init_ht=vinitht, show_jacchia=cml_args.jacchia, \
         estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
