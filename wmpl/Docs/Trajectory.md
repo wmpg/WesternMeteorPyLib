@@ -91,11 +91,6 @@ pressure of the run follows. Near the fragmentations of the simulated fireballs 
 so it is somewhat small: the bias of the fit where the meteor fragments is not included. Its share of the
 uncertainty of the pressure, about 0.3 %, is small next to that of the frame.
 
-When the solver estimated the initial velocity from a drag fit of the first part of the trajectory
-(`--vinitdrag`, `wmpl.Utils.DragInitialVelocity`), which models a single body without fragmentation, the
-report warns if a flare point lies at or above the lowest fitted point, giving the highest flare point of
-every station, and suggests a `--vinitdraght` that keeps only the points above the highest flare.
-
 Two cameras can mark the same flare a frame apart, e.g. as it lasts longer than a frame or peaks between
 two, so the comparison takes one frame of the slower camera off the time between two flares before it
 weighs it against its uncertainty. In the simulated fireballs, with the frames of each camera at a random

@@ -2037,59 +2037,6 @@ def eventFlaresStr(events, pairTest, valueStr, speedStr, pressureStr):
 
 
 
-def dragFitFlareWarning(traj, flares):
-    """ Warn when flare points lie within the part of the trajectory that the drag fit of the initial velocity
-        (--vinitdrag) used, as that fit models a single body without fragmentation.
-
-    Arguments:
-        traj: [Trajectory object] Solved trajectory the flares were projected on.
-        flares: [list] Flare points from flareHeights().
-
-    Return:
-        [str] The warning, empty if no drag fit was used or no flare lies within it.
-    """
-
-    # Only with the drag fit of the initial velocity
-    fit = getattr(traj, 'v_init_drag_fit', None)
-    if (fit is None) or (getattr(fit, 'ht_range', None) is None):
-        return ""
-
-    ht_lo, ht_hi = fit.ht_range
-
-    # Flare points at or above the lowest fitted point, with 1 m for the rounding
-    inside = [flare for flare in flares if flare['ht'] >= ht_lo - 1.0]
-    if not inside:
-        return ""
-
-    # Highest flare point of every station within the fit
-    highest = {}
-    for flare in inside:
-        station_id = str(flare['station_id'])
-        if (station_id not in highest) or (flare['ht'] > highest[station_id]['ht']):
-            highest[station_id] = flare
-
-    points_str = ", ".join(["{:s} at {:.2f} km".format(station_id, flare['ht']/1000) \
-        for station_id, flare in sorted(highest.items(), key=lambda item: -item[1]['ht'])])
-
-    out_str = "\n"
-    out_str += "WARNING: {:d} flare point(s) at or above the lowest point of the --vinitdrag fit\n" \
-        .format(len(inside))
-    out_str += "of the initial velocity ({:.2f} km), which models a single body without\n".format(ht_lo/1000)
-    out_str += "fragmentation. Highest per station: {:s}.\n".format(points_str)
-
-    # Suggest a height above the highest flare, if any fitted point is above it
-    ht_flare = max(flare['ht'] for flare in inside)
-    if ht_flare < ht_hi:
-        out_str += "Fit only the points above it, e.g. with --vinitdraght {:.1f}.\n".format( \
-            np.ceil(ht_flare/100)/10)
-    else:
-        out_str += "It is at or above the first fitted point ({:.2f} km), so no fitted point is free\n" \
-            "of it.\n".format(ht_hi/1000)
-
-    return out_str
-
-
-
 def oneStationSolution(traj, meteor, input_meteors, time_diffs=None, **noise_kwargs):
     """ Measure the points of a fragment seen from one station against a solution of the main trajectory, on
         which they are projected as the flares are (see projectFlares()).
@@ -2920,7 +2867,6 @@ if __name__ == "__main__":
 
             ref_stations = timeReferenceStations(traj_orig, mc_trajs=mc_trajs)
             flare_report = flareReport(flares, ref_stations=ref_stations)
-            flare_report += dragFitFlareWarning(traj_orig, flares)
             print(flare_report)
 
             # Append the report to the saved one
