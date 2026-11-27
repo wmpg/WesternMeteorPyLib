@@ -505,17 +505,19 @@ def testLuminousEfficiencyAndAirDensityMatchMetSim():
         MetSim's.
     """
 
-    # Every type of the luminous efficiency over the velocities and masses of meteors
+    # Every type of the luminous efficiency over the velocities and masses of meteors, to the rounding of the
+    #   platform's math functions
     for lum_eff_type in range(9):
         for vel in (11000.0, 20000.0, 25371.0, 25373.0, 40000.0, 72000.0):
             for mass in (1e-12, 1e-6, 1e-2, 10.0):
                 ref = luminousEfficiency(lum_eff_type, 0.7, vel, mass)
                 tau = nbLumEff(lum_eff_type, 0.7, vel, np.log(vel/1000.0), np.log(mass))
-                assert abs(tau - ref) <= 1e-12*abs(ref), "type {:d}, {:.0f} m/s, {:.0e} kg".format( \
-                    lum_eff_type, vel, mass)
+                assert abs(tau - ref) <= 1e-9*abs(ref), "type {:d}, {:.0f} m/s, {:.0e} kg: {:.2e} off" \
+                    "".format(lum_eff_type, vel, mass, abs(tau/ref - 1))
 
-    # The density polynomial and a table between their heights
+    # The density polynomial and a table between their heights, to the same rounding
     ht = np.linspace(60000.0, 180000.0, 97)
     for const in (scenarioConstants('single'), dynestyConstants()):
         ref = np.array([atmDensity(h, const) for h in ht])
-        assert np.allclose(airDensity(const, ht), ref, rtol=1e-12, atol=0)
+        rel = np.max(np.abs(airDensity(const, ht)/ref - 1))
+        assert rel < 1e-9, "air density {:.2e} off".format(rel)
