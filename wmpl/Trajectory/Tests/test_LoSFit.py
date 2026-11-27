@@ -27,8 +27,8 @@ import scipy.optimize
 import matplotlib
 matplotlib.use('Agg')
 
-from wmpl.Trajectory.Trajectory import angleSumMeasurements2Line, lineFrame, lineFromFrame, \
-    minimizeAngleCost, moveStateVector, nelderMeadLine, stateVectorDiverged
+from wmpl.Trajectory.Trajectory import LOS_SMOOTHING, angleSumMeasurements2Line, lineFrame, \
+    lineFromFrame, minimizeAngleCost, moveStateVector, nelderMeadLine, stateVectorDiverged
 from wmpl.Trajectory.Tests.SyntheticTrajectory import observeStraightMeteor
 from wmpl.Utils.Math import angleBetweenVectors, vectNorm
 
@@ -102,7 +102,9 @@ def _solve(minimize, seed=20261105, **kwargs):
             - begin: [ndarray] ECI coordinates of the beginning of the meteor (m).
     """
 
-    traj, begin, _ = observeStraightMeteor(seed=seed, estimate_timing_vel=False, calc_orbit=False, **kwargs)
+    # Exercise the legacy Nelder-Mead angle fit explicitly
+    traj, begin, _ = observeStraightMeteor(seed=seed, estimate_timing_vel=False, calc_orbit=False, \
+        los_fit='angles', **kwargs)
 
     with _replaced(scipy.optimize, 'minimize', minimize):
         traj = traj.run()
@@ -295,7 +297,8 @@ def testAFitInADistantMinimumIsMinimizedAgainFromThePreviousSolution():
 
         return result
 
-    traj, _, _ = observeStraightMeteor(seed=20261105, estimate_timing_vel=True, calc_orbit=False)
+    traj, _, _ = observeStraightMeteor(seed=20261105, estimate_timing_vel=True, calc_orbit=False, \
+        los_fit='angles')
 
     with _replaced(scipy.optimize, 'minimize', distant):
         traj = traj.run()
@@ -499,7 +502,7 @@ def testTheLineFitStartedAlongALineOfSightGivesAFiniteLine():
 
     assert np.all(np.isfinite(result.x))
     assert np.isfinite(result.fun)
-    assert result.nfev < 1000
+    assert result.nfev < 1000*(len(LOS_SMOOTHING) + 1)
 
 
 

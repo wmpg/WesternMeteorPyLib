@@ -85,13 +85,15 @@ def testTheInitialVelocityIsRecovered():
 def testTheLagIsComputedFromTheFittedLengths():
     """ Check that the lag is computed from the lengths the velocity was fitted to, as the lengths with the
         gravity drop depend on the times, which the timing estimation changes. Before the fix, the lengths
-        were computed again with the new times and were up to 4.9 cm off.
+        were computed again with the new times and were up to 4.9 cm off. The lag is the deceleration by the
+        air, so the length gained from gravity along the path is taken off it.
     """
 
     traj = _solve(clock_offsets={'B': 0.3})
 
     for obs in traj.observations:
-        lag = obs.state_vect_dist - lineFunc(obs.time_data, *traj.velocity_fit)
+        lag = obs.state_vect_dist - traj.gravityLengthAlongPath(traj.observations, obs.time_data) \
+            - lineFunc(obs.time_data, *traj.velocity_fit)
         assert np.allclose(obs.lag, lag, rtol=0, atol=1e-9)
 
 

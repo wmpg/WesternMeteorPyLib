@@ -277,7 +277,7 @@ def updateSpaceWeather(dt_max):
 
 
 
-def spaceWeatherArrays(dt_arr):
+def spaceWeatherArrays(dt_arr, space_weather=None):
     """ Get the solar and geomagnetic activity of every point for the MSIS model.
 
     With the real space weather, the measured F10.7 of the previous day, its 81-day average and the ap
@@ -288,6 +288,10 @@ def spaceWeatherArrays(dt_arr):
 
     Arguments:
         dt_arr: [ndarray] Dates (datetime64, UTC).
+
+    Keyword arguments:
+        space_weather: [str] "real" or "constant", see MSIS_SPACE_WEATHER. None by default, which uses
+            MSIS_SPACE_WEATHER.
 
     Return:
         (f107, f107a, ap, source):
@@ -303,7 +307,10 @@ def spaceWeatherArrays(dt_arr):
     ap = np.full((n, 7), CONSTANT_AP)
     source = np.full(n, 'constant', dtype=object)
 
-    if (MSIS_SPACE_WEATHER != "real") or (n == 0):
+    if space_weather is None:
+        space_weather = MSIS_SPACE_WEATHER
+
+    if (space_weather != "real") or (n == 0):
         return f107, f107a, ap, source
 
     updateSpaceWeather(np.max(dt_arr))
@@ -570,6 +577,101 @@ def atmDensTable(ht, table_ht, table_log10_rho):
 
 
 
+def loadAtmosphereProfile(file_path):
+    """ Load the air density of an atmosphere profile as a density table. The profile is a CSV file in the
+        format OpenDarkflight writes for model profiles (e.g. ERA5), of which only the height and density
+        columns are read.
+
+    Arguments:
+        file_path: [str] Path to the CSV file.
+
+    Return:
+        (table_ht, table_log10_rho): Density table in the form of getAtmDensityTable().
+            - table_ht: [list] Heights (m), ascending.
+            - table_log10_rho: [list] log10 of the density (kg/m^3) at the table heights.
+    """
+
+    # Read the height and density columns
+    data = np.genfromtxt(file_path, delimiter=',', names=True)
+    ht_arr = np.atleast_1d(data['height'])
+    dens_arr = np.atleast_1d(data['density'])
+
+    # Skip the levels without a valid density and sort the others by height
+    valid = np.isfinite(ht_arr) & np.isfinite(dens_arr) & (dens_arr > 0)
+    sort_ind = np.argsort(ht_arr[valid])
+    ht_arr = ht_arr[valid][sort_ind]
+    dens_arr = dens_arr[valid][sort_ind]
+
+    # Check that there are at least two levels at different heights
+    if (len(ht_arr) < 2) or np.any(np.diff(ht_arr) <= 0):
+        raise ValueError("The atmosphere profile {:s} needs at least 2 levels with a density, all at " \
+            "different heights".format(file_path))
+
+    return [float(ht) for ht in ht_arr], [float(lr) for lr in np.log10(dens_arr)]
+
+
+
+def atmProfileJoinFactor(lat, lon, jd, table_ht, table_log10_rho):
+    """ Compute the factor by which the MSIS density is scaled above the top of an atmosphere profile, the
+        ratio of the density of the profile to that of MSIS at the top (see atmDensProfileMSIS()).
+
+    Arguments:
+        lat: [float or ndarray] Latitude (rad).
+        lon: [float or ndarray] Longitude (rad).
+        jd: [float] Julian date.
+        table_ht: [list] Table heights (m), ascending.
+        table_log10_rho: [list] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        [float or ndarray] Density of the profile over the MSIS density at the top of the profile.
+    """
+
+    ht_top = np.full(np.shape(lat), table_ht[-1]) if np.ndim(lat) else table_ht[-1]
+
+    return 10**table_log10_rho[-1]/getAtmDensity(lat, lon, ht_top, jd)
+
+
+
+def atmDensProfileMSIS(ht, lat, lon, jd, table_ht, table_log10_rho):
+    """ Compute the atmosphere density from a tabulated profile (loadAtmosphereProfile()) up to the top of the
+        profile, and above it from the MSIS model scaled by the ratio of the two densities at the top, so that
+        the density does not jump there. A profile which ends below the heights of a meteor, e.g. at 46 km for
+        ERA5 on pressure levels, is thus continued upwards. A jump of the density at the top would change the
+        scale height of the air there, which the fits of the deceleration would take into beta and the entry
+        velocity. Below the bottom of the profile, its lowest segment is extrapolated (atmDensTable()).
+
+    Arguments:
+        ht: [float or ndarray] Height above sea level (m).
+        lat: [float or ndarray] Latitude (rad), of all the heights or of every height.
+        lon: [float or ndarray] Longitude (rad), of all the heights or of every height.
+        jd: [float] Julian date.
+        table_ht: [list] Table heights (m), ascending.
+        table_log10_rho: [list] log10 of the densities (kg/m^3) at the table heights.
+
+    Return:
+        atm_dens: [float or ndarray] Atmosphere neutral mass density in kg/m^3.
+    """
+
+    ht_arr = np.atleast_1d(np.asarray(ht, dtype=np.float64))
+    lat_arr = np.broadcast_to(np.asarray(lat, dtype=np.float64), ht_arr.shape)
+    lon_arr = np.broadcast_to(np.asarray(lon, dtype=np.float64), ht_arr.shape)
+
+    # The density of the profile up to its top
+    atm_dens = np.atleast_1d(atmDensTable(ht_arr, table_ht, table_log10_rho)).astype(np.float64)
+
+    # Above the top, scale the MSIS density to join the profile
+    above = ht_arr > table_ht[-1]
+    if np.any(above):
+        if (np.ndim(lat) == 0) and (np.ndim(lon) == 0):
+            join_factor = atmProfileJoinFactor(float(lat), float(lon), jd, table_ht, table_log10_rho)
+        else:
+            join_factor = atmProfileJoinFactor(lat_arr[above], lon_arr[above], jd, table_ht, table_log10_rho)
+        atm_dens[above] = join_factor*getAtmDensity(lat_arr[above], lon_arr[above], ht_arr[above], jd)
+
+    return atm_dens if np.ndim(ht) else float(atm_dens[0])
+
+
+
 def atmTableSegments(table_ht, table_log10_rho):
     """ Compute the exponential segments of a density table.
 
@@ -672,7 +774,7 @@ class AtmDensityTableInterp(object):
 
 
 
-def getMSISVariable(lat, lon, height, jd, variable):
+def getMSISVariable(lat, lon, height, jd, variable, space_weather=None):
     """ For the given heights, returns one of the variables computed by the MSIS model. The model version
         is given by MSIS_VERSION, see setAtmosphere().
 
@@ -686,6 +788,10 @@ def getMSISVariable(lat, lon, height, jd, variable):
             using setAtmosphere().
         variable: [Variable] Model output to return, e.g. Variable.MASS_DENSITY or Variable.TEMPERATURE.
             The model also gives the number densities of N2, O2, O, He, H, Ar, N, anomalous oxygen and NO.
+
+    Keyword arguments:
+        space_weather: [str] "real" or "constant", see spaceWeatherArrays(). None by default, which uses
+            MSIS_SPACE_WEATHER.
 
     Return:
         [float or ndarray] The requested variable, in SI units.
@@ -710,7 +816,7 @@ def getMSISVariable(lat, lon, height, jd, variable):
         dt_unique = np.array([np.datetime64(jd2Date(jd_value, dt_obj=True)) for jd_value in jd_unique])
         dt_arr = dt_unique[jd_index.ravel()]
 
-        f107, f107a, ap, _ = spaceWeatherArrays(dt_arr)
+        f107, f107a, ap, _ = spaceWeatherArrays(dt_arr, space_weather=space_weather)
 
         # Compute one row per point, giving all inputs the same length
         with warnings.catch_warnings():
@@ -726,7 +832,7 @@ def getMSISVariable(lat, lon, height, jd, variable):
 
 
 
-def getAtmDensity(lat, lon, height, jd):
+def getAtmDensity(lat, lon, height, jd, space_weather=None):
     """ Compute the atmosphere mass density of the MSIS model, see getMSISVariable().
 
     Arguments:
@@ -735,11 +841,15 @@ def getAtmDensity(lat, lon, height, jd):
         height: [float or ndarray] Height in meters.
         jd: [float or ndarray] Julian date, of all the points or of every point.
 
+    Keyword arguments:
+        space_weather: [str] "real" or "constant", see spaceWeatherArrays(). None by default, which uses
+            MSIS_SPACE_WEATHER.
+
     Return:
         [float or ndarray] Atmosphere mass density (kg/m^3), NaN for non-finite inputs.
     """
 
-    return getMSISVariable(lat, lon, height, jd, Variable.MASS_DENSITY)
+    return getMSISVariable(lat, lon, height, jd, Variable.MASS_DENSITY, space_weather=space_weather)
 
 
 

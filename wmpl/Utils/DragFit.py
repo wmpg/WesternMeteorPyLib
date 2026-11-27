@@ -6,17 +6,21 @@ which computes the mass from the drag equation for an assumed shape and density.
 The meteor is assumed to move along the straight line of the trajectory solution and to decelerate by
 atmospheric drag:
 
-    dv/dt = -K*rho*v**2 + g_along
+    dv/dt = -K*rho*v_air**2 + g_along
 
 where rho is the NRLMSISE-00 air density, g_along the component of gravity along the line and K the ballistic
-coefficient (Gamma*A/(m**(1/3)*rho_m**(2/3))). Both ablation and fragmentation increase K, so it is only
+coefficient (Gamma*A/(m**(1/3)*rho_m**(2/3))). The drag acts on the speed relative to the air, which moves
+with the ground, v_air = v - v_rot, where v is the inertial speed and v_rot the speed of the Earth's rotation
+along the trajectory (Physics.earthRotationSpeed). Both ablation and fragmentation increase K, so it is only
 allowed to grow along the trajectory, which keeps the velocity positive and decreasing. With the specific
-kinetic energy E = v**2/2 and the length L along the line, the drag equation is linear:
+kinetic energy E = v**2/2 and the length L along the line, the drag equation is linear for a given ratio
+v_air/v:
 
-    dE/dL = -2*K*rho*E + g_along
+    dE/dL = -2*K*rho*(v_air/v)**2*E + g_along
 
-and is solved exactly. The logarithm of K is a sum of non-negative ramps in L, which is fitted to the lengths
-and times of all used points with a robust loss and a small penalty on the growth of K.
+and is solved exactly, iterating on that ratio. The logarithm of K is a sum of non-negative ramps in L, which
+is fitted to the lengths and times of all used points with a robust loss and a small penalty on the growth
+of K.
 
 Above the first observed point the meteor is assumed to move without drag, only accelerated by gravity, as
 it barely decelerates in the thin air. Optionally, K can be kept at its first value instead. As K can only
@@ -28,10 +32,20 @@ beginning of the dark flight. Ablation essentially stops below about 3 km/s, so 
 exact. A meteor which ends faster probably still ablates below its end, but letting K grow there by
 single-body ablation did not predict the hidden ends of real fireballs better.
 
+A fragmentation makes K jump, which the penalty on the growth of K spreads over the segments around it. If the
+heights of the fragmentations are known, e.g. from the flares, K can jump at them without penalty. How
+spread the last fragmentation was below its height is not fixed by the motion alone, so spreadScan() also fits
+the growth spread below the heights, the same spread for all of them, over a range of spreads, and the
+farthest K at the last point among those which fit within Delta chi2 <= 4 is taken as its systematic
+uncertainty.
+
 Gravity bends the path of the meteor by the angle theta, dtheta/dt = g_perp/v, where g_perp is the component
 of gravity perpendicular to the path. Drag damps the velocity gained from gravity in the same way as the rest
 of the velocity, so the bending grows quickly as the meteor slows down. The model is only computed until the
-path has bent by a few degrees from the first point. Further on, a dark flight model has to be used.
+path has bent by a few degrees from the first point. Further on, a dark flight model has to be used. If the
+trajectory was solved with the drag against the rotating air, the drag also pulls the velocity of the meteor
+across the path towards that of the air, which turns the direction of the radiant and the path below the last
+point.
 
 If the trajectory was solved with the gravity correction, the positions in the observed part are dropped from
 the line in the same way as in the trajectory solver, and the heights and the air density are computed on the
@@ -55,10 +69,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 
-from wmpl.Trajectory.Trajectory import applyGravityDrop
+from wmpl.Trajectory.Trajectory import GRAVITY_DROP_MIN_VEL, applyGravityDrop, buildRampsWithGaps, \
+    findObservedWindows, gravityDropOrigin, gravityDropVectors, solutionDropTimeOrigin
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import findClosestPoints, vectMag
-from wmpl.Utils.Physics import ballisticCoeffMass
+from wmpl.Utils.Physics import GAMMA_A, ballisticCoeffMass, earthRotationSpeed, earthRotationVelocity
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, derotatedRadiantAltAz, ecef2LatLonAlt
 
@@ -66,10 +81,14 @@ from wmpl.Utils.TrajConversions import EARTH, cartesian2Geo, derotatedRadiantAlt
 # Gravitational acceleration at the surface of the Earth (m/s^2)
 G_SURFACE = 9.80665
 
-# Product of the drag coefficient and the shape factor, and the bulk density (kg/m^3), assumed for the
-#   dynamic mass by default
-GAMMA_A = 0.78
+# Bulk density (kg/m^3) assumed for the dynamic mass by default, with Gamma*A = GAMMA_A
 BULK_DENSITY = 3500.0
+
+# Iterations of the scale of the drag for the speed relative to the air: the most, the number after which
+#   the scale is damped so it cannot oscillate, and the change of the speeds at which they stop (m/s)
+DRAG_SCALE_MAX_ITERATIONS = 50
+DRAG_SCALE_DAMPED_AFTER = 10
+DRAG_SCALE_TOL = 1e-3
 
 
 
@@ -115,7 +134,7 @@ def usedPoints(traj):
 
 class DragFit(object):
     def __init__(self, traj, n_knots=None, h_top=200000.0, penalty=1.0, drag_above=False, max_bending=5.0, \
-        max_vel_growth=0.1):
+        max_vel_growth=0.1, knot_hts=None, knot_spread=0.0, gap_aware=True, gap_penalty_factor=5.0):
         """ Fit the drag model to the lengths and times of the used points of the given trajectory.
 
         Arguments:
@@ -136,6 +155,18 @@ class DragFit(object):
             max_vel_growth: [float] Largest relative growth of the velocity above the beginning of the
                 observed part, only used if drag_above is True. The model is not computed further. 0.1 by
                 default.
+            knot_hts: [list] Heights of the fragmentations (m), as given by the trajectory solution, e.g.
+                those of the flares. The ballistic coefficient can jump without penalty at each one within
+                the observed part, between the heights of the used points of the solution, which are on the
+                path dropped by gravity. None by default.
+            knot_spread: [float] Height below each of knot_hts over which the ballistic coefficient grows
+                without penalty (m). 0 by default, for a jump, which takes one step of the grid of the
+                observed part (a thousandth of its length).
+            gap_aware: [bool] Detect unobserved zero-station gaps along the trajectory and place one
+                regularized ramp across each gap rather than letting uniform knots straddle gaps. True by
+                default.
+            gap_penalty_factor: [float] Relative penalty multiplier applied to gap ramps when gap_aware is
+                True and gaps exist. 5.0 by default.
         """
 
         self.traj = traj
@@ -147,6 +178,10 @@ class DragFit(object):
         self.state_vect = np.array(traj.state_vect_mini)
         self.radiant_eci = np.array(traj.radiant_eci_mini)
 
+        # Speed of the Earth's rotation along the trajectory, by which the inertial speed exceeds the speed
+        #   relative to the air
+        self.v_rotation = earthRotationSpeed(traj)
+
         # Get the data
         self.time_data, self.len_data = usedPoints(traj)
         self.len_first = np.min(self.len_data)
@@ -155,15 +190,53 @@ class DragFit(object):
         # Compute the line geometry and the atmosphere along it
         h_top = max(h_top, self._wgs84HeightEci(self._lineEci(self.len_first))[0] + 100e3)
         self.drop_grid = None
+        self.air_vel_grid = None
         self._initLine(h_top)
 
-        # Set the ramps of the ballistic coefficient, uniformly spaced between the first and the last point
+        # Detect observed windows and unobserved gaps across stations for gap-aware ramp placement
+        station_lens = [np.asarray(obs.state_vect_dist, dtype=np.float64)[np.asarray(obs.ignore_list) == 0] \
+            for obs in traj.observations if (not obs.ignore_station) \
+            and np.any(np.asarray(obs.ignore_list) == 0)]
+        self.windows, self.gaps = findObservedWindows(station_lens) if gap_aware else \
+            ([(self.len_first, self.len_last)], [])
+
+        # Set the ramps of the ballistic coefficient (gap-aware when unobserved gaps exist, uniform otherwise)
         if n_knots is None:
             n_knots = int(np.clip(len(self.len_data)/25, 3, 15))
 
+        if gap_aware and self.gaps:
+            obs_len_grid = self.len_grid[self.i_first:self.i_last + 1]
+            self.ramp_beg, self.ramp_len, self.is_gap_ramp = buildRampsWithGaps(obs_len_grid, self.windows, \
+                self.gaps, len(self.len_data), n_knots=n_knots)
+            self.pen_weight = np.where(self.is_gap_ramp, float(gap_penalty_factor), 1.0)
+            n_knots = len(self.ramp_beg)
+        else:
+            self.ramp_beg = np.linspace(self.len_first, self.len_last, n_knots + 1)[:-1]
+            self.ramp_len = np.full(n_knots, (self.len_last - self.len_first)/n_knots)
+            self.is_gap_ramp = np.zeros(n_knots, dtype=bool)
+            self.pen_weight = np.ones(n_knots)
+
+        # Add a ramp without penalty below every fragmentation between the heights of the used points
+        self.knot_hts = np.array([] if knot_hts is None else knot_hts, dtype=float)
+        self.knot_spread = knot_spread
+        if len(self.knot_hts):
+
+            ht_used = np.concatenate([obs.model_ht[obs.ignore_list == 0] for obs in traj.observations \
+                if not obs.ignore_station])
+            inside = (self.knot_hts < np.max(ht_used)) & (self.knot_hts > np.min(ht_used))
+            self.knot_hts = self.knot_hts[inside]
+
+            knot_beg, knot_len = self._knotRamps()
+            self.ramp_beg = np.append(self.ramp_beg, knot_beg)
+            self.ramp_len = np.append(self.ramp_len, knot_len)
+            self.is_gap_ramp = np.append(self.is_gap_ramp, np.zeros(len(self.knot_hts), dtype=bool))
+            self.pen_weight = np.append(self.pen_weight, np.zeros(len(self.knot_hts)))
+            n_knots += len(self.knot_hts)
+
         self.n_knots = n_knots
-        self.ramp_beg = np.linspace(self.len_first, self.len_last, n_knots + 1)[:-1]
-        self.ramp_len = (self.len_last - self.len_first)/n_knots
+
+        # The uncertainty of ln K from the spread of the fragmentations, set by spreadScan()
+        self.log_k_spread = None
 
         # Fit the model and compute the solution along the whole line
         self._fit(penalty)
@@ -175,6 +248,10 @@ class DragFit(object):
         if self.gravity_correction:
 
             self._computeGravityDrop()
+
+            # Move the ramps to the heights of the fragmentations on the dropped path
+            self.ramp_beg[self.pen_weight == 0], self.ramp_len[self.pen_weight == 0] = self._knotRamps()
+
             self._fit(penalty, params_init=self.params)
             self._checkFit()
             self._solveFull()
@@ -193,6 +270,30 @@ class DragFit(object):
         if (not np.isfinite(self.res_rms)) or (abs(self.params[0] - self.time_data[0]) > max(1.0, duration)):
             raise ValueError("The drag model could not be fitted, the lengths and times of the points of " \
                 + "the trajectory are not consistent")
+
+
+
+    def _knotRamps(self):
+        """ Compute the ramps below the heights of the fragmentations, on the descending part of the current
+            path.
+
+        Return:
+            (knot_beg, knot_len):
+                - knot_beg: [ndarray] Lengths where the ramps begin (m).
+                - knot_len: [ndarray] Lengths of the ramps (m), at least one step of the grid of the observed
+                    part, so the motion, which is integrated on that grid, follows the same K as the one
+                    reported.
+        """
+
+        i_low = np.argmin(self.ht_grid)
+        ht_desc, len_desc = self.ht_grid[:i_low + 1][::-1], self.len_grid[:i_low + 1][::-1]
+        knot_beg = np.interp(self.knot_hts, ht_desc, len_desc)
+        knot_end = np.interp(self.knot_hts - self.knot_spread, ht_desc, len_desc)
+
+        # Take the step of the grid of the observed part
+        len_step = (self.len_last - self.len_first)/(self.i_last - self.i_first)
+
+        return knot_beg, np.maximum(knot_end - knot_beg, len_step)
 
 
 
@@ -303,15 +404,35 @@ class DragFit(object):
         g = self.g_grid[self.i_first:self.i_last + 1]
         dlen = np.diff(len_arr)
 
-        # Compute the integral of 2*K*rho from the first point
-        a = 2*np.exp(self._logK(params, len_arr))*rho
-        phi = np.concatenate([[0.0], np.cumsum(0.5*(a[1:] + a[:-1])*dlen)])
-        exp_phi = np.exp(np.clip(phi, None, 700.0))
+        # The drag acts on the speed relative to the air, which moves with the ground, so 2*K*rho is scaled by
+        #   the squared ratio of that speed to the inertial one (see _airDragScale), iterating from the inertial
+        #   speed
+        drag_scale = 1.0
+        vel_prev = None
+        for i in range(DRAG_SCALE_MAX_ITERATIONS if self.v_rotation else 1):
 
-        # Compute the energy, including the work done by gravity
-        grav = np.concatenate([[0.0], np.cumsum(0.5*(g[1:]*exp_phi[1:] + g[:-1]*exp_phi[:-1])*dlen)])
-        energy = (0.5*params[1]**2 + grav)/exp_phi
-        vel = np.sqrt(np.maximum(2*energy, 1.0))
+            # Compute the integral of 2*K*rho from the first point
+            a = 2*np.exp(self._logK(params, len_arr))*rho*drag_scale
+            phi = np.concatenate([[0.0], np.cumsum(0.5*(a[1:] + a[:-1])*dlen)])
+            exp_phi = np.exp(np.clip(phi, None, 700.0))
+
+            # Compute the energy, including the work done by gravity
+            grav = np.concatenate([[0.0], np.cumsum(0.5*(g[1:]*exp_phi[1:] + g[:-1]*exp_phi[:-1])*dlen)])
+            energy = (0.5*params[1]**2 + grav)/exp_phi
+            vel = np.sqrt(np.maximum(2*energy, 1.0))
+
+            # Stop when the speeds no longer change
+            if (vel_prev is not None) and (np.max(np.abs(vel - vel_prev)) < DRAG_SCALE_TOL):
+                break
+
+            vel_prev = vel
+
+            # Take the scale at the new speeds, damped after a few iterations, as a meteor which slows close
+            #   to the speed of the air can make it alternate
+            if i < DRAG_SCALE_DAMPED_AFTER:
+                drag_scale = self._airDragScale(vel)
+            else:
+                drag_scale = 0.5*(drag_scale + self._airDragScale(vel))
 
         # Integrate the time
         time = params[0] + np.concatenate([[0.0], np.cumsum(0.5*(1/vel[1:] + 1/vel[:-1])*dlen)])
@@ -343,7 +464,7 @@ class DragFit(object):
         len_model = np.where(self.time_data > time[-1], len_arr[-1] + vel[-1]*(self.time_data - time[-1]), \
             len_model)
 
-        return np.concatenate([len_model - self.len_data, w_pen*params[3:]])
+        return np.concatenate([len_model - self.len_data, w_pen*self.pen_weight*params[3:]])
 
 
 
@@ -381,7 +502,7 @@ class DragFit(object):
 
             res = scipy.optimize.least_squares(lambda p: self._residuals(np.concatenate([p, \
                 np.zeros(self.n_knots)]), 0.0)[:len(self.len_data)], p0[:3], bounds=(lower[:3], upper[:3]), \
-                loss='soft_l1', f_scale=50.0, x_scale='jac', ftol=1e-6, xtol=1e-6)
+                loss='soft_l1', f_scale=50.0, x_scale='jac', ftol=1e-8, xtol=1e-9)
 
             if (best is None) or (res.cost < best.cost):
                 best = res
@@ -405,7 +526,7 @@ class DragFit(object):
             p0 = np.clip(p0, lower + 1e-9, upper - 1e-9)
 
             res = scipy.optimize.least_squares(self._residuals, p0, args=(w_pen,), bounds=(lower, upper), \
-                loss='soft_l1', f_scale=f_scale, x_scale='jac', ftol=1e-6, xtol=1e-6, max_nfev=1000)
+                loss='soft_l1', f_scale=f_scale, x_scale='jac', ftol=1e-8, xtol=1e-9, max_nfev=1000)
 
             if (best_full is None) or (res.cost < best_full.cost):
                 best_full = res
@@ -431,7 +552,7 @@ class DragFit(object):
         w_pen = np.sqrt(penalty)*f_scale
 
         res = scipy.optimize.least_squares(self._residuals, params, args=(w_pen,), bounds=(lower, upper), \
-            loss='soft_l1', f_scale=f_scale, x_scale='jac', ftol=1e-6, xtol=1e-6, max_nfev=1000)
+            loss='soft_l1', f_scale=f_scale, x_scale='jac', ftol=1e-8, xtol=1e-9, max_nfev=1000)
 
         self.params = res.x
 
@@ -501,7 +622,8 @@ class DragFit(object):
             *np.diff(self.len_grid[obs_slice]))])
 
         # Take the ballistic coefficient at the first and the last point outside the observed part
-        log_k_grid = self._logK(self.params, self.len_grid)
+        # Keep K at its value at the last point below it, also if a ramp has not ended there
+        log_k_grid = self._logK(self.params, np.minimum(self.len_grid, self.len_last))
         if not self.drag_above:
             log_k_grid[:self.i_first] = -np.inf
 
@@ -519,7 +641,7 @@ class DragFit(object):
             else:
                 a = 0.0
 
-            energy = self._energyStep(energy, a, g, -dlen)
+            energy = self._airEnergyStep(energy, a, g, -dlen, vel[i])
 
             # Stop when the velocity has grown too much, as K above the beginning is not known
             if np.sqrt(max(2*energy, 0.0)) > (1 + self.max_vel_growth)*vel[self.i_first]:
@@ -537,7 +659,7 @@ class DragFit(object):
             a = 2*np.exp(log_k_grid[i])*0.5*(self.rho_grid[i] + self.rho_grid[i + 1])
             g = 0.5*(self.g_grid[i] + self.g_grid[i + 1])
 
-            energy = self._energyStep(energy, a, g, dlen)
+            energy = self._airEnergyStep(energy, a, g, dlen, vel[i])
 
             # Stop if the meteor comes to a halt (e.g. an Earth-grazer going up)
             if energy <= 0.5:
@@ -590,6 +712,47 @@ class DragFit(object):
 
 
 
+    def _airDragScale(self, vel):
+        """ Compute the factor by which the drag on the speed relative to the air differs from the drag on the
+            inertial speed. The sign is kept, so the drag pushes the meteor forward if the air moves faster
+            along the line than the meteor.
+
+        Arguments:
+            vel: [float or ndarray] Inertial speed (m/s).
+
+        Return:
+            [float or ndarray] Factor of the drag term.
+        """
+
+        ratio = 1 - self.v_rotation/vel
+
+        return ratio*np.abs(ratio)
+
+
+
+    def _airEnergyStep(self, energy, a, g, dlen, vel):
+        """ Advance the energy equation by dlen, with the drag term scaled for the speed relative to the air
+            at the mean speed of the step.
+
+        Arguments:
+            energy: [float] Specific kinetic energy at the start (J/kg).
+            a: [float] Drag term 2*K*rho (1/m) for the inertial speed.
+            g: [float] Component of gravity along the line (m/s^2).
+            dlen: [float] Step along the line (m), negative when going up.
+            vel: [float] Inertial speed at the start (m/s).
+
+        Return:
+            [float] Specific kinetic energy at the end of the step (J/kg).
+        """
+
+        # Estimate the speed at the end of the step with the scale at its start
+        energy_end = self._energyStep(energy, a*self._airDragScale(vel), g, dlen)
+        vel_mean = 0.5*(vel + np.sqrt(max(2*energy_end, 1.0)))
+
+        return self._energyStep(energy, a*self._airDragScale(vel_mean), g, dlen)
+
+
+
     def _computeGravityDrop(self):
         """ Compute the gravity drop along the line in the same way as the trajectory solver does in the
             observed part, and from the bending by gravity below it, and update the heights and the air
@@ -598,11 +761,14 @@ class DragFit(object):
 
         traj = self.traj
 
-        # Take the time of the first point and the largest distance from the centre of the Earth of the first
-        #   points of all stations as the reference, as the trajectory solver does
-        t0 = min([obs.time_data[0] for obs in traj.observations])
+        # Take the time from which the solver computed the drop, and the largest distance from the centre of
+        #   the Earth of the first points of the used stations as the reference
+        t0 = solutionDropTimeOrigin(traj)
+
+        # Take all stations if none is used
+        used = [obs for obs in traj.observations if not obs.ignore_station] or traj.observations
         r0 = max([vectMag(findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], self.state_vect, \
-            self.radiant_eci)[1]) for obs in traj.observations])
+            self.radiant_eci)[1]) for obs in used])
 
         v0z = getattr(traj, 'v0z', None)
         if v0z is None:
@@ -614,19 +780,60 @@ class DragFit(object):
         #   point, where the positions are on the line
         line_eci = self._lineEci(self.len_grid)
         drop_grid = np.zeros_like(line_eci)
-        for i, (eci, t) in enumerate(zip(line_eci, self.time_grid)):
-            if np.isfinite(t) and (t > t0):
-                drop_grid[i] = eci - applyGravityDrop(eci, t - t0, r0, gravity_factor, v0z)
+        dropped = np.isfinite(self.time_grid) & (self.time_grid > t0)
+
+        # Velocity across the path which the drag against the rotating air gives the meteor (ECI, m/s)
+        air_vel_grid = np.zeros_like(line_eci)
+        air_rotation = getattr(traj, 'air_rotation', False)
+
+        # Drop across the path with the speeds of the solution, or vertically for solutions without them
+        if getattr(traj, 'gravity_vel', None) is not None:
+            if np.any(dropped):
+                eci0 = gravityDropOrigin(traj.observations, self.state_vect, self.radiant_eci, \
+                    traj.gravity_vel, t0)
+                drop_grid[dropped] = -gravityDropVectors(eci0, self.radiant_eci, \
+                    self.time_grid[dropped] - t0, traj.gravity_vel, t0, gravity_factor, \
+                    air_rotation=air_rotation)
+
+                # Take the velocity of the drift with the air as the time derivative of the difference
+                #   between the drops with and without the rotating air
+                if air_rotation and (np.count_nonzero(dropped) > 1):
+                    drift = -drop_grid[dropped] - gravityDropVectors(eci0, self.radiant_eci, \
+                        self.time_grid[dropped] - t0, traj.gravity_vel, t0, gravity_factor, \
+                        air_rotation=False)
+                    air_vel_grid[dropped] = np.gradient(drift, self.time_grid[dropped], axis=0)
+
+        else:
+            for i in np.where(dropped)[0]:
+                drop_grid[i] = line_eci[i] - applyGravityDrop(line_eci[i], self.time_grid[i] - t0, r0, \
+                    gravity_factor, v0z)
 
         # Below the last point, continue the path along the direction bent by gravity
         valid = np.where(np.isfinite(self.time_grid))[0]
         pos = line_eci[self.i_last] - drop_grid[self.i_last]
+        motion = -self.radiant_eci
         for i in range(self.i_last + 1, valid[-1] + 1):
 
             dlen = self.len_grid[i] - self.len_grid[i - 1]
             theta = 0.5*(self.bend_grid[i - 1] + self.bend_grid[i])
 
-            pos = pos - dlen*self._bentRadiant(np.array([theta]), pos[None, :])[0]
+            # Relax the velocity across the path towards that of the air, at the rate at which the drag
+            #   slows the meteor
+            if air_rotation:
+                air = earthRotationVelocity(pos)
+                air_along = np.dot(air, motion)
+                air_across = air - air_along*motion
+                dt = self.time_grid[i] - self.time_grid[i - 1]
+                vel = 0.5*(self.vel_grid[i - 1] + self.vel_grid[i])
+                decel = 0.5*(self.g_grid[i - 1] + self.g_grid[i]) \
+                    - (self.vel_grid[i] - self.vel_grid[i - 1])/dt
+                drag_rate = max(decel, 0.0)/max(vel - air_along, GRAVITY_DROP_MIN_VEL)
+                air_vel_grid[i] = air_across + (air_vel_grid[i - 1] - air_across)*np.exp(-drag_rate*dt)
+
+            direction = self._airRadiant(self._bentRadiant(np.array([theta]), pos[None, :]), \
+                np.array([self.vel_grid[i]]), 0.5*(air_vel_grid[i - 1] + air_vel_grid[i])[None, :])[0]
+
+            pos = pos - dlen*direction
             drop_grid[i] = line_eci[i] - pos
 
         # Keep the drop constant outside the modelled part, so the heights stay continuous
@@ -634,6 +841,7 @@ class DragFit(object):
         drop_grid[valid[-1] + 1:] = drop_grid[valid[-1]]
 
         self.drop_grid = drop_grid
+        self.air_vel_grid = air_vel_grid
 
         # Update the heights and the air density
         self.ht_grid = self._wgs84HeightEci(line_eci - drop_grid) + np.interp(self.len_grid, self.len_atm, \
@@ -702,10 +910,32 @@ class DragFit(object):
 
 
 
+    def _airRadiant(self, radiant_arr, vel_arr, air_vel_arr):
+        """ Turn the directions of the radiant by the velocity across the path which the drag against the
+            rotating air gives the meteor.
+
+        Arguments:
+            radiant_arr: [ndarray] Unit vectors towards the radiant in the ECI frame, one row per point.
+            vel_arr: [ndarray] Speeds of the meteor along the path (m/s).
+            air_vel_arr: [ndarray] Velocities across the path from the rotating air (ECI, m/s), one row per
+                point.
+
+        Return:
+            [ndarray] Unit vectors towards the radiant in the ECI frame, one row per point.
+        """
+
+        # The radiant is opposite to the velocity of the meteor
+        radiant_arr = vel_arr[:, None]*radiant_arr - air_vel_arr
+
+        return radiant_arr/np.linalg.norm(radiant_arr, axis=1)[:, None]
+
+
+
     def radiantAtLength(self, len_arr):
         """ Compute the directions of the radiant at the given lengths along the trajectory, opposite to the
             direction of motion. If the trajectory was solved with the gravity correction, the direction is
-            bent by gravity from the first point, by the angle theta, dtheta/dt = g_perp/v.
+            bent by gravity from the first point, by the angle theta, dtheta/dt = g_perp/v, and turned by the
+            velocity across the path which the drag against the rotating air gives the meteor.
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -720,8 +950,16 @@ class DragFit(object):
             return np.tile(self.radiant_eci, (len(len_arr), 1))
 
         theta = np.interp(len_arr, self.len_grid[self._valid], self.bend_grid[self._valid])
+        radiant_arr = self._bentRadiant(theta, self.eciAtLength(len_arr))
 
-        return self._bentRadiant(theta, self.eciAtLength(len_arr))
+        if self.air_vel_grid is None:
+            return radiant_arr
+
+        vel_arr = np.interp(len_arr, self.len_grid[self._valid], self.vel_grid[self._valid])
+        air_vel_arr = np.column_stack([np.interp(len_arr, self.len_grid[self._valid], \
+            self.air_vel_grid[self._valid, i]) for i in range(3)])
+
+        return self._airRadiant(radiant_arr, vel_arr, air_vel_arr)
 
 
 
@@ -823,7 +1061,8 @@ class DragFit(object):
 
     def ballisticCoeffAtLength(self, len_arr):
         """ Compute the ballistic coefficients at the given lengths along the trajectory, and their
-            uncertainties estimated from the fit.
+            uncertainties estimated from the fit, and also from the spread of the fragmentations if the fit
+            comes from spreadScan().
 
         Arguments:
             len_arr: [float or ndarray] Lengths along the trajectory from the state vector (m).
@@ -853,6 +1092,10 @@ class DragFit(object):
         ramps = np.clip((len_clip[:, None] - self.ramp_beg[None, :])/self.ramp_len, 0.0, 1.0)
         grad = np.hstack([np.zeros((len(len_arr), 2)), np.ones((len(len_arr), 1)), ramps])
         log_k_std = self._paramStd(grad)
+
+        # Add the uncertainty from the spread of the fragmentations
+        if self.log_k_spread is not None:
+            log_k_std = np.hypot(log_k_std, np.interp(len_clip, *self.log_k_spread))
 
         # The coefficient is exactly zero above the first point without drag
         log_k_std[k_arr == 0] = 0.0
@@ -1189,17 +1432,15 @@ class DragFit(object):
             bulk_density))
         out.append("")
 
-        # Compute the uncertainties of the growth of K in every segment
-        d_std = self._paramStd(np.eye(len(self.params))[3:])
-
         out.append(" Seg, Ht beg, Ht end, Time beg,  Vel beg,  Dyn pres,     K beg,     K end, K std, " \
             + "Growth, Signif")
         out.append(("    ,   (km),   (km),      (s),   (km/s), beg (kPa),   (m{:s}/kg),   (m{:s}/kg), " \
             + "  (%),    (x), (sigma)").format(sq, sq))
 
-        for i in range(self.n_knots):
+        for n, i in enumerate(np.argsort(self.ramp_beg)):
 
-            len_seg = np.array([self.ramp_beg[i], self.ramp_beg[i] + self.ramp_len])
+            # Clip the segment at the last point, below which K does not grow
+            len_seg = np.array([self.ramp_beg[i], min(self.ramp_beg[i] + self.ramp_len[i], self.len_last)])
             ht_seg = self.heightAtLength(len_seg)
             time_seg = self.timeAtLength(len_seg)
             vel_seg = self.velocityAtLength(len_seg)
@@ -1209,16 +1450,22 @@ class DragFit(object):
             rho_beg = np.exp(np.interp(ht_seg[0], self.ht_atm, self.log_rho_atm))
             dyn_pres = rho_beg*self.groundVelocityAtLength(len_seg[0])[0]**2
 
-            # Compute the significance of the growth of K in the segment
-            if d_std[i] > 0:
-                signif = self.params[3 + i]/d_std[i]
+            # Compute the growth of K within the segment from all the ramps which overlap it, and its
+            #   significance
+            ramps = np.clip((len_seg[:, None] - self.ramp_beg[None, :])/self.ramp_len, 0.0, 1.0)
+            grad = np.r_[np.zeros(3), ramps[1] - ramps[0]]
+            log_growth = grad.dot(self.params)
+            growth = np.exp(log_growth)
+            growth_std = self._paramStd(grad[None, :])[0]
+            if growth_std > 0:
+                signif = log_growth/growth_std
             else:
                 signif = 0.0
 
             out.append(("{:4d}, {:6.2f}, {:6.2f}, {:8.3f}, {:8.3f}, {:9.1f}, {:9.2e}, {:9.2e}, {:5.0f}, " \
-                + "{:6.2f}, {:6.1f}{:s}").format(i + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
+                + "{:6.2f}, {:6.1f}{:s}").format(n + 1, ht_seg[0]/1000, ht_seg[1]/1000, time_seg[0], \
                 vel_seg[0]/1000, dyn_pres/1000, k_seg[0], k_seg[1], 100*log_k_std[1], \
-                np.exp(self.params[3 + i]), signif, " *" if signif > 2 else ""))
+                growth, signif, " *" if signif > 2 else ""))
 
         out.append("The star * marks the segments where K grows significantly (more than 2 sigma). K std " \
             + "is the relative uncertainty of K at the segment end.")
@@ -1227,8 +1474,84 @@ class DragFit(object):
         out.append("The final dynamic mass is the mass of the leading body at the last point for the " \
             + "assumed Gamma*A and density, m = (Gamma*A/(K*rho_m^(2/3)))^3. Only the uncertainty of K is " \
             + "propagated.")
+        if len(self.knot_hts):
+            out.append("The segments which begin at the heights of the fragmentations have no penalty on " \
+                + "the growth of K.")
 
         return "\n".join(out)
+
+
+
+def spreadScan(traj, knot_hts, spread_step=250.0, spread_max=None, **kwargs):
+    """ Fit the drag model with the fragmentations as jumps and spread over a range of heights below them,
+        as how spread the last fragmentation was is not fixed by the motion alone. The spreads which fit as
+        well as the best one within Delta chi2 <= 4 are acceptable. The result is the fit with jumps, and the
+        largest difference of the ballistic coefficient at the last point of an acceptable spread from it is
+        taken as its systematic uncertainty. The largest difference along the whole trajectory is kept in the
+        returned fit as log_k_spread, a tuple of lengths (m) and differences of ln K, which its uncertainties
+        of K and of the dynamic mass then include.
+
+    Arguments:
+        traj: [Trajectory object] Solved trajectory.
+        knot_hts: [list] Heights of the fragmentations (m).
+
+    Keyword arguments:
+        spread_step: [float] Step of the spreads (m). 250 m by default.
+        spread_max: [float] Largest spread (m). None by default, down to the last point from the lowest
+            fragmentation within the observed part.
+        **kwargs: [dict] Keyword arguments for DragFit.
+
+    Return:
+        (fit, spreads, delta_chi2, log_k_last, log_k_std):
+            - fit: [DragFit object] Fit with the fragmentations as jumps.
+            - spreads: [ndarray] Spreads (m).
+            - delta_chi2: [ndarray] Delta chi2 of the fit with every spread from the best one.
+            - log_k_last: [ndarray] Logarithm of the ballistic coefficient at the last point for every spread.
+            - log_k_std: [float] Uncertainty of the logarithm of the ballistic coefficient at the last point
+                of the fit with jumps, from the fit and from the spread.
+    """
+
+    # Fit the jumps, and find how far below the lowest fragmentation the last point is
+    fits = [DragFit(traj, knot_hts=knot_hts, **kwargs)]
+    knots = fits[0].pen_weight == 0
+    if spread_max is None:
+        spread_max = 0.0
+        if np.any(knots):
+            spread_max = fits[0].heightAtLength(np.array([np.max(fits[0].ramp_beg[knots])]))[0] \
+                - fits[0].heightAtLength(np.array([fits[0].len_last]))[0]
+
+
+    # Fit the other spreads, if there are fragmentations within the observed part, in steps and ending with
+    #   the largest spread itself, so a range shorter than a step is also scanned
+    spreads = np.zeros(1)
+    if np.any(knots) and (spread_max > 0):
+        spreads = np.unique(np.r_[np.arange(0.0, spread_max, spread_step), spread_max])
+    fits += [DragFit(traj, knot_hts=knot_hts, knot_spread=spread, **kwargs) for spread in spreads[1:]]
+
+    # Compute the Delta chi2 of every spread, with the variance of the residuals of the best one, at least
+    #   (1 mm)^2 so an exact fit of noise-free lengths does not divide by zero
+    ssr = np.array([np.sum(fit.residuals**2) for fit in fits])
+    best = int(np.argmin(ssr))
+    n_dof = max(len(fits[best].len_data) - 3 - fits[best].n_knots, 1)
+    delta_chi2 = (ssr - ssr[best])/max(ssr[best]/n_dof, 1e-6)
+
+    # Take the largest difference of K at the last point of an acceptable spread from the jumps as its
+    #   systematic uncertainty
+    k_last = [fit.ballisticCoeffAtLength(np.array([fit.len_last])) for fit in fits]
+    log_k_last = np.log([k[0][0] for k in k_last])
+    log_k_sys = np.max(np.abs(log_k_last[delta_chi2 <= 4.0] - log_k_last[0]))
+    log_k_std = np.hypot(k_last[0][1][0], log_k_sys)
+
+    # Keep the largest difference of K of an acceptable spread from the jumps along the trajectory
+    # Take K on the grid and at the beginnings and ends of the ramps of all fits, so the envelope does not
+    #   miss a jump between the nodes of the grid
+    ramp_ends = np.concatenate([np.r_[fit.ramp_beg, fit.ramp_beg + fit.ramp_len] for fit in fits])
+    len_arr = np.union1d(fits[0].len_grid, np.r_[fits[0].len_first, fits[0].len_last, ramp_ends])
+    log_k_arr = np.log([fit.ballisticCoeffAtLength(len_arr)[0] for fit in fits])
+    fits[0].log_k_spread = (len_arr, np.max(np.abs(log_k_arr[delta_chi2 <= 4.0] - log_k_arr[0]), axis=0))
+
+
+    return fits[0], spreads, delta_chi2, log_k_last, log_k_std
 
 
 
@@ -1253,6 +1576,14 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
 
     fig, (ax_ht, ax_vel, ax_k) = plt.subplots(ncols=3, sharey=True, figsize=(14, 5))
 
+    # Shade and hatch unobserved gaps when present
+    for idx_g, (g_beg, g_end) in enumerate(getattr(drag_fit, 'gaps', [])):
+        h0, h1 = drag_fit.heightAtLength(np.array([g_beg, g_end]))/1000.0
+        lbl = 'Unobserved gap' if idx_g == 0 else None
+        for ax_g in (ax_ht, ax_vel, ax_k):
+            ax_g.axhspan(min(h0, h1), max(h0, h1), facecolor='tab:orange', edgecolor='tab:orange', \
+                hatch='xxx', alpha=0.18, linewidth=0.0, label=(lbl if ax_g is ax_ht else None), zorder=1)
+
     # Plot the station data
     for obs in traj.observations:
 
@@ -1272,6 +1603,7 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
 
     # Plot the model, with the extrapolated parts dashed
     k_grid, log_k_std = drag_fit.ballisticCoeffAtLength(drag_fit.len_grid)
+    band_label = '1$\\sigma$' if drag_fit.log_k_spread is None else '1$\\sigma$, fit and spread'
     valid = np.isfinite(drag_fit.time_grid)
     observed = valid & (drag_fit.len_grid >= drag_fit.len_first) & (drag_fit.len_grid <= drag_fit.len_last)
     for sel, line_style, label in [(observed, 'solid', 'Model'), \
@@ -1307,7 +1639,7 @@ def plotDragFit(drag_fit, show=True, gamma_a=None, bulk_density=BULK_DENSITY):
         k_lo = np.exp(np.clip(log_k - log_std, log_min, log_max))
         k_hi = np.exp(np.clip(log_k + log_std, log_min, log_max))
 
-    ax_k.fill_betweenx(drag_fit.ht_grid[observed]/1000, k_lo, k_hi, color='0.7', label='1$\\sigma$', zorder=2)
+    ax_k.fill_betweenx(drag_fit.ht_grid[observed]/1000, k_lo, k_hi, color='0.7', label=band_label, zorder=2)
 
 
     # Show the growth of the ballistic coefficient in the observed part and the equivalent mass loss of a
@@ -1393,6 +1725,10 @@ if __name__ == "__main__":
         help='Bulk density in kg/m^3 used for computing the dynamic mass. Default is {:.0f} kg/m^3.'.format( \
         BULK_DENSITY))
 
+    arg_parser.add_argument('-f', '--fragheights', metavar='HT', type=float, nargs='+', \
+        help='Heights of the fragmentations in km, e.g. those of the flares, where the ballistic ' \
+        + 'coefficient can jump without penalty.')
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1403,9 +1739,31 @@ if __name__ == "__main__":
     dir_path, file_name = os.path.split(cml_args.traj_pickle_file)
     traj = loadPickle(dir_path, file_name)
 
-    # Fit the drag model
-    drag_fit = DragFit(traj, n_knots=cml_args.knots, drag_above=cml_args.dragabove)
+    # Fit the drag model, and scan the spread of the fragmentations if any are given
+    fit_kwargs = dict(n_knots=cml_args.knots, drag_above=cml_args.dragabove)
+    if cml_args.fragheights is None:
+        drag_fit = DragFit(traj, **fit_kwargs)
+    else:
+        drag_fit, spreads, delta_chi2, log_k_last, log_k_std = spreadScan(traj, \
+            1000*np.array(cml_args.fragheights), **fit_kwargs)
 
     print(drag_fit.summaryTable(gamma_a=cml_args.ga, bulk_density=cml_args.dens))
+
+    # Report the scan of the spread of the fragmentations
+    if cml_args.fragheights is not None:
+
+        print()
+        print("Spread of the fragmentations below their heights, acceptable (*) within Delta chi2 <= 4")
+        print(" Spread (km), Delta chi2, K last (m^2/kg)")
+        for spread, d_chi2, log_k in zip(spreads, delta_chi2, log_k_last):
+            print("  {:6.2f}{:s}    {:8.2f}      {:.3e}".format(spread/1000, "*" if d_chi2 <= 4 else " ", \
+                d_chi2, np.exp(log_k)))
+
+        # Split the uncertainty of K at the last point into the parts from the fit and from the spread
+        log_k_sys = np.interp(drag_fit.len_last, *drag_fit.log_k_spread)
+        log_k_fit = np.sqrt(max(log_k_std**2 - log_k_sys**2, 0.0))
+        print(("K at the last point: {:.3e} m^2/kg +/- {:.1f}% ({:.1f}% from the fit and {:.1f}% from the " \
+            + "spread, which the table above includes)").format(np.exp(log_k_last[0]), 100*log_k_std, \
+            100*log_k_fit, 100*log_k_sys))
 
     plotDragFit(drag_fit, gamma_a=cml_args.ga, bulk_density=cml_args.dens)
