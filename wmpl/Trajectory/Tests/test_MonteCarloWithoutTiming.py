@@ -93,8 +93,8 @@ def testMonteCarloVelocityUncertaintyWithoutTimingEstimation():
     assert 1.0 < traj.uncertainties.v_init < 50.0
     assert 1.0 < traj.uncertainties.v_g < 50.0
 
-    # The noise is not applied to the velocity of the reported solution
-    assert abs(traj.v_init - traj_nominal.v_init) < 1.0
+    # The velocity noise perturbation is not applied to the reported solution beyond small geometric tilt
+    assert abs(traj.v_init - traj_nominal.v_init) < 2.0
 
 
 

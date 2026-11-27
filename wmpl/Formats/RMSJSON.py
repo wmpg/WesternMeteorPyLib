@@ -238,6 +238,7 @@ if __name__ == "__main__":
         air_rotation=(not cml_args.disableairrot), \
         drag_fit_timing=(not cml_args.disabledragfit), \
         pre_atm_correction=(not cml_args.disablepreatm), \
+        los_fit=cml_args.losfit, \
         gravity_factor=cml_args.gfact,
         plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
         show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \

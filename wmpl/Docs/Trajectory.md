@@ -39,6 +39,7 @@ Run any of them with `--help` for the full list of options. The ones that matter
 | `-t`, `--maxtoffset` | Maximum timing offset allowed between stations, in seconds, 5 s by default. With 3 or more stations, a station whose clock needs a larger offset is ignored. |
 | `-v`, `--vinitht` | Estimate the initial velocity as the average above this height, in km. |
 | `--disableairrot` | Keep the air at rest when computing the drop across the path (see [The drop](#the-drop)). |
+| `--losfit` | Line-of-sight cost function: `huber` (default, signed angles with soft-L1 seed + Huber loss), `least_squares`, or `angles` (legacy Nelder-Mead sum of absolute angles). |
 | `-l`, `--plotallspatial` | Save the full set of diagnostic plots. |
 
 To see the solver working on a synthetic example without any data of your own:
@@ -94,25 +95,31 @@ forwards in time.
 ## How the line is fitted to the lines of sight
 
 The solver starts from the line where the planes of the lines of sight of two stations intersect, and then
-fits the line to the lines of sight of all stations at once: it looks for the line with the smallest sum of
-the angles between it and every line of sight, with each station weighted by how well it sees the line
-(Borovicka 1990, with angles instead of distances, `angleSumMeasurements2Line()` in `Trajectory.py`). The
-sum is minimized with the Nelder-Mead simplex method over the four ways a line can move, two turns and two
-shifts, restarted with a fresh simplex until the line stops moving (`nelderMeadLine()`).
+fits the line to all stations at once over the four degrees of freedom of a local line frame (two turns and
+two cross-track shifts, `lineFrame()`). Each station is weighted by `sin^2(incident_angle)` when more than
+two stations are active.
 
-The angles are not squared, so the sum has a sharp bend, like `|x|`, wherever the line passes through a line
-of sight. The simplex can stop at such a bend although the line could still get better. When 344 fireballs
-of the GMN and UWO databases were solved again, 40 of them (12 %) ended more than 1 arcsec from the best
-line, 4 more than 1 arcmin and one 19 arcmin away. The solver therefore first minimizes a smoothed sum, in
-which every angle is replaced by `sqrt(angle^2 + s^2) - s`, which is round near zero and the same as the
-angle minus `s` far from it. It takes `s` = 10, 1, 0.1 and 0.01 arcsec in turn (`LOS_SMOOTHING`), each time
-from the line found with the one before, and then minimizes the exact sum. The result is never worse in the
-exact sum than the line it started from.
+By default (`los_fit='huber'`, `--losfit huber`), the solver minimizes the **signed across-track angles**
+between each line of sight and the plane through its station holding the (gravity- and air-dropped) trajectory
+line (`angleResidualsMeasurements2Line()`, `leastSquaresLine()`). Because the signed angle varies smoothly
+across the line, trust-region reflective least squares (`scipy.optimize.least_squares`) converges in ~120
+evaluations instead of ~2000 for Nelder-Mead — running **3.8-4.9x faster** without Monte Carlo and
+**2.8-3.7x faster** with Monte Carlo. To prevent a badly miscalibrated station from pulling the fit or
+inflating the residual scale, Stage 1 runs with a smooth-L1 (`soft_l1`, 1 arcsec scale) loss, and Stage 2
+refits with a Huber loss scaled to `1.345 * MAD` (Huber 1964). A per-station Huber M-estimator sandwich
+covariance gives the formal 1-sigma radiant and cross-track position uncertainties from the scatter of the
+lines of sight (`traj.losFormalUncertainty()`, printed in the text report; note that systematic station
+calibration offsets are not captured by formal scatter alone).
 
-With the smoothing, 6 of the 344 fireballs (2 %) end more than 1 arcsec from the best line, and none more
-than 7 arcsec. Where the fit did not stop early, the radiant moves by 0.004 arcsec (median). The residuals do
-not change, and solving takes 26 % less time, although the smoothed sums take about three times as many
-evaluations, as the angles of all points are computed at once.
+Benchmarking across 345 real fireballs (1,377 held-out station evaluations across 264 multi-station events)
+shows zero new failures, a 3.9x speedup without Monte Carlo, and better out-of-sample prediction of held-out
+stations than the legacy L1 angle fit (beating `angles` on 53.4% of stations and cutting 90th-percentile
+held-out median residuals by 12% and leave-one-out radiant shifts by 16%).
+
+`los_fit='least_squares'` (`--losfit least_squares`) fits the signed angles by plain linear least squares.
+The legacy L1 fit (`los_fit='angles'`, `--losfit angles`) minimizes the weighted sum of unsigned angles with
+Nelder-Mead (`angleSumMeasurements2Line()`, `nelderMeadLine()`), preceded by smoothing continuation
+(`LOS_SMOOTHING` = 10, 1, 0.1, 0.01 arcsec) to avoid stopping at L1 kinks.
 
 ![How far the radiants of 344 fireballs were from the best line, before and after the smoothing](figures/Trajectory_los_smoothing.png)
 

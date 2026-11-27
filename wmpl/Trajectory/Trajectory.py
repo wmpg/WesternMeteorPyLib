@@ -1867,6 +1867,326 @@ def nelderMeadLine(fun, x0, args=(), maxfev=None, smoothing=None, **kwargs):
 
 
 
+# Largest number of line frames made around the solution of the least squares line-of-sight fit
+LOS_LSQ_MAX_FRAMES = 5
+
+# Step of the numerical derivatives of the least squares line-of-sight fit, as a move of the line at the ends
+#   of the meteor (m)
+LOS_LSQ_DIFF_STEP = 1e-3
+
+# Scale of the Huber loss of the least squares line-of-sight fit, in standard deviations of the residuals, for
+#   which the fit keeps 95% of the efficiency of least squares with normal errors (Huber 1964)
+LOS_HUBER_K = 1.345
+
+# Unit of the residuals in the least squares line-of-sight fit (1 arcsec in radians), so that the tolerances
+#   of scipy.optimize.least_squares, which are absolute for the gradient, act at the scale of the residuals
+LOS_LSQ_RESIDUAL_UNIT = np.radians(1.0/3600)
+
+
+
+def _resolveLosWeights(observations, weights):
+    """ Resolve station weights for line-of-sight fitting, falling back to unity on non-ignored stations.
+
+    Arguments:
+        observations: [list] List of ObservedPoints objects.
+        weights: [list or None] Station statistical weights, or None.
+
+    Return:
+        [ndarray] Non-negative float64 weights, one per station.
+    """
+
+    if (weights is None) or (sum(weights) <= 0):
+        weights = np.array([1.0 if (not obs.ignore_station) else 0.0 for obs in observations], \
+            dtype=np.float64)
+    else:
+        weights = np.array(weights, dtype=np.float64)
+
+    return weights
+
+
+
+def angleResidualsMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, \
+    gravity_factor=1.0, v0z=None, r0=None, gravity_vel=None, air_rotation=True):
+    """ Compute the signed angles between the lines of sight and the radiant line, the residuals of the least
+        squares line-of-sight fit. The angle of each point is taken between its line of sight and the plane
+        through its station which holds the (dropped) line, i.e. across the line as seen from the station. It
+        equals the unsigned angle of angleSumMeasurements2Line to third order, with a sign, so the residuals
+        vary smoothly with the line. Each residual is multiplied by the square root of its station weight.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects containing meteor observations.
+        state_vect: [3 element ndarray] ECI position of a point on the line (meters).
+        radiant_eci: [3 element ndarray] 3D vector of the radiant in ECI coordinates.
+
+    Keyword arguments:
+        weights: [list] Statistical weights for every station. None by default.
+        gravity: [bool] If True, the gravity drop is taken into account. False by default.
+        gravity_factor: [float] Factor by which the gravity correction is multiplied. 1.0 by default.
+        v0z: [float] Initial vertical velocity of the meteor (m/s). If None, 0.0 is used.
+        r0: [float] Distance of the beginning of the meteor from the centre of the Earth (meters). If None,
+            the distance of each point is used.
+        gravity_vel: [tuple] Speeds of the meteor against time (see Trajectory.gravity_vel), with which the
+            drop is computed across the path and slowed by drag (see gravityDropTable). None by default.
+        air_rotation: [bool] Take the drag against the rotating air into account in the drop across the path.
+            True by default.
+
+    Return:
+        [ndarray] Signed weighted residuals of all used points of the weighted stations (radians).
+    """
+
+    weights = _resolveLosWeights(observations, weights)
+
+    # Normalize radiant and place state vector at the beginning of the trajectory
+    radiant_eci = np.ascontiguousarray(vectNorm(np.asarray(radiant_eci, dtype=np.float64)))
+    state_vect = np.ascontiguousarray(np.asarray(state_vect, dtype=np.float64))
+    state_vect = moveStateVector(state_vect, radiant_eci, observations)
+
+    # Take the gravity drop origin from the first time of the used stations
+    t0 = dropTimeOrigin(observations)
+
+    # Stack used points from stations with positive weight only
+    active = [(obs, weights[i], np.asarray(obs.ignore_list) == 0) \
+        for i, obs in enumerate(observations) if weights[i] > 0]
+    counts = [int(np.count_nonzero(used)) for _, _, used in active]
+    if sum(counts) == 0:
+        return np.empty(0, dtype=np.float64)
+
+    stat_eci = np.concatenate([np.reshape(obs.stat_eci_los, (-1, 3))[used] for obs, _, used in active])
+    meas_eci = np.concatenate([np.reshape(obs.meas_eci_los, (-1, 3))[used] for obs, _, used in active])
+    time_rel = np.concatenate([np.asarray(obs.time_data, dtype=np.float64)[used] \
+        for obs, _, used in active]) - t0
+    point_weights = np.repeat(np.array([w for _, w, _ in active], dtype=np.float64), counts)
+
+    # Project measurement lines of sight onto the radiant line
+    _, rad_cpa, _ = findClosestPoints_vect(stat_eci, meas_eci, state_vect, radiant_eci)
+
+    # Apply gravity and rotating-air drop across the path when speed curve is given
+    if gravity and (gravity_vel is not None):
+        drops = gravityDropVectors(gravityDropOrigin(observations, state_vect, radiant_eci, gravity_vel, \
+            t0), radiant_eci, time_rel, gravity_vel, t0, gravity_factor, air_rotation=air_rotation)
+        rad_cpa = rad_cpa + drops
+
+    # Otherwise apply the vertical gravity drop
+    elif gravity:
+        if v0z is None:
+            v0z = 0.0
+
+        if r0 is None:
+            r0_points = np.linalg.norm(rad_cpa, axis=1)
+        else:
+            r0_points = np.full(len(time_rel), r0, dtype=np.float64)
+
+        r0_points[r0_points == 0] = 1.0
+        rad_cpa = applyGravityDrop_vect(rad_cpa, time_rel, r0_points, gravity_factor, v0z)
+
+    # Compute the normal of the plane through each station holding the shifted radiant line
+    normals = np.cross(rad_cpa - stat_eci, radiant_eci)
+    norms = np.linalg.norm(normals, axis=1)
+    good = norms > 0.0
+
+    # Calculate the signed angle between each line of sight and its station-line plane
+    sin_angles = np.zeros(len(norms), dtype=np.float64)
+    sin_angles[good] = np.einsum('ij,ij->i', meas_eci[good], normals[good])/norms[good]
+    residuals = np.sqrt(point_weights)*np.arcsin(np.clip(sin_angles, -1.0, 1.0))
+
+    return residuals
+
+
+
+def minimizeAngleResiduals(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None, \
+    r0=None, gravity_vel=None, air_rotation=True):
+    """ Helper function for least squares minimization of signed angle deviations, with the arguments of
+        minimizeAngleCost.
+    """
+
+    state_vect, radiant_eci = np.hsplit(params, 2)
+
+    return angleResidualsMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, \
+        gravity=gravity, gravity_factor=gravity_factor, v0z=v0z, r0=r0, gravity_vel=gravity_vel, \
+        air_rotation=air_rotation)
+
+
+
+def residualStations(observations, weights=None):
+    """ Find the station index of every residual returned by angleResidualsMeasurements2Line.
+
+    Arguments:
+        observations: [list] A list of ObservedPoints objects.
+
+    Keyword arguments:
+        weights: [list] Statistical weights for every station. None by default.
+
+    Return:
+        [ndarray] Index of the station of every residual in observations.
+    """
+
+    weights = _resolveLosWeights(observations, weights)
+
+    stations = []
+    for i, obs in enumerate(observations):
+        if weights[i] > 0:
+            stations += [i]*int(np.count_nonzero(np.asarray(obs.ignore_list) == 0))
+
+    return np.array(stations, dtype=int)
+
+
+
+def fitLineFrames(params, args, loss='linear', f_scale=1.0, maxfev=None):
+    """ Fit a line to the residuals of angleResidualsMeasurements2Line with scipy.optimize.least_squares over
+        the four coordinates of a line frame, updated around the solution until the move is below
+        LOS_RESTART_TOLERANCE.
+
+    Arguments:
+        params: [ndarray] Initial line parameters (ECI state vector and radiant vector joined).
+        args: [tuple] Arguments of minimizeAngleResiduals, starting with observations.
+
+    Keyword arguments:
+        loss: [str] Loss function of scipy.optimize.least_squares. 'linear' by default.
+        f_scale: [float] Loss scale in units of LOS_LSQ_RESIDUAL_UNIT. 1.0 by default.
+        maxfev: [int] Maximum number of residual evaluations. None by default.
+
+    Return:
+        (params, solution, nit, nfev): [tuple] Fitted line, OptimizeResult, frame count, and evaluations.
+    """
+
+    observations = args[0]
+    nit = 0
+    nfev = 0
+
+    for _ in range(LOS_LSQ_MAX_FRAMES):
+
+        # Build a four-coordinate frame around the current line
+        frame = lineFrame(params[:3], params[3:], observations)
+
+        # Give each fit the remaining evaluation budget
+        max_nfev = None
+        if maxfev is not None:
+            max_nfev = max(maxfev - nfev, 1)
+
+        solution = scipy.optimize.least_squares(lambda coords: minimizeAngleResiduals(\
+            lineFromFrame(coords, frame), *args)/LOS_LSQ_RESIDUAL_UNIT, np.zeros(4), method='trf', \
+            loss=loss, f_scale=f_scale, diff_step=LOS_LSQ_DIFF_STEP, max_nfev=max_nfev)
+
+        nit += 1
+        nfev += solution.nfev
+        params = lineFromFrame(solution.x, frame)
+
+        # Stop when the line no longer moves or the evaluation budget is exhausted
+        if (np.max(np.abs(solution.x)) < LOS_RESTART_TOLERANCE) \
+            or ((maxfev is not None) and (nfev >= maxfev)):
+            break
+
+    return params, solution, nit, nfev
+
+
+
+def leastSquaresLine(fun, x0, args=(), maxfev=None, loss='linear', **kwargs):
+    """ Fit a line to the lines of sight by least squares of signed across-track angles (see
+        angleResidualsMeasurements2Line), with the scipy.optimize.minimize interface of nelderMeadLine. With
+        the Huber loss, an initial smooth-L1 (soft_l1) pass at 1 arcsec scale finds a robust seed unaffected
+        by gross station outliers, then the line is refitted with the Huber loss scaled to LOS_HUBER_K times
+        the MAD standard deviation of the Stage-1 residuals (Huber 1964).
+
+        References:
+            Huber, P. J. (1964). Robust estimation of a location parameter. The Annals of Mathematical
+                Statistics, 35(1), 73-101.
+
+    Arguments:
+        fun: [function] Cost of the line which nelderMeadLine minimizes (see minimizeAngleCost). Evaluated at
+            the solution for reporting compatibility.
+        x0: [ndarray] Initial parameters of the line (ECI state vector and radiant vector joined).
+
+    Keyword arguments:
+        args: [tuple] Arguments of the cost, starting with observations and station weights.
+        maxfev: [int] Maximum number of residual evaluations per stage. None by default.
+        loss: [str] 'linear' for least squares, or 'huber'. 'linear' by default.
+        kwargs: [dict] Extra arguments passed by scipy.optimize.minimize, unused.
+
+    Return:
+        [OptimizeResult] Fit result with the state vector moved to the meteor beginning, unit radiant vector,
+            formal per-station sandwich covariance of the line frame, frame tuple, and weighted residuals
+            (radians).
+    """
+
+    observations = args[0]
+    fit_args = tuple(args)
+
+    # Fit directly with linear least squares or seed Huber from a robust soft-L1 pass
+    f_scale_rad = None
+    if loss == 'linear':
+        params, solution, nit, nfev = fitLineFrames(np.array(x0, dtype=np.float64), fit_args, \
+            maxfev=maxfev)
+    else:
+
+        # Use a smooth-L1 seed at 1 arcsec scale so a miscalibrated station cannot inflate the MAD scale
+        params, solution, nit, nfev = fitLineFrames(np.array(x0, dtype=np.float64), fit_args, \
+            loss='soft_l1', f_scale=1.0, maxfev=maxfev)
+
+        # Scale the Huber threshold to LOS_HUBER_K times the MAD standard deviation of Stage-1 residuals
+        f_scale = 1.0
+        sigma = 1.4826*np.median(np.abs(minimizeAngleResiduals(params, *fit_args)))/LOS_LSQ_RESIDUAL_UNIT
+        if sigma > 0:
+            f_scale = LOS_HUBER_K*sigma
+        f_scale_rad = f_scale*LOS_LSQ_RESIDUAL_UNIT
+
+        params, solution, fit_nit, fit_nfev = fitLineFrames(params, fit_args, loss=loss, f_scale=f_scale, \
+            maxfev=maxfev)
+        nit += fit_nit
+        nfev += fit_nfev
+
+    # Compute the residual Jacobian at the solution by central differences in a local line frame
+    frame = lineFrame(params[:3], params[3:], observations)
+    residuals = minimizeAngleResiduals(lineFromFrame(np.zeros(4), frame), *fit_args)
+    jac = np.zeros((len(residuals), 4))
+    for i in range(4):
+        step = np.zeros(4)
+        step[i] = LOS_LSQ_DIFF_STEP
+        jac[:, i] = (minimizeAngleResiduals(lineFromFrame(step, frame), *fit_args) \
+            - minimizeAngleResiduals(lineFromFrame(-step, frame), *fit_args))/(2*LOS_LSQ_DIFF_STEP)
+
+    nfev += 9
+
+    # Compute the per-station M-estimator sandwich covariance of the four frame coordinates
+    covariance = None
+    stations = residualStations(observations, fit_args[1] if (len(fit_args) > 1) else None)
+    n_res = len(residuals)
+    if n_res > 4:
+
+        # Apply the Huber influence function and its derivative so outliers do not inflate the covariance
+        if (loss == 'huber') and (f_scale_rad is not None):
+            psi = np.clip(residuals, -f_scale_rad, f_scale_rad)
+            psi_prime = (np.abs(residuals) <= f_scale_rad).astype(np.float64)
+            if np.count_nonzero(psi_prime) < 6:
+                psi_prime = np.where(np.abs(residuals) <= f_scale_rad, 1.0, \
+                    f_scale_rad/np.maximum(np.abs(residuals), 1e-30))
+        else:
+            psi = residuals
+            psi_prime = np.ones(n_res, dtype=np.float64)
+
+        bread = (jac.T*psi_prime).dot(jac)
+        if np.linalg.cond(bread) < 1.0/np.finfo(np.float64).eps:
+
+            meat = np.zeros((4, 4))
+            for i in np.unique(stations):
+                station_mask = stations == i
+                station_jac = jac[station_mask]
+                meat += np.mean(psi[station_mask]**2)*station_jac.T.dot(station_jac)
+
+            bread_inv = np.linalg.inv(bread)
+            covariance = bread_inv.dot(meat).dot(bread_inv)*n_res/(n_res - 4)
+
+    # Return the line with the state vector placed at the beginning of the meteor
+    params[:3] = moveStateVector(params[:3], params[3:], observations)
+    params[3:] = vectNorm(params[3:])
+
+    result = scipy.optimize.OptimizeResult(x=params, fun=fun(params, *args), success=bool(solution.success), \
+        status=solution.status, message=solution.message, nit=nit, nfev=nfev, covariance=covariance, \
+        frame=frame, residuals=residuals)
+
+    return result
+
+
+
 
 class MCUncertainties(object):
     def __init__(self, mc_traj_list):
@@ -2703,6 +3023,10 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Assign geometric uncertainty flag, if it was changed
     traj_best.geometric_uncert = geometric_uncert
+
+    # Keep the formal LoS covariance from the measured lines of sight rather than a noisy MC draw
+    traj_best.los_covariance = getattr(traj, 'los_covariance', None)
+    traj_best.los_frame = getattr(traj, 'los_frame', None)
 
     # Attach Monte Carlo drag uncertainties and re-evaluate the pre-atmospheric velocity gate
     if getattr(traj, 'drag_timing_fit', None) is not None:
@@ -5423,7 +5747,8 @@ class Trajectory(object):
         mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0, \
         save_kml=False, kml_measured=False, air_rotation=True, drag_fit_timing=True, \
         pre_atm_correction=True, drag_max_iter=DRAG_TRAJ_MAX_ITER, drag_dt_tol=DRAG_TRAJ_DT_TOL, \
-        drag_penalty=1.0, drag_gap_penalty=1.0, drag_n_knots=None, drag_max_k0=DRAG_TRAJ_MAX_K0):
+        drag_penalty=1.0, drag_gap_penalty=1.0, drag_n_knots=None, drag_max_k0=DRAG_TRAJ_MAX_K0, \
+        los_fit='huber'):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -5512,6 +5837,12 @@ class Trajectory(object):
             drag_n_knots: [int] Target number of observed ln K segments in DragTimingFit. None by default.
             drag_max_k0: [float] Upper bound on initial ballistic coefficient K_0 (m^2/kg), or None.
                 DRAG_TRAJ_MAX_K0 by default.
+            los_fit: [str] Cost function of the line-of-sight fit. 'huber' (default) seeds the line with a
+                smooth-L1 pass on signed across-track angles and refits with a Huber loss scaled to
+                LOS_HUBER_K times the MAD residual standard deviation, returning the formal M-estimator
+                sandwich covariance (see leastSquaresLine and losFormalUncertainty). 'least_squares' fits
+                signed angles by linear least squares. 'angles' minimizes the weighted sum of absolute angles
+                with Nelder-Mead (see nelderMeadLine).
 
         """
 
@@ -5598,6 +5929,9 @@ class Trajectory(object):
 
         # Number of restarts of the line-of-sight minimization
         self.los_restarts = los_restarts
+
+        # Cost function of the line-of-sight fit
+        self.los_fit = los_fit
 
         # If True, pure geometric uncertainties will be computed and culling of solutions based on cost
         #   function value will not be done
@@ -7735,6 +8069,15 @@ class Trajectory(object):
 
         out_str += "\n"
 
+        # Write out the formal uncertainty of the least squares line-of-sight fit when available
+        radiant_stddev, position_stddev = self.losFormalUncertainty()
+        if radiant_stddev is not None:
+            out_str += "Formal 1 sigma of the line-of-sight fit ({:s}), from the scatter of the lines of " \
+                "sight:\n".format(getattr(self, 'los_fit', 'huber'))
+            out_str += " Radiant  = {:.2f} arcsec\n".format(3600*np.degrees(radiant_stddev))
+            out_str += " Position = {:.2f} m across the line\n".format(position_stddev)
+            out_str += "\n"
+
 
         # Write out the state vector covariance matrix
         if self.state_vect_cov is not None:
@@ -9756,8 +10099,52 @@ class Trajectory(object):
 
 
 
+    def lineOfSightMethod(self):
+        """ Choose the minimization method and options for the line-of-sight fit from los_fit.
+
+        Return:
+            (method, options): [tuple] Method callable for scipy.optimize.minimize and its options dict.
+        """
+
+        los_fit = getattr(self, 'los_fit', 'huber')
+
+        if los_fit == 'least_squares':
+            return leastSquaresLine, {'loss': 'linear'}
+
+        elif los_fit == 'huber':
+            return leastSquaresLine, {'loss': 'huber'}
+
+        elif los_fit != 'angles':
+            print("Unknown line-of-sight fit '{:s}', fitting the angles".format(str(los_fit)))
+
+        return nelderMeadLine, {}
+
+
+
+    def losFormalUncertainty(self):
+        """ Compute the formal 1-sigma radiant and cross-track position uncertainties from the least squares
+            line-of-sight covariance.
+
+        Return:
+            (radiant_stddev, position_stddev): [tuple] Formal radiant (rad) and position (m) 1-sigma, or
+                (None, None) if the line was not fitted by least squares.
+        """
+
+        covariance = getattr(self, 'los_covariance', None)
+        frame = getattr(self, 'los_frame', None)
+        if (covariance is None) or (frame is None):
+            return None, None
+
+        half_length = frame[1]
+        radiant_stddev = np.sqrt(covariance[0, 0] + covariance[1, 1])/half_length
+        position_stddev = np.sqrt(covariance[2, 2] + covariance[3, 3])
+
+        return radiant_stddev, position_stddev
+
+
+
     def _solveLineOfSight(self, weights, use_gravity):
-        """ Minimize angular line-of-sight deviations using the Nelder-Mead line solver with optional
+        """ Minimize angular line-of-sight deviations using the configured line-of-sight solver with optional
             restarts, distant-minimum recovery and bounded SLSQP fallback.
 
         Arguments:
@@ -9779,31 +10166,32 @@ class Trajectory(object):
         p0 = np.r_[self.state_vect, self.best_conv_inter.radiant_eci]
         minimize_args = (self.observations, weights, use_gravity, self.gravity_factor, self.v0z, \
             self.gravity_r0, self.gravity_vel, self.air_rotation)
+        line_method, line_options = self.lineOfSightMethod()
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, \
-            method=nelderMeadLine)
+            method=line_method, options=line_options)
 
         # Perform optional polish restarts from the converged minimum
         for _ in range(getattr(self, 'los_restarts', 0)):
             restarted_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, \
-                args=minimize_args, method=nelderMeadLine)
+                args=minimize_args, method=line_method, options=line_options)
             if restarted_solution.success or (not minimize_solution.success):
                 minimize_solution = restarted_solution
 
-        # Continue from the moved state vector if the simplex ran out of evaluations
+        # Continue from the moved state vector if the solver ran out of evaluations
         for _ in range(LOS_CONTINUE_RUNS):
             if minimize_solution.success:
                 break
             restart = np.r_[moveStateVector(minimize_solution.x[:3], minimize_solution.x[3:], \
                 self.observations), vectNorm(minimize_solution.x[3:])]
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, restart, args=minimize_args, \
-                method=nelderMeadLine)
+                method=line_method, options=line_options)
 
         # Minimize again from the previous solution if its cost is lower than the current minimum
         if (self.state_vect_mini is not None) and (self.radiant_eci_mini is not None):
             previous = np.r_[self.state_vect_mini, self.radiant_eci_mini]
             if minimizeAngleCost(previous, *minimize_args) < minimize_solution.fun:
                 previous_solution = scipy.optimize.minimize(minimizeAngleCost, previous, \
-                    args=minimize_args, method=nelderMeadLine)
+                    args=minimize_args, method=line_method, options=line_options)
                 if previous_solution.success or (not minimize_solution.success):
                     minimize_solution = previous_solution
 
@@ -9832,6 +10220,10 @@ class Trajectory(object):
             print(' Iterations:', minimize_solution.nit)
             print(' Success:', minimize_solution.success)
             print(' Final function value:', minimize_solution.fun)
+
+        # Keep the formal covariance from the least squares line-of-sight fit when available
+        self.los_covariance = getattr(minimize_solution, 'covariance', None)
+        self.los_frame = getattr(minimize_solution, 'frame', None)
 
         # Unpack the fitted line, or fall back to the intersecting planes seed on failure
         self.los_mini_status = bool(minimize_solution.success)
