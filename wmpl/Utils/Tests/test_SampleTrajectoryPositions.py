@@ -320,12 +320,15 @@ def testSamplesWithOnlyThePositions():
 
     traj_samples = TrajectorySamples(traj)
     traj_samples.addSample(0.1, 100000.0, 0.7, -1.4, 100000.0, 2.8, 1.1)
+    traj_samples.addSample(0.2, 99000.0, 0.7, -1.4, 99000.0, 2.8, 1.1, 20000.0, 20100.0, True)
     arrays = traj_samples.toArrays()
 
     assert arrays['ht'][0] == 100000.0
     assert np.isnan(arrays['vel'][0]) and np.isnan(arrays['dyn_pressure'][0])
-    assert arrays['eci'].shape == (1, 3) and np.all(np.isnan(arrays['eci']))
+    assert arrays['eci'].shape == (2, 3) and np.all(np.isnan(arrays['eci']))
     assert not arrays['extrapolated'][0]
+    assert not arrays['in_gap'][0]
+    assert arrays['in_gap'][1] and np.isnan(arrays['length'][1])
 
 
 

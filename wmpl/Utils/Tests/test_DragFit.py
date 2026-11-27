@@ -526,6 +526,18 @@ def testMotionUncertaintyUnconstrained():
     assert np.isfinite(vel_std[0])
     assert np.isinf(vel_std[1])
 
+    # Large finite covariance on ln K must keep the finite-difference step in the local linear regime
+    drag_fit_big = copy.copy(drag_fit)
+    drag_fit_big.params_null = np.zeros((len(drag_fit.params), 0))
+    drag_fit_big.params_cov = np.zeros_like(drag_fit.params_cov)
+    drag_fit_big.params_cov[2, 2] = 1e4
+    vel_std_big, _ = drag_fit_big.motionStdAtLength(np.array([drag_fit.len_last]))
+    drag_fit_small = copy.copy(drag_fit_big)
+    drag_fit_small.params_cov = np.zeros_like(drag_fit.params_cov)
+    drag_fit_small.params_cov[2, 2] = 1e-4
+    vel_std_small, _ = drag_fit_small.motionStdAtLength(np.array([drag_fit.len_last]))
+    assert np.isclose(vel_std_big[0]/(1e4*vel_std_small[0]), 1.0, rtol=1e-2)
+
 
 
 def testDynamicPressureOfTheTableIsRelativeToTheGround():
@@ -555,6 +567,13 @@ def testDynamicPressureOfTheTableIsRelativeToTheGround():
     # The ECI velocity gives a much lower pressure
     dyn_pres_eci = rho*drag_fit.velocityAtLength(drag_fit.ramp_beg)**2/1000
     assert np.max(dyn_pres_table - dyn_pres_eci) > 1.0
+
+    # Fixed-station solutions already have ground-relative speeds and must not be derotated again
+    drag_fit_fixed = copy.copy(drag_fit)
+    drag_fit_fixed.traj = copy.copy(drag_fit.traj)
+    drag_fit_fixed.traj.orbit_los_success = False
+    assert np.allclose(drag_fit_fixed.groundVelocityAtLength(len_arr), \
+        drag_fit_fixed.velocityAtLength(len_arr))
 
 
 

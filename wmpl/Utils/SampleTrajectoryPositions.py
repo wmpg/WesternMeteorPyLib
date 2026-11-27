@@ -13,7 +13,7 @@ import argparse
 import numpy as np
 
 from wmpl.Utils.DragFit import DragFit, plotDragFit, spreadScan
-from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
+from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, eci2RaDec, raDec2AltAz
 from wmpl.Utils.Math import lineAndSphereIntersections
 from wmpl.Utils.Pickling import loadPickle
 
@@ -115,8 +115,8 @@ class TrajectorySamples(object):
 
 
     def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot, vel=None, vel_norot=None, \
-        length=None, eci=None, radiant_eci=None, vel_std=None, time_std=None, len_std=None, decel=None, \
-        dyn_pressure=None, k=None, log_k_std=None, extrapolated=None, in_gap=False):
+        in_gap=False, length=None, eci=None, radiant_eci=None, vel_std=None, time_std=None, len_std=None, \
+        decel=None, dyn_pressure=None, k=None, log_k_std=None, extrapolated=None):
         """ Add a sample to the container.
 
         Arguments:
@@ -131,6 +131,8 @@ class TrajectorySamples(object):
         Keyword arguments:
             vel: [float] Velocity in the ECI frame (m/s). None by default.
             vel_norot: [float] Velocity relative to the ground (m/s). None by default.
+            in_gap: [bool] True if the sample falls inside an unobserved gap bridged by the drag model.
+                False by default.
             length: [float] Length along the trajectory from the state vector (m). None by default.
             eci: [ndarray] ECI coordinates, epoch of date (m). None by default.
             radiant_eci: [ndarray] Unit vector towards the radiant in the ECI frame, bent by gravity. None by
@@ -148,8 +150,6 @@ class TrajectorySamples(object):
                 by default.
             extrapolated: [bool] True if the sample is outside the observed part of the trajectory. None by
                 default.
-            in_gap: [bool] True if the sample falls inside an unobserved gap bridged by the drag model.
-                False by default.
         """
 
         self.t_est.append(t_est)
@@ -367,11 +367,15 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_tim
 
         # Derotate the radiant with the instantaneous speed when rotating-air drift is modelled, or v_init
         radiant_eci = drag_fit.radiantAtLength(len_val)[0]
-        if drag_fit.gravity_correction and getattr(traj, 'air_rotation', False):
-            vel_derot = vel
+        if getattr(traj, 'orbit_los_success', True) is False:
+            ra_rad, dec_rad = eci2RaDec(radiant_eci)
+            azim_norot, elev_norot = raDec2AltAz(ra_rad, dec_rad, jd, lat, lon)
         else:
-            vel_derot = traj.v_init
-        azim_norot, elev_norot, _ = derotatedRadiantAltAz(vel_derot*radiant_eci, height_eci, jd, lat, lon)
+            if drag_fit.gravity_correction and getattr(traj, 'air_rotation', False):
+                vel_derot = vel
+            else:
+                vel_derot = traj.v_init
+            azim_norot, elev_norot, _ = derotatedRadiantAltAz(vel_derot*radiant_eci, height_eci, jd, lat, lon)
 
         # Compute the dynamic pressure with the velocity relative to the ground
         vel_norot = vel_norot_array[i]
