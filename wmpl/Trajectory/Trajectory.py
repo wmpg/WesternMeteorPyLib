@@ -2933,6 +2933,99 @@ def _MCTrajSolve(params):
 
 
 
+def timingWeightedRun(mc_results, traj):
+    """ Choose the Monte Carlo run nearest the mean of the runs weighted by the likelihood of their timing
+        residuals, exp(-chi2/2), rather than the run with the lowest timing residuals (Vida et al. 2020).
+
+    References:
+        Vida, D., Gural, P. S., Brown, P. G., Campbell-Brown, M., & Wiegert, P. (2020). Estimating
+            trajectories of meteors: an observational Monte Carlo approach - I. Theory. MNRAS, 491(2),
+            2688-2705.
+
+    Arguments:
+        mc_results: [list] Trajectory objects of the Monte Carlo runs, which may include the original one.
+        traj: [Trajectory object] Original solution, whose timing residuals set the residual variance scale.
+
+    Return:
+        [int] Index of the chosen run in mc_results.
+    """
+
+    # Collect fallback timing residuals (mean abs s for drag fit, mean square s^2 for legacy)
+    raw_timing_res = np.array([np.inf if (traj_tmp.timing_res is None) else traj_tmp.timing_res \
+        for traj_tmp in mc_results], dtype=np.float64)
+    raw_finite = np.isfinite(raw_timing_res)
+    lowest = int(np.argmin(np.where(raw_finite, raw_timing_res, np.inf)))
+
+    # Use drag-fit RMS timing residuals and effective independent count n_data/tau_int when available
+    df_orig = getattr(traj, 'drag_timing_fit', None)
+    drag_fits = [getattr(traj_tmp, 'drag_timing_fit', None) for traj_tmp in mc_results]
+    drag_ok = [(df_tmp is not None) and np.isfinite(df_tmp.res_rms_s) for df_tmp in drag_fits]
+    use_drag = (df_orig is not None) and np.isfinite(df_orig.res_rms_s) and (df_orig.res_rms_s > 0.0) \
+        and (sum(drag_ok) >= 3)
+
+    if use_drag:
+
+        res_sq = np.array([df_tmp.res_rms_s**2 if ok else np.inf for df_tmp, ok in zip(drag_fits, drag_ok)], \
+            dtype=np.float64)
+        ref_sq = float(df_orig.res_rms_s**2)
+        tau_int = float(max(getattr(df_orig, 'res_tau_int', 1.0), 1.0))
+        n_eff = float(df_orig.n_data)/tau_int
+
+    else:
+
+        res_sq = raw_timing_res
+        ref_sq = float(traj.timing_res) if (traj.timing_res is not None) else np.nan
+        n_eff = float(sum([int(np.count_nonzero(np.asarray(obs.ignore_list) == 0)) \
+            for obs in getattr(traj, 'observations', []) if not obs.ignore_station]))
+
+    # Keep only runs with finite residual scale and valid geometry and speed features
+    valid = np.isfinite(res_sq) & np.array([(traj_tmp.radiant_eci_mini is not None) \
+        and (traj_tmp.state_vect_mini is not None) and (traj_tmp.v_init is not None) \
+        and np.all(np.isfinite(traj_tmp.radiant_eci_mini)) \
+        and np.all(np.isfinite(traj_tmp.state_vect_mini)) and np.isfinite(traj_tmp.v_init) \
+        for traj_tmp in mc_results], dtype=bool)
+
+    # Fall back to the lowest timing residual if the residuals cannot be scaled
+    if (not np.isfinite(ref_sq)) or (ref_sq <= 0.0) or (n_eff <= 0.0) or (np.count_nonzero(valid) < 3):
+        return lowest
+
+    # Weight the runs by the likelihood of their timing residuals relative to the lowest run
+    chi2 = n_eff*res_sq[valid]/ref_sq
+    weights = np.exp(-0.5*(chi2 - np.min(chi2)))
+    weights /= np.sum(weights)
+
+    # Extract radiants and state vectors of valid runs
+    runs = [traj_tmp for traj_tmp, ok in zip(mc_results, valid) if ok]
+    radiants = np.array([vectNorm(traj_tmp.radiant_eci_mini) for traj_tmp in runs])
+    state_vects = np.array([traj_tmp.state_vect_mini for traj_tmp in runs])
+
+    # Build two orthonormal directions across the weighted mean radiant
+    mean_radiant_raw = np.sum(weights[:, None]*radiants, axis=0)
+    if np.linalg.norm(mean_radiant_raw) <= 0.0:
+        return lowest
+    mean_radiant = vectNorm(mean_radiant_raw)
+    axis = np.zeros(3)
+    axis[np.argmin(np.abs(mean_radiant))] = 1.0
+    across1 = vectNorm(np.cross(mean_radiant, axis))
+    across2 = np.cross(mean_radiant, across1)
+
+    # Describe each run by its radiant and position across the line, and its initial velocity
+    offsets = state_vects - np.sum(weights[:, None]*state_vects, axis=0)
+    features = np.column_stack([np.dot(radiants, across1), np.dot(radiants, across2), \
+        np.dot(offsets, across1), np.dot(offsets, across2), [traj_tmp.v_init for traj_tmp in runs]])
+
+    # Scale each feature by its spread over the runs
+    spread = np.std(features, axis=0)
+    spread[spread == 0.0] = 1.0
+
+    # Return the run nearest the weighted mean
+    mean_features = np.sum(weights[:, None]*features, axis=0)
+    distances = np.sum(((features - mean_features)/spread)**2, axis=1)
+
+    return int(np.flatnonzero(valid)[np.argmin(distances)])
+
+
+
 def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False, \
     plot_results=True, mc_cores=None, max_runs=None):
     """ Estimates uncertainty in the trajectory solution by doing Monte Carlo runs. The MC runs are done
@@ -3014,9 +3107,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         return traj, None
 
 
-    # Choose the solution with the lowest timing residuals as the best solution
-    timing_res_trajs = [traj_tmp.timing_res for traj_tmp in mc_results]
-    best_traj_ind = timing_res_trajs.index(min(timing_res_trajs))
+    # Choose the run nearest the mean of the runs weighted by their timing residuals
+    best_traj_ind = timingWeightedRun(mc_results, traj)
 
     # Choose the best trajectory
     traj_best = mc_results[best_traj_ind]
