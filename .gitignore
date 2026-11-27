@@ -30,3 +30,7 @@ wmpl/share/Atens.txt
 wmpl/share/gmn_shower_table_20230518.npy
 wmpl/share/ELEMENTS.COMET
 wmpl/MetSim/MetSimErosionCyTools.c
+
+# Numba cache files
+*.nbi
+*.nbc

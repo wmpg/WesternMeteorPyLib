@@ -62,6 +62,7 @@ from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants
     fitLagTimeOffset, lagTimeOffsetMax
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin, \
     constantsRelativeToGround, constantsToInertial, atmDensityDescription, Fragment
+from wmpl.MetSim.MetSimErosionAlphaBeta import runSimulation as runSimulationAlphaBeta
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
 from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy, earthRotationSpeed
@@ -709,7 +710,7 @@ def plotSimVsObsResiduals(obs_data, sim_data=None, output_folder='', file_name='
         # ax4.plot(sim_data.luminosity_arr, sim_data.leading_frag_height_arr/1000,'--', color=color_sim, label='wmpl')
 
         # integration time step in self.const.dt for luminosity integration and abs_magnitude_integration check if any sim_data.stations_lum does not have '1T' or '2T' in the name as CAMO narrowfield do not have smearing because it follows the meteor
-        if ((1/obs_data.fps_lum) > sim_data.const.dt): # and (not any('1T' in station for station in obs_data.stations_lum) or not any('2T' in station for station in obs_data.stations_lum)):
+        if averagesTheLight(sim_data, obs_data): # and (not any('1T' in station for station in obs_data.stations_lum) or not any('2T' in station for station in obs_data.stations_lum)):
             sim_data.luminosity_arr, sim_data.abs_magnitude = integrateLuminosity(sim_data.time_arr,sim_data.time_arr,sim_data.luminosity_arr,sim_data.const.dt,obs_data.fps_lum,obs_data.P_0m)
 
         # Plot simulated data
@@ -1010,7 +1011,7 @@ def _maybe_integrate_luminosity(sim, obs_data):
         return  # nothing we can do
 
     try:
-        if fps > 0 and (1.0/float(fps)) > float(dt):
+        if fps > 0 and averagesTheLight(sim, obs_data):
             L_new, mag_new = integrateLuminosity(
                 np.asarray(sim.time_arr),
                 np.asarray(sim.time_arr),            # same as your call
@@ -2373,7 +2374,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
                     "rho_array": backup_data["rho_array"],
                     "rho_mass_weighted_estimate": {k: float(v) for k, v in backup_data["rho_mass_weighted_estimate"].items()},
                     "const_backups": backup_data["const_backups"],
-                    "ground_frame": not getattr(obs_data, 'legacy_inertial_frame', False)
+                    "ground_frame": not getattr(obs_data, 'legacy_inertial_frame', False),
+                    "alphabeta": bool(getattr(obs_data, 'alphabeta', False))
                 },
 
                 "best_guess": {
@@ -2555,6 +2557,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         f.write('\nBest fit logL: '+str(best_guess_logL)+'\n') # dynesty_run_results.logl[sim_num])+'\n')
         f.write("Best fit lag time offset t0: {:+.2f} ms ({:s})\n".format(1000*best_guess_time_offset, \
             "fitted" if getattr(obs_data, 'fit_lag_time_offset', True) else "fixed"))
+        f.write("Simulations: {:s}\n".format("alpha-beta closed forms" \
+            if getattr(obs_data, 'alphabeta', False) else "MetSim time steps"))
         if diff_logL is not None:
             f.write('REAL logL: '+str(real_logL)+'\n')
             f.write('Diff logL (Best fit - REAL): '+str(diff_logL)+'\n')
@@ -3586,18 +3590,24 @@ def integrateLuminosity(all_simulated_time, time_fps, luminosity_arr, dt, fps, P
 
     """
     
-    # make a copy of the luminosity_arr to make the new_luminosity_arr
-    new_luminosity_arr = np.full(len(time_fps), np.nan) 
-    new_abs_magnitude = np.full(len(time_fps), np.nan)
-    # new_luminosity_arr = self.luminosity_arr
-    for i in range(len(time_fps)):
-        # pick all the self.time_arr between time_sampled_lum[i]-1/fps and time_sampled_lum[i] in self.time_arr
-        mask = (all_simulated_time > time_fps[i]-1/fps) & (all_simulated_time <= time_fps[i])
-        # sum them together and divide by 1/self.fps_lum
-        # new_luminosity_arr[i] = (np.sum(luminosity_arr[mask])*dt)/abs(np.max(all_simulated_time[mask])-np.min(all_simulated_time[mask])) # 1/self.fps_lum
-        # simply take the mean of the luminosity_arr[mask] and assign it to new_luminosity_arr[i]
-        new_luminosity_arr[i] = np.mean(luminosity_arr[mask])
-        new_abs_magnitude[i] = -2.5*np.log10(new_luminosity_arr[i]/P_0m)
+    # Mean of the samples in (t - 1/fps, t] of every frame from cumulative sums, NaN for a frame without
+    #   samples or with a NaN sample
+    order = np.argsort(np.asarray(all_simulated_time, dtype=np.float64), kind='stable')
+    sim_time = np.asarray(all_simulated_time, dtype=np.float64)[order]
+    lum = np.asarray(luminosity_arr, dtype=np.float64)[order]
+    bad = np.isnan(lum)
+    cum = np.concatenate([[0.0], np.cumsum(np.where(bad, 0.0, lum))])
+    cum_bad = np.concatenate([[0], np.cumsum(bad)])
+    frames = np.asarray(time_fps, dtype=np.float64)
+    i_lo = np.searchsorted(sim_time, frames - 1/fps, side='right')
+    i_hi = np.searchsorted(sim_time, frames, side='right')
+    count = i_hi - i_lo
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        new_luminosity_arr = np.where((count > 0) & (cum_bad[i_hi] == cum_bad[i_lo]), \
+            (cum[i_hi] - cum[i_lo])/np.maximum(count, 1), np.nan)
+        new_abs_magnitude = -2.5*np.log10(new_luminosity_arr/P_0m)
+
     return new_luminosity_arr, new_abs_magnitude
 
 
@@ -4800,7 +4810,7 @@ class ObservationData:
 
 def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_all_cameras=True, 
     only_plot=True, cores=None, pool_MPI=None, pick_position=0, extraprior_file='', save_backup=True, \
-    fit_lag_time_offset=True):
+    fit_lag_time_offset=True, alphabeta=False):
     """ Create the output folder if it doesn't exist and run the Dynesty simulation.
 
     Arguments:
@@ -4820,6 +4830,8 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
         fit_lag_time_offset: [bool] Fit the time at which the simulation passes the height of the first lag
             point to the lengths of every simulation, instead of fixing it to the time of that point. True by
             default.
+        alphabeta: [bool] Simulate with the alpha-beta closed forms of MetSimErosionAlphaBeta instead of
+            MetSim's time steps. False by default.
 
     Return:
         None
@@ -4915,6 +4927,9 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
             # Fit the time offset of the simulation from the first lag point
             obs_data.fit_lag_time_offset = fit_lag_time_offset
 
+            # Simulate with the alpha-beta closed forms
+            obs_data.alphabeta = alphabeta
+
             obs_data.h_kill = np.min([np.min(obs_data.height_lum),np.min(obs_data.height_lag)])-1000
             # check if the h_kill is smaller than 0
             if obs_data.h_kill < 0:
@@ -4957,6 +4972,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                         dsampler_results = dsampler.results
                         ground_frame = os.path.isfile(groundFrameMarkerPath(dynesty_file))
+                        alphabeta_run = os.path.isfile(engineMarkerPath(dynesty_file))
                         restored_file = dynesty_file
                         
                     except Exception as e:
@@ -4970,6 +4986,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                             try:
                                 dsampler_results, _ , backup_small = restoreBackupDynesty(backup_dynesty_file)
                                 ground_frame = backup_small['dynesty'].get('ground_frame', False)
+                                alphabeta_run = backup_small['dynesty'].get('alphabeta', False)
                                 restored_file = backup_dynesty_file
                                 print(f"Loaded backup dynesty file: {backup_dynesty_file}")
                             except Exception as e:
@@ -4981,6 +4998,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         
                     try:
                         replayInTheFrameOfTheRun(obs_data, ground_frame, restored_file)
+                        replayWithTheEngineOfTheRun(obs_data, alphabeta_run, restored_file)
                         plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
@@ -5019,6 +5037,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                     dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                     dsampler_results = dsampler.results
                     ground_frame = os.path.isfile(groundFrameMarkerPath(dynesty_file))
+                    alphabeta_run = os.path.isfile(engineMarkerPath(dynesty_file))
                     restored_file = dynesty_file
 
                 except Exception as e:
@@ -5032,6 +5051,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                         try:
                             dsampler_results, _ , backup_small = restoreBackupDynesty(backup_dynesty_file)
                             ground_frame = backup_small['dynesty'].get('ground_frame', False)
+                            alphabeta_run = backup_small['dynesty'].get('alphabeta', False)
                             restored_file = backup_dynesty_file
                             print(f"Loaded backup dynesty file: {backup_dynesty_file}")
                         except Exception as e:
@@ -5043,6 +5063,7 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
 
                 # dsampler = dynesty oad DynamicNestedSampler by restore(dynesty_file)
                 replayInTheFrameOfTheRun(obs_data, ground_frame, restored_file)
+                replayWithTheEngineOfTheRun(obs_data, alphabeta_run, restored_file)
                 plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
 
             else:
@@ -5212,9 +5233,11 @@ def setupDynestyOutputDir(out_folder, obs_data, bounds, flags_dict, fixed_values
         shutil.copy(dynesty_file, out_folder)
         print("dynesty file copied to output folder:", dynesty_file_in_output_path)
 
-        # Copy the ground-frame marker with the checkpoint
+        # Copy the ground-frame and engine markers with the checkpoint
         if os.path.isfile(groundFrameMarkerPath(dynesty_file)):
             shutil.copy(groundFrameMarkerPath(dynesty_file), out_folder)
+        if os.path.isfile(engineMarkerPath(dynesty_file)):
+            shutil.copy(engineMarkerPath(dynesty_file), out_folder)
 
     if os.path.isfile(report_txt):
         # copy the report file to the output folder if not already there
@@ -5993,7 +6016,7 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
 
     if dir_path!="" and file_name!="":
         # Run the simulation, which completes some fields of the constants that are saved
-        frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
+        frag_main, results_list, wake_results = simulateConstants(const_nominal, real_event)
 
         # Save the time offset of the simulation from the first lag point with the constants
         const_nominal.fit_lag_time_offset = getattr(real_event, 'fit_lag_time_offset', True)
@@ -6004,6 +6027,45 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
         saveConstants(const_nominal, dir_path, file_name)
 
     return const_nominal
+
+
+
+def simulateConstants(const, real_event):
+    """ Run MetSim on the constants, or the alpha-beta engine when the observations ask for it.
+
+    Arguments:
+        const: [Constants object] Simulation constants.
+        real_event: [object] Observations, whose alphabeta flag selects the engine.
+
+    Return:
+        (frag_main, results_list, wake_results): [tuple] As MetSimErosion.runSimulation returns them.
+    """
+
+    if getattr(real_event, 'alphabeta', False):
+        return runSimulationAlphaBeta(const)
+
+    return runSimulation(const, compute_wake=False)
+
+
+
+def averagesTheLight(simulation_results, obs_data):
+    """ Tell whether the simulated light is averaged over the frames, when they are longer than MetSim's
+        time step, and always for the alpha-beta engine, whose results come every 1 ms.
+
+    Arguments:
+        simulation_results: [SimulationResults object] Simulation.
+        obs_data: [object] Observations.
+
+    Return:
+        [bool] True to average the light over the frames, False to interpolate it.
+    """
+
+    # MetSim's time step of the simulation
+    dt = simulation_results.const.dt if hasattr(simulation_results, 'const') else simulation_results.dt
+
+    return (1/obs_data.fps_lum > dt) or getattr(obs_data, 'alphabeta', False)
+
+
 
 def runSimulationDynesty(parameter_guess, real_event, var_names, fix_var):
     """ Run the MetSim simulation with the given parameters.
@@ -6023,7 +6085,7 @@ def runSimulationDynesty(parameter_guess, real_event, var_names, fix_var):
     const_nominal = constructConstants(parameter_guess, real_event, var_names, fix_var)
 
     # Run the simulation, leaving a ZeroDivisionError of an unphysical draw to the caller to reject
-    frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
+    frag_main, results_list, wake_results = simulateConstants(const_nominal, real_event)
     simulation_MetSim_object = SimulationResults(const_nominal, frag_main, results_list, wake_results)
 
     return simulation_MetSim_object
@@ -6359,7 +6421,7 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
     # all simulated time is the time_arr subtract the first time of the simulation
     all_simulated_time = simulation_results.time_arr- simulated_time[0]#
     # find the integral of the luminosity in time in between FPS but not valid for CAMO narrowfield cameras as there is no smearing because it follows the meteor
-    if (1/obs_metsim_obj.fps_lum > simulation_results.const.dt): # and (not any('1T' in station for station in obs_metsim_obj.stations_lum) or not any('2T' in station for station in obs_metsim_obj.stations_lum)): # FPS is lower than the simulation time step need to integrate the luminosity
+    if averagesTheLight(simulation_results, obs_metsim_obj): # and (not any('1T' in station for station in obs_metsim_obj.stations_lum) or not any('2T' in station for station in obs_metsim_obj.stations_lum)): # FPS is lower than the simulation time step need to integrate the luminosity
         simulated_lc_intensity, _ = integrateLuminosity(all_simulated_time,obs_metsim_obj.time_lum,simulation_results.luminosity_arr,simulation_results.const.dt,obs_metsim_obj.fps_lum,obs_metsim_obj.P_0m)
 
         # Reject the simulation if it does not cover all observed frames
@@ -6471,6 +6533,40 @@ def replayInTheFrameOfTheRun(obs_data, ground_frame, source):
 
 
 
+def engineMarkerPath(dynesty_file):
+    """ Compute the path of the file that marks a dynesty run as simulated with the alpha-beta engine.
+
+    Arguments:
+        dynesty_file: [str] Path to the dynesty checkpoint file.
+
+    Return:
+        [str] Path of the marker file.
+    """
+
+    return dynesty_file + '.alphabeta'
+
+
+
+def replayWithTheEngineOfTheRun(obs_data, alphabeta, source):
+    """ Replay the samples of a restored dynesty run with the engine the run was made with.
+
+    Arguments:
+        obs_data: [ObservationData object] Observations, changed in place.
+        alphabeta: [bool] The run was simulated with the alpha-beta engine.
+        source: [str] Path of the restored checkpoint or backup, for the note.
+
+    Return:
+        None
+    """
+
+    if bool(getattr(obs_data, 'alphabeta', False)) != alphabeta:
+        print("NOTE: {:s} was made {:s} the alpha-beta engine, so its samples are replayed {:s} it." \
+            "".format(source, "with" if alphabeta else "without", "with" if alphabeta else "without"))
+
+    obs_data.alphabeta = alphabeta
+
+
+
 def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_core=1, output_folder="", 
                     base_name="",log_file_path="", pool_MPI=None, save_backup=True):
     """ Main function to run the Dynesty nested sampling.
@@ -6508,6 +6604,22 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
     with open(marker_file, 'w') as f:
         f.write("MetSim simulated relative to the ground\n")
 
+    # Refuse to resume a run with another engine than the one it was made with, and mark the engine
+    engine_marker = engineMarkerPath(dynesty_file)
+    alphabeta = bool(getattr(obs_data, 'alphabeta', False))
+    if os.path.exists(dynesty_file):
+        if os.path.isfile(engine_marker) != alphabeta:
+            raise ValueError("{:s} was made {:s} --alphabeta and must be resumed {:s} it, or a new run " \
+                "started.".format(dynesty_file, "with" if not alphabeta else "without", \
+                "with" if not alphabeta else "without"))
+
+    elif os.path.isfile(engine_marker) and (not alphabeta):
+        os.remove(engine_marker)
+
+    if alphabeta:
+        with open(engine_marker, 'w') as f:
+            f.write("Simulated with the alpha-beta engine (--alphabeta)\n")
+
     # get variable names
     var_names = list(flags_dict.keys())
     # get the number of parameters
@@ -6526,6 +6638,12 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
             # if so, set the noise_lag to the fixed value
             obs_data.noise_lag = fixed_values['noise_lag']
             print("Fixed noise in lag to:", fixed_values['noise_lag'])
+
+    # Compile the alpha-beta engine before the workers start, at the middle of the priors, which also
+    #   stops a setup it does not take
+    if alphabeta:
+        logLikelihoodDynesty(priorDynesty(np.full(ndim, 0.5), bounds, flags_dict), obs_data, flags_dict, \
+            fixed_values, timeout=600)
     
     # Master-only: do any setup that requires file I/O
     if (pool_MPI is None) or (pool_MPI.is_master()):
@@ -6597,6 +6715,8 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
         print("Copying dynesty file to output folder...")
         shutil.copy(dynesty_file, output_folder)
         shutil.copy(marker_file, output_folder)
+        if os.path.isfile(engine_marker):
+            shutil.copy(engine_marker, output_folder)
         print("dynesty file copied to:", output_folder)
     
     plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, output_folder, base_name, log_file_path, n_core, save_backup=save_backup, finish_run=True)
@@ -6664,6 +6784,10 @@ if __name__ == "__main__":
         help="Fix the simulation to the time of the first lag point, instead of fitting the time at " \
         "which it passes the height of that point to the lengths of every simulation.")
 
+    arg_parser.add_argument('--alphabeta', action="store_true",
+        help="Simulate with the alpha-beta closed forms of the ablation (MetSimErosionAlphaBeta) " \
+        "instead of MetSim's time steps.")
+
     # Optional: suppress warnings
     # warnings.filterwarnings('ignore')
 
@@ -6681,6 +6805,6 @@ if __name__ == "__main__":
         raise ValueError("pick_position must be between 0 and 1, 0 leading edge, 0.5 centroid full meteor, 1 trailing edge.")
 
     setupDirAndRunDynesty(cml_args.input_dir, output_dir=cml_args.output_dir, prior=cml_args.prior, resume=cml_args.new_dynesty, use_all_cameras=cml_args.all_cameras, only_plot=cml_args.only_plot, cores=cml_args.cores, pick_position=cml_args.pick_pos, extraprior_file=cml_args.extraprior, save_backup=cml_args.save_backup, \
-        fit_lag_time_offset=cml_args.fit_lag_time_offset)
+        fit_lag_time_offset=cml_args.fit_lag_time_offset, alphabeta=cml_args.alphabeta)
 
     print("\nDONE: Completed processing of all files in the input directory.\n")

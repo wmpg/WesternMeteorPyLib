@@ -9,6 +9,8 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
+import os
+import tempfile
 import warnings
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -130,11 +132,81 @@ def testWeightedHistogramMode():
 
 
 
+def testIntegratedLuminosityIsTheMeanOfTheFrame():
+    """ Check that the light of every frame is the plain mean of the samples in (t - 1/fps, t], NaN without
+        samples or with a NaN sample, as a mask over the samples gives it.
+    """
+
+    # Random samples of the light with one NaN
+    rng = np.random.default_rng(2)
+    t = np.sort(rng.uniform(0.0, 2.0, 3000))
+    lum = rng.uniform(1.0, 100.0, t.size)
+    lum[1000] = np.nan
+
+    # Frames across and beyond the samples, and one just after the NaN
+    t_frames = np.concatenate([np.linspace(-0.1, 2.1, 400), [t[1000] + 0.001]])
+    fps = 30.0
+
+    # Light of every frame from integrateLuminosity
+    new_lum, new_mag = DynestyMetSim.integrateLuminosity(t, t_frames, lum, 0.001, fps, 840.0)
+
+    # The same means from a mask over the samples
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ref = np.array([np.mean(lum[(t > tf - 1/fps) & (t <= tf)]) for tf in t_frames])
+
+    # NaN in the same frames, and the same means and magnitudes
+    assert np.array_equal(np.isnan(new_lum), np.isnan(ref))
+    ok = ~np.isnan(ref)
+    assert np.allclose(new_lum[ok], ref[ok], rtol=1e-12, atol=0)
+    assert np.allclose(new_mag[ok], -2.5*np.log10(ref[ok]/840.0), rtol=1e-12, atol=0)
+
+
+
+def testRunsAreResumedAndReplayedWithTheirEngine():
+    """ Check that a run made with or without --alphabeta is resumed only with the same engine, that a
+        restored run is replayed with its own engine, and that the observations select the engine.
+    """
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+
+        # A checkpoint made relative to the ground, without the engine marker
+        dynesty_file = os.path.join(tmp_dir, 'run.dynesty')
+        open(dynesty_file, 'w').close()
+        open(DynestyMetSim.groundFrameMarkerPath(dynesty_file), 'w').close()
+
+        # It cannot be resumed with the alpha-beta engine
+        obs = SimpleNamespace(v_rotation=0.0, alphabeta=True)
+        with pytest.raises(ValueError, match='alphabeta'):
+            DynestyMetSim.dynestyMainRun(dynesty_file, obs, [], {}, {})
+
+        # With the marker, it cannot be resumed with MetSim
+        open(DynestyMetSim.engineMarkerPath(dynesty_file), 'w').close()
+        obs = SimpleNamespace(v_rotation=0.0, alphabeta=False)
+        with pytest.raises(ValueError, match='alphabeta'):
+            DynestyMetSim.dynestyMainRun(dynesty_file, obs, [], {}, {})
+
+    # A restored run is replayed with the engine it was made with
+    obs = SimpleNamespace(alphabeta=False)
+    DynestyMetSim.replayWithTheEngineOfTheRun(obs, True, 'run.dynesty')
+    assert obs.alphabeta
+
+    # The observations select the engine of the simulations
+    with patch.object(DynestyMetSim, 'runSimulationAlphaBeta', return_value='alphabeta'), \
+        patch.object(DynestyMetSim, 'runSimulation', return_value='metsim'):
+
+        assert DynestyMetSim.simulateConstants(None, SimpleNamespace(alphabeta=True)) == 'alphabeta'
+        assert DynestyMetSim.simulateConstants(None, SimpleNamespace(alphabeta=False)) == 'metsim'
+
+
+
 if __name__ == "__main__":
 
     testSimulationEndingAboveTheObservationsIsRejected()
     testIntegratedLuminosityOutsideTheSimulationIsRejected()
     testFailedSimulationIsRejected()
     testWeightedHistogramMode()
+    testIntegratedLuminosityIsTheMeanOfTheFrame()
+    testRunsAreResumedAndReplayedWithTheirEngine()
 
     print('All tests passed.')
