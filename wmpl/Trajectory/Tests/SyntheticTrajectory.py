@@ -35,7 +35,7 @@ STATIONS = [
 
 class DragMeteor(object):
     def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0, \
-        ground_drag=False):
+        ground_drag=False, k_jumps=None):
         """ Integrate the motion of a meteor decelerated by drag along a straight line. The ballistic
             coefficient grows linearly with time during the visible part of the trajectory.
 
@@ -53,7 +53,12 @@ class DragMeteor(object):
             duration: [float] Duration of the integration (s). 20 s by default.
             ground_drag: [bool] If True, the drag acts on the speed relative to the air, which moves with
                 the ground, as on a real meteor. False by default, in which case it acts on the inertial speed.
+            k_jumps: [list] Jumps of the ballistic coefficient as at fragmentations, (time from the top (s),
+                factor) each. None by default.
         """
+
+        if k_jumps is None:
+            k_jumps = []
 
         self.t_vis_beg = t_vis_beg
         self.t_vis_end = t_vis_end
@@ -84,6 +89,11 @@ class DragMeteor(object):
             # Interpolate the ballistic coefficient linearly in the visible part
             frac = np.clip((t - t_vis_beg)/(t_vis_end - t_vis_beg), 0.0, 1.0)
             k = k_beg + frac*(k_end - k_beg)
+
+            # Multiply it at every jump
+            for t_jump, factor in k_jumps:
+                if t >= t_jump:
+                    k *= factor
 
             rho = np.exp(np.interp(len_val, len_table, log_rho_table))
             g = np.interp(len_val, len_table, g_table)
@@ -285,7 +295,8 @@ def stationAzimAlt(eci_points, jds, lat, lon, ele):
 
 
 
-def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, stations=None, clock_offsets=None, **kwargs):
+def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, stations=None, clock_offsets=None, flare_time=None, \
+    **kwargs):
     """ Observe the visible part of the synthetic meteor from the stations, three by default, and make a
         trajectory object. The times are relative to the beginning of the visible part.
 
@@ -299,6 +310,9 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, stations=None, clock_off
         stations: [list] Stations in the form of STATIONS. None by default, in which case STATIONS is used.
         clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
             default, when all clocks are exact.
+        flare_time: [float] Time of a flare from the beginning of the visible part (s), which every station
+            that sees it flags at its frame nearest to it (infillTrajectory(flare_times=...)). None by
+            default.
         kwargs: Passed to the Trajectory object. The solver takes the drag against the rotating air into
             account only for a meteor integrated with it.
 
@@ -336,8 +350,13 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, stations=None, clock_off
         azim = azim + rng.normal(0, noise, len(azim))/np.cos(elev)
         elev = elev + rng.normal(0, noise, len(elev))
 
+        # Flag the frame nearest to the flare
+        flare_times = None
+        if (flare_time is not None) and (times[0] <= flare_time <= times[-1]):
+            flare_times = [times[np.argmin(np.abs(times - flare_time))] + clock_offsets.get(station_id, 0.0)]
+
         traj.infillTrajectory(azim, elev, times + clock_offsets.get(station_id, 0.0), np.radians(lat), \
-            np.radians(lon), ele, station_id=station_id)
+            np.radians(lon), ele, station_id=station_id, flare_times=flare_times)
 
 
     return traj
