@@ -115,7 +115,10 @@ def testUncertaintiesBelowEscapeVelocity(monkeypatch):
 
     traj_best = traj.run()
 
-    assert any(traj_used is traj for traj_used in traj_list_used)
+    # The original solution is among the runs, as a copy with a sampled velocity since the drag-coupled
+    #   solver samples the velocities of the runs
+    assert any(np.array_equal(traj_used.state_vect_mini, traj.state_vect_mini) \
+        for traj_used in traj_list_used)
 
     assert traj_best.orbit.ra_g is None
     assert traj_best.uncertainties is not None
