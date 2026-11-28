@@ -2723,8 +2723,9 @@ def calcCovMatrices(mc_traj_list):
 
 def sampleMCVelocities(traj_list):
     """ Sample the initial velocity of every trajectory within the standard deviation of its direct fit,
-        and recompute the orbit. Used for the Monte Carlo uncertainties when the timing is not estimated, as
-        the noise is only added to the angles and it does not change the velocity.
+        and recompute the orbit. Used for the Monte Carlo uncertainties when the timing is not estimated or
+        when the drag-coupled solver is used, as line-of-sight noise perturbations only vary the geometry
+        while fitting the unperturbed original observations.
 
     Arguments:
         traj_list: [list] A list of Trajectory objects.
@@ -2739,15 +2740,35 @@ def sampleMCVelocities(traj_list):
 
         traj_sampled = copy.copy(traj)
 
-        # Sample the initial velocity
-        if traj.v_init_stddev:
-            traj_sampled.v_init = traj.v_init + np.random.normal(0, traj.v_init_stddev)
+        has_valid_v = (traj.v_init is not None) and np.isfinite(traj.v_init)
+        has_valid_std = (traj.v_init_stddev is not None) and np.isfinite(traj.v_init_stddev) \
+            and (traj.v_init_stddev > 0.0)
+        had_orbit = (traj.orbit is not None)
+        had_valid_orbit = had_orbit and (traj.orbit.ra_g is not None)
 
-        # Recompute the orbit with the sampled velocity
-        traj_sampled.orbit = calcOrbit(traj.radiant_eci_mini, traj_sampled.v_init, traj.v_avg, \
-            traj.state_vect_mini, traj.rbeg_jd, stations_fixed=(not traj.orbit_los_success), \
-            reference_init=traj.orbit_los_success, v_init_stddev_direct=traj.v_init_stddev, \
-            dv_pre_atm=getattr(traj, 'dv_pre_atm', 0.0))
+        if has_valid_v and has_valid_std:
+
+            los_ok = bool(getattr(traj, 'orbit_los_success', traj.los_mini_status))
+
+            # Resample if a draw is non-positive or drops a valid orbit below escape velocity
+            for _ in range(10):
+
+                v_cand = traj.v_init + np.random.normal(0.0, traj.v_init_stddev)
+                if v_cand <= 0.0:
+                    continue
+
+                if not had_orbit:
+                    traj_sampled.v_init = v_cand
+                    break
+
+                orbit_cand = calcOrbit(traj.radiant_eci_mini, v_cand, traj.v_avg, traj.state_vect_mini, \
+                    traj.rbeg_jd, stations_fixed=(not los_ok), reference_init=los_ok, \
+                    v_init_stddev_direct=traj.v_init_stddev, dv_pre_atm=getattr(traj, 'dv_pre_atm', 0.0))
+
+                if (not had_valid_orbit) or (orbit_cand.ra_g is not None):
+                    traj_sampled.v_init = v_cand
+                    traj_sampled.orbit = orbit_cand
+                    break
 
         traj_list_sampled.append(traj_sampled)
 
@@ -3032,8 +3053,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     if getattr(traj, 'drag_timing_fit', None) is not None:
         _updateDragMCResults(traj, traj_best, mc_results)
 
-    # Without timing estimation the noise does not change the velocity, so sample it within its uncertainty
-    if not traj.estimate_timing_vel:
+    # Sample the initial velocity within its direct-fit uncertainty when MC runs only vary the geometry
+    if (not traj.estimate_timing_vel) or (getattr(traj, 'drag_timing_fit', None) is not None):
         mc_results = sampleMCVelocities(mc_results)
 
     print('Computing uncertainties...')
