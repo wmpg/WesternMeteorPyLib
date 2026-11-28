@@ -7,9 +7,10 @@ Run with pytest:
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
+import scipy.special
 
 from wmpl.Utils.Math import medianStddev, circPercentile, findClosestPoints, findClosestPoints_vect, \
-    isGraphConnected, weightedMedian, integratedAutocorrTime
+    isGraphConnected, weightedMedian, integratedAutocorrTime, expEi
 
 
 
@@ -176,13 +177,24 @@ def testIntegratedAutocorrTime():
 
 
 
+def testExpEiMatchesScipy():
+    """ exp(-x) Ei(x) agrees with scipy.special.expi from 1e-8 to 600, below the overflow of expi. """
+
+    # Arguments across the series, the table and the asymptotic series
+    x = np.logspace(-8, np.log10(600.0), 2000)
+    ref = np.exp(-x)*scipy.special.expi(x)
+
+    assert np.max(np.abs(expEi(x)/ref - 1)) < 1e-10
+
+
+
 
 if __name__ == "__main__":
 
     # Run all tests
     test_list = [testMedianStddev, testWeightedMedian, testCircPercentileOfAnglesFrom0To360, \
         testCircPercentileOfAnglesFromMinus180To180, testClosestPointsOfManyLinesAreThoseOfEachLine, \
-        testGraphConnectivity, testIntegratedAutocorrTime]
+        testGraphConnectivity, testIntegratedAutocorrTime, testExpEiMatchesScipy]
 
     for test in test_list:
         test()

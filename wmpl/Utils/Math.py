@@ -11,6 +11,7 @@ import scipy.linalg
 import scipy.stats
 import scipy.spatial
 import scipy.optimize
+import scipy.special
 
 try:
     # If Numba is available, use the jit decorator with specified options
@@ -1421,6 +1422,143 @@ def expSegmentIntegral(rho_0, scale, dh):
     x_safe = np.where(x == 0, 1.0, x)
 
     return rho_0*dh*np.where(x == 0, 1.0, np.expm1(x_safe)/x_safe)
+
+
+##############################################################################################################
+
+
+### SPECIAL FUNCTIONS ###
+##############################################################################################################
+
+# Euler's constant
+EULER_GAMMA = 0.5772156649015329
+
+# Range, intervals per octave and degree of the Chebyshev fits of x exp(-x) Ei(x)
+EXPEI_LO = 2.0**-24
+EXPEI_HI = 512.0
+EXPEI_PER_OCTAVE = 4
+EXPEI_DEG = 8
+
+
+
+def fitExpEiTable():
+    """ Fit the Chebyshev polynomials of x exp(-x) Ei(x) in ln(x) on quarter octaves to scipy.special.expi (to
+        2.5e-13 at most).
+
+    Return:
+        (s0, ds, coefs):
+            - s0: [float] ln(x) at the start of the first interval.
+            - ds: [float] Length of the intervals in ln(x).
+            - coefs: [ndarray] Chebyshev coefficients of every interval.
+    """
+
+    # Quarter octaves of ln(x) from EXPEI_LO to EXPEI_HI
+    n = int(round(np.log2(EXPEI_HI/EXPEI_LO)))*EXPEI_PER_OCTAVE
+    edges = np.log(EXPEI_LO) + np.arange(n + 1)*np.log(2.0)/EXPEI_PER_OCTAVE
+
+    # Chebyshev nodes in every interval
+    k = np.arange(EXPEI_DEG + 1)
+    t = np.cos(np.pi*(k + 0.5)/(EXPEI_DEG + 1))
+
+    # Fit every interval at its nodes
+    coefs = np.empty((n, EXPEI_DEG + 1))
+    for i in range(n):
+        x = np.exp(edges[i] + (t + 1)/2*(edges[i + 1] - edges[i]))
+        coefs[i] = np.polynomial.chebyshev.chebfit(t, x*np.exp(-x)*scipy.special.expi(x), EXPEI_DEG)
+
+    return edges[0], edges[1] - edges[0], coefs
+
+
+# Chebyshev coefficients of x exp(-x) Ei(x), fitted once on import
+EXPEI_S0, EXPEI_DS, EXPEI_COEFS = fitExpEiTable()
+EXPEI_N = EXPEI_COEFS.shape[0]
+
+
+
+@njit
+def expEiScalar(x):
+    """ Compute exp(-x) Ei(x) for x > 0, with the power series of Ei near its root at x = 0.3725 and the
+        asymptotic series above EXPEI_HI. Compiled with numba, so that compiled code can call it.
+
+    Arguments:
+        x: [float] Argument, x > 0.
+
+    Return:
+        [float] exp(-x) Ei(x).
+    """
+
+    # Power series of Ei near its root, where the fit loses accuracy
+    if (x >= 0.25) and (x < 0.5):
+        acc = 0.0
+        term = 1.0
+        for k in range(1, 40):
+            term *= x/k
+            acc += term/k
+            if term < 1e-17*acc:
+                break
+
+        return np.exp(-x)*(EULER_GAMMA + np.log(x) + acc)
+
+    # The series to first order below the table
+    if x < EXPEI_LO:
+        return np.exp(-x)*(EULER_GAMMA + np.log(x) + x)
+
+    # Asymptotic series
+    if x >= EXPEI_HI:
+        term = 1.0/x
+        acc = term
+        for k in range(1, 15):
+            term = term*k/x
+            acc += term
+
+        return acc
+
+    # Interval of the table and its Chebyshev variable
+    sx = np.log(x)
+    i = int((sx - EXPEI_S0)/EXPEI_DS)
+    if i > EXPEI_N - 1:
+        i = EXPEI_N - 1
+    t = 2.0*(sx - (EXPEI_S0 + i*EXPEI_DS))/EXPEI_DS - 1.0
+
+    # Clenshaw sum of the Chebyshev fit of the interval
+    b1 = 0.0
+    b2 = 0.0
+    for j in range(EXPEI_DEG, 0, -1):
+        b0 = 2.0*t*b1 - b2 + EXPEI_COEFS[i, j]
+        b2 = b1
+        b1 = b0
+
+    return (t*b1 - b2 + EXPEI_COEFS[i, 0])/x
+
+
+
+@njit
+def expEiArray(x):
+    """ Compute exp(-x) Ei(x) for every element of a 1D array, see expEiScalar(). """
+
+    # Every element in turn
+    out = np.empty(x.shape[0])
+    for i in range(x.shape[0]):
+        out[i] = expEiScalar(x[i])
+
+    return out
+
+
+
+def expEi(x):
+    """ Compute exp(-x) Ei(x) element-wise for x > 0, which stays finite where Ei(x) overflows.
+
+    Arguments:
+        x: [float or ndarray] Argument, x > 0.
+
+    Return:
+        [float or ndarray] exp(-x) Ei(x), with the shape of x.
+    """
+
+    # Flatten for the compiled loop and restore the shape
+    x = np.asarray(x, dtype=np.float64)
+
+    return expEiArray(np.ascontiguousarray(x.ravel())).reshape(x.shape)
 
 
 

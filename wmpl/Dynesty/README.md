@@ -77,6 +77,7 @@ remember if you put both PATH_TO_INPUT_FOLDER_1 and PATH_TO_INPUT_FOLDER_2 in th
 | `--extraprior` | Path to an `.extraprior` file for advanced tuning (e.g., dust release, erosion heights). |
 | `--pick_pos` | Adjusts the pick position in the meteor frame (0 to 1). <br>• `0`: Leading edge (default).<br>• `0.5`: Centroid (recommended for fireballs). |
 | `--cores` | Specify the number of CPU cores to use. Default uses all available cores. |
+| `--alphabeta` | Simulates with the alpha-beta closed forms of the ablation (`MetSimErosionAlphaBeta`) instead of MetSim's time steps, see [The alpha-beta engine](#the-alpha-beta-engine). |
 | `-new` | Forces a new simulation in the output folder does not continue the dynesty simulation if interrupted. Prevents mixing data if a `.dynesty` file already exists (though separate folders are recommended). |
 | `-all` | Merges all available data from multiple cameras, only necessary if using EMCCD and CAMO narrow-field, wide-field data! By default the code will take lightcurve from EMCCD if not present it will combine CAMO narrow-field with wide-field data, while for the deceleration (lag) the code will take first CAMO narrow-field, then if not present EMCCD and if neither are present it will use CAMO wide-field. |
 | `-plot` | Generates plots based on the current state of the `.dynesty` file without running the simulation. Useful to make sure everything is loaded correctly and when .dynesty file is created to check on progress. |
@@ -190,6 +191,9 @@ noise_lum, 5, n_lum0, invgamma      # Luminosity noise [J/s] (Inverse Gamma)
 ### Advanced Configuration
 For greater flexibility, use the `--extraprior` flag with a specialized file. This allows tuning of over 30 variables, including dust release and specific erosion height changes (useful for fireballs or to introduce a third fragmentation).
 * *Warning:* Adding too many variables (>30) may prevent Dynesty from converging on a solution.
+
+### The alpha-beta engine
+With `--alphabeta`, every simulation of the fit, of its plots and of the saved constants is made by `wmpl/MetSim/MetSimErosionAlphaBeta.py`, which computes MetSim's erosion model from the alpha-beta closed form of the ablation in the column of air along the path instead of stepping it in time. It returns MetSim's results on a grid of about 1 ms, so the light of every frame is always the mean over the frame, as with MetSim at a step finer than the frames. Its tests compare it with MetSim at a time step of 1 ms (`wmpl/MetSim/Tests/test_MetSimErosionAlphaBeta.py`). Eroding meteoroids run several times faster than with MetSim at its time step, single bodies gain nothing. A run made with the option is marked by a `.alphabeta` file next to its checkpoint: a resume with the other engine is refused, and a restored run is plotted again with its own engine. The engine is compiled with numba at the first simulation of a process and cached for later runs. It does not compute the wake or the ionization, gives the leading fragment as the brightest one, and refuses fragmentation entries applied only upwards and grazing paths that climb back up before the kill height.
 
 ---
 
