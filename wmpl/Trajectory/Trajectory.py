@@ -2883,6 +2883,7 @@ def trajNoiseGenerator(traj, noise_sigma):
                 obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time, \
                 ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, \
                 fov_end=obs.fov_end, obs_id=obs.obs_id, comment=obs.comment)
+            traj_mc.observations[-1].flare_index = getattr(obs, 'flare_index', None)
 
             
         # Do not show plots or perform additional optimizations
@@ -3748,6 +3749,12 @@ DRAG_TRAJ_MAX_ITER = 4
 #   on short faint meteors (ramps still allow K to grow above K_0 during fragmentation)
 DRAG_TRAJ_MAX_K0 = 10.0
 
+# Largest shift of the initial velocity by the knots of K at the flares (standard deviations)
+DRAG_TRAJ_FLARE_MAX_DV_SIGMA = 1.0
+
+# Relative tolerance on the cost of the fit with the knots at the flares over the fit without them
+DRAG_TRAJ_FLARE_COST_TOL = 1e-2
+
 # Evaluation limits for exploratory cold starts and final or warm-started least-squares refinements
 DRAG_TRAJ_EXPLORE_MAX_NFEV = 80
 DRAG_TRAJ_REFINE_MAX_NFEV = 250
@@ -4025,7 +4032,7 @@ class DragTimingFit(object):
     def __init__(self, station_times, station_lens, station_weights, free_mask, state_vect, radiant_eci, \
         jd, gravity_factor=1.0, max_toffset=5.0, n_knots=None, penalty=1.0, gap_penalty_factor=1.0, \
         drop_grid_func=None, air_rotation=True, params_init=None, res_scale_init=None, \
-        max_k0=DRAG_TRAJ_MAX_K0):
+        max_k0=DRAG_TRAJ_MAX_K0, knot_lens=None):
         """ Fit the drag model and free station time offsets to projected lengths and times.
 
         Arguments:
@@ -4054,6 +4061,9 @@ class DragTimingFit(object):
                 default.
             max_k0: [float] Upper bound on the initial ballistic coefficient K_0 (m^2/kg), or None to use
                 DRAG_VEL_LOG_K_BOUNDS[1]. DRAG_TRAJ_MAX_K0 by default.
+            knot_lens: [ndarray] Lengths along the line where ln K can jump, e.g. at the flares (m, as
+                station_lens). Each one inside the descending part of the fit gets a ramp of one grid step,
+                with the penalty of the other ramps. None by default.
         """
 
         ### Configure geometry and parameter bounds ###
@@ -4139,6 +4149,24 @@ class DragTimingFit(object):
         # Construct monotonic ln K ramps across observed windows and unobserved gaps
         self.ramp_beg, self.ramp_len, self.is_gap_ramp = buildRampsWithGaps(self.len_grid, self.windows, \
             self.gaps, self.n_data, n_knots=n_knots)
+
+        # Add a ramp of one grid step at every knot inside the descending part, where ln K can jump
+        self.knot_lens = np.array([] if knot_lens is None else knot_lens, dtype=np.float64)
+        len_low = self.len_grid[int(np.argmin(self.ht_grid))]
+        self.knot_lens = self.knot_lens[(self.knot_lens > self.len_first) & (self.knot_lens < len_low)]
+        self.is_knot_ramp = np.zeros(len(self.ramp_beg), dtype=bool)
+        if len(self.knot_lens):
+
+            self.ramp_beg = np.r_[self.ramp_beg, self.knot_lens]
+            self.ramp_len = np.r_[self.ramp_len, np.full(len(self.knot_lens), self.dlen[0])]
+            self.is_gap_ramp = np.r_[self.is_gap_ramp, np.zeros(len(self.knot_lens), dtype=bool)]
+            self.is_knot_ramp = np.r_[self.is_knot_ramp, np.ones(len(self.knot_lens), dtype=bool)]
+
+            # Keep the ramps sorted along the line
+            order = np.argsort(self.ramp_beg, kind='stable')
+            self.ramp_beg, self.ramp_len = self.ramp_beg[order], self.ramp_len[order]
+            self.is_gap_ramp, self.is_knot_ramp = self.is_gap_ramp[order], self.is_knot_ramp[order]
+
         self.n_knots = len(self.ramp_beg)
         self.ramps = np.clip((self.len_grid[:, None] - self.ramp_beg[None, :])/self.ramp_len[None, :], \
             0.0, 1.0)
@@ -4684,10 +4712,31 @@ class DragTimingFit(object):
         f_scale = 2.0*res_scale
         w_pen = np.sqrt(penalty)*f_scale
 
+        # Keep the scales of the loss, for cost()
+        self.loss_scales = (f_scale, w_pen)
+
         # Run bounded trust-region least squares using the analytical Jacobian
         return scipy.optimize.least_squares(self._residuals, params_init, jac=self._jacobian, \
             args=(w_pen,), bounds=(lower, upper), loss='soft_l1', f_scale=f_scale, x_scale='jac', \
             ftol=1e-6, xtol=1e-9, max_nfev=max_nfev)
+
+
+
+    def cost(self, params):
+        """ Compute the cost the fit minimizes for the given parameters, with the scales of the loss of its
+            last refinement (see _leastSquares()).
+
+        Arguments:
+            params: [ndarray] Full parameter vector.
+
+        Return:
+            [float] Cost, as scipy.optimize.least_squares gives it for the soft-L1 loss.
+        """
+
+        f_scale, w_pen = self.loss_scales
+        z = (self._residuals(params, w_pen)/f_scale)**2
+
+        return float(0.5*f_scale**2*np.sum(2.0*(np.sqrt(1.0 + z) - 1.0)))
 
 
 
@@ -5928,7 +5977,7 @@ class Trajectory(object):
         save_kml=False, kml_measured=False, air_rotation=True, drag_fit_timing=True, \
         pre_atm_correction=True, drag_max_iter=DRAG_TRAJ_MAX_ITER, drag_dt_tol=DRAG_TRAJ_DT_TOL, \
         drag_penalty=1.0, drag_gap_penalty=1.0, drag_n_knots=None, drag_max_k0=DRAG_TRAJ_MAX_K0, \
-        los_fit='huber'):
+        los_fit='huber', flare_knots=True):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -6023,6 +6072,11 @@ class Trajectory(object):
                 sandwich covariance (see leastSquaresLine and losFormalUncertainty). 'least_squares' fits
                 signed angles by linear least squares. 'angles' minimizes the weighted sum of absolute angles
                 with Nelder-Mead (see nelderMeadLine).
+            flare_knots: [bool] Let the ballistic coefficient of the drag-coupled fit jump at the flares
+                given to infillTrajectory() (flare_times), with a knot of ln K at each one. The knots are
+                dropped with a warning if the fit with them fails, ends with a higher cost than the fit
+                without them, or moves the initial velocity by more than its standard deviation. True by
+                default.
 
         """
 
@@ -6154,6 +6208,10 @@ class Trajectory(object):
         self.drag_timing_fit = None
         self.pre_atm_info = None
         self.dv_pre_atm = 0.0
+
+        # Knots of K at the flares, and their comparison with the fit without them
+        self.flare_knots = flare_knots
+        self.flare_knot_info = None
 
         # Gravity correction factor, limit to 0 - 1
         self.gravity_factor = gravity_factor
@@ -6307,7 +6365,7 @@ class Trajectory(object):
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
         ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment='', ignore_station=False,
-        radec_jd=None):
+        radec_jd=None, flare_times=None):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -6339,6 +6397,10 @@ class Trajectory(object):
                 the meteor was observed.
             radec_jd: [ndarray] Julian date at which each R.A./Dec. was computed, when meastype is 1. See
                 ObservedPoints. None by default (all at jdt_ref, the CAMS convention).
+            flare_times: [list] Times of the flares the station saw (s), in the time of time_data, e.g. the
+                first point of each flare. The drag-coupled fit gets a knot of ln K at the position on the
+                trajectory of each one (see flareKnotLengths()), unless flare_knots is False. Flares outside
+                the times of the points are ignored. None by default.
         Return:
             None
         """
@@ -6375,6 +6437,13 @@ class Trajectory(object):
         meas2 = np.array(meas2)
         time_data = np.array(time_data)
 
+        # Place the flares among the points of the station, so they follow the time offsets of its points
+        flare_index = None
+        if flare_times is not None:
+            flare_times = np.atleast_1d(np.array(flare_times, dtype=np.float64))
+            flare_times = flare_times[(flare_times >= np.min(time_data)) & (flare_times <= np.max(time_data))]
+            flare_index = np.interp(flare_times, time_data, np.arange(len(time_data)))
+
         # Add a fixed offset to time data if given
         if str(station_id) in self.fixed_time_offsets:
             time_data += self.fixed_time_offsets[str(station_id)]
@@ -6396,6 +6465,7 @@ class Trajectory(object):
             meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, ignore_station=ignore_station, 
             magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id, comment=comment,
             radec_jd=radec_jd)
+        obs.flare_index = flare_index
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -6497,6 +6567,9 @@ class Trajectory(object):
             station_id=obs.station_id, excluded_time=excluded_time, ignore_list=ignore_list, \
             magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id, \
             comment=obs.comment, ignore_station=obs.ignore_station, radec_jd=radec_jd)
+
+        # Keep the flares, which are placed among the points of the observation
+        self.observations[-1].flare_index = getattr(obs, 'flare_index', None)
 
 
 
@@ -8116,6 +8189,51 @@ class Trajectory(object):
         return out_str
 
 
+    def _flareKnotsReport(self):
+        """ Describe the knots of K at the flares in the drag-coupled fit, and the fit without them, for the
+            report.
+
+        Return:
+            [str] Lines of the report, empty if no flares were given.
+        """
+
+        info = getattr(self, 'flare_knot_info', None)
+        flares_given = any((getattr(obs, 'flare_index', None) is not None) and (len(obs.flare_index) > 0) \
+            for obs in self.observations)
+
+        if info is None:
+
+            if flares_given and (not getattr(self, 'flare_knots', True)):
+                return "\nKnots of K at the flares: not used (disabled)\n"
+
+            if flares_given:
+                return "\nKnots of K at the flares: none inside the descending part of the drag fit\n"
+
+            return ""
+
+        out_str = "\n"
+        if info['dropped'] is None:
+            out_str += "Knots of K at the flares (where K can jump):\n"
+        else:
+            out_str += "Knots of K at the flares, not used ({:s}):\n".format(info['dropped'])
+
+        for idx_k, (ht, stations) in enumerate(zip(info['hts'], info['stations'])):
+            out_str += "  {:d}. h = {:6.2f} km (stations {:s})\n".format(idx_k + 1, ht/1000.0, \
+                ", ".join(stations))
+
+        # Give the fit without the knots when they are used
+        if (info['dropped'] is None) and (info.get('v_init_free') is not None):
+
+            mass = info['mass_free']
+            mass_str = "not estimated" if mass is None else "{:.3g} kg".format(mass)
+            out_str += ("  Without them    = v_init {:.3f} +/- {:.3f} km/s, end {:.3f} km/s, " \
+                + "K end = {:.2e} m^2/kg, terminal mass {:s}\n").format(info['v_init_free']/1000.0, \
+                info['v_init_std_free']/1000.0, info['v_end_free']/1000.0, info['k_end_free'], mass_str)
+
+        return out_str
+
+
+
     def saveReport(self, dir_path, file_name, uncertainties=None, verbose=True, save_results=True):
         """ Save the trajectory estimation report to file. 
     
@@ -8517,6 +8635,9 @@ class Trajectory(object):
                     out_str += ("  {:d}. h = {:6.2f} km ({:.1f} - {:.1f} km), P_dyn = {:s}, " \
                         + "K x{:.2f}{:s}\n").format(idx_ev + 1, ev['ht']/1000.0, ev['ht_beg']/1000.0, \
                         ev['ht_end']/1000.0, _formatPressure(ev['dyn_pres']), ev['k_ratio'], signif_str)
+
+            # List the knots of K at the flares, and the fit without them
+            out_str += self._flareKnotsReport()
 
             # List unobserved zero-station gaps and their early/late jump timing bounds
             if drag_fit.gap_uncertainties:
@@ -10462,6 +10583,137 @@ class Trajectory(object):
 
 
 
+    def flareKnotLengths(self):
+        """ Compute the lengths along the line (m, as state_vect_dist) of the flares the stations saw, from
+            the points of each station around the flare in its own time, so no time offset is needed. The
+            flares of different stations closer than two frames along the line give one knot, at their
+            median length.
+
+        Return:
+            (knot_lens, knot_stations):
+                - knot_lens: [ndarray] Sorted lengths of the knots (m), empty if there are none, if
+                    flare_knots is False or if the knots were dropped.
+                - knot_stations: [list] IDs of the stations of every knot.
+        """
+
+        info = getattr(self, 'flare_knot_info', None)
+        if (not getattr(self, 'flare_knots', True)) or ((info is not None) and (info['dropped'] is not None)):
+            return np.array([]), []
+
+        lens, stations, steps = [], [], []
+        for obs in self.observations:
+
+            flare_index = getattr(obs, 'flare_index', None)
+            if obs.ignore_station or (flare_index is None) or (len(flare_index) == 0) \
+                or (obs.state_vect_dist is None):
+                continue
+
+            # Take the lengths of the flares between the used points of the station
+            used = np.where(obs.ignore_list == 0)[0]
+            if len(used) < 2:
+                continue
+
+            lens += np.interp(flare_index, used, obs.state_vect_dist[used]).tolist()
+            stations += [str(obs.station_id)]*len(flare_index)
+            steps.append(np.median(np.abs(np.diff(obs.state_vect_dist[used]))))
+
+        if len(lens) == 0:
+            return np.array([]), []
+
+        # Join the flares closer than two frames
+        order = np.argsort(lens, kind='stable')
+        lens, stations = np.array(lens)[order], [stations[i] for i in order]
+        breaks = np.where(np.diff(lens) > 2*np.max(steps))[0] + 1
+        groups = np.split(np.arange(len(lens)), breaks)
+
+        knot_lens = np.array([np.median(lens[group]) for group in groups])
+        knot_stations = [sorted(set(stations[i] for i in group)) for group in groups]
+
+        return knot_lens, knot_stations
+
+
+
+    def _checkFlareKnots(self, drag_fit, drop_grid_func=None, penalty=1.0, gap_penalty_factor=1.0, \
+        n_knots=None, max_k0=DRAG_TRAJ_MAX_K0):
+        """ Fit the data of a drag fit with knots at the flares again without them, and drop the knots if
+            the fit with them ends with a higher cost or moves the initial velocity by more than its
+            standard deviation. The knots and the fit without them are kept in flare_knot_info for the
+            report.
+
+        Arguments:
+            drag_fit: [DragTimingFit object] Fit with knots at the flares.
+
+        Keyword arguments:
+            drop_grid_func: [callable] Gravity drop of drag_fit (see estimateDragTiming()). None by default.
+            penalty: [float] Penalty of drag_fit on the growth of ln K. 1.0 by default.
+            gap_penalty_factor: [float] Relative penalty of drag_fit on gap ramps. 1.0 by default.
+            n_knots: [int] Target number of observed ln K segments of drag_fit. None by default.
+            max_k0: [float] Upper bound of drag_fit on K_0 (m^2/kg). DRAG_TRAJ_MAX_K0 by default.
+
+        Return:
+            [str] Why the knots were dropped, None if they are kept.
+        """
+
+        # Stations of the knots of the fit
+        knot_lens, knot_stations = self.flareKnotLengths()
+        stations = [next((st for lk, st in zip(knot_lens, knot_stations) if np.isclose(lk, length)), []) \
+            for length in drag_fit.knot_lens]
+
+        info = {'hts': drag_fit.heightAtLength(drag_fit.knot_lens), 'stations': stations, 'dropped': None, \
+            'v_init_free': None, 'v_init_std_free': None, 'v_end_free': None, 'k_end_free': None, \
+            'mass_free': None, 'cost': None, 'cost_free': None}
+        self.flare_knot_info = info
+
+        # Take the points of the fit by station
+        st_idx = [drag_fit.stat_idx == i for i in range(drag_fit.n_stations)]
+        st_times = [drag_fit.time_data[sel] for sel in st_idx]
+        st_lens = [drag_fit.len_data[sel] for sel in st_idx]
+        weights = [float(drag_fit.sqrt_w[sel][0]**2) if np.any(sel) else 0.0 for sel in st_idx]
+
+        # Fit the same points without the knots
+        try:
+            free_fit = DragTimingFit(st_times, st_lens, weights, drag_fit.free_mask, drag_fit.state_vect, \
+                drag_fit.radiant_eci, drag_fit.jd, gravity_factor=drag_fit.gravity_factor, \
+                max_toffset=drag_fit.max_toffset, n_knots=n_knots, penalty=penalty, \
+                gap_penalty_factor=gap_penalty_factor, drop_grid_func=drop_grid_func, \
+                air_rotation=drag_fit.air_rotation, max_k0=max_k0)
+
+        except ValueError:
+            return None
+
+        info.update(v_init_free=float(free_fit.vel_grid[0]), v_init_std_free=float(free_fit.v_init_stddev), \
+            v_end_free=float(free_fit.vel_grid[-1]), k_end_free=float(np.exp(free_fit.log_k_grid[-1])), \
+            mass_free=free_fit.terminalDynamicMass()['mass'])
+
+        # Compare the costs in the fit with the knots, with no jump at the knots for the fit without them
+        if free_fit.n_knots == drag_fit.n_knots - np.count_nonzero(drag_fit.is_knot_ramp):
+
+            n_ramps, n_free_ramps = drag_fit.n_knots, free_fit.n_knots
+            params_free = np.zeros_like(drag_fit.params)
+            params_free[:3] = free_fit.params[:3]
+            params_free[3:3 + n_ramps][~drag_fit.is_knot_ramp] = free_fit.params[3:3 + n_free_ramps]
+            params_free[3 + n_ramps:] = free_fit.params[3 + n_free_ramps:]
+            info.update(cost=drag_fit.cost(drag_fit.params), cost_free=drag_fit.cost(params_free))
+
+            if info['cost'] > (1.0 + DRAG_TRAJ_FLARE_COST_TOL)*info['cost_free']:
+                info['dropped'] = "the fit with them ends with a higher cost than the fit without them " \
+                    + "({:.4g} against {:.4g})".format(info['cost'], info['cost_free'])
+
+        # Check the shift of the initial velocity
+        dv_init = float(drag_fit.vel_grid[0]) - info['v_init_free']
+        if (info['dropped'] is None) and (info['v_init_std_free'] > 0.0) \
+            and (abs(dv_init) > DRAG_TRAJ_FLARE_MAX_DV_SIGMA*info['v_init_std_free']):
+
+            info['dropped'] = ("they move the initial velocity by {:+.1f} m/s, more than its standard " \
+                + "deviation of {:.1f} m/s").format(dv_init, info['v_init_std_free'])
+
+        if (info['dropped'] is not None) and self.verbose:
+            print("WARNING: The knots of K at the flares are dropped, {:s}".format(info['dropped']))
+
+        return info['dropped']
+
+
+
     def estimateDragTiming(self, weights, drop_grid_func=None, penalty=1.0, gap_penalty_factor=1.0, \
         n_knots=None, check_clock_outliers=True, params_init=None, res_scale_init=None, \
         max_k0=DRAG_TRAJ_MAX_K0):
@@ -10539,6 +10791,9 @@ class Trajectory(object):
         st_lens = [obs.state_vect_dist[obs.ignore_list == 0] if not obs.ignore_station else np.array([]) \
             for obs in self.observations]
 
+        # Lengths along the line of the flares, where ln K can jump
+        knot_lens, _ = self.flareKnotLengths()
+
         # Always pass self.gravity_factor for along-track gravity in the drag model (matching DragFit and
         #   fitDragVelocity), since gravity_correction controls cross-track path bending only
         try:
@@ -10547,9 +10802,22 @@ class Trajectory(object):
                 max_toffset=self.max_toffset, n_knots=n_knots, penalty=penalty, \
                 gap_penalty_factor=gap_penalty_factor, drop_grid_func=drop_grid_func, \
                 air_rotation=getattr(self, 'air_rotation', True), params_init=params_init, \
-                res_scale_init=res_scale_init, max_k0=max_k0)
+                res_scale_init=res_scale_init, max_k0=max_k0, knot_lens=knot_lens)
 
         except ValueError as err:
+
+            # Drop the knots at the flares and fit again if the fit with them failed
+            if len(knot_lens):
+                self.flare_knot_info = {'hts': [], 'stations': [], 'v_init_free': None, \
+                    'dropped': "the fit with them failed ({:s})".format(str(err))}
+                if self.verbose:
+                    print("WARNING: The knots of K at the flares are dropped, {:s}".format( \
+                        self.flare_knot_info['dropped']))
+
+                return self.estimateDragTiming(weights, drop_grid_func=drop_grid_func, penalty=penalty, \
+                    gap_penalty_factor=gap_penalty_factor, n_knots=n_knots, \
+                    check_clock_outliers=check_clock_outliers, max_k0=max_k0)
+
             if self.verbose:
                 print("Drag timing fit failed: {:s}".format(str(err)))
             return False, None, np.zeros(len(self.observations)), 0.0, 0.0, [0.0, 0.0]
@@ -10571,7 +10839,7 @@ class Trajectory(object):
                         self.radiant_eci_mini, self.jdt_ref, gravity_factor=self.gravity_factor, \
                         max_toffset=2.0*self.max_toffset, n_knots=n_knots, penalty=penalty, \
                         gap_penalty_factor=gap_penalty_factor, drop_grid_func=drop_grid_func, \
-                        air_rotation=getattr(self, 'air_rotation', True), max_k0=max_k0)
+                        air_rotation=getattr(self, 'air_rotation', True), max_k0=max_k0, knot_lens=knot_lens)
                     exceeds = np.any(np.abs(wide_fit.time_offsets[free_mask]) > 1.1*self.max_toffset)
                 except ValueError:
                     exceeds = False
@@ -10605,7 +10873,8 @@ class Trajectory(object):
                                 gravity_factor=self.gravity_factor, max_toffset=self.max_toffset, \
                                 n_knots=n_knots, penalty=penalty, gap_penalty_factor=gap_penalty_factor, \
                                 drop_grid_func=drop_grid_func, \
-                                air_rotation=getattr(self, 'air_rotation', True), max_k0=max_k0)
+                                air_rotation=getattr(self, 'air_rotation', True), max_k0=max_k0, \
+                                knot_lens=knot_lens)
                         except ValueError:
                             continue
 
@@ -10827,6 +11096,13 @@ class Trajectory(object):
                 break
 
 
+        # Check the knots at the flares against a fit without them, on the points of the last pass
+        knots_dropped = False
+        if (not _mc_run) and np.any(getattr(drag_fit, 'is_knot_ramp', [])):
+            knots_dropped = self._checkFlareKnots(drag_fit, drop_grid_func=drop_func, penalty=penalty, \
+                gap_penalty_factor=gap_penalty_factor, n_knots=n_knots, max_k0=max_k0) is not None
+
+
         ### Finalize derived trajectory quantities and filter outlier picks ###
 
         # Switch to noise-free observations for final derived quantities in MC runs
@@ -10906,6 +11182,13 @@ class Trajectory(object):
 
             elif self.verbose:
                 print("All picks are within {:.1f} sigma...".format(self.reject_n_sigma_outliers))
+
+        # Solve again without the knots at the flares if they were dropped
+        if knots_dropped:
+            if self.verbose:
+                print("Updating the solution without the knots of K at the flares...")
+            self._reinitObservations()
+            return self._runDragCoupledCore(_rerun_bad_picks=True, _mc_run=False, _orig_obs=None)
 
         return True
 

@@ -104,7 +104,9 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True, fragment=0, fl
             suffix 0 optional for the main fragment; files without the columns of the fragment are skipped.
         flares: [bool] Only load the points of the main fragment flagged as flares, also those not used in
             its trajectory, with no minimum number of points. Their flags are kept in trajectory_use, and
-            their positions in time among the points of the file in flare_rows. False by default.
+            their positions in time among the points of the file in flare_rows. False by default. Otherwise
+            the main fragment keeps the times of its flares in flare_times, in the time of its points, at the
+            first of the consecutive points of each flare, also among the points not used in its trajectory.
     
     """
 
@@ -206,7 +208,8 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True, fragment=0, fl
             else:
                 trajectory_use = np.ones(len(data), dtype=bool)
 
-            # Keep only the flares, or only the points used in the trajectory
+            # Keep only the flares, or only the points used in the trajectory and the times of the flares
+            flare_dt = []
             if flares:
                 if (fragment) or ('flare' not in header):
                     continue
@@ -220,6 +223,14 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True, fragment=0, fl
                 data, trajectory_use, flare_rows = data[flare], trajectory_use[flare], row_order[flare]
 
             else:
+
+                # Take the times of the flares of the main fragment at the first point of each one
+                if (not fragment) and ('flare' in header):
+                    time_order = np.argsort(np.char.strip(data[:, dt_indx]), kind='stable')
+                    flare = np.char.lower(np.char.strip(data[time_order, header.index('flare')])) == 'true'
+                    flare_first = flare & ~np.r_[False, flare[:-1]]
+                    flare_dt = [parseECSVDatetime(date) for date in data[time_order[flare_first], dt_indx]]
+
                 data = data[trajectory_use]
 
             if len(data) == 0:
@@ -267,6 +278,7 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True, fragment=0, fl
 
             # Compute the relative times from the differences of the times, to the microsecond
             time_data = np.array([(dt - dt_list[0]).total_seconds() for dt in dt_list])
+            flare_times = np.array([(dt - dt_list[0]).total_seconds() for dt in flare_dt])
 
 
             # Compute RA/Dec
@@ -311,6 +323,9 @@ def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True, fragment=0, fl
                 meteor_list.append(meteor)
                 continue
 
+
+            # Keep the times of the flares for the knots of the drag fit
+            meteor.flare_times = flare_times if len(flare_times) else None
 
             # Check that the observation has a minimum number of points
             if len(meteor.time_data) < 4:
@@ -2720,6 +2735,14 @@ if __name__ == "__main__":
     arg_parser.add_argument('--writemilig', metavar='MILIG_PATH', type=str, \
         help="Write the observations to a MILIG input file and exit. The MILIG_PATH argument is the path to the output file.")
 
+    arg_parser.add_argument('--noflareknots', \
+        help="Do not let the ballistic coefficient K of the drag fit of the solver jump at the flares " \
+            "flagged in the ECSV files (flare column). By default the fit has a knot of K at the first " \
+            "point of every flare, and drops the knots with a warning if the fit with them fails, ends " \
+            "with a higher cost than the fit without them, or moves the initial velocity by more than its " \
+            "standard deviation.", \
+        action="store_true")
+
     arg_parser.add_argument('--fragments', \
         help="After the main fragment, also solve the trajectories of the additional fragments in the ECSV " \
             "files (columns with a numeric suffix, e.g. azimuth1, as in Appendix 4 of the GFE standard), " \
@@ -2841,6 +2864,7 @@ if __name__ == "__main__":
         air_rotation=(not cml_args.disableairrot), \
         drag_fit_timing=(not cml_args.disabledragfit), \
         pre_atm_correction=(not cml_args.disablepreatm), \
+        flare_knots=(not cml_args.noflareknots), \
         los_fit=cml_args.losfit, \
         gravity_factor=cml_args.gfact,
         plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \

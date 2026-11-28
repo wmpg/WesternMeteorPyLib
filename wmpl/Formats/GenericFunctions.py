@@ -149,6 +149,20 @@ class MeteorObservation(object):
 
 
 
+def shiftFlareTimes(meteor, tsec_shift):
+    """ Shift the times of the flares of an observation, if it has any (e.g. from ECSV files), with the
+        times of its points.
+
+    Arguments:
+        meteor: [MeteorObservation object] Observation.
+        tsec_shift: [float] Shift of the times (s).
+    """
+
+    if getattr(meteor, 'flare_times', None) is not None:
+        meteor.flare_times = meteor.flare_times + tsec_shift
+
+
+
 def prepareObservations(meteor_list):
     """ Takes a list of MeteorObservation objects, normalizes all data points to the same reference Julian 
         date, precesses the observations from J2000 to the epoch of date. 
@@ -177,6 +191,7 @@ def prepareObservations(meteor_list):
         # Apply the normalization to the reference meteor
         meteor_list[ref_ind].jdt_ref += jdt_delta
         meteor_list[ref_ind].time_data -= tsec_delta
+        shiftFlareTimes(meteor_list[ref_ind], -tsec_delta)
 
 
         meteor_list_tcorr = []
@@ -193,6 +208,7 @@ def prepareObservations(meteor_list):
                 # Normalize all meteor times to the same reference time
                 meteor.jdt_ref -= jdt_diff
                 meteor.time_data += tsec_diff
+                shiftFlareTimes(meteor, tsec_diff)
 
             meteor_list_tcorr.append(meteor)
 
@@ -298,7 +314,8 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
 
             traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
                 meteor.longitude, meteor.height, station_id=meteor.station_id, \
-                magnitudes=meteor.mag_data, comment=comment, radec_jd=radec_jd)
+                magnitudes=meteor.mag_data, comment=comment, radec_jd=radec_jd, \
+                flare_times=getattr(meteor, 'flare_times', None))
 
         elif solver.lower().startswith('gural'):
 

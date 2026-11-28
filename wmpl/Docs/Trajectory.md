@@ -140,6 +140,24 @@ at the middle of their exposure, and RMS times the frames of FF files at their b
 the trajectory share those times and the solver fits the time offsets of the stations, so the heights and
 pressures follow the position of the meteor in the frame either way.
 
+The drag fit of the solver lets the ballistic coefficient K jump at the flares, as at a fragmentation: it
+gets a knot of K at the first point of every flare, used in the trajectory or not, with the penalty of the
+other steps of K. Each station places its flares with its own points around them, in its own time, so the
+knots need no time offsets, and the flares of different stations closer than two frames along the path give
+one knot, at their median position. Other input formats can give the flares to
+`Trajectory.infillTrajectory()` as `flare_times`. On 120 deep fireballs simulated with MetSim (15 to 20 km/s,
+2 or 3 fragmentations losing 10 to 80 % of the mass each, the last one 1.5 to 9 km above the end), with every
+camera flagging the frame nearest to each fragmentation give or take one frame, the knots lowered the error
+of the speed at the last point from 128 to 57 m/s RMS, and the median error of the dynamic mass there (from
+K) from 18 to 7 %, and left the initial velocity as it was (4.3 against 4.4 m/s RMS). Flares where the
+meteor did not fragment did not change the error of the speed at the end beyond the noise (+3 m/s on
+average). After the
+last iteration the drag fit is done again without the knots. The knots are dropped with a warning, and the
+trajectory solved again without them, if the fit with them ends with a cost more than 1 % higher or moves the
+initial velocity by more than its standard deviation; neither happened in these simulations. The report
+lists the knots with their stations, and gives the initial and final speed, K and terminal mass of the fit
+without them.
+
 ```
 python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 ```
@@ -148,6 +166,7 @@ python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
 | :--- | :--- |
 | `--fragments` | After the main fragment, solve every additional fragment seen from at least 2 stations with the same options (Monte Carlo included), save each one in a `fragment_k` folder of the output directory, and print how it differs from the main one: convergence angle of its stations, radiant, velocities, heights, distance from the main path and how far ahead of the main fragment it is at the same time. |
 | `--fragtimefit` | Estimate the station time offsets for every fragment, instead of reusing those of the main trajectory, which its larger number of points constrains better. Without the timing estimation (`-e`), the fragments take the same fixed offsets as the main fragment. |
+| `--noflareknots` | Do not let K of the drag fit jump at the flares (see above). |
 | `--fragnosys` | Leave out of the Monte Carlo uncertainties of the fragments the systematic errors of the stations, which are otherwise included when the main trajectory has 3 stations or more (see below). |
 
 Two solutions differ slightly even for identical data, as each goes through its own iterations of the
