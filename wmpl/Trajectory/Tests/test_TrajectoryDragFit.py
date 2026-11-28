@@ -22,7 +22,7 @@ import numpy as np
 from wmpl.Trajectory.Tests.SyntheticTrajectory import DragMeteor, GravityDragMeteor, JDT_REF, STATIONS, \
     observeMeteor, timingOffsets
 from wmpl.Trajectory.Trajectory import DragTimingFit, Trajectory, _MCTrajSolve, _updateDragMCResults, \
-    checkMCTrajectories, computeStationCoverage, findObservedWindows, plotDragTrajectory
+    checkMCTrajectories, computeStationCoverage, findObservedWindows, plotDragTrajectory, sampleMCVelocities
 from wmpl.Utils.DragFit import DragFit
 from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.Physics import trajectoryLightCurve
@@ -678,3 +678,75 @@ def testDetectDragChangesExcludesAscendingAndLowPressure():
     fit_hi = copy.deepcopy(traj_desc.drag_timing_fit)
     fit_hi.rho = np.full_like(fit_hi.rho, 1e-9)
     assert fit_hi.detectDragChanges() == []
+
+
+
+def testDragMCVelocityUncertaintyIncludesDirectFitSpread():
+    """ Verify that drag-coupled Monte Carlo runs with timing estimation sample initial velocities within
+        their direct-fit uncertainty so velocity and orbital uncertainties are not underestimated, while
+        keeping the reported solution unperturbed and handling edge cases in sampleMCVelocities cleanly.
+    """
+
+    meteor = DragMeteor(15000.0, 90.0, 45.0, 0.005, 0.005, 2.7, 10.0, ground_drag=True)
+
+    # Nominal solve without MC
+    traj_nom = observeMeteor(meteor, noise=60.0, fps=25.0, seed=3, stations=STATIONS, \
+        clock_offsets={'B': 0.05, 'C': -0.04}, gravity_correction=False, calc_orbit=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj_nom = traj_nom.run()
+
+    # Drag-coupled MC solve with timing estimation enabled
+    np.random.seed(42)
+    traj_mc = observeMeteor(meteor, noise=60.0, fps=25.0, seed=3, stations=STATIONS, \
+        clock_offsets={'B': 0.05, 'C': -0.04}, gravity_correction=False, calc_orbit=True, \
+        monte_carlo=True, mc_runs=25, mc_cores=1)
+    with contextlib.redirect_stdout(io.StringIO()):
+        traj_mc = traj_mc.run()
+
+    assert traj_mc is not None
+    assert traj_mc.uncertainties is not None
+    assert traj_nom.v_init_stddev > 5.0
+
+    # MC velocity and geocentric speed uncertainties must reflect the direct-fit uncertainty
+    assert traj_mc.uncertainties.v_init > 0.5*traj_nom.v_init_stddev
+    assert traj_mc.uncertainties.v_g > 0.5*traj_nom.v_init_stddev
+    assert traj_mc.uncertainties.a > 0.0
+    assert traj_mc.uncertainties.e > 0.0
+
+    # Reported best solution velocity is not randomly perturbed by sampleMCVelocities
+    assert abs(traj_mc.v_init - traj_nom.v_init) < 0.5*traj_nom.v_init_stddev
+
+    # Guard checks in sampleMCVelocities for invalid v_init/std, missing orbit and near-escape velocities
+    np.random.seed(7)
+    bad_cases = []
+    for bad_std in (None, 0.0, np.nan, np.inf):
+        t_bad = copy.copy(traj_nom)
+        t_bad.v_init_stddev = bad_std
+        bad_cases.append(t_bad)
+    for bad_v in (None, np.nan):
+        t_bad = copy.copy(traj_nom)
+        t_bad.v_init = bad_v
+        bad_cases.append(t_bad)
+    out_bad = sampleMCVelocities(bad_cases)
+    for t_in, t_out in zip(bad_cases, out_bad):
+        if (t_in.v_init is not None) and np.isfinite(t_in.v_init):
+            assert t_out.v_init == t_in.v_init
+        else:
+            assert (t_out.v_init is None) or (not np.isfinite(t_out.v_init))
+        assert t_out.orbit is t_in.orbit
+
+    # Missing orbit (calc_orbit=False) samples positive v_init without computing an orbit
+    t_no_orb = copy.copy(traj_nom)
+    t_no_orb.orbit = None
+    t_no_orb.v_init_stddev = 50.0
+    out_no_orb = sampleMCVelocities([t_no_orb])[0]
+    assert out_no_orb.orbit is None
+    assert out_no_orb.v_init > 0.0
+    assert out_no_orb.v_init != t_no_orb.v_init
+
+    # Near-escape velocity with wide uncertainty must preserve a valid geocentric orbit
+    t_slow = copy.copy(traj_nom)
+    t_slow.v_init = 11500.0
+    t_slow.v_init_stddev = 1200.0
+    out_slow = sampleMCVelocities([t_slow]*15)
+    assert all((t_s.v_init > 0.0) and (t_s.orbit.ra_g is not None) for t_s in out_slow)
