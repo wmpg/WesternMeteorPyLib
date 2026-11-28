@@ -10,7 +10,6 @@ Run with pytest:
 
 from __future__ import print_function, division, absolute_import
 
-import datetime
 import os
 import tempfile
 
@@ -24,12 +23,10 @@ matplotlib.use('Agg')
 from wmpl.Formats.ECSV import ecsvFragments, loadECSVs, appliedTimeOffsets, solverStationIDs, \
     originalPicksTrajectory
 from wmpl.Formats.GenericFunctions import solveTrajectoryGeneric
+from wmpl.Formats.Tests.StraightMeteorECSV import writeStraightMeteorECSVs
 from wmpl.Formats.Tests.SyntheticECSV import FRAGMENT, writeFragmentECSV
-from wmpl.Trajectory.Tests.SyntheticTrajectory import STRAIGHT_JDT_REF, STRAIGHT_STATIONS, \
-    stationAzimAlt, straightMeteorPoints
 from wmpl.Utils.Math import angleBetweenVectors
 from wmpl.Utils.Pickling import savePickle
-from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 
 
 
@@ -63,7 +60,7 @@ def testAdditionalFragmentColumns(tmp_path):
     assert len(meteors) == 1
     assert len(meteors[0].time_data) == 5
     assert np.isclose(np.degrees(min(meteors[0].elev_data)), 29.0 - 0.3*6)
-    assert set(meteors[0].mag_data) == {10.0}
+    assert np.all(np.isnan(meteors[0].mag_data))
 
 
 
@@ -296,55 +293,6 @@ def testFilesWithoutEmptyRowsAreUnchanged():
 
 
 
-
-def _writeStraightMeteorECSVs(dir_path):
-    """ Write the noise-free straight meteor of SyntheticTrajectory as seen from each of its stations into an
-        ECSV file per station, with the azimuth and altitude at the time of each row.
-
-    Arguments:
-        dir_path: [str] Directory where the files are written.
-
-    Return:
-        (paths, radiant_eci):
-            - paths: [list] Paths to the files.
-            - radiant_eci: [ndarray] True radiant unit vector in ECI coordinates.
-    """
-
-    times, points, _, radiant_eci = straightMeteorPoints()
-
-    # Compute the times of the rows to the microsecond, as they are written, and their Julian dates
-    dt_ref = jd2Date(STRAIGHT_JDT_REF, dt_obj=True)
-    dt_list = [dt_ref + datetime.timedelta(microseconds=int(round(1e6*t))) for t in times]
-    jds = np.array([datetime2JD(dt) for dt in dt_list])
-
-    paths = []
-    for station_id, s_lat, s_lon, ele in STRAIGHT_STATIONS:
-
-        azim, alt = stationAzimAlt(points, jds, s_lat, s_lon, ele)
-
-        # Put the station into the header
-        header = HEADER.replace("obs_latitude: 45.0", "obs_latitude: {:.6f}".format(s_lat))
-        header = header.replace("obs_longitude: 15.0", "obs_longitude: {:.6f}".format(s_lon))
-        header = header.replace("obs_elevation: 200.0", "obs_elevation: {:.1f}".format(ele))
-        header = header.replace("XX0001", station_id)
-
-        # Write a row per point, with the azimuth and altitude in degrees
-        rows = []
-        for i, dt in enumerate(dt_list):
-            rows.append(",".join([dt.strftime("%Y-%m-%dT%H:%M:%S.%f"), "0.0", "0.0", \
-                "{:.9f}".format(np.degrees(azim[i])), "{:+.9f}".format(np.degrees(alt[i])), "0.0", "0.0", \
-                "+0.00"]))
-
-        path = os.path.join(dir_path, "{:s}.ecsv".format(station_id))
-        with open(path, "w") as f:
-            f.write(header + ",".join(COLUMNS) + "\n" + "\n".join(rows) + "\n")
-
-        paths.append(path)
-
-    return paths, radiant_eci
-
-
-
 def _solveStraightMeteor(radec_per_point):
     """ Solve the straight meteor from its ECSV files without noise.
 
@@ -357,7 +305,7 @@ def _solveStraightMeteor(radec_per_point):
 
     with tempfile.TemporaryDirectory() as tmp_dir:
 
-        paths, radiant_eci = _writeStraightMeteorECSVs(tmp_dir)
+        paths, _, radiant_eci = writeStraightMeteorECSVs(tmp_dir)
         jdt_ref, meteor_list = loadECSVs(paths, radec_per_point=radec_per_point)
 
         traj = solveTrajectoryGeneric(jdt_ref, meteor_list, tmp_dir, estimate_timing_vel=False, \

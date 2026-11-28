@@ -32,6 +32,10 @@
     # Define the length variance in meters (used to weight the cost function)
     "len_sigma": 2.0,
 
+    # Fit the time at which the simulation passes the height of the first observed point, instead of fixing
+    # it to the time of that point (true by default)
+    "fit_time_offset": true,
+
     # Define the fit parameters and bounds
     "fit_sets":
     [   

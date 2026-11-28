@@ -15,21 +15,31 @@ or standalone (no pytest required):
     python -m wmpl.Utils.Tests.test_AlphaBeta
 """
 
+import subprocess
+import sys
 import time
 
 import numpy as np
+import scipy.integrate
 import scipy.special
+import scipy.stats
 
 import matplotlib
 matplotlib.use("Agg")  # headless - plotAlphaBeta() tests must not require a display or block
 import matplotlib.pyplot as plt
 
+from wmpl.Utils.AlphaBeta import alphaBetaEntryVelocityWithGravity, alphaBetaResidualTrend, \
+    exponentialAtmosphereDensityRatio, exponentialAtmosphereHeights, RESIDUAL_TREND_SIGMA, RHO_ATM_0
 from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLightCurve,
     alphaBetaMasses, alphaBetaVelocity, alphaBetaHeight, alphaBetaVelocityNormed,
     alphaBetaVelocityNormedLUT, alphaBetaHeightNormed, alphaBetaLuminosityF,
     alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
     plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
-    getDefaultInverseEiLUT, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+    getDefaultInverseEiLUT, fitAlphaBetaLag, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+from wmpl.Utils.AlphaBeta import profileAlphaBetaLag, profileIntervalText, plotAlphaBetaLagProfile, \
+    AlphaBetaPath, profileRegionAlphaBetaLag, plotAlphaBetaMassDiagram, plotAlphaBetaMasses, _formatMass, \
+    _formatMu, expLinearLag, expLinearVelocity, profileMassesAlphaBetaLag
+from wmpl.Utils.Tests.AlphaBetaSynthetic import integrateAlphaBetaPath
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -567,6 +577,454 @@ def testFitAlphaBetaRobust():
         raise AssertionError("fitAlphaBeta: ValueError not raised for a bad method name")
 
 
+
+def testFitAlphaBetaSmoothedVelocities():
+    """ Velocities which never exceed the initial velocity, as from a fit of the lag (constant down to a
+        height, then a constant deceleration), give a Q4 residual without a minimum inside the bounds. The
+        Q4 fit used to end at beta = 50 with a velocity curve far from the data, so the velocity residuals
+        must be fitted instead, for both methods.
+    """
+
+    ht_data = np.linspace(85000.0, 25000.0, 120)
+    v_init = 17000.0
+
+    # Constant velocity down to 40 km, then falling linearly with height to 0.2*v_init at 25 km
+    v_data = np.where(ht_data > 40000, v_init, v_init*(1 - 0.8*(40000 - ht_data)/15000))
+
+    for method in ['q4', 'robust']:
+
+        _, alpha, beta = fitAlphaBeta(v_data, ht_data, v_init=v_init, method=method)
+
+        # The fit must not end at a bound
+        _, beta_upper = ALPHA_BETA_BOUNDS[1]
+        assert beta < 0.5*beta_upper, "{:s}: beta = {:.2f} at the bound".format(method, beta)
+
+        # The velocity curve must follow the data (it was 2.9 km/s off at the bound)
+        rmse = np.sqrt(np.mean((alphaBetaVelocity(ht_data, alpha, beta, v_init) - v_data)**2))
+        assert rmse < 1000.0, "{:s}: velocity RMSE {:.0f} m/s".format(method, rmse)
+
+
+
+def _syntheticLag(v_init_true, noise_std, seed, alpha_true=ALPHA_TRUE, beta_true=BETA_TRUE):
+    """ Generate the distances along the path of a synthetic meteor at regular times, by integrating the
+        alpha-beta velocity of alpha_true and beta_true in time, independently of AlphaBetaPath.
+
+    Arguments:
+        v_init_true: [float] Initial velocity (m/s).
+        noise_std: [float] Standard deviation of the Gaussian noise added to the distances (m).
+        seed: [int] Seed of the random noise.
+
+    Keyword arguments:
+        alpha_true: [float] Alpha of the meteor. ALPHA_TRUE by default.
+        beta_true: [float] Beta of the meteor. BETA_TRUE by default.
+
+    Return:
+        (time_data, length_data, ht_data):
+            - time_data: [ndarray] Times (s).
+            - length_data: [ndarray] Noisy distances along the path (m).
+            - ht_data: [ndarray] Heights at the true distances (m).
+    """
+
+    # Integrate the distance at regular times along a straight path from 90 km, down to 40 km
+    time_data = np.arange(0.0, 6.0, 0.02)
+    length_true, ht_data = integrateAlphaBetaPath(time_data, v_init_true, alpha_true, beta_true, SLOPE, \
+        90000.0)
+
+    # Keep the points above 40 km and add the noise
+    keep = ht_data > 40000.0
+    rng = np.random.RandomState(seed)
+    length_data = length_true[keep] + rng.normal(0, noise_std, np.sum(keep))
+
+    return time_data[keep], length_data, ht_data[keep]
+
+
+
+def testSmoothLagModelIsContinuous():
+    """ The smooth model of the lag (expLinearLag()) is continuous where the deceleration becomes
+        constant, and its time derivative is the velocity of expLinearVelocity() minus v0 on both sides.
+    """
+
+    v0 = 15000.0
+
+    for a1, a2, t0, decel in [(20.0, 1.5, 3.6, 6.0), (500.0, 0.7, 2.0, 3.0)]:
+
+        # The lag just before the transition and at it
+        lag_before, lag_at = expLinearLag(np.array([t0 - 1e-9, t0]), a1, a2, t0, decel)
+
+        assert abs(lag_at - lag_before) < 1e-3, "The lag jumps by {:.3f} m at t0 = {:.1f} s".format( \
+            lag_at - lag_before, t0)
+
+        # Central differences of the lag before and after the transition
+        time_arr = np.array([0.5*t0, t0 + 0.5])
+        dt = 1e-6
+        lag_rate = (expLinearLag(time_arr + dt, a1, a2, t0, decel) \
+            - expLinearLag(time_arr - dt, a1, a2, t0, decel))/(2*dt)
+
+        assert np.allclose(lag_rate, expLinearVelocity(time_arr, v0, a1, a2, t0, decel) - v0, atol=1e-3)
+
+
+
+def testFitAlphaBetaLag():
+    """ The fit of the lag should recover alpha, beta and the initial velocity of a synthetic meteor, from
+        an initial velocity which is 1% off, with residuals consistent with the noise.
+    """
+
+    noise_std = 20.0
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, noise_std, 42)
+
+    v_init, alpha, beta, residuals = fitAlphaBetaLag(time_data, length_data, ht_data, 1.01*V_INIT_TRUE)
+
+    _assertClose(alpha, ALPHA_TRUE, 0.05, "alpha (lag)")
+    _assertClose(beta, BETA_TRUE, 0.05, "beta (lag)")
+    _assertClose(v_init, V_INIT_TRUE, 0.001, "v_init (lag)")
+
+    # The residuals must be close to the noise
+    rmse = np.sqrt(np.mean(residuals**2))
+    assert rmse < 1.2*noise_std, "lag fit RMSE {:.1f} m > {:.1f} m".format(rmse, 1.2*noise_std)
+
+    # With the initial velocity fixed to the true one, alpha and beta are recovered too
+    v_init_fixed, alpha, beta, _ = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        fit_v_init=False)
+
+    assert v_init_fixed == V_INIT_TRUE
+    _assertClose(alpha, ALPHA_TRUE, 0.05, "alpha (lag, fixed v_init)")
+    _assertClose(beta, BETA_TRUE, 0.05, "beta (lag, fixed v_init)")
+
+
+
+def testFitAlphaBetaLagGravity():
+    """ The distance gained from gravity along the path biases the fit of the lag, as the model has no
+        gravity, and taking it out recovers the true parameters.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 11)
+
+    # Add the distance gained from gravity along the path of the synthetic meteor
+    gravity_length = 0.5*9.81*np.sin(SLOPE)*time_data**2
+    length_gravity = length_data + gravity_length
+
+    # Without the correction the initial velocity is biased by more than 1 m/s
+    v_init_biased, _, _, _ = fitAlphaBetaLag(time_data, length_gravity, ht_data, V_INIT_TRUE)
+    assert abs(v_init_biased - V_INIT_TRUE) > 1.0
+
+    # With the gravity taken out the true parameters are recovered
+    v_init, alpha, beta, _ = fitAlphaBetaLag(time_data, length_gravity - gravity_length, ht_data, \
+        V_INIT_TRUE)
+
+    # The 1 sigma uncertainty of beta is about 5% at this noise, so allow 2 sigma
+    _assertClose(alpha, ALPHA_TRUE, 0.05, "alpha (lag, gravity taken out)")
+    _assertClose(beta, BETA_TRUE, 0.1, "beta (lag, gravity taken out)")
+    _assertClose(v_init, V_INIT_TRUE, 0.001, "v_init (lag, gravity taken out)")
+
+
+
+def testFitAlphaBetaLagErrors():
+    """ The uncertainties of the fit of the lag should cover the true values, and be large for a meteor
+        which does not decelerate.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    # The covariance must be finite, with the true values within 3 sigma in the log space
+    assert np.all(np.isfinite(errors['cov_log']))
+    assert abs(np.log(alpha/ALPHA_TRUE)) < 3*errors['alpha_std_rel']
+    assert abs(np.log(beta/BETA_TRUE)) < 3*errors['beta_std_rel']
+    assert errors['alpha_ci_wald_lower'] < alpha < errors['alpha_ci_wald_upper']
+    assert errors['v_init_std'] > 0
+
+    # The masses take the covariance directly
+    v_final = np.min(alphaBetaVelocity(ht_data, alpha, beta, v_init))
+    _, _, mass_errors = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, vel_init=v_init, \
+        vel_end=v_final, estimate_errors=True, cov_log=errors['cov_log'])
+    assert np.isfinite(mass_errors['m_init_std_rel'])
+
+    # Without more points than parameters the uncertainties are NaN, with all keys present
+    _, _, _, _, errors_few = fitAlphaBetaLag(time_data[:3], length_data[:3], ht_data[:3], V_INIT_TRUE, \
+        estimate_errors=True)
+    assert np.isnan(errors_few['v_init_std']) and np.all(np.isnan(errors_few['cov_full']))
+
+    # A meteor which does not decelerate leaves beta unconstrained
+    length_const = V_INIT_TRUE*time_data + np.random.RandomState(3).normal(0, 20.0, len(time_data))
+    _, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_const, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+    assert (not np.isfinite(errors['beta_std_rel'])) or (errors['beta_std_rel'] > 1.0)
+
+
+
+def testProfileAlphaBetaLag():
+    """ The profile intervals of the fit of the lag should cover the true values and agree with the Wald
+        intervals when alpha and beta are well constrained.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=20)
+
+    for name, value, true_value in [('alpha', alpha, ALPHA_TRUE), ('beta', beta, BETA_TRUE)]:
+
+        # Both sides are constrained and the interval covers the fit and the true value
+        assert not (profile[name + '_lower_at_bound'] or profile[name + '_upper_at_bound'])
+        assert profile[name + '_lower'] < value < profile[name + '_upper']
+        assert profile[name + '_lower'] < true_value < profile[name + '_upper']
+
+        # The Wald interval is close to the profile interval for a well constrained parameter
+        _assertClose(profile[name + '_lower'], errors[name + '_ci_wald_lower'], 0.1, name + " lower")
+        _assertClose(profile[name + '_upper'], errors[name + '_ci_wald_upper'], 0.1, name + " upper")
+
+    # The fit is the lowest point found by the profiles and the grid
+    assert profile['min_delta_chi2'] > -0.1
+
+    # The models within the interval of one parameter reach the profile interval of alpha, so the interval of
+    #   a quantity derived from them, e.g. the initial mass, follows the interval of alpha
+    region_alpha, _, _ = profileRegionAlphaBetaLag(profile, n_params=1)
+    _assertClose(np.min(region_alpha), profile['alpha_lower'], 0.01, "lowest alpha of the region")
+    _assertClose(np.max(region_alpha), profile['alpha_upper'], 0.01, "highest alpha of the region")
+
+    # The minimum of the grid is within the 1 sigma region, and alpha and beta are anticorrelated
+    assert profile['grid_delta_chi2'].shape == (20, 20)
+    assert np.min(profile['grid_delta_chi2']) < scipy.stats.chi2.ppf(0.6827, 2)
+    assert profile['corr_log'] < 0
+
+    assert " - " in profileIntervalText(profile, 'beta')
+
+
+
+def testProfileAlphaBetaLagNarrowInterval():
+    """ An interval narrower than the first step of the profile should still be found, and agree with the
+        Wald interval on both sides of the best fit, within the asymmetry of the profile.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 2.0, 7)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=0)
+
+    for name, value in [('alpha', alpha), ('beta', beta)]:
+        _assertClose(value - profile[name + '_lower'], value - errors[name + '_ci_wald_lower'], 0.5, \
+            name + " lower half width")
+        _assertClose(profile[name + '_upper'] - value, errors[name + '_ci_wald_upper'] - value, 0.5, \
+            name + " upper half width")
+
+
+
+def testProfileAlphaBetaLagStartingVelocity():
+    """ The profiles should keep the bounds of the initial velocity of the fit, centered on its starting
+        point, and not find a better fit than the best one outside of them.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+
+    # Start the fit from an initial velocity which is far off, so the fitted one ends at its bound
+    v_init_start = 16000.0
+    v_init, alpha, beta, _ = fitAlphaBetaLag(time_data, length_data, ht_data, v_init_start)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, \
+        v_init_start=v_init_start, n_grid=0)
+
+    # With the bounds centered on the fitted velocity the profiles find fits about 200 lower in chi-squared,
+    #   with the right bounds only a slightly better local minimum than the fit from the far start
+    for name in ['alpha', 'beta']:
+        assert np.min(profile[name + '_profile'][1]) > -10.0
+
+
+
+def testProfileAlphaBetaLagUpperLimit():
+    """ A meteor which loses almost no mass leaves beta without a lower limit, which the profile should
+        report, while the Wald uncertainty of beta is meaningless.
+    """
+
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 5, beta_true=0.001)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=8)
+
+    # Beta has only an upper limit, below the upper bound of the fit, and alpha is constrained
+    assert profile['beta_lower_at_bound'] and (not profile['beta_upper_at_bound'])
+    assert profile['beta_upper'] < ALPHA_BETA_BOUNDS[1][1]
+    assert not (profile['alpha_lower_at_bound'] or profile['alpha_upper_at_bound'])
+    assert profileIntervalText(profile, 'beta') == "0 - {:.3g} (consistent with zero)".format( \
+        profile['beta_upper'])
+    assert profileIntervalText(profile, 'beta', notes=False) == "0 - {:.3g}".format(profile['beta_upper'])
+
+    # The plot is drawn also when the Wald region is far larger than the bounds of the fit
+    fig = plotAlphaBetaLagProfile(profile, alpha, beta, errors=errors, title="Test")
+    plt.close(fig)
+
+    # The models within the 95% region include the best fit
+    region_alpha, region_beta, region_v_init = profileRegionAlphaBetaLag(profile)
+    assert len(region_alpha) == len(region_beta) == len(region_v_init) > 0
+    assert np.min(region_beta) < profile['beta_upper']
+
+    # The survival diagram draws the regions of the profile
+    fig, _ = plotAlphaBetaSurvivalDiagram(alpha, beta, SLOPE, errors=errors, profile=profile, \
+        axes=plt.subplots()[1])
+    plt.close(fig)
+
+    # The diagram with straight lines of the final mass covers the best fit, with beta from 0
+    fig, ax = plotAlphaBetaMassDiagram(alpha, beta, SLOPE, profile=profile)
+    assert ax.get_ylim()[0] == 0
+    assert ax.get_xlim()[0] < alpha*np.sin(SLOPE) < ax.get_xlim()[1]
+    plt.close(fig)
+
+    # The masses are drawn also without an interval, with an open side and when not defined
+    fig, ax = plotAlphaBetaMasses([("A", 0.07, 0.03, 0.08, 'k'), ("B", 0.2, 0.1, np.inf, 'k'), \
+        ("C", 0.5, None, None, 'k'), ("D", np.nan, None, None, 'k'), ("E", 0.3, 0.0, 0.9, 'k'), \
+        ("F", 0.3, 0.0, np.inf, 'k'), ("G", 1e-5, 1e-6, 1e-4, 'k'), ("H", 1e-5, None, None, 'k')])
+    assert len(ax.get_yticklabels()) == 8
+
+    # The axis starts at 1 g, the smaller masses are shown with arrows at its left edge
+    assert ax.get_xlim()[0] == 0.001
+    texts = [text.get_text() for text in ax.texts]
+    assert any(text.endswith("(95%: > 100 g)") for text in texts)
+    assert any(text.endswith("(95%: < 900 g)") for text in texts)
+    assert any(text.endswith("(95%: not constrained)") for text in texts)
+    plt.close(fig)
+
+
+
+def testProfileIntervalTextBounds():
+    """ The interval of beta which reaches the lower bound of the fit should start at zero, while an open side
+        of alpha and the upper side of beta stay without a limit.
+    """
+
+    def _profile(name, lower_at_bound, upper_at_bound):
+        """ Profile with the interval 0.5 - 2 of the given parameter and the given open sides. """
+
+        return {name + '_lower': 0.5, name + '_upper': 2.0, name + '_lower_at_bound': lower_at_bound, \
+            name + '_upper_at_bound': upper_at_bound}
+
+
+    # Beta at the lower bound is consistent with zero
+    assert profileIntervalText(_profile('beta', True, False), 'beta') == "0 - 2 (consistent with zero)"
+    assert profileIntervalText(_profile('beta', True, False), 'beta', notes=False) == "0 - 2"
+
+    # The other open sides have no limit
+    assert profileIntervalText(_profile('alpha', True, False), 'alpha') == "< 2 (no lower limit)"
+    assert profileIntervalText(_profile('alpha', True, False), 'alpha', notes=False) == "< 2"
+    assert profileIntervalText(_profile('beta', False, True), 'beta') == "> 0.5 (no upper limit)"
+    assert profileIntervalText(_profile('alpha', False, True), 'alpha') == "> 0.5 (no upper limit)"
+
+    # Both sides open or both closed
+    assert profileIntervalText(_profile('beta', True, True), 'beta') == "not constrained"
+    assert profileIntervalText(_profile('beta', False, False), 'beta') == "0.5 - 2"
+
+
+
+def testProfileMassesAlphaBetaLagBetaAtZero():
+    """ A meteor whose lag gives only an upper limit of beta should have bounded profile intervals of the
+        initial and final masses, as the masses are finite at beta = 0, while the Wald uncertainty of beta
+        from the covariance of ln alpha and ln beta explodes.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 5, beta_true=0.001)
+
+    v_init, alpha, beta, _, errors = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE, \
+        estimate_errors=True)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=12)
+
+    # Beta is consistent with zero and its Wald uncertainty is not meaningful
+    assert profile['beta_lower_at_bound'] and (not profile['beta_upper_at_bound'])
+    assert (not np.isfinite(errors['beta_std_rel'])) or (errors['beta_std_rel'] > 1.0)
+
+    # Masses of the models within the interval, with the final velocity at the lowest point
+    ht_end = np.min(ht_data)
+    m_init_true, _ = alphaBetaMasses(ALPHA_TRUE, 0.001, SLOPE, dens=DENS_TRUE)
+    for mu in [0, 2/3]:
+
+        m_init, m_final = profileMassesAlphaBetaLag(profile, alpha, beta, v_init, SLOPE, ht_end, mu=mu, \
+            dens=DENS_TRUE)
+
+        # The intervals are finite, positive and bounded, and the final mass is never above the initial one
+        assert len(m_init) == len(m_final) > 1
+        assert np.all(np.isfinite(m_init)) and np.all(np.isfinite(m_final))
+        assert np.min(m_final) > 0
+        assert np.all(m_final <= m_init*(1 + 1e-12))
+        assert np.max(m_init)/np.min(m_init) < 2.0
+        assert np.max(m_final)/np.min(m_final) < 10.0
+
+        # The interval of the initial mass covers the true one, and the final mass reaches the initial one
+        #   at beta = 0
+        assert np.min(m_init) < m_init_true < np.max(m_init)
+        assert np.max(m_final) > 0.9*np.min(m_init)
+
+        # The best fit is included
+        _assertClose(m_init[-1], alphaBetaMasses(alpha, beta, SLOPE, mu=mu, dens=DENS_TRUE)[0], 1e-12, \
+            "initial mass of the best fit")
+
+    # Without the grid there is no interval
+    profile_no_grid = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=0)
+    m_init, m_final = profileMassesAlphaBetaLag(profile_no_grid, alpha, beta, v_init, SLOPE, ht_end)
+    assert len(m_init) == len(m_final) == 0
+
+
+
+def testPlotAlphaBetaLagProfileCoarseGrid():
+    """ The plot of the uncertainties should be drawn also when the grid is too coarse to have points within
+        the 3 sigma region, from the extent of the profiles.
+    """
+
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+    v_init, alpha, beta, _ = fitAlphaBetaLag(time_data, length_data, ht_data, V_INIT_TRUE)
+
+    profile = profileAlphaBetaLag(time_data, length_data, ht_data, v_init, alpha, beta, n_grid=2)
+
+    fig = plotAlphaBetaLagProfile(profile, alpha, beta)
+    plt.close(fig)
+
+
+
+def testFormatMassAndMu():
+    """ Masses are written with a readable unit and mu = 2/3 as a fraction. """
+
+    assert _formatMass(0.142) == "142 g"
+    assert _formatMass(2.3) == "2.3 kg"
+    assert _formatMass(5e-5) == "50 mg"
+    assert _formatMass(2500.0) == "2.5 t"
+    assert _formatMu(2/3) == "2/3"
+    assert _formatMu(0) == "0"
+
+
+
+def testAlphaBetaPathLengthsSmooth():
+    """ The cost of the fit to the lag should change smoothly with alpha, so the fit and the profiles are not
+        thrown off by jumps of the time offset of the model.
+    """
+
+    time_data, length_data, ht_data = _syntheticLag(V_INIT_TRUE, 20.0, 7)
+    path = AlphaBetaPath(length_data, ht_data)
+
+    # Cost along small steps of alpha around the true value, in units of the noise variance
+    alpha_values = ALPHA_TRUE*np.exp(np.linspace(-0.002, 0.002, 11))
+    costs = []
+    for alpha in alpha_values:
+        length_model, _ = path.lengths(time_data, alpha, BETA_TRUE, V_INIT_TRUE, length_data=length_data)
+        costs.append(np.sum((length_data - length_model)**2)/20.0**2)
+
+    # The cost follows a parabola closely
+    coeffs = np.polyfit(np.log(alpha_values), costs, 2)
+    assert np.max(np.abs(np.polyval(coeffs, np.log(alpha_values)) - costs)) < 0.1
+
+
+
 def testFitAlphaBetaErrorEstimationRejectsQ4():
     """ estimate_errors=True must be rejected for method='q4' - Q4's L1/Nelder-Mead fit has no
         natural Jacobian to build an analytic covariance from.
@@ -751,13 +1209,15 @@ def testFitAlphaBetaErrorEstimationBoundPinned():
         an actual trajectory (beta landing at 49.99995, a hair under the upper bound of 50) came
         back with alpha_std_rel/beta_std_rel/cov_log/etc. all NaN and no explanation.
 
-        The true beta here is set well beyond the upper bound, so the constrained fit has no
-        choice but to pin against that edge - reproduces the same pathology deterministically.
+        The true alpha here is set well beyond its upper bound, so the meteor barely decelerates
+        over the heights of the data and the constrained fit has no choice but to pin beta against
+        its upper bound - reproduces the same pathology deterministically. A true beta beyond its
+        bound does not, as a velocity curve inside the bounds then fits the data well.
     """
 
-    beta_true_extreme = 150.0
+    alpha_true_extreme = 1e5
 
-    v_clean = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    v_clean = alphaBetaVelocity(HT_DATA, alpha_true_extreme, BETA_TRUE, V_INIT_TRUE)
     rng = np.random.RandomState(42)
     v_data = v_clean + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
 
@@ -895,9 +1355,9 @@ def testAlphaBetaMassesErrorEstimationBoundPinnedPropagatesNaN():
         not raise - the same graceful-degradation contract as fitAlphaBeta() itself.
     """
 
-    beta_true_extreme = 150.0
+    alpha_true_extreme = 1e5
 
-    v_clean = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    v_clean = alphaBetaVelocity(HT_DATA, alpha_true_extreme, BETA_TRUE, V_INIT_TRUE)
     rng = np.random.RandomState(42)
     v_data = v_clean + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
 
@@ -1106,10 +1566,10 @@ def testPlotAlphaBetaGracefulDegradation():
     fig, axes = plotAlphaBeta(v_data, HT_DATA, fit, errors=None, residuals=True, seed=0)
     plt.close(fig)
 
-    # A true beta far beyond ALPHA_BETA_BOUNDS pins the fit against its upper bound, the same
-    #   deterministic setup as testFitAlphaBetaErrorEstimationBoundPinned()
-    beta_true_extreme = 150.0
-    v_clean_extreme = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    # A true alpha far beyond ALPHA_BETA_BOUNDS pins the fit against the upper bound of beta, the
+    #   same deterministic setup as testFitAlphaBetaErrorEstimationBoundPinned()
+    alpha_true_extreme = 1e5
+    v_clean_extreme = alphaBetaVelocity(HT_DATA, alpha_true_extreme, BETA_TRUE, V_INIT_TRUE)
     rng = np.random.RandomState(42)
     v_data_extreme = v_clean_extreme + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
 
@@ -1262,8 +1722,8 @@ def testPlotAlphaBetaSurvivalDiagramRuns():
     plt.close(fig3)
 
     # A NaN cov_log (bound-pinned fit, same setup as testFitAlphaBetaErrorEstimationBoundPinned)
-    beta_true_extreme = 150.0
-    v_clean_extreme = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    alpha_true_extreme = 1e5
+    v_clean_extreme = alphaBetaVelocity(HT_DATA, alpha_true_extreme, BETA_TRUE, V_INIT_TRUE)
     rng = np.random.RandomState(42)
     v_data_extreme = v_clean_extreme + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
 
@@ -1562,10 +2022,290 @@ def testLightCurveInputValidation():
     _assertRaisesValueError("bad dyn_method", dyn_method="banana")
 
 
+
+def makeNonExponentialAtmosphere():
+    """ Make a density profile whose scale height goes from 6 km at 40 km to 8 km at 100 km, constant
+        outside.
+
+    Return:
+        (hts, rho):
+            - hts: [ndarray] Heights (m).
+            - rho: [ndarray] Air density at hts (kg/m^3).
+    """
+
+    # Integrate the log density over the scale height from 15 km
+    hts = np.arange(15e3, 1000e3 + 1, 100.0)
+    scale = np.interp(hts, [40e3, 100e3], [6000.0, 8000.0])
+    ln_rho = np.log(RHO_ATM_0) - 15e3/6000.0 - np.concatenate([[0], \
+        np.cumsum(np.diff(hts)/((scale[1:] + scale[:-1])/2))])
+
+    return hts, np.exp(ln_rho)
+
+
+
+def simulateDeepFireball(hts, rho, v_e=20000.0, b_e=1.6e-3, sigma=1.5e-8, slope=np.radians(45), \
+    h_first=50e3):
+    """ Integrate the drag and ablation equations of the alpha-beta model (mu = 2/3, no gravity) from
+        200 km through the given atmosphere, and take the speeds at 60 heights from h_first until the
+        body is down to 40% of its initial speed.
+
+    Arguments:
+        hts: [ndarray] Heights of the density profile (m).
+        rho: [ndarray] Air density at hts (kg/m^3).
+
+    Keyword arguments:
+        v_e: [float] Initial speed (m/s). 20000 by default.
+        b_e: [float] Initial drag parameter B of the drag equation (m^2/kg). 1.6e-3 by default.
+        sigma: [float] Ablation coefficient (s^2/m^2). 1.5e-8 by default.
+        slope: [float] Slope of the trajectory (rad). 45 deg by default.
+        h_first: [float] Height of the first point (m). 50 km by default.
+
+    Return:
+        (h_obs, v_obs, alpha, beta):
+            - h_obs: [ndarray] Heights of the points (m).
+            - v_obs: [ndarray] Speeds at the points (m/s).
+            - alpha: [float] True alpha.
+            - beta: [float] True beta.
+    """
+
+    def deriv(h, y):
+        """ Compute the derivatives of the speed and the mass ratio over the height. """
+
+        v, mass_ratio = y
+        r = np.exp(np.interp(h, hts, np.log(rho)))
+        mass_ratio = max(mass_ratio, 1e-12)
+
+        return [b_e*mass_ratio**(-1/3)*r*v/np.sin(slope), sigma*b_e*mass_ratio**(2/3)*r*v**2/np.sin(slope)]
+
+
+    # Integrate from 200 km down to 20 km
+    sol = scipy.integrate.solve_ivp(deriv, [200e3, 20e3], [v_e, 1.0], dense_output=True, rtol=1e-10, \
+        atol=1e-8, max_step=200)
+
+    # Take the points from h_first until the body is down to 40% of its initial speed
+    grid = np.linspace(200e3, 20e3, 20000)
+    h_last = grid[np.nonzero(sol.sol(grid)[0] < 0.4*v_e)[0][0]]
+    h_obs = np.linspace(h_first, h_last, 60)
+
+    return h_obs, sol.sol(h_obs)[0], b_e*RHO_ATM_0*HT_NORM_CONST/np.sin(slope), sigma*v_e**2/6
+
+
+
+def testColumnRescalingIsTheIdentityInTheExponentialAtmosphere():
+    """ Check that in the exponential atmosphere of the model, both the column and the density rescalings
+        leave the heights as they are.
+    """
+
+    hts = np.arange(15e3, 1000e3 + 1, 100.0)
+    rho = RHO_ATM_0*np.exp(-hts/HT_NORM_CONST)
+    ht_data = np.linspace(30e3, 130e3, 50)
+
+    for method in ('column', 'density'):
+        assert np.allclose(exponentialAtmosphereHeights(ht_data, hts, rho, method=method), ht_data, atol=1.0)
+
+
+
+def testColumnRescalingKeepsTheFitExactInANonExponentialAtmosphere():
+    """ Check that the column rescaling with a fitted initial velocity recovers the initial velocity of a
+        fireball at 20 km/s seen from 50 km in an atmosphere whose scale height goes from 6 to 8 km within
+        15 m/s, alpha within 3% and beta within 5%. The density rescaling puts alpha over 10% low, and the
+        initial velocity of the leading points is over 50 m/s low.
+    """
+
+    hts, rho = makeNonExponentialAtmosphere()
+    h_obs, v_true, alpha_true, beta_true = simulateDeepFireball(hts, rho)
+
+    for seed in range(3):
+        v_obs = v_true + np.random.default_rng(seed).normal(0, 50.0, len(v_true))
+
+        # Fit with the column rescaling
+        ht_column = exponentialAtmosphereHeights(h_obs, hts, rho, method='column')
+        v_init, alpha, beta, errors = fitAlphaBeta(v_obs, ht_column, method='robust', sigma_v=50.0, \
+            fit_v_init=True, estimate_errors=True)
+        assert abs(v_init - 20000.0) < min(15.0, 3*errors['v_init_std'])
+        assert abs(alpha/alpha_true - 1) < 0.03 and abs(beta/beta_true - 1) < 0.05
+        assert errors['cov_full'].shape == (3, 3) and np.isfinite(errors['alpha_std_rel'])
+
+        # Fit with the density rescaling
+        ht_density = exponentialAtmosphereHeights(h_obs, hts, rho, method='density')
+        _, alpha_density, _ = fitAlphaBeta(v_obs, ht_density, method='robust', sigma_v=50.0, fit_v_init=True)
+        assert alpha_density/alpha_true < 0.9
+
+        # Fit with the initial velocity of the leading points
+        v_init_leading, _, _ = fitAlphaBeta(v_obs, ht_column, method='robust', sigma_v=50.0)
+        assert v_init_leading < 20000.0 - 50.0
+
+
+
+def testFittingTheInitialVelocityNeedsTheRobustFit():
+    """ Check that the Q4 fit refuses to fit the initial velocity. """
+
+    hts, rho = makeNonExponentialAtmosphere()
+    h_obs, v_true, _, _ = simulateDeepFireball(hts, rho)
+
+    try:
+        fitAlphaBeta(v_true, exponentialAtmosphereHeights(h_obs, hts, rho), method='q4', fit_v_init=True)
+    except ValueError:
+        return
+
+    raise AssertionError("fit_v_init=True with method='q4' did not raise ValueError")
+
+
+
+def testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint():
+    """ Check that the speed of a body falling under gravity alone from 180 km, at 20 km/s to 60 km and at
+        12 km/s to 40 km, is taken back to its speed at 180 km within 0.05 m/s.
+    """
+
+    def g(h):
+        """ Compute the gravity at the given height (m/s^2). """
+
+        return 9.81*(6371008.7714/(6371008.7714 + h))**2
+
+
+    for v_top, h_first in [(20000.0, 60e3), (12000.0, 40e3)]:
+        sol = scipy.integrate.solve_ivp(lambda h, v: [-g(h)/v[0]], [180e3, h_first], [v_top], rtol=1e-12)
+        v_first = sol.y[0][-1]
+        assert v_first - v_top > 50.0
+        assert abs(alphaBetaEntryVelocityWithGravity(v_first, h_first) - v_top) < 0.05
+
+
+
+def makeDeepModelData(seed=0, sigma_v=50.0):
+    """ Make noisy velocities of the alpha-beta model (alpha 20, beta 1, 20 km/s) over a deep window.
+
+    Keyword arguments:
+        seed: [int] Seed of the noise. 0 by default.
+        sigma_v: [float] Standard deviation of the noise (m/s). 50 by default.
+
+    Return:
+        (ht, v):
+            - ht: [ndarray] Heights (m).
+            - v: [ndarray] Velocities (m/s).
+    """
+
+    ht = np.linspace(9.0, 2.5, 80)*HT_NORM_CONST
+    v = alphaBetaVelocity(ht, 20.0, 1.0, 20000.0) + np.random.default_rng(seed).normal(0, sigma_v, len(ht))
+
+    return ht, v
+
+
+
+def testFreeInitialVelocityIsNotPinnedByAnOutlierAtTheTop():
+    """ Check that an outlier of +1500 m/s at the highest point does not pin the fitted initial velocity,
+        which stays within 3 sigma of the true 20 km/s, and that the (ln alpha, ln beta) covariance with
+        v_init held fixed is not larger than the marginal one.
+    """
+
+    ht, v = makeDeepModelData()
+    v[np.argmax(ht)] += 1500.0
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v, ht, method='robust', sigma_v=50.0, fit_v_init=True, \
+        estimate_errors=True)
+
+    assert abs(v_init - 20000.0) < 3*errors['v_init_std']
+    assert abs(alpha/20.0 - 1) < 0.05 and abs(beta - 1) < 0.1
+    assert np.all(np.diag(errors['cov_fit']) <= np.diag(errors['cov_log']) + 1e-15)
+
+
+
+def testResidualTrendFlagsAFragmentationNotNoise():
+    """ Check that the residuals of a body which decelerates three times as fast below a break are flagged
+        as a trend, and those of a single body are not.
+    """
+
+    # Check that the residuals of a single body are not flagged
+    ht, v = makeDeepModelData()
+    v_init, alpha, beta = fitAlphaBeta(v, ht, method='robust', sigma_v=50.0, fit_v_init=True)
+    bands, significant = alphaBetaResidualTrend(v, ht, v_init, alpha, beta)
+    assert (not significant) and max(abs(b[4]) for b in bands) < RESIDUAL_TREND_SIGMA
+
+    # Below the break, take the curve of a body with three times the ballistic coefficient
+    ht_break = 5.5*HT_NORM_CONST
+    below = ht < ht_break
+    v_frag = v.copy()
+    v_frag[below] = alphaBetaVelocity(ht[below], 60.0, 1.0, 20000.0) \
+        - alphaBetaVelocity(ht_break, 60.0, 1.0, 20000.0) + alphaBetaVelocity(ht_break, 20.0, 1.0, 20000.0) \
+        + np.random.default_rng(1).normal(0, 50.0, int(np.sum(below)))
+
+    v_init, alpha, beta = fitAlphaBeta(v_frag, ht, method='robust', sigma_v=50.0, fit_v_init=True)
+    _, significant = alphaBetaResidualTrend(v_frag, ht, v_init, alpha, beta)
+    assert significant
+
+
+
+def testLightCurveNeedsTheDensityRatioWithTheColumnMapping():
+    """ Check that the model magnitudes at the column-rescaled heights, corrected by the density ratio, follow
+        up to an offset the light curve of a single body integrated through an atmosphere whose scale height
+        goes from 6 to 8 km, and that without the correction they do not.
+    """
+
+    hts, rho = makeNonExponentialAtmosphere()
+    v_e, b_e, sigma, slope = 20000.0, 1.6e-3, 1.5e-8, np.radians(45)
+    log_rho = np.log(rho)
+
+    def deriv(h, y):
+        """ Compute the derivatives of the speed and the mass ratio over the height. """
+
+        v, mass_ratio = y
+        r = np.exp(np.interp(h, hts, log_rho))
+        mass_ratio = max(mass_ratio, 1e-12)
+
+        return [b_e*mass_ratio**(-1/3)*r*v/np.sin(slope), sigma*b_e*mass_ratio**(2/3)*r*v**2/np.sin(slope)]
+
+
+    # Integrate the body from 200 km and take the light curve points from 85 to 45 km
+    sol = scipy.integrate.solve_ivp(deriv, [200e3, 20e3], [v_e, 1.0], dense_output=True, rtol=1e-10, \
+        atol=1e-12, max_step=200)
+    h_lc = np.linspace(85e3, 45e3, 40)
+    v, mass_ratio = sol.sol(h_lc)
+    r = np.exp(np.interp(h_lc, hts, log_rho))
+
+    # Compute the luminosity per unit initial mass and luminous efficiency
+    lum = b_e*mass_ratio**(2/3)*r*v**3*(sigma*v**2/2 + 1)
+    mag_true = -2.5*np.log10(lum)
+
+    # Compute the model magnitudes at the column-rescaled heights
+    ht_column = exponentialAtmosphereHeights(h_lc, hts, rho, method='column')
+    ratio = exponentialAtmosphereDensityRatio(h_lc, hts, rho, method='column')
+    mag_model, _ = alphaBetaModelMagnitude(ht_column/HT_NORM_CONST, \
+        b_e*RHO_ATM_0*HT_NORM_CONST/np.sin(slope), sigma*v_e**2/6, 2/3.0)
+
+    def shapeError(mag):
+        """ Compute the largest difference from the true light curve after removing the mean offset. """
+
+        diff = mag - mag_true
+
+        return np.max(np.abs(diff - np.mean(diff)))
+
+
+    assert shapeError(mag_model - 2.5*np.log10(ratio)) < 0.01
+    assert shapeError(mag_model) > 0.05
+
+    # Check that the ratio is 1 with the density mapping
+    assert np.allclose(exponentialAtmosphereDensityRatio(h_lc, hts, rho, method='density'), 1.0)
+
+
+
+
+def testCommandLineHelp():
+    """ Check that the help of the command line prints, which failed on a "%" in a help text that argparse
+        took as a format.
+    """
+
+    result = subprocess.run([sys.executable, '-m', 'wmpl.Utils.AlphaBeta', '--help'], capture_output=True, \
+        text=True, timeout=300)
+
+    assert result.returncode == 0, result.stderr
+    assert "--errors" in result.stdout
+
+
+
 if __name__ == "__main__":
 
     # Standalone runner so the tests can be executed without pytest installed
     test_functions = [
+        testCommandLineHelp,
         testFitAlphaBetaUnconstrained,
         testInitialMassConstraint,
         testFinalMassConstraint,
@@ -1578,6 +2318,13 @@ if __name__ == "__main__":
         testFastFlagPropagation,
         testFastPipelineSpeedup,
         testFitAlphaBetaRobust,
+        testFitAlphaBetaSmoothedVelocities,
+        testSmoothLagModelIsContinuous,
+        testFitAlphaBetaLag,
+        testFitAlphaBetaLagGravity,
+        testFitAlphaBetaLagErrors,
+        testProfileIntervalTextBounds,
+        testProfileMassesAlphaBetaLagBetaAtZero,
         testFitAlphaBetaErrorEstimationRejectsQ4,
         testFitAlphaBetaErrorEstimationRejectsBadCi,
         testFitAlphaBetaErrorEstimationPointEstimateUnchanged,
@@ -1610,6 +2357,13 @@ if __name__ == "__main__":
         testFitAlphaBetaLightCurve,
         testLuminousEfficiency,
         testLightCurveInputValidation,
+        testColumnRescalingIsTheIdentityInTheExponentialAtmosphere,
+        testColumnRescalingKeepsTheFitExactInANonExponentialAtmosphere,
+        testFittingTheInitialVelocityNeedsTheRobustFit,
+        testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint,
+        testFreeInitialVelocityIsNotPinnedByAnOutlierAtTheTop,
+        testResidualTrendFlagsAFragmentationNotNoise,
+        testLightCurveNeedsTheDensityRatioWithTheColumnMapping,
     ]
 
     failed = 0

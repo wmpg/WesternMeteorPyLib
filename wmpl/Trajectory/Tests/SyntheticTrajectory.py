@@ -5,11 +5,13 @@
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
+import scipy.integrate
 
-from wmpl.Trajectory.Trajectory import Trajectory, applyGravityDrop
+from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 from wmpl.Utils.Math import vectMag
-from wmpl.Utils.TrajConversions import altAz2RADec, cartesian2Geo, eci2RaDec, geo2Cartesian, \
+from wmpl.Utils.Physics import earthRotationVelocity
+from wmpl.Utils.TrajConversions import EARTH, G, altAz2RADec, cartesian2Geo, eci2RaDec, geo2Cartesian, \
     raDec2AltAz_vect, raDec2ECI
 
 
@@ -32,7 +34,8 @@ STATIONS = [
 
 
 class DragMeteor(object):
-    def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0):
+    def __init__(self, v_init, azim, elev, k_beg, k_end, t_vis_beg, t_vis_end, dt=0.001, duration=20.0, \
+        ground_drag=False):
         """ Integrate the motion of a meteor decelerated by drag along a straight line. The ballistic
             coefficient grows linearly with time during the visible part of the trajectory.
 
@@ -48,6 +51,8 @@ class DragMeteor(object):
         Keyword arguments:
             dt: [float] Integration step (s). 0.001 s by default.
             duration: [float] Duration of the integration (s). 20 s by default.
+            ground_drag: [bool] If True, the drag acts on the speed relative to the air, which moves with
+                the ground, as on a real meteor. False by default, in which case it acts on the inertial speed.
         """
 
         self.t_vis_beg = t_vis_beg
@@ -58,6 +63,11 @@ class DragMeteor(object):
         self.top_eci = np.array(geo2Cartesian(lat, lon, TOP_HT, JDT_REF))
         ra, dec = altAz2RADec(np.radians(azim), np.radians(elev), JDT_REF, lat, lon)
         self.radiant_eci = np.array(raDec2ECI(ra, dec))
+
+        # Compute the speed of the ground along the line, which the drag takes off the inertial speed
+        v_rotation = 0.0
+        if ground_drag:
+            v_rotation = np.dot(earthRotationVelocity(self.top_eci), -self.radiant_eci)
 
         # Tabulate the air density with height along the line
         len_table = np.linspace(0, 400e3, 401)
@@ -78,7 +88,7 @@ class DragMeteor(object):
             rho = np.exp(np.interp(len_val, len_table, log_rho_table))
             g = np.interp(len_val, len_table, g_table)
 
-            return -k*rho*vel**2 + g
+            return -k*rho*(vel - v_rotation)*np.abs(vel - v_rotation) + g
 
 
         # Integrate with the 4th order Runge-Kutta method
@@ -154,6 +164,100 @@ class DragMeteor(object):
 
 
 
+class GravityDragMeteor(object):
+    def __init__(self, v_init, azim, elev, mass, duration, ht_beg=90000.0, bulk_density=3500.0, gamma_a=0.8, \
+        sigma=0.01e-6, air_rotation=False):
+        """ Integrate the motion of a meteoroid in ECI coordinates under the central gravity of the Earth, the
+            drag along its velocity and the mass loss, so the path is bent by gravity and the drag slows the
+            bending. The air has an exponential density above a spherical Earth.
+
+        Arguments:
+            v_init: [float] Initial velocity (m/s).
+            azim: [float] Azimuth of the radiant at the beginning, +E of due N (deg).
+            elev: [float] Elevation of the radiant at the beginning (deg).
+            mass: [float] Initial mass (kg).
+            duration: [float] Longest duration of the visible part (s). It ends earlier if the meteoroid
+                slows to 2.5 km/s or reaches 15 km.
+
+        Keyword arguments:
+            ht_beg: [float] Height of the beginning (m), above TOP_LAT and TOP_LON. 90 km by default.
+            bulk_density: [float] Bulk density (kg/m^3). 3500 by default.
+            gamma_a: [float] Product of the drag coefficient and the shape factor. 0.8 by default.
+            sigma: [float] Ablation coefficient (kg/J). 0.01 s^2/km^2 by default.
+            air_rotation: [bool] The air rotates with the Earth, and the drag acts against the velocity
+                relative to it. If False, the air is at rest in ECI. False by default.
+        """
+
+        self.t_vis_beg = 0.0
+
+        # The solver takes the drag against the rotating air into account only if the air rotates
+        self.air_rotation = air_rotation
+
+        lat, lon = np.radians(TOP_LAT), np.radians(TOP_LON)
+        begin = np.array(geo2Cartesian(lat, lon, ht_beg, JDT_REF))
+        ra, dec = altAz2RADec(np.radians(azim), np.radians(elev), JDT_REF, lat, lon)
+        self.radiant_eci = np.array(raDec2ECI(ra, dec))
+
+        k = gamma_a*bulk_density**(-2/3.0)
+
+        def derivatives(t, state):
+
+            pos, vel, m = state[:3], state[3:6], max(state[6], 1e-9)
+
+            # Take the velocity relative to the air, which the drag acts against
+            vel_air = vel - earthRotationVelocity(pos) if air_rotation else vel
+
+            r, v = vectMag(pos), vectMag(vel_air)
+            rho = 1.225*np.exp(-(r - EARTH.EQUATORIAL_RADIUS)/7100.0)
+
+            acc = -G*EARTH.MASS*pos/r**3 - k*m**(-1/3.0)*rho*v*vel_air
+
+            return np.r_[vel, acc, -k*sigma*m**(2/3.0)*rho*v**3]
+
+        def tooLow(t, state):
+            return vectMag(state[:3]) - EARTH.EQUATORIAL_RADIUS - 15000.0
+        tooLow.terminal = True
+
+        def tooSlow(t, state):
+            return vectMag(state[3:6]) - 2500.0
+        tooSlow.terminal = True
+
+        self.solution = scipy.integrate.solve_ivp(derivatives, (0, duration), \
+            np.r_[begin, -v_init*self.radiant_eci, mass], method='DOP853', rtol=1e-12, atol=1e-6, \
+            dense_output=True, events=(tooLow, tooSlow))
+
+        self.t_vis_end = self.solution.t[-1]
+
+
+
+    def eciAtTime(self, time_arr):
+        """ Compute the ECI coordinates at the given times from the beginning.
+
+        Arguments:
+            time_arr: [ndarray] Times (s).
+
+        Return:
+            [ndarray] ECI coordinates (m), one row per time.
+        """
+
+        return self.solution.sol(np.atleast_1d(time_arr))[:3].T
+
+
+
+    def velocityAtTime(self, time_arr):
+        """ Compute the ECI velocity vectors at the given times from the beginning.
+
+        Arguments:
+            time_arr: [ndarray] Times (s).
+
+        Return:
+            [ndarray] ECI velocities (m/s), one row per time.
+        """
+
+        return self.solution.sol(np.atleast_1d(time_arr))[3:6].T
+
+
+
 def stationAzimAlt(eci_points, jds, lat, lon, ele):
     """ Compute the directions of points on a trajectory as seen from a station.
 
@@ -181,18 +285,22 @@ def stationAzimAlt(eci_points, jds, lat, lon, ele):
 
 
 
-def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
-    """ Observe the visible part of the synthetic meteor from three stations and make a trajectory object.
-        The times are relative to the beginning of the visible part.
+def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, stations=None, clock_offsets=None, **kwargs):
+    """ Observe the visible part of the synthetic meteor from the stations, three by default, and make a
+        trajectory object. The times are relative to the beginning of the visible part.
 
     Arguments:
-        meteor: [DragMeteor object] Synthetic meteor.
+        meteor: [DragMeteor or GravityDragMeteor object] Synthetic meteor.
 
     Keyword arguments:
         noise: [float] Noise of the azimuth and elevation (arcsec). 30 by default.
         fps: [float] Frame rate of the cameras. 25 by default.
         seed: [int] Seed of the noise. 1 by default.
-        kwargs: Passed to the Trajectory object.
+        stations: [list] Stations in the form of STATIONS. None by default, in which case STATIONS is used.
+        clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
+            default, when all clocks are exact.
+        kwargs: Passed to the Trajectory object. The solver takes the drag against the rotating air into
+            account only for a meteor integrated with it.
 
     Return:
         traj: [Trajectory object] Trajectory object with the observations, not yet solved.
@@ -200,15 +308,22 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
 
     rng = np.random.default_rng(seed)
 
+    if stations is None:
+        stations = STATIONS
+
+    if clock_offsets is None:
+        clock_offsets = {}
+
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
-        show_plots=False, save_results=False, verbose=False)
+        show_plots=False, save_results=False, verbose=False, \
+        air_rotation=getattr(meteor, 'air_rotation', False))
     traj_kwargs.update(kwargs)
     traj = Trajectory(JDT_REF, **traj_kwargs)
 
     duration = meteor.t_vis_end - meteor.t_vis_beg
     noise = np.radians(noise/3600.0)
 
-    for station_id, lat, lon, ele, frac_beg, frac_end in STATIONS:
+    for station_id, lat, lon, ele, frac_beg, frac_end in stations:
 
         # Sample the frames with a random phase
         times = np.arange(frac_beg*duration + rng.uniform(0, 1/fps), frac_end*duration, 1/fps)
@@ -221,7 +336,8 @@ def observeMeteor(meteor, noise=30.0, fps=25.0, seed=1, **kwargs):
         azim = azim + rng.normal(0, noise, len(azim))/np.cos(elev)
         elev = elev + rng.normal(0, noise, len(elev))
 
-        traj.infillTrajectory(azim, elev, times, np.radians(lat), np.radians(lon), ele, station_id=station_id)
+        traj.infillTrajectory(azim, elev, times + clock_offsets.get(station_id, 0.0), np.radians(lat), \
+            np.radians(lon), ele, station_id=station_id)
 
 
     return traj
@@ -252,14 +368,15 @@ STRAIGHT_STATIONS = [
 
 def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, elevation=55.0, \
     gravity_drop=False):
-    """ Compute the points of a straight, constant-velocity meteor.
+    """ Compute the points of a meteor without drag, on a straight line at constant velocity or moving under
+        the central gravity of the Earth.
 
     Keyword arguments:
         duration: [float] Duration of the meteor (s). STRAIGHT_DURATION by default.
         v_init: [float] Velocity of the meteor (m/s). STRAIGHT_V_INIT by default.
         elevation: [float] Elevation of the radiant at the beginning of the meteor (deg). 55 by default.
-        gravity_drop: [bool] Drop the meteor by gravity with applyGravityDrop, so that it is not a straight
-            line anymore. False by default.
+        gravity_drop: [bool] Move the meteor under the central gravity of the Earth from the beginning,
+            which bends its path down and speeds it up. False by default.
 
     Return:
         (times, points, begin, radiant_eci):
@@ -279,11 +396,15 @@ def straightMeteorPoints(duration=STRAIGHT_DURATION, v_init=STRAIGHT_V_INIT, ele
     times = np.linspace(0, duration, STRAIGHT_N_POINTS)
     points = begin - np.outer(v_init*times, radiant_eci)
 
-    # Drop the points by gravity, with the vertical component of the velocity
+    # Move the meteor under the central gravity of the Earth
     if gravity_drop:
-        v0z = -v_init*np.sin(np.radians(elevation))
-        points = np.array([applyGravityDrop(point, t, vectMag(begin), 1.0, v0z) \
-            for point, t in zip(points, times)])
+
+        def derivatives(t, state):
+            return np.r_[state[3:], -G*EARTH.MASS*state[:3]/vectMag(state[:3])**3]
+
+        solution = scipy.integrate.solve_ivp(derivatives, (0, duration), np.r_[begin, -v_init*radiant_eci], \
+            method='DOP853', rtol=1e-12, atol=1e-6, t_eval=times)
+        points = solution.y[:3].T
 
     return times, points, begin, radiant_eci
 
@@ -300,12 +421,13 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
         duration: [float] Duration of the meteor (s). STRAIGHT_DURATION by default.
         v_init: [float] Velocity of the meteor (m/s). STRAIGHT_V_INIT by default.
         elevation: [float] Elevation of the radiant at the beginning of the meteor (deg). 55 by default.
-        gravity_drop: [bool] Drop the meteor by gravity with applyGravityDrop, so that it is not a straight
-            line anymore. False by default.
+        gravity_drop: [bool] Move the meteor under the central gravity of the Earth from the beginning,
+            which bends its path down and speeds it up. False by default.
         clock_offsets: [dict] Seconds by which the clock of the station is ahead, per station ID. None by
             default, when all clocks are exact.
         **kwargs: [dict] Keyword arguments of the Trajectory object, which replace the defaults (no timing
-            offsets above 1 s, no gravity correction, no Monte Carlo, no plots and no saving).
+            offsets above 1 s, no gravity correction, no drag against the rotating air, no Monte Carlo, no
+            plots and no saving).
 
     Return:
         (traj, begin, radiant_eci):
@@ -324,7 +446,7 @@ def observeStraightMeteor(noise=1e-4, seed=1, duration=STRAIGHT_DURATION, v_init
         elevation=elevation, gravity_drop=gravity_drop)
 
     traj_kwargs = dict(meastype=2, max_toffset=1.0, gravity_correction=False, monte_carlo=False, \
-        show_plots=False, save_results=False, verbose=False)
+        show_plots=False, save_results=False, verbose=False, air_rotation=False)
     traj_kwargs.update(kwargs)
     traj = Trajectory(STRAIGHT_JDT_REF, **traj_kwargs)
 
