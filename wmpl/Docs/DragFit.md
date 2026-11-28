@@ -195,12 +195,12 @@ printed at the end. For the example trajectory, sampled every 2 km from 118 to 9
 *  0.342,       96000.0,  44.224849,  -81.362618,    96000.0, 162.187211,  60.906425,     65.566,      379.3,      65.616,      40396.81,          5.101
 ```
 
-- **Azim** and **Elev** are the radiant above a fixed ground. Drag acts against the velocity
-  relative to the air, so it does not turn the direction of motion above the ground, and the radiant
-  is derotated with the initial velocity, as in `Orbit.calcOrbit` and `DynamicMassFit`. Only the
-  bending by gravity changes it. Derotating it with the instantaneous velocity would turn it by about
-  `v_rot*(1/v - 1/v_init)` radians, where `v_rot` is the component of the Earth's rotation velocity
-  across the path: 0.5 deg at the end and 2 deg at 5 km/s for the synthetic fireball of the tests.
+- **Azim** and **Elev** are the radiant above a fixed ground. When the trajectory is solved with
+  gravity and rotating-air drag (the default), `DragFit.radiantAtLength` already includes the
+  sideways turning of the ECI velocity by the rotating air, so the radiant is derotated with the
+  instantaneous velocity. For trajectories solved without rotating-air drift (or without gravity),
+  the radiant is derotated with the initial velocity so drag does not artificially turn the
+  ground-fixed direction by `v_rot*(1/v - 1/v_init)`.
 - **Decel** is `K*rho*v^2 - g_along`, positive when the meteor slows down. Above the beginning, without
   drag, it is the small negative acceleration by gravity.
 - **Dyn pres** is `rho*v^2` with the velocity relative to the air, as in the `DragFit` table. The
@@ -214,7 +214,7 @@ printed at the end. For the example trajectory, sampled every 2 km from 118 to 9
 
 With `--csv`, the samples are saved with the Julian date, the length along the trajectory, the ECI
 coordinates, the uncertainties of the time and the length, the ballistic coefficient and its
-uncertainty, and a flag of the extrapolated samples.
+uncertainty, and flags for extrapolated and unobserved-gap samples.
 
 ---
 

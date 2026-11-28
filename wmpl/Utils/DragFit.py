@@ -1176,6 +1176,11 @@ class DragFit(object):
 
         # Compute the modelled motion at the given lengths
         vel = self.velocityAtLength(len_arr)
+
+        # Fixed-station solutions already report speeds relative to the ground
+        if getattr(self.traj, 'orbit_los_success', True) is False:
+            return vel
+
         time_arr = self.timeAtLength(len_arr)
         eci_arr = self.eciAtLength(len_arr)
         radiant_arr = self.radiantAtLength(len_arr)
@@ -1230,7 +1235,7 @@ class DragFit(object):
         vel = self.velocityAtLength(len_arr) - getattr(self, 'v_rotation', 0.0)
         g_along = np.interp(len_arr, self.len_grid, self.g_grid)
 
-        return k_arr*self.airDensityAtLength(len_arr)*vel**2 - g_along
+        return k_arr*self.airDensityAtLength(len_arr)*vel*np.abs(vel) - g_along
 
 
 
@@ -1277,10 +1282,12 @@ class DragFit(object):
         grad = np.zeros((len(coord_arr), 2, n_params))
         for j in range(n_params):
 
-            # Step by a tenth of the uncertainty of the parameter
+            # Step by a tenth of the uncertainty of the parameter, capped at a local linear scale
+            step_max = 1e-3*max(abs(self.params[j]), 1.0) if (j == 1) else 1e-3
             step = 0.1*params_std[j]
             if not (np.isfinite(step) and (step > 0)):
                 step = 1e-6*max(abs(self.params[j]), 1.0)
+            step = min(step, step_max)
 
             params_step = np.zeros(n_params)
             params_step[j] = step
